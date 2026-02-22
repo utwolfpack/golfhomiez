@@ -1,0 +1,14 @@
+[
+  {
+    "token": "21be632eae80610df17332b909737c0000d8f5100489bce60ef586b3735a981d",
+    "userId": "69a78a4e-c57f-46a8-94e1-dc3f903ce63d",
+    "createdAt": "2026-02-22T00:30:59.187Z",
+    "expiresAt": "2026-03-01T00:30:59.186Z"
+  },
+  {
+    "token": "0a1b0534b2a176c8acee851c9e33cb978255f69f6885dfda986e3bc5b329a224",
+    "userId": "493d7139-ba6d-4e0b-b693-35d2d6397500",
+    "createdAt": "2026-02-22T00:44:48.536Z",
+    "expiresAt": "2026-03-01T00:44:48.536Z"
+  }
+]

@@ -1,0 +1,36 @@
+[
+  {
+    "id": "0f80db00-8895-4116-98a7-e62d9afb9d06",
+    "name": "Bernie and Danny",
+    "members": [
+      {
+        "id": "2586a6d8-28a8-4609-8c6f-25ae1acaa9cb",
+        "name": "Bernie Gonzales",
+        "email": "bernie.gonzales@bernie.gonzales"
+      },
+      {
+        "id": "9401fe45-4bdd-4c19-ac74-ba8df06c1553",
+        "name": "Danny Martinez",
+        "email": "danny.martinez@danny.martinez"
+      }
+    ],
+    "createdAt": "2026-02-22T00:19:39.639Z"
+  },
+  {
+    "id": "bded21e7-ebf5-49eb-b779-76a4641a22a6",
+    "name": "Ruben and Sean",
+    "members": [
+      {
+        "id": "06a989e1-9c34-45d5-add7-332ed95459ca",
+        "name": "Sean Oldroyd",
+        "email": "utwolfpack@yahoo.com"
+      },
+      {
+        "id": "4b6936d5-c48e-4bfb-acd2-5d5cb60a756a",
+        "name": "Ruben Sanchez",
+        "email": "rubensanchez@rubensanchez.com"
+      }
+    ],
+    "createdAt": "2026-02-22T00:17:09.168Z"
+  }
+]
