@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import PageHero from '../components/PageHero'
+import clubhouseImg from '../assets/gallery/clubhouse-twilight.svg'
 
 export default function Login() {
   const [username, setUsername] = useState('')
@@ -10,47 +12,62 @@ export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
 
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      await login(username, password)
+      navigate('/')
+    } catch (err: any) {
+      setError(err?.message || 'Login failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <div className="container">
-      <div className="card" style={{ maxWidth: 520, margin: '0 auto' }}>
-        <h2 style={{ marginTop: 0 }}>Login</h2>
-        <div className="small" style={{ marginBottom: 12 }}>
-          Username is your email for now.
-        </div>
+    <div className="container pageStack">
+      <div className="card pageCardShell">
+        <PageHero
+          eyebrow="Welcome back"
+          title="Sign in and hit the first tee"
+          subtitle="Jump into your rounds, roster updates, and dashboard stats without losing your place."
+        />
 
-        <label className="label">Username</label>
-        <input className="input" value={username} onChange={e => setUsername(e.target.value)} placeholder="you@example.com" />
+        <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
+          <div>
+            <label className="label">Username</label>
+            <input className="input" value={username} onChange={e => setUsername(e.target.value)} placeholder="you@example.com" />
+          </div>
 
-        <div style={{ height: 12 }} />
+          <div>
+            <label className="label">Password</label>
+            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+          </div>
 
-        <label className="label">Password</label>
-        <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+          {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
 
-        {error ? <div className="small" style={{ color: '#b91c1c', marginTop: 10 }}>{error}</div> : null}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn btnPrimary" disabled={busy}>
+              {busy ? 'Signing in…' : 'Login'}
+            </button>
+            <Link className="btn" to="/register">Create account</Link>
+          </div>
 
-        <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-          <button
-            className="btn btnPrimary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true); setError(null)
-              try {
-                await login(username, password)
-                navigate('/')
-              } catch (e: any) {
-                setError(e.message || 'Login failed')
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? 'Signing in…' : 'Login'}
-          </button>
-          <Link className="btn" to="/register">Create account</Link>
-        </div>
+          <div className="small">
+            <Link to="/forgot-password">Forgot password?</Link>
+          </div>
+        </form>
 
-        <div className="small" style={{ marginTop: 12 }}>
-          <Link to="/forgot-password">Forgot password?</Link>
+        <div className="photoStrip photoStrip--compact" style={{ marginTop: 16 }}>
+          <div className="photoCard">
+            <img src={clubhouseImg} alt="Clubhouse finish" className="photoCardImg" />
+            <div className="photoCardOverlay">
+              <div className="photoCardTitle">Clubhouse finish</div>
+              <div className="photoCardSubtitle">Wrap up rounds, rosters, and records in one place.</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -7,9 +7,14 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite",
     "dev:server": "nodemon server/index.js",
+    "start": "node server/index.js",
     "build": "vite build",
+    "postinstall": "npm run build",
     "preview": "vite preview",
     "lint": "eslint ."
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

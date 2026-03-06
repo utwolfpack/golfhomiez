@@ -1,4 +1,4 @@
-# Golf Scramble Tracker (Local React App)
+# Golf Homiez! Tracker (Local React App)
 
 This project runs locally with a React (Vite) client and a small Express API that writes data to **static JSON files inside the repo**.
 

@@ -1,6 +1,8 @@
-export type ScoreEntry = {
+export type TeamScoreEntry = {
   id: string
+  mode: 'team'
   date: string // YYYY-MM-DD
+  state: string
   course: string
   team: string
   opponentTeam: string
@@ -9,9 +11,25 @@ export type ScoreEntry = {
   money: number // + won, - lost
   won: true | false | null // null = tie
   holes: number[] | null
+  createdByUserId?: string
+  createdByEmail?: string
   createdAt: string
 }
 
+export type SoloScoreEntry = {
+  id: string
+  mode: 'solo'
+  date: string // YYYY-MM-DD
+  state: string
+  course: string
+  roundScore: number
+  holes: number[] | null
+  createdByUserId?: string
+  createdByEmail?: string
+  createdAt: string
+}
+
+export type ScoreEntry = TeamScoreEntry | SoloScoreEntry
 
 export type TeamMember = {
   id: string

@@ -23,17 +23,18 @@ export default function NavBar() {
 
   return (
     <div className="nav">
-      <Link to="/" style={{ fontWeight: 700 }}>⛳ Golf Scramble</Link>
+      <Link to="/" style={{ fontWeight: 700 }}>⛳ Golf Homiez!</Link>
       <div className="navLinks">
         <A to="/">Home</A>
-        <A to="/golf-logger">Golf Logger</A>
-        <A to="/teams">Teams</A>
+        {user ? (
+          <>
+            <A to="/teams">Teams</A>
+            <A to="/my-golf-scores">My Golf Scores</A>
+          </>
+        ) : null}
         <A to="/directions">Directions</A>
         {!user ? (
-          <>
-            <A to="/login">Login</A>
-            <A to="/register">Register</A>
-          </>
+          <A to="/login">Login/Register</A>
         ) : (
           <>
             <span className="small">Signed in as <strong>{user.email}</strong></span>

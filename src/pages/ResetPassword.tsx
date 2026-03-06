@@ -1,14 +1,17 @@
 import { FormEvent, useMemo, useState } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import PageHero from '../components/PageHero'
 
 export default function ResetPassword() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
 
+  const tokenFromSession = typeof window !== 'undefined' ? sessionStorage.getItem('reset_token') || '' : ''
   const tokenFromUrl = useMemo(() => params.get('token') || '', [params])
+  const hiddenToken = tokenFromSession || tokenFromUrl
+  const expiresAt = typeof window !== 'undefined' ? sessionStorage.getItem('reset_token_expires_at') || '' : ''
 
-  const [token, setToken] = useState(tokenFromUrl)
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -20,7 +23,7 @@ export default function ResetPassword() {
     setError(null)
     setStatus(null)
 
-    if (!token.trim()) return setError('Token is required')
+    if (!hiddenToken.trim()) return setError('Your reset session was not found. Start again from Forgot Password.')
     if (newPassword.length < 6) return setError('Password must be at least 6 characters')
     if (newPassword !== confirm) return setError('Passwords do not match')
 
@@ -28,10 +31,11 @@ export default function ResetPassword() {
     try {
       const res = await api<{ ok: boolean; message: string }>('/api/auth/password-reset/confirm', {
         method: 'POST',
-        body: JSON.stringify({ token, newPassword })
+        body: JSON.stringify({ token: hiddenToken, newPassword })
       })
       setStatus(res.message)
-      // Ensure client token is cleared (user must log in again)
+      sessionStorage.removeItem('reset_token')
+      sessionStorage.removeItem('reset_token_expires_at')
       localStorage.removeItem('auth_token')
       setTimeout(() => navigate('/login'), 800)
     } catch (err: any) {
@@ -42,43 +46,37 @@ export default function ResetPassword() {
   }
 
   return (
-    <div className="container">
-      <div className="card" style={{ maxWidth: 720, margin: '0 auto' }}>
-        <h2 style={{ marginTop: 0 }}>Reset Password</h2>
-        <div className="small" style={{ marginBottom: 12 }}>
-          Paste your reset token and choose a new password.
-        </div>
+    <div className="container pageStack">
+      <div className="card pageCardShell">
+        <PageHero
+          eyebrow="Secure reset"
+          title="Choose a fresh password"
+          subtitle="Your reset token stays hidden in this browser session while you set a new password."
+        />
 
-        <form onSubmit={onSubmit}>
-          <label className="label">Reset token</label>
-          <textarea
-            className="input"
-            value={token}
-            onChange={e => setToken(e.target.value)}
-            placeholder="Paste token here"
-            rows={3}
-            style={{ resize: 'vertical' }}
-          />
+        <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 720 }}>
+          {expiresAt ? <div className="small">Reset session expires: {new Date(expiresAt).toLocaleString()}</div> : null}
 
-          <div style={{ height: 12 }} />
+          <div>
+            <label className="label">New password</label>
+            <input className="input" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+          </div>
 
-          <label className="label">New password</label>
-          <input className="input" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+          <div>
+            <label className="label">Confirm new password</label>
+            <input className="input" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+          </div>
 
-          <div style={{ height: 12 }} />
+          <div>
+            <button className="btn btnPrimary" disabled={loading}>{loading ? 'Working…' : 'Reset password'}</button>
+          </div>
 
-          <label className="label">Confirm new password</label>
-          <input className="input" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} />
-
-          <div style={{ height: 12 }} />
-          <button className="btn btnPrimary" disabled={loading}>{loading ? 'Working…' : 'Reset password'}</button>
-
-          {error && <div className="small" style={{ color: '#b91c1c', marginTop: 10 }}>{error}</div>}
-          {status && <div className="small" style={{ color: '#065f46', marginTop: 10 }}>{status}</div>}
+          {error && <div className="small" style={{ color: '#b91c1c' }}>{error}</div>}
+          {status && <div className="small" style={{ color: '#065f46' }}>{status}</div>}
         </form>
 
         <div className="small" style={{ marginTop: 12 }}>
-          <Link to="/forgot-password">Need a token?</Link>
+          <Link to="/forgot-password">Start over</Link>
           {' · '}
           <Link to="/login">Back to login</Link>
         </div>

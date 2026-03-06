@@ -1,11 +1,11 @@
 import { FormEvent, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import PageHero from '../components/PageHero'
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<string | null>(null)
-  const [token, setToken] = useState<string | null>(null)
   const [resetUrl, setResetUrl] = useState<string | null>(null)
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -15,7 +15,6 @@ export default function ForgotPassword() {
     e.preventDefault()
     setError(null)
     setStatus(null)
-    setToken(null)
     setResetUrl(null)
     setExpiresAt(null)
     setLoading(true)
@@ -24,8 +23,9 @@ export default function ForgotPassword() {
         '/api/auth/password-reset/request',
         { method: 'POST', body: JSON.stringify({ email }) }
       )
-      setStatus(res.message)
-      if (res.token) setToken(res.token)
+      if (res.token) sessionStorage.setItem('reset_token', res.token)
+      if (res.expiresAt) sessionStorage.setItem('reset_token_expires_at', res.expiresAt)
+      setStatus('Reset session created. Continue to choose a new password.')
       if (res.resetUrl) setResetUrl(res.resetUrl)
       if (res.expiresAt) setExpiresAt(res.expiresAt)
     } catch (err: any) {
@@ -36,44 +36,42 @@ export default function ForgotPassword() {
   }
 
   return (
-    <div className="container">
-      <div className="card" style={{ maxWidth: 720, margin: '0 auto' }}>
-        <h2 style={{ marginTop: 0 }}>Forgot Password</h2>
-        <div className="small" style={{ marginBottom: 12 }}>
-          Enter your email to generate a one-time reset token (local app mode).
-        </div>
+    <div className="container pageStack">
+      <div className="card pageCardShell">
+        <PageHero
+          eyebrow="Password help"
+          title="Start a secure password reset"
+          subtitle="This local-app flow creates a one-time reset session and keeps the token hidden from view."
+        />
 
-        <form onSubmit={onSubmit}>
-          <label className="label">Email</label>
-          <input className="input" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
+        <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 720 }}>
+          <div>
+            <label className="label">Email</label>
+            <input className="input" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
+          </div>
 
-          <div style={{ height: 12 }} />
-          <button className="btn btnPrimary" disabled={loading}>
-            {loading ? 'Working…' : 'Generate reset token'}
-          </button>
+          <div>
+            <button className="btn btnPrimary" disabled={loading}>
+              {loading ? 'Working…' : 'Start reset'}
+            </button>
+          </div>
 
-          {error && <div className="small" style={{ color: '#b91c1c', marginTop: 10 }}>{error}</div>}
-          {status && <div className="small" style={{ color: '#065f46', marginTop: 10 }}>{status}</div>}
+          {error && <div className="small" style={{ color: '#b91c1c' }}>{error}</div>}
+          {status && <div className="small" style={{ color: '#065f46' }}>{status}</div>}
         </form>
 
-        {(token || resetUrl) && (
+        {(status || resetUrl) && (
           <div className="card" style={{ marginTop: 14, borderStyle: 'dashed' }}>
-            <h3 style={{ marginTop: 0 }}>Reset token</h3>
+            <h3 style={{ marginTop: 0 }}>Reset session ready</h3>
+            <div className="small">Your reset token is stored privately in this browser session and is never shown on screen.</div>
             {expiresAt && (
-              <div className="small" style={{ marginBottom: 8 }}>
+              <div className="small" style={{ marginTop: 8 }}>
                 Expires: {new Date(expiresAt).toLocaleString()}
               </div>
             )}
-            {token && (
-              <div style={{ wordBreak: 'break-all', padding: 10, border: '1px solid #d8dae6', borderRadius: 10, background: '#fafafa' }}>
-                <code>{token}</code>
-              </div>
-            )}
-            {resetUrl && (
-              <div style={{ marginTop: 10 }}>
-                <Link className="btn" to={resetUrl}>Open reset page</Link>
-              </div>
-            )}
+            <div style={{ marginTop: 12 }}>
+              <Link className="btn btnPrimary" to={resetUrl || '/reset-password'}>Continue to reset password</Link>
+            </div>
           </div>
         )}
 
