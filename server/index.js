@@ -14,7 +14,7 @@ const app = express()
 app.use(express.json())
 app.use(cors({ origin: true }))
 
-const PORT = Number(process.env.PORT || 5000)
+const PORT = Number(process.env.PORT || 5001)
 
 // IMPORTANT: In many hosting setups (Elastic Beanstalk, Hostinger, etc.),
 // deploying a new version replaces the application directory. If we store

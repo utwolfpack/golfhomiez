@@ -34,3 +34,17 @@ npm run dev
 - Scores: `server/data/scores.json`
 
 > Note: This is for local use. Storing credentials in a repo file is not suitable for production.
+
+
+## MySQL migration (CloudPanel)
+
+This app now uses MySQL/MariaDB instead of JSON files for runtime storage.
+
+1. Create a database and database user in CloudPanel. CloudPanel supports adding a database and user from the Databases screen. citeturn0search1turn0search5
+2. Copy `.env.mysql.example` values into your environment or CloudPanel Node.js site variables.
+3. Install dependencies: `npm install`
+4. Build the frontend: `npm run build`
+5. Migrate the current JSON data into MySQL: `npm run migrate:mysql`
+6. Start the app: `npm start`
+
+The migration reads the existing JSON files from `server/data/` (or `DATA_DIR` if you set it) and imports them into MySQL tables.

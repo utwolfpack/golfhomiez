@@ -35,7 +35,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [view, setView] = useState<'team' | 'solo'>('team')
+  const [view, setView] = useState<'all' | 'team' | 'solo'>('team')
   const [stateFilter, setStateFilter] = useState('UT')
   const [courseFilter, setCourseFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
@@ -69,7 +69,7 @@ export default function Home() {
   }, [scores, user?.email])
 
   const viewScores = useMemo(() => {
-    return userScores.filter(s => (view === 'solo' ? isSoloScore(s) : isTeamScore(s)))
+    return userScores.filter(s => (view === 'all' ? true : view === 'solo' ? isSoloScore(s) : isTeamScore(s)))
   }, [userScores, view])
 
   const nameByAbbr = useMemo(() => new Map(US_STATES.map(s => [s.abbr, s.name])), [])
@@ -102,7 +102,6 @@ export default function Home() {
   }, [viewScores, stateFilter])
 
   const teamOptions = useMemo(() => {
-    if (view !== 'team') return []
     const fromLogs = viewScores
       .filter(s => {
         const ss = s as any
@@ -113,7 +112,7 @@ export default function Home() {
       .map(s => (s as any).team)
       .filter(Boolean)
     return Array.from(new Set(fromLogs)).sort((a, b) => a.localeCompare(b))
-  }, [viewScores, view, stateFilter, courseFilter])
+  }, [viewScores, stateFilter, courseFilter])
 
   const filteredScores = useMemo(() => {
     return viewScores.filter((s: any) => {
@@ -182,6 +181,9 @@ export default function Home() {
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          <button type="button" className={view === 'all' ? 'btnPrimary' : 'btn'} onClick={() => { setView('all'); setTeamFilter('all') }}>
+            All Rounds
+          </button>
           <button type="button" className={view === 'team' ? 'btnPrimary' : 'btn'} onClick={() => { setView('team'); setTeamFilter('all') }}>
             Team Scrambles
           </button>
@@ -190,7 +192,7 @@ export default function Home() {
           </button>
         </div>
 
-        <div className="grid" style={{ gridTemplateColumns: view === 'team' ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))', gap: 12, marginTop: 14 }}>
+        <div className="grid" style={{ gridTemplateColumns: view === 'solo' ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))', gap: 12, marginTop: 14 }}>
           <div>
             <label className="label">State</label>
             <select
@@ -217,7 +219,7 @@ export default function Home() {
               {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          {view === 'team' ? (
+          {view !== 'solo' ? (
             <div>
               <label className="label">Team</label>
               <select
@@ -242,17 +244,24 @@ export default function Home() {
             <StatCard title="Money Won/Lost" value={formatMoney(teamStats.money)} subtitle="From your logged rounds" />
             <StatCard title="Rounds Logged" value={`${teamStats.total}`} subtitle="Filtered view" />
           </div>
-        ) : (
+        ) : view === 'solo' ? (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginTop: 14 }}>
             <StatCard title="Solo Rounds" value={`${soloStats.total}`} subtitle="Filtered view" />
             <StatCard title="Average Score" value={soloStats.total ? soloStats.avg.toFixed(1) : '—'} subtitle="Lower is better" />
             <StatCard title="Best Score" value={soloStats.total ? `${soloStats.best}` : '—'} subtitle="Your lowest round" />
           </div>
+        ) : (
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginTop: 14 }}>
+            <StatCard title="Rounds Logged" value={`${filteredScores.length}`} subtitle="All filtered rounds" />
+            <StatCard title="Team Win %" value={`${teamStats.winPct.toFixed(0)}%`} subtitle={`${teamStats.wins}-${teamStats.losses}${teamStats.ties ? `-${teamStats.ties}` : ''} team record`} />
+            <StatCard title="Money Won/Lost" value={formatMoney(teamStats.money)} subtitle="Team rounds only" />
+            <StatCard title="Solo Avg Score" value={soloStats.total ? soloStats.avg.toFixed(1) : '—'} subtitle={soloStats.total ? `${soloStats.total} solo rounds` : 'No solo rounds'} />
+          </div>
         )}
 
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16 }}>
           <h3 style={{ margin: 0 }}>Recent Rounds</h3>
-          {view === 'team' ? <Link className="small" to="/golf-logger">Log a team round</Link> : <Link className="small" to="/solo-logger">Log a solo round</Link>}
+          {view === 'team' ? <Link className="small" to="/golf-logger">Log a team round</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">Open My Golf Scores</Link>}
         </div>
 
         <div className="tableWrap" style={{ marginTop: 10 }}>
@@ -262,7 +271,7 @@ export default function Home() {
                 <th>Date</th>
                 <th>State</th>
                 <th>Course</th>
-                {view === 'team' ? (<><th>Team</th><th>Opponent</th><th>Score</th><th>Result</th><th>Money</th></>) : (<><th>Round Score</th></>)}
+                {view === 'team' ? (<><th>Team</th><th>Opponent</th><th>Score</th><th>Result</th><th>Money</th></>) : view === 'solo' ? (<><th>Round Score</th></>) : (<><th>Type</th><th>Summary</th></>)}
               </tr>
             </thead>
             <tbody>
@@ -278,6 +287,18 @@ export default function Home() {
                   )
                 }
 
+                if (view === 'all' && s.mode === 'solo') {
+                  return (
+                    <tr key={s.id}>
+                      <td>{s.date}</td>
+                      <td>{String(s.state || '').toUpperCase()}</td>
+                      <td>{s.course}</td>
+                      <td>Solo</td>
+                      <td>{s.roundScore}</td>
+                    </tr>
+                  )
+                }
+
                 const result = s.won === true ? 'Win' : s.won === false ? 'Loss' : 'Tie'
                 const scoreStr = `${s.teamTotal}-${s.opponentTotal}`
                 return (
@@ -285,17 +306,26 @@ export default function Home() {
                     <td>{s.date}</td>
                     <td>{String(s.state || '').toUpperCase()}</td>
                     <td>{s.course}</td>
-                    <td>{s.team}</td>
-                    <td>{s.opponentTeam}</td>
-                    <td>{scoreStr}</td>
-                    <td>{result}</td>
-                    <td>{formatMoney(s.money || 0)}</td>
+                    {view === 'all' ? (
+                      <>
+                        <td>Team</td>
+                        <td>{s.team} vs {s.opponentTeam} • {scoreStr} • {result} • {formatMoney(s.money || 0)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td>{s.team}</td>
+                        <td>{s.opponentTeam}</td>
+                        <td>{scoreStr}</td>
+                        <td>{result}</td>
+                        <td>{formatMoney(s.money || 0)}</td>
+                      </>
+                    )}
                   </tr>
                 )
               })}
               {!pagedRecent.length ? (
                 <tr>
-                  <td colSpan={view === 'team' ? 8 : 4} className="small">No rounds yet for this view and filters.</td>
+                  <td colSpan={view === 'team' ? 8 : view === 'solo' ? 4 : 5} className="small">No rounds yet for this view and filters.</td>
                 </tr>
               ) : null}
             </tbody>
