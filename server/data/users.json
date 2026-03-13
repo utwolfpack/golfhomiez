@@ -2,9 +2,9 @@
   {
     "id": "493d7139-ba6d-4e0b-b693-35d2d6397500",
     "email": "utwolfpack@yahoo.com",
-    "passwordHash": "$2a$10$kukW.nTW2Z9vsN1FubfNlOWEgFbtthVDJ//GPeSmKGYcM297phYc6",
+    "passwordHash": "$2a$10$roR19CuffaVhjb5za79NnO4EZvR12lpOhgT/cZ9BsxHNxPe66oY4W",
     "createdAt": "2026-02-22T00:15:20.841Z",
-    "passwordUpdatedAt": "2026-03-06T05:57:16.163Z"
+    "passwordUpdatedAt": "2026-03-07T19:08:40.448Z"
   },
   {
     "id": "706b73ad-df3e-49f5-b629-f0d5aa23b647",
@@ -24,5 +24,17 @@
     "email": "bernie.gonzales@bernie.gonzales",
     "passwordHash": "$2a$10$.HTPNLzT1JcLHZ2qXp5Y6uysx8r2g3SgdnT3IVKTctEYrfkL.EMCG",
     "createdAt": "2026-02-22T00:30:55.667Z"
+  },
+  {
+    "id": "ad48af42-43e3-4d20-abd3-bd87aaa4ee51",
+    "email": "utwolfpack@gmail.com",
+    "passwordHash": "$2a$10$rKmnEoy0sY1xNkR2wNkIW.pVxPXlvRKvpYf2Ed9PutMtFCSedS3yu",
+    "createdAt": "2026-03-07T19:06:08.481Z"
+  },
+  {
+    "id": "cdbefe06-5d3f-4a9d-acbd-c2fb00e79ce3",
+    "email": "nebocreek@gmail.com",
+    "passwordHash": "$2a$10$EoFkTEmvKIFgBXU851tsz.QnrQIi8fATVCMmPizX9qC2WPcEGRjeu",
+    "createdAt": "2026-03-07T19:38:21.341Z"
   }
 ]
