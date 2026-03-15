@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { getPool } from './db.js'
 import { setLatestPasswordReset } from './auth-debug.js'
+import { sendMail } from './mailer.js'
 
 const authSecret = process.env.BETTER_AUTH_SECRET || 'dev-only-secret-change-me-1234567890123456'
 
@@ -28,7 +29,35 @@ export const auth = betterAuth({
         url,
         expiresAt,
       })
-      console.log(`[better-auth] password reset for ${user.email}: ${url}`)
+
+      await sendMail({
+        to: user.email,
+        subject: 'Reset your Golf Homiez password',
+        text: `Use this link to reset your Golf Homiez password: ${url}`,
+        html: `
+          <p>Use the link below to reset your Golf Homiez password:</p>
+          <p><a href="${url}">${url}</a></p>
+        `,
+      })
+
+      console.log(`[better-auth] password reset email sent to ${user.email}`)
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendMail({
+        to: user.email,
+        subject: 'Verify your Golf Homiez email',
+        text: `Verify your Golf Homiez email by opening this link: ${url}`,
+        html: `
+          <p>Welcome to Golf Homiez.</p>
+          <p>Verify your email by clicking the link below:</p>
+          <p><a href="${url}">${url}</a></p>
+        `,
+      })
+
+      console.log(`[better-auth] verification email sent to ${user.email}`)
     },
   },
 })
