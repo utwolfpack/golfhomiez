@@ -5,7 +5,6 @@ import StatCard from '../components/StatCard'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import type { ScoreEntry, TeamScoreEntry, SoloScoreEntry } from '../types'
-import { calculateHandicapIndex } from '../data/courseDetails'
 import { US_STATES } from '../data/usStates'
 
 function formatMoney(n: number) {
@@ -128,14 +127,6 @@ function MyGolfScoresInner() {
     return subset.reduce((sum, s) => sum + s.roundScore, 0) / subset.length
   }, [soloFiltered])
 
-  const handicapIndex = useMemo(() => {
-    const recentDifferentials = soloFiltered
-      .slice(0, 20)
-      .map((s) => s.handicapDifferential)
-      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-    return calculateHandicapIndex(recentDifferentials)
-  }, [soloFiltered])
-
   const bestGame = useMemo(() => {
     if (!filteredScores.length) return null
     const ranked = [...filteredScores].sort((a, b) => {
@@ -162,13 +153,12 @@ function MyGolfScoresInner() {
 
     if (view !== 'team') {
       cards.push(
-        <StatCard key="soloavg" title="Solo Avg (Last 10)" value={recentTenSoloAvg !== null ? recentTenSoloAvg.toFixed(1) : '—'} subtitle={soloFiltered.length >= 10 ? 'Newest 10 solo rounds' : `All ${soloFiltered.length || 0} solo rounds`} />,
-        <StatCard key="handicap" title="Handicap Index" value={handicapIndex !== null ? handicapIndex.toFixed(1) : '—'} subtitle={soloFiltered.length ? 'Calculated from saved course-adjusted differentials' : 'Log solo rounds to start tracking'} />
+        <StatCard key="soloavg" title="Solo Avg (Last 10)" value={recentTenSoloAvg !== null ? recentTenSoloAvg.toFixed(1) : '—'} subtitle={soloFiltered.length >= 10 ? 'Newest 10 solo rounds' : `All ${soloFiltered.length || 0} solo rounds`} />
       )
     }
 
     return cards
-  }, [filteredScores.length, view, teamStats, recentTenTeamAvg, teamFiltered.length, recentTenSoloAvg, soloFiltered.length, handicapIndex])
+  }, [filteredScores.length, view, teamStats, recentTenTeamAvg, teamFiltered.length, recentTenSoloAvg, soloFiltered.length])
 
   return (
     <div className="container pageStack">
@@ -241,7 +231,6 @@ function MyGolfScoresInner() {
                   <th>State</th>
                   <th>Course</th>
                   <th>Round Score</th>
-                  <th>Course HCP Diff</th>
                 </tr>
               </thead>
               <tbody>
@@ -251,11 +240,10 @@ function MyGolfScoresInner() {
                     <td>{String(s.state || '').toUpperCase()}</td>
                     <td>{s.course}</td>
                     <td>{s.roundScore}</td>
-                    <td>{typeof s.handicapDifferential === 'number' ? s.handicapDifferential.toFixed(1) : '—'}</td>
                   </tr>
                 ))}
                 {!pagedScores.length ? (
-                  <tr><td colSpan={5} className="small">No rounds match the current filters.</td></tr>
+                  <tr><td colSpan={4} className="small">No rounds match the current filters.</td></tr>
                 ) : null}
               </tbody>
             </table>
@@ -286,7 +274,6 @@ function MyGolfScoresInner() {
                         <td>—</td>
                         <td>—</td>
                         <td>{s.roundScore}</td>
-                    <td>{typeof s.handicapDifferential === 'number' ? s.handicapDifferential.toFixed(1) : '—'}</td>
                         <td>—</td>
                         <td>—</td>
                       </tr>

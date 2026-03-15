@@ -2,7 +2,26 @@ export type SessionUser = { id: string; email: string; name?: string | null }
 
 type AuthResult<T> = { data?: T; error?: { message?: string } }
 
-const AUTH_BASE = import.meta.env.VITE_AUTH_BASE_URL || 'http://127.0.0.1:5001/api/auth'
+function isLoopbackHost(hostname: string) {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+}
+
+function getAuthBase() {
+  const raw = String(import.meta.env.VITE_AUTH_BASE_URL || '/api/auth').trim()
+  if (typeof window === 'undefined') return raw.replace(/\/$/, '')
+
+  const pageUrl = new URL(window.location.origin)
+  const targetUrl = new URL(raw, window.location.origin)
+
+  if (isLoopbackHost(pageUrl.hostname) && isLoopbackHost(targetUrl.hostname) && pageUrl.port === targetUrl.port) {
+    targetUrl.protocol = pageUrl.protocol
+    targetUrl.hostname = pageUrl.hostname
+  }
+
+  return targetUrl.toString().replace(/\/$/, '')
+}
+
+const AUTH_BASE = getAuthBase()
 
 async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
   const text = await res.text()
@@ -79,7 +98,7 @@ export async function resetPassword(token: string, newPassword: string) {
 }
 
 export async function getLatestResetLink(email: string) {
-  const url = new URL(`${AUTH_BASE.replace(/\/api\/auth$/, '')}/api/auth-debug/latest-reset`)
+  const url = new URL('/api/auth-debug/latest-reset', window.location.origin)
   url.searchParams.set('email', email)
   const res = await fetch(url.toString(), { credentials: 'include' })
   return parseResponse<{ email: string; token: string; url: string; expiresAt?: string | null } | null>(res)

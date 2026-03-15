@@ -37,10 +37,6 @@ function mapScore(row) {
     roundScore: row.round_score,
     money: row.money == null ? null : Number(row.money),
     won: row.won == null ? null : Boolean(row.won),
-    courseRating: row.course_rating == null ? null : Number(row.course_rating),
-    slopeRating: row.slope_rating == null ? null : Number(row.slope_rating),
-    par: row.par == null ? null : Number(row.par),
-    handicapDifferential: row.handicap_differential == null ? null : Number(row.handicap_differential),
     holes: row.holes_json ? (typeof row.holes_json === 'string' ? JSON.parse(row.holes_json) : row.holes_json) : null,
     createdByUserId: row.created_by_user_id,
     createdByEmail: row.created_by_email,
@@ -153,9 +149,8 @@ export async function createScore(entry) {
     `INSERT INTO scores (
       id, mode, date, state, course, team, opponent_team,
       team_total, opponent_total, round_score, money, won,
-      course_rating, slope_rating, par, handicap_differential,
       holes_json, created_by_user_id, created_by_email, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       score.id,
       score.mode,
@@ -169,10 +164,6 @@ export async function createScore(entry) {
       score.roundScore ?? null,
       score.money ?? null,
       score.won === true ? 1 : score.won === false ? 0 : null,
-      score.courseRating ?? null,
-      score.slopeRating ?? null,
-      score.par ?? null,
-      score.handicapDifferential ?? null,
       score.holes ? JSON.stringify(score.holes) : null,
       score.createdByUserId,
       score.createdByEmail,
