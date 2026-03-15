@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise'
+import { getMigrations } from 'better-auth/db/migration'
 
 let pool
 
@@ -10,71 +11,41 @@ export function getDbConfig() {
   return {
     host: requiredEnv('DB_HOST', '127.0.0.1'),
     port: Number(requiredEnv('DB_PORT', '3306')),
-    user: requiredEnv('DB_USER', ''),
-    password: requiredEnv('DB_PASSWORD', ''),
-    database: requiredEnv('DB_NAME', ''),
+    user: requiredEnv('DB_USER', 'golf_homiez_user'),
+    password: requiredEnv('DB_PASSWORD', 'change_me'),
+    database: requiredEnv('DB_NAME', 'golf_homiez'),
     waitForConnections: true,
     connectionLimit: Number(requiredEnv('DB_POOL_SIZE', '10')),
     queueLimit: 0,
     multipleStatements: true,
+    timezone: 'Z',
   }
 }
 
-export function hasDbEnv() {
-  return Boolean(process.env.DB_HOST && process.env.DB_USER && process.env.DB_NAME)
-}
-
-export async function getPool() {
+export function getPool() {
   if (!pool) {
-    const cfg = getDbConfig()
-    if (!cfg.user || !cfg.database) {
-      throw new Error('Missing DB connection environment variables. Set DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASSWORD.')
-    }
-    pool = mysql.createPool(cfg)
+    pool = mysql.createPool(getDbConfig())
   }
   return pool
 }
 
-export async function initDb() {
-  const db = await getPool()
+async function ensureAuthSchema() {
+  const { auth } = await import('./auth.js')
+  const { runMigrations } = await getMigrations(auth.options)
+  await runMigrations()
+}
+
+async function ensureAppTables(db) {
   await db.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id VARCHAR(36) PRIMARY KEY,
-      email VARCHAR(191) NOT NULL UNIQUE,
-      password_hash VARCHAR(255) NOT NULL,
-      created_at DATETIME NOT NULL,
-      password_updated_at DATETIME NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      token VARCHAR(128) PRIMARY KEY,
-      user_id VARCHAR(36) NOT NULL,
-      created_at DATETIME NOT NULL,
-      expires_at DATETIME NOT NULL,
-      INDEX idx_sessions_user_id (user_id),
-      CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS password_resets (
-      id VARCHAR(36) PRIMARY KEY,
-      token VARCHAR(128) NOT NULL UNIQUE,
-      user_id VARCHAR(36) NOT NULL,
-      created_at DATETIME NOT NULL,
-      expires_at DATETIME NOT NULL,
-      used_at DATETIME NULL,
-      INDEX idx_password_resets_user_id (user_id),
-      CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
     CREATE TABLE IF NOT EXISTS teams (
-      id VARCHAR(36) PRIMARY KEY,
+      id VARCHAR(191) PRIMARY KEY,
       name VARCHAR(191) NOT NULL UNIQUE,
-      created_at DATETIME NOT NULL
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS team_members (
-      id VARCHAR(36) PRIMARY KEY,
-      team_id VARCHAR(36) NOT NULL,
+      id VARCHAR(191) PRIMARY KEY,
+      team_id VARCHAR(191) NOT NULL,
       name VARCHAR(191) NOT NULL,
       email VARCHAR(191) NOT NULL,
       INDEX idx_team_members_team_id (team_id),
@@ -82,7 +53,7 @@ export async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS scores (
-      id VARCHAR(36) PRIMARY KEY,
+      id VARCHAR(191) PRIMARY KEY,
       mode ENUM('team','solo') NOT NULL,
       date DATE NOT NULL,
       state VARCHAR(8) NOT NULL,
@@ -94,16 +65,55 @@ export async function initDb() {
       round_score INT NULL,
       money DECIMAL(10,2) NULL,
       won TINYINT NULL,
+      course_rating DECIMAL(5,1) NULL,
+      slope_rating INT NULL,
+      par INT NULL,
+      handicap_differential DECIMAL(5,1) NULL,
       holes_json JSON NULL,
-      created_by_user_id VARCHAR(36) NOT NULL,
+      created_by_user_id VARCHAR(191) NOT NULL,
       created_by_email VARCHAR(191) NOT NULL,
-      created_at DATETIME NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_scores_created_by (created_by_user_id),
-      INDEX idx_scores_date (date),
-      CONSTRAINT fk_scores_user FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+      INDEX idx_scores_date (date)
     );
   `)
 }
+
+async function addColumnIfMissing(db, tableName, columnName, definition) {
+  const [rows] = await db.query(
+    `
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
+      LIMIT 1
+    `,
+    [tableName, columnName],
+  )
+
+  if (Array.isArray(rows) && rows.length > 0) {
+    return
+  }
+
+  await db.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
+}
+
+async function ensureScoreColumns(db) {
+  await addColumnIfMissing(db, 'scores', 'course_rating', 'DECIMAL(5,1) NULL AFTER won')
+  await addColumnIfMissing(db, 'scores', 'slope_rating', 'INT NULL AFTER course_rating')
+  await addColumnIfMissing(db, 'scores', 'par', 'INT NULL AFTER slope_rating')
+  await addColumnIfMissing(db, 'scores', 'handicap_differential', 'DECIMAL(5,1) NULL AFTER par')
+}
+
+export async function initDb() {
+  const db = getPool()
+  await db.query('SELECT 1')
+  await ensureAuthSchema()
+  await ensureAppTables(db)
+  await ensureScoreColumns(db)
+}
+
 
 export async function closeDb() {
   if (pool) {

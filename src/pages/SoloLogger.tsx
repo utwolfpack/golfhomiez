@@ -5,6 +5,8 @@ import { US_STATES } from '../data/usStates'
 import { getCoursesForState } from '../data/coursesByState'
 import { useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
+import { getCourseDetails, calculateHandicapDifferential } from '../data/courseDetails'
+import { useNearestCourseDefault } from '../hooks/useNearestCourseDefault'
 
 export default function SoloLogger() {
   const { user } = useAuth()
@@ -24,6 +26,7 @@ export default function SoloLogger() {
   const [error, setError] = useState<string | null>(null)
 
   const courses = useMemo(() => getCoursesForState(state), [state])
+  const locationStatus = useNearestCourseDefault(state, course, setCourse, courses)
   const missingFields = useMemo(() => {
     const missing: string[] = []
     const scoreNum = Number(roundScore)
@@ -37,10 +40,11 @@ export default function SoloLogger() {
   }, [date, today, state, course, roundScore])
 
   useEffect(() => {
-    if (!course && courses.length) setCourse(courses[0])
     if (course && courses.length && !courses.includes(course)) setCourse(courses[0] || '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, courses.join('|')])
+  }, [course, courses])
+
+  const courseDetails = useMemo(() => getCourseDetails(state, course), [state, course])
+  const handicapDifferential = useMemo(() => calculateHandicapDifferential(Number(roundScore), courseDetails?.courseRating ?? 72, courseDetails?.slopeRating ?? 113), [roundScore, courseDetails])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -119,6 +123,9 @@ export default function SoloLogger() {
               <select className="input" value={course} onChange={e => setCourse(e.target.value)}>
                 {courses.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
+              <div className="small" style={{ marginTop: 6 }}>
+                {locationStatus === 'granted' ? 'Defaulted to the nearest supported course for your location.' : locationStatus === 'requesting' ? 'Checking your location for the nearest course…' : 'Using the first course because location was unavailable.'}
+              </div>
             </div>
 
             <div>
@@ -132,6 +139,17 @@ export default function SoloLogger() {
                 placeholder="e.g. 82"
                 min={0}
               />
+            </div>
+
+            <div>
+              <label className="label">Course handicap data</label>
+              <input className="input inputReadOnly" readOnly value={courseDetails ? `Par ${courseDetails.par} • Rating ${courseDetails.courseRating.toFixed(1)} • Slope ${courseDetails.slopeRating}` : 'Waiting for course selection'} />
+            </div>
+
+            <div>
+              <label className="label">Handicap differential</label>
+              <input className="input inputReadOnly" readOnly value={handicapDifferential === null ? '' : handicapDifferential.toFixed(1)} />
+              <div className="small" style={{ marginTop: 6 }}>Saved with the round so your handicap index can be tracked over time.</div>
             </div>
           </div>
 
