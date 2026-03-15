@@ -11,7 +11,7 @@ These files are meant to be copied into the **root of the app project**.
    docker compose up --build
    ```
 4. Open:
-   - App/API: `http://localhost:5001`
+   - App/API: `http://127.0.0.1:5001`
 
 ## Notes
 

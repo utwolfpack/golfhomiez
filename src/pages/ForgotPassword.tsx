@@ -1,37 +1,33 @@
-import { FormEvent, useState } from 'react'
+import { FormEvent, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../lib/api'
 import PageHero from '../components/PageHero'
+import { forgotPassword, getLatestResetLink } from '../lib/auth-api'
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<string | null>(null)
-  const [resetUrl, setResetUrl] = useState<string | null>(null)
-  const [expiresAt, setExpiresAt] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [resetUrl, setResetUrl] = useState<string | null>(null)
+
+  const redirectTo = useMemo(() => `${window.location.origin}/reset-password`, [])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
+    setBusy(true)
     setError(null)
-    setStatus(null)
+    setMessage(null)
     setResetUrl(null)
-    setExpiresAt(null)
-    setLoading(true)
     try {
-      const res = await api<{ ok: boolean; message: string; token?: string; resetUrl?: string; expiresAt?: string }>(
-        '/api/auth/password-reset/request',
-        { method: 'POST', body: JSON.stringify({ email }) }
-      )
-      if (res.token) sessionStorage.setItem('reset_token', res.token)
-      if (res.expiresAt) sessionStorage.setItem('reset_token_expires_at', res.expiresAt)
-      setStatus('Reset session created. Continue to choose a new password.')
-      if (res.resetUrl) setResetUrl(res.resetUrl)
-      if (res.expiresAt) setExpiresAt(res.expiresAt)
+      const result = await forgotPassword(email, redirectTo)
+      if (result.error) throw new Error(result.error.message || 'Could not start reset flow')
+      setMessage('If that account exists, a reset link has been generated.')
+      const latest = await getLatestResetLink(email)
+      if (latest.data?.url) setResetUrl(latest.data.url)
     } catch (err: any) {
-      setError(err?.message || 'Failed to request reset token')
+      setError(err?.message || 'Could not start reset flow')
     } finally {
-      setLoading(false)
+      setBusy(false)
     }
   }
 
@@ -39,45 +35,29 @@ export default function ForgotPassword() {
     <div className="container pageStack">
       <div className="card pageCardShell">
         <PageHero
-          eyebrow="Password help"
-          title="Start a secure password reset"
-          subtitle="This local-app flow creates a one-time reset session and keeps the token hidden from view."
+          eyebrow="Reset password"
+          title="Request a password reset"
+          subtitle="Enter your email and use the generated reset link in local development."
         />
-
-        <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 720 }}>
+        <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">Email</label>
-            <input className="input" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
+            <input className="input" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
           </div>
 
-          <div>
-            <button className="btn btnPrimary" disabled={loading}>
-              {loading ? 'Working…' : 'Start reset'}
-            </button>
-          </div>
-
-          {error && <div className="small" style={{ color: '#b91c1c' }}>{error}</div>}
-          {status && <div className="small" style={{ color: '#065f46' }}>{status}</div>}
-        </form>
-
-        {(status || resetUrl) && (
-          <div className="card" style={{ marginTop: 14, borderStyle: 'dashed' }}>
-            <h3 style={{ marginTop: 0 }}>Reset session ready</h3>
-            <div className="small">Your reset token is stored privately in this browser session and is never shown on screen.</div>
-            {expiresAt && (
-              <div className="small" style={{ marginTop: 8 }}>
-                Expires: {new Date(expiresAt).toLocaleString()}
-              </div>
-            )}
-            <div style={{ marginTop: 12 }}>
-              <Link className="btn btnPrimary" to={resetUrl || '/reset-password'}>Continue to reset password</Link>
+          {message ? <div className="small" style={{ color: '#166534' }}>{message}</div> : null}
+          {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
+          {resetUrl ? (
+            <div className="small" style={{ wordBreak: 'break-word' }}>
+              Local reset link: <a href={resetUrl}>{resetUrl}</a>
             </div>
-          </div>
-        )}
+          ) : null}
 
-        <div className="small" style={{ marginTop: 12 }}>
-          <Link to="/login">Back to login</Link>
-        </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn btnPrimary" disabled={busy}>{busy ? 'Sending…' : 'Send reset link'}</button>
+            <Link className="btn" to="/login">Back to login</Link>
+          </div>
+        </form>
       </div>
     </div>
   )
