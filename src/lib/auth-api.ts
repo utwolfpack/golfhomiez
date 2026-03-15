@@ -78,7 +78,7 @@ export async function getSessionAuth() {
 }
 
 export async function forgotPassword(email: string, redirectTo: string) {
-  const res = await fetch(`${AUTH_BASE}/forget-password`, {
+  const res = await fetch(`${AUTH_BASE}/request-password-reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
