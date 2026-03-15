@@ -1,120 +1,33 @@
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import fs from 'fs'
 import path from 'path'
-import bcrypt from 'bcryptjs'
-import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { v4 as uuidv4 } from 'uuid'
+import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
+import { auth } from './auth.js'
+import { getLatestPasswordReset } from './auth-debug.js'
+import storage from './storage/index.js'
+import { getCourseDetails, calculateHandicapDifferential } from './course-data.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
-app.use(express.json())
-app.use(cors({ origin: true }))
-
 const PORT = Number(process.env.PORT || 5001)
+const clientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
 
-// IMPORTANT: In many hosting setups (Elastic Beanstalk, Hostinger, etc.),
-// deploying a new version replaces the application directory. If we store
-// JSON data inside the app folder, it can be overwritten on deploy.
-//
-// To make data persist across deploys, set DATA_DIR to a persistent path
-// (e.g., /var/golf-homiez-data). Locally, we default to server/data.
-const dataDir = process.env.DATA_DIR
-  ? path.resolve(process.env.DATA_DIR)
-  : path.join(process.cwd(), 'server', 'data')
-const usersPath = path.join(dataDir, 'users.json')
-const scoresPath = path.join(dataDir, 'scores.json')
-const teamsPath = path.join(dataDir, 'teams.json')
-const sessionsPath = path.join(dataDir, 'sessions.json')
-const passwordResetsPath = path.join(dataDir, 'password_resets.json')
-
-// Ensure data directory & files exist (so the app runs on a fresh clone)
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
-if (!fs.existsSync(usersPath)) writeJson(usersPath, [])
-if (!fs.existsSync(scoresPath)) writeJson(scoresPath, [])
-if (!fs.existsSync(teamsPath)) writeJson(teamsPath, [])
-if (!fs.existsSync(sessionsPath)) writeJson(sessionsPath, [])
-if (!fs.existsSync(passwordResetsPath)) writeJson(passwordResetsPath, [])
-
-function readJson(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
-  } catch {
-    return fallback
-  }
-}
-
-function writeJson(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf8')
-}
+app.use(cors({ origin: [clientOrigin, 'http://127.0.0.1:5174'], credentials: true }))
+app.all('/api/auth/*', toNodeHandler(auth))
+app.use(express.json())
 
 function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase()
 }
 
 function isEmail(s) {
-  // intentionally simple; good enough for local app
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim())
-}
-
-function getUserById(userId) {
-  const users = readJson(usersPath, [])
-  return users.find(u => u.id === userId) || null
-}
-
-function purgeExpiredPasswordResets() {
-  const resets = readJson(passwordResetsPath, [])
-  const now = Date.now()
-  const next = resets.filter(r => {
-    const exp = Date.parse(r.expiresAt || '')
-    return exp && exp > now && !r.usedAt
-  })
-  if (next.length !== resets.length) writeJson(passwordResetsPath, next)
-}
-
-function authMiddleware(req, res, next) {
-  const header = req.headers.authorization || ''
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null
-  if (!token) return res.status(401).json({ message: 'Missing token' })
-
-  const sessions = readJson(sessionsPath, [])
-  const session = sessions.find(s => s.token === token)
-  if (!session) return res.status(401).json({ message: 'Invalid token' })
-
-  // expire sessions (7 days default)
-  const now = Date.now()
-  const exp = Date.parse(session.expiresAt || '')
-  if (!exp || exp < now) {
-    writeJson(sessionsPath, sessions.filter(s => s.token !== token))
-    return res.status(401).json({ message: 'Session expired' })
-  }
-
-  const user = getUserById(session.userId)
-  if (!user) return res.status(401).json({ message: 'Invalid session user' })
-
-  req.user = { id: user.id, email: user.email, token }
-  next()
-}
-
-function withSortedTeams(teams) {
-  return [...teams].sort((a, b) => String(a.name).localeCompare(String(b.name)))
-}
-
-function findTeamByName(name) {
-  const n = String(name || '').trim().toLowerCase()
-  if (!n) return null
-  const teams = readJson(teamsPath, [])
-  return teams.find(t => String(t.name || '').trim().toLowerCase() === n) || null
-}
-
-function isUserOnTeam(teamName, userEmail) {
-  const team = findTeamByName(teamName)
-  if (!team) return false
-  const e = normalizeEmail(userEmail)
-  return (team.members || []).some(m => normalizeEmail(m.email) === e)
 }
 
 function isValidPastOrTodayDate(dateStr) {
@@ -127,366 +40,275 @@ function isValidPastOrTodayDate(dateStr) {
   return dt.getTime() <= today.getTime()
 }
 
-
-app.get('/api/health', (req, res) => res.json({ ok: true }))
-
-// ---- Auth (file-backed sessions) ----
-app.post('/api/auth/register', async (req, res) => {
-  const { email, password } = req.body || {}
-  const e = normalizeEmail(email)
-  const p = String(password || '')
-
-  if (!e || !p) return res.status(400).json({ message: 'Email and password required' })
-  if (!isEmail(e)) return res.status(400).json({ message: 'Email is invalid' })
-  if (p.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' })
-
-  const users = readJson(usersPath, [])
-  const exists = users.some(u => normalizeEmail(u.email) === e)
-  if (exists) return res.status(409).json({ message: 'Email already registered' })
-
-  const passwordHash = await bcrypt.hash(p, 10)
-  const user = { id: uuidv4(), email: e, passwordHash, createdAt: new Date().toISOString() }
-  users.push(user)
-  writeJson(usersPath, users)
-
-  return res.status(201).json({ message: 'Registered' })
-})
-
-app.post('/api/auth/login', async (req, res) => {
-  // "Username" on the UI maps to email for now
-  const { username, password } = req.body || {}
-  const e = normalizeEmail(username)
-  const p = String(password || '')
-
-  if (!e || !p) return res.status(400).json({ message: 'Username and password required' })
-
-  const users = readJson(usersPath, [])
-  const user = users.find(u => normalizeEmail(u.email) === e)
-  if (!user) return res.status(401).json({ message: 'Invalid credentials' })
-
-  const ok = await bcrypt.compare(p, user.passwordHash)
-  if (!ok) return res.status(401).json({ message: 'Invalid credentials' })
-
-  const sessions = readJson(sessionsPath, [])
-  const token = crypto.randomBytes(32).toString('hex')
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-  const session = { token, userId: user.id, createdAt: new Date().toISOString(), expiresAt }
-  sessions.push(session)
-  writeJson(sessionsPath, sessions)
-
-  return res.json({ token, user: { id: user.id, email: user.email } })
-})
-
-// ---- Password reset (local, file-backed) ----
-// Since this is a local app, we don't send email. We return a one-time token that the UI can display.
-app.post('/api/auth/password-reset/request', (req, res) => {
-  purgeExpiredPasswordResets()
-
-  const { email } = req.body || {}
-  const e = normalizeEmail(email)
-  if (!e) return res.status(400).json({ message: 'Email required' })
-  if (!isEmail(e)) return res.status(400).json({ message: 'Email is invalid' })
-
-  const users = readJson(usersPath, [])
-  const user = users.find(u => normalizeEmail(u.email) === e)
-
-  // Always return ok to avoid username/email enumeration in a real system.
-  if (!user) return res.json({ ok: true, message: 'If that account exists, a reset token is available.' })
-
-  const resets = readJson(passwordResetsPath, [])
-  const token = crypto.randomBytes(24).toString('hex')
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes
-  resets.push({
-    id: uuidv4(),
-    token,
-    userId: user.id,
-    createdAt: new Date().toISOString(),
-    expiresAt,
-    usedAt: null
-  })
-  writeJson(passwordResetsPath, resets)
-
-  // Provide a helper link for local usage.
-  return res.json({
-    ok: true,
-    message: 'Reset token created (local mode).',
-    token,
-    resetUrl: `/reset-password?token=${token}`,
-    expiresAt
-  })
-})
-
-app.post('/api/auth/password-reset/confirm', async (req, res) => {
-  purgeExpiredPasswordResets()
-
-  const { token, newPassword } = req.body || {}
-  const t = String(token || '').trim()
-  const p = String(newPassword || '')
-
-  if (!t) return res.status(400).json({ message: 'Token required' })
-  if (p.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' })
-
-  const resets = readJson(passwordResetsPath, [])
-  const reset = resets.find(r => r.token === t)
-  if (!reset || reset.usedAt) return res.status(400).json({ message: 'Invalid or used token' })
-
-  const exp = Date.parse(reset.expiresAt || '')
-  if (!exp || exp < Date.now()) return res.status(400).json({ message: 'Token expired' })
-
-  const users = readJson(usersPath, [])
-  const idx = users.findIndex(u => u.id === reset.userId)
-  if (idx < 0) return res.status(400).json({ message: 'Invalid token user' })
-
-  const passwordHash = await bcrypt.hash(p, 10)
-  users[idx] = { ...users[idx], passwordHash, passwordUpdatedAt: new Date().toISOString() }
-  writeJson(usersPath, users)
-
-  // Mark token used
-  const nextResets = resets.map(r => (r.token === t ? { ...r, usedAt: new Date().toISOString() } : r))
-  writeJson(passwordResetsPath, nextResets)
-
-  // Invalidate all sessions for this user
-  const sessions = readJson(sessionsPath, [])
-  writeJson(sessionsPath, sessions.filter(s => s.userId !== reset.userId))
-
-  return res.json({ ok: true, message: 'Password updated. Please log in again.' })
-})
-
-app.post('/api/auth/logout', authMiddleware, (req, res) => {
-  const sessions = readJson(sessionsPath, [])
-  writeJson(sessionsPath, sessions.filter(s => s.token !== req.user.token))
-  res.json({ ok: true })
-})
-
-app.get('/api/auth/me', authMiddleware, (req, res) => {
-  res.json({ user: { id: req.user.id, email: req.user.email } })
-})
-
-// ---- Teams ----
-app.get('/api/teams', authMiddleware, (req, res) => {
-  const teams = readJson(teamsPath, [])
-  res.json(withSortedTeams(teams))
-})
-
-app.post('/api/teams', authMiddleware, (req, res) => {
-  const { name, members } = req.body || {}
-  const trimmed = String(name || '').trim()
-  if (!trimmed) return res.status(400).json({ message: 'Team name required' })
-
-  const mem = Array.isArray(members) ? members : []
-  const normalizedMembers = mem
-    .map(m => ({
-      id: m && m.id ? String(m.id) : uuidv4(),
-      name: String((m && m.name) || '').trim(),
-      email: normalizeEmail((m && m.email) || '')
-    }))
-    .filter(m => m.name || m.email)
-
-  if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
-
-  for (const m of normalizedMembers) {
-    if (!m.name) return res.status(400).json({ message: 'Each team member must have a name' })
-    if (!m.email) return res.status(400).json({ message: 'Each team member must have an email' })
-    if (!isEmail(m.email)) return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
+async function authMiddleware(req, res, next) {
+  try {
+    const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
+    if (!session?.user) return res.status(401).json({ message: 'Unauthorized' })
+    req.user = {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    }
+    next()
+  } catch (error) {
+    console.error('Auth middleware error:', error)
+    res.status(500).json({ message: 'Authentication failed' })
   }
+}
 
-  // prevent duplicate member emails within team
-  const seen = new Set()
-  for (const m of normalizedMembers) {
-    if (seen.has(m.email)) return res.status(400).json({ message: 'Duplicate team member email in the same team' })
-    seen.add(m.email)
-  }
+async function findTeamByName(name) {
+  return storage.getTeamByName(name)
+}
 
-  const teams = readJson(teamsPath, [])
-  const exists = teams.some(t => String(t.name).toLowerCase() === trimmed.toLowerCase())
-  if (exists) return res.status(409).json({ message: 'Team already exists' })
+async function isUserOnTeam(teamName, userEmail) {
+  const team = await findTeamByName(teamName)
+  if (!team) return false
+  const e = normalizeEmail(userEmail)
+  return (team.members || []).some((m) => normalizeEmail(m.email) === e)
+}
 
-  const team = { id: uuidv4(), name: trimmed, members: normalizedMembers, createdAt: new Date().toISOString() }
-  const next = withSortedTeams([...teams, team])
-  writeJson(teamsPath, next)
-  res.status(201).json(team)
+app.get('/api/health', async (req, res) => {
+  const backend = await storage.getBackendName()
+  res.json({ ok: true, storage: backend })
 })
 
-// Update team (name + members). Also updates past scores if the team name changes.
-app.put('/api/teams/:id', authMiddleware, (req, res) => {
-  const id = String(req.params.id || '').trim()
-  if (!id) return res.status(400).json({ message: 'Team id required' })
-
-  const { name, members } = req.body || {}
-  const trimmed = String(name || '').trim()
-  if (!trimmed) return res.status(400).json({ message: 'Team name required' })
-
-  const mem = Array.isArray(members) ? members : []
-  const normalizedMembers = mem
-    .map(m => ({
-      id: m && m.id ? String(m.id) : uuidv4(),
-      name: String((m && m.name) || '').trim(),
-      email: normalizeEmail((m && m.email) || '')
-    }))
-    .filter(m => m.name || m.email)
-
-  if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
-
-  for (const m of normalizedMembers) {
-    if (!m.name) return res.status(400).json({ message: 'Each team member must have a name' })
-    if (!m.email) return res.status(400).json({ message: 'Each team member must have an email' })
-    if (!isEmail(m.email)) return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
-  }
-  // prevent duplicate member emails within team
-  const seen = new Set()
-  for (const m of normalizedMembers) {
-    if (seen.has(m.email)) return res.status(400).json({ message: 'Duplicate team member email in the same team' })
-    seen.add(m.email)
-  }
-
-  const teams = readJson(teamsPath, [])
-  const idx = teams.findIndex(t => String(t.id) === id)
-  if (idx < 0) return res.status(404).json({ message: 'Team not found' })
-
-  // prevent duplicate team names (case-insensitive) for different teams
-  const nameTaken = teams.some(t => String(t.id) !== id && String(t.name).toLowerCase() === trimmed.toLowerCase())
-  if (nameTaken) return res.status(409).json({ message: 'Team name already exists' })
-
-  const prev = teams[idx]
-  const requesterEmail = normalizeEmail(req.user.email)
-  const canEdit = (prev.members || []).some(m => normalizeEmail(m.email) === requesterEmail)
-  if (!canEdit) return res.status(403).json({ message: 'Only team members can edit this team' })
-
-  const updated = { ...prev, name: trimmed, members: normalizedMembers }
-  const nextTeams = withSortedTeams(teams.map(t => (String(t.id) === id ? updated : t)))
-  writeJson(teamsPath, nextTeams)
-
-  // If the team name changed, update historical scores so dashboards remain consistent.
-  const prevName = String(prev.name || '')
-  if (prevName && prevName !== trimmed) {
-    const scores = readJson(scoresPath, [])
-    const nextScores = scores.map(s => {
-      const tName = String(s.team || '')
-      const oName = String(s.opponentTeam || '')
-      const patched = { ...s }
-      if (tName === prevName) patched.team = trimmed
-      if (oName === prevName) patched.opponentTeam = trimmed
-      return patched
-    })
-    writeJson(scoresPath, nextScores)
-  }
-
-  res.json(updated)
+app.get('/api/auth-debug/latest-reset', (req, res) => {
+  const email = String(req.query.email || '').trim()
+  if (!email) return res.status(400).json({ message: 'email query parameter required' })
+  const latest = getLatestPasswordReset(email)
+  res.json(latest || null)
 })
 
-// ---- Scores ----
-app.get('/api/scores', authMiddleware, (req, res) => {
-  const scores = readJson(scoresPath, [])
-  res.json(scores)
+app.get('/api/teams', authMiddleware, async (req, res) => {
+  try {
+    const teams = await storage.listTeams()
+    res.json(teams)
+  } catch (error) {
+    console.error('List teams error:', error)
+    res.status(500).json({ message: 'Could not load teams' })
+  }
 })
 
-app.post('/api/scores', authMiddleware, (req, res) => {
-  const body = req.body || {}
-  const mode = body.mode === 'solo' ? 'solo' : 'team'
+app.post('/api/teams', authMiddleware, async (req, res) => {
+  try {
+    const { name, members } = req.body || {}
+    const trimmed = String(name || '').trim()
+    if (!trimmed) return res.status(400).json({ message: 'Team name required' })
 
-  if (mode === 'solo') {
-    const { date, state, course, roundScore, holes } = body
-    if (!date || !course) return res.status(400).json({ message: 'date and course required' })
+    const mem = Array.isArray(members) ? members : []
+    const normalizedMembers = mem
+      .map((m) => ({
+        id: m && m.id ? String(m.id) : uuidv4(),
+        name: String((m && m.name) || '').trim(),
+        email: normalizeEmail((m && m.email) || ''),
+      }))
+      .filter((m) => m.name || m.email)
+
+    if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
+
+    for (const m of normalizedMembers) {
+      if (!m.name) return res.status(400).json({ message: 'Each team member must have a name' })
+      if (!m.email) return res.status(400).json({ message: 'Each team member must have an email' })
+      if (!isEmail(m.email)) return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
+    }
+
+    const seen = new Set()
+    for (const m of normalizedMembers) {
+      if (seen.has(m.email)) return res.status(400).json({ message: 'Duplicate team member email in the same team' })
+      seen.add(m.email)
+    }
+
+    const exists = await storage.getTeamByName(trimmed)
+    if (exists) return res.status(409).json({ message: 'Team already exists' })
+
+    const requesterEmail = normalizeEmail(req.user.email)
+    const requesterIsMember = normalizedMembers.some((m) => m.email === requesterEmail)
+    if (!requesterIsMember) return res.status(403).json({ message: 'You can only create a team that includes your email on the roster' })
+
+    const team = await storage.createTeam({ name: trimmed, members: normalizedMembers })
+    res.status(201).json(team)
+  } catch (error) {
+    console.error('Create team error:', error)
+    res.status(500).json({ message: 'Could not create team' })
+  }
+})
+
+app.put('/api/teams/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!id) return res.status(400).json({ message: 'Team id required' })
+
+    const { name, members } = req.body || {}
+    const trimmed = String(name || '').trim()
+    if (!trimmed) return res.status(400).json({ message: 'Team name required' })
+
+    const mem = Array.isArray(members) ? members : []
+    const normalizedMembers = mem
+      .map((m) => ({
+        id: m && m.id ? String(m.id) : uuidv4(),
+        name: String((m && m.name) || '').trim(),
+        email: normalizeEmail((m && m.email) || ''),
+      }))
+      .filter((m) => m.name || m.email)
+
+    if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
+
+    for (const m of normalizedMembers) {
+      if (!m.name) return res.status(400).json({ message: 'Each team member must have a name' })
+      if (!m.email) return res.status(400).json({ message: 'Each team member must have an email' })
+      if (!isEmail(m.email)) return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
+    }
+
+    const seen = new Set()
+    for (const m of normalizedMembers) {
+      if (seen.has(m.email)) return res.status(400).json({ message: 'Duplicate team member email in the same team' })
+      seen.add(m.email)
+    }
+
+    const existing = await storage.getTeamById(id)
+    if (!existing) return res.status(404).json({ message: 'Team not found' })
+
+    const nameTaken = await storage.getTeamByName(trimmed)
+    if (nameTaken && String(nameTaken.id) !== id) return res.status(409).json({ message: 'Team name already exists' })
+
+    const requesterEmail = normalizeEmail(req.user.email)
+    const canEdit = (existing.members || []).some((m) => normalizeEmail(m.email) === requesterEmail)
+    if (!canEdit) return res.status(403).json({ message: 'Only team members can edit this team' })
+
+    const requesterStillMember = normalizedMembers.some((m) => m.email === requesterEmail)
+    if (!requesterStillMember) return res.status(403).json({ message: 'You must remain on the team roster to save changes' })
+
+    const updated = await storage.updateTeam(id, { name: trimmed, members: normalizedMembers })
+    res.json(updated)
+  } catch (error) {
+    console.error('Update team error:', error)
+    res.status(500).json({ message: 'Could not update team' })
+  }
+})
+
+app.get('/api/scores', authMiddleware, async (req, res) => {
+  try {
+    const scores = await storage.listScores()
+    res.json(scores)
+  } catch (error) {
+    console.error('List scores error:', error)
+    res.status(500).json({ message: 'Could not load scores' })
+  }
+})
+
+app.post('/api/scores', authMiddleware, async (req, res) => {
+  try {
+    const body = req.body || {}
+    const mode = body.mode === 'solo' ? 'solo' : 'team'
+
+    if (mode === 'solo') {
+      const { date, state, course, roundScore, holes } = body
+      if (!date || !course) return res.status(400).json({ message: 'date and course required' })
+      if (!isValidPastOrTodayDate(date)) return res.status(400).json({ message: 'Date must be today or earlier' })
+      if (!state || typeof state !== 'string' || !String(state).trim()) return res.status(400).json({ message: 'state required' })
+      if (typeof roundScore !== 'number' || Number.isNaN(roundScore)) return res.status(400).json({ message: 'roundScore must be a number' })
+      if (roundScore < 0) return res.status(400).json({ message: 'roundScore must be zero or greater' })
+
+      const normalizedState = String(state).toUpperCase()
+      const courseDetails = getCourseDetails(normalizedState, course)
+      const entry = await storage.createScore({
+        mode: 'solo',
+        date,
+        state: normalizedState,
+        course,
+        roundScore,
+        courseRating: courseDetails?.courseRating ?? 72,
+        slopeRating: courseDetails?.slopeRating ?? 113,
+        par: courseDetails?.par ?? 72,
+        handicapDifferential: calculateHandicapDifferential(roundScore, courseDetails?.courseRating ?? 72, courseDetails?.slopeRating ?? 113),
+        holes: Array.isArray(holes) ? holes : null,
+        createdByUserId: req.user.id,
+        createdByEmail: req.user.email,
+      })
+      return res.status(201).json(entry)
+    }
+
+    const { date, state, course, team, opponentTeam, teamTotal, opponentTotal, holes } = body
+    if (!date || !course || !team) return res.status(400).json({ message: 'date, course, team required' })
     if (!isValidPastOrTodayDate(date)) return res.status(400).json({ message: 'Date must be today or earlier' })
     if (!state || typeof state !== 'string' || !String(state).trim()) return res.status(400).json({ message: 'state required' })
-    if (typeof roundScore !== 'number' || Number.isNaN(roundScore)) return res.status(400).json({ message: 'roundScore must be a number' })
-    if (roundScore < 0) return res.status(400).json({ message: 'roundScore must be zero or greater' })
+    if (!opponentTeam || !String(opponentTeam).trim()) return res.status(400).json({ message: 'opponentTeam required' })
+    if (String(opponentTeam).trim().toLowerCase() === String(team).trim().toLowerCase()) {
+      return res.status(400).json({ message: 'Opponent team must be different from your team' })
+    }
+    if (typeof teamTotal !== 'number' || Number.isNaN(teamTotal)) return res.status(400).json({ message: 'teamTotal must be a number' })
+    if (typeof opponentTotal !== 'number' || Number.isNaN(opponentTotal)) return res.status(400).json({ message: 'opponentTotal must be a number' })
+    if (teamTotal < 0 || opponentTotal < 0) return res.status(400).json({ message: 'Scores must be zero or greater' })
 
-    const scores = readJson(scoresPath, [])
-    const entry = {
-      id: uuidv4(),
-      mode: 'solo',
+    const myTeam = await findTeamByName(team)
+    if (!myTeam) return res.status(400).json({ message: 'Your team must be a known team (create it first)' })
+    if (!(await isUserOnTeam(team, req.user.email))) return res.status(403).json({ message: 'You are not a member of the selected team' })
+
+    const oppTeamObj = await findTeamByName(opponentTeam)
+    if (!oppTeamObj) return res.status(400).json({ message: 'Opponent team must be a known team (create it first)' })
+
+    const won = teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null)
+    const diff = Math.abs(opponentTotal - teamTotal)
+    const money = won === true ? diff : won === false ? -diff : 0
+
+    const entry = await storage.createScore({
+      mode: 'team',
       date,
       state: String(state).toUpperCase(),
       course,
-      roundScore,
+      team,
+      opponentTeam: String(opponentTeam).trim(),
+      teamTotal,
+      opponentTotal,
+      money,
+      won,
       holes: Array.isArray(holes) ? holes : null,
       createdByUserId: req.user.id,
       createdByEmail: req.user.email,
-      createdAt: new Date().toISOString()
-    }
-    scores.unshift(entry)
-    writeJson(scoresPath, scores)
-    return res.status(201).json(entry)
+    })
+    res.status(201).json(entry)
+  } catch (error) {
+    console.error('Create score error:', error)
+    res.status(500).json({ message: 'Could not create score' })
   }
-
-  // TEAM (scramble) mode
-  const { date, state, course, team, opponentTeam, teamTotal, opponentTotal, holes } = body
-  if (!date || !course || !team) return res.status(400).json({ message: 'date, course, team required' })
-  if (!isValidPastOrTodayDate(date)) return res.status(400).json({ message: 'Date must be today or earlier' })
-  if (!state || typeof state !== 'string' || !String(state).trim()) return res.status(400).json({ message: 'state required' })
-  if (!opponentTeam || !String(opponentTeam).trim()) return res.status(400).json({ message: 'opponentTeam required' })
-  if (String(opponentTeam).trim().toLowerCase() === String(team).trim().toLowerCase()) {
-    return res.status(400).json({ message: 'Opponent team must be different from your team' })
-  }
-  if (typeof teamTotal !== 'number' || Number.isNaN(teamTotal)) return res.status(400).json({ message: 'teamTotal must be a number' })
-  if (typeof opponentTotal !== 'number' || Number.isNaN(opponentTotal)) return res.status(400).json({ message: 'opponentTotal must be a number' })
-  if (teamTotal < 0 || opponentTotal < 0) return res.status(400).json({ message: 'Scores must be zero or greater' })
-
-  // Authorization: you can only log a round for a team you are on.
-  const myTeam = findTeamByName(team)
-  if (!myTeam) return res.status(400).json({ message: 'Your team must be a known team (create it first)' })
-  if (!isUserOnTeam(team, req.user.email)) return res.status(403).json({ message: 'You are not a member of the selected team' })
-
-  const oppTeamObj = findTeamByName(opponentTeam)
-  if (!oppTeamObj) return res.status(400).json({ message: 'Opponent team must be a known team (create it first)' })
-
-  // Standard golf scoring: lower score wins.
-  const won = teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null)
-  // Money won/lost is the stroke difference from the perspective of the logged in user's team.
-  // Win  by 3 strokes => +$3.00, Lose by 2 strokes => -$2.00, Tie => $0.00
-  const diff = Math.abs(opponentTotal - teamTotal)
-  const money = won === true ? diff : won === false ? -diff : 0
-
-  const scores = readJson(scoresPath, [])
-  const entry = {
-    id: uuidv4(),
-    mode: 'team',
-    date,
-    state: String(state).toUpperCase(),
-    course,
-    team,
-    opponentTeam: String(opponentTeam).trim(),
-    teamTotal,
-    opponentTotal,
-    money,
-    won,
-    holes: Array.isArray(holes) ? holes : null,
-    createdByUserId: req.user.id,
-    createdByEmail: req.user.email,
-    createdAt: new Date().toISOString()
-  }
-  scores.unshift(entry)
-  writeJson(scoresPath, scores)
-  res.status(201).json(entry)
 })
 
+app.delete('/api/scores/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    const entry = await storage.getScoreById(id)
+    if (!entry) return res.status(404).json({ message: 'Score not found' })
 
-app.delete('/api/scores/:id', authMiddleware, (req, res) => {
-  const id = String(req.params.id || '').trim()
-  const scores = readJson(scoresPath, [])
-  const entry = scores.find(s => String(s.id) === id)
-  if (!entry) return res.status(404).json({ message: 'Score not found' })
+    const can = await isUserOnTeam(entry.team, req.user.email) || await isUserOnTeam(entry.opponentTeam, req.user.email)
+    if (!can) return res.status(403).json({ message: 'Only members of the teams involved can delete this round' })
 
-  const can = isUserOnTeam(entry.team, req.user.email) || isUserOnTeam(entry.opponentTeam, req.user.email)
-  if (!can) return res.status(403).json({ message: 'Only members of the teams involved can delete this round' })
-
-  writeJson(scoresPath, scores.filter(s => String(s.id) !== id))
-  res.json({ ok: true })
+    await storage.deleteScoreById(id)
+    res.json({ ok: true })
+  } catch (error) {
+    console.error('Delete score error:', error)
+    res.status(500).json({ message: 'Could not delete score' })
+  }
 })
 
-// ---- Static frontend (production) ----
-// When deployed to AWS Elastic Beanstalk, we serve the Vite build output from /dist
-// so the UI + API run as a single Node.js app.
 const distDir = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir))
-  // SPA fallback: let React Router handle client-side routes.
   app.get('*', (req, res) => {
     res.sendFile(path.join(distDir, 'index.html'))
   })
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on port ${PORT}`)
+async function bootstrap() {
+  await storage.initStorage()
+  const backend = await storage.getBackendName()
+  console.log(`Storage backend: ${backend}`)
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server listening on port ${PORT}`)
+  })
+}
+
+bootstrap().catch((error) => {
+  console.error('Startup failed:', error)
+  process.exit(1)
 })

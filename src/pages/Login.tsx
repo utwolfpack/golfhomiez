@@ -5,7 +5,7 @@ import PageHero from '../components/PageHero'
 import clubhouseImg from '../assets/gallery/clubhouse-twilight.svg'
 
 export default function Login() {
-  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -17,7 +17,7 @@ export default function Login() {
     setBusy(true)
     setError(null)
     try {
-      await login(username, password)
+      await login(email.trim(), password)
       navigate('/')
     } catch (err: any) {
       setError(err?.message || 'Login failed')
@@ -37,13 +37,13 @@ export default function Login() {
 
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
-            <label className="label">Username</label>
-            <input className="input" value={username} onChange={e => setUsername(e.target.value)} placeholder="you@example.com" />
+            <label className="label">Email</label>
+            <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
           </div>
 
           <div>
             <label className="label">Password</label>
-            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" />
           </div>
 
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}

@@ -1,12 +1,10 @@
 export type ApiError = { message: string }
 
 export async function api<T>(url: string, opts: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('auth_token')
   const headers = new Headers(opts.headers || {})
-  headers.set('Content-Type', 'application/json')
-  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (!headers.has('Content-Type') && opts.body) headers.set('Content-Type', 'application/json')
 
-  const res = await fetch(url, { ...opts, headers })
+  const res = await fetch(url, { ...opts, headers, credentials: 'include' })
   const text = await res.text()
   const data = text ? JSON.parse(text) : null
   if (!res.ok) {

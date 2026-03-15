@@ -1,62 +1,69 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { api } from '../lib/api'
+import { getSessionAuth, signInEmail, signOutAuth, signUpEmail } from '../lib/auth-api'
 
-export type User = { id: string; email: string }
+export type User = { id: string; email: string; name?: string | null }
 
 type AuthState = {
   user: User | null
   loading: boolean
-  login: (username: string, password: string) => Promise<void>
-  logout: () => void
-  register: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<void>
+  logout: () => Promise<void>
+  register: (name: string, email: string, password: string) => Promise<void>
+  refreshSession: () => Promise<void>
 }
 
 const Ctx = createContext<AuthState | null>(null)
+
+function toUser(data: { user?: User } | null | undefined) {
+  return data?.user ? { id: data.user.id, email: data.user.email, name: data.user.name } : null
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
+  async function refreshSession() {
+    const result = await getSessionAuth()
+    if (result.error) {
+      setUser(null)
+      return
+    }
+    setUser(toUser(result.data))
+  }
+
   useEffect(() => {
+    let active = true
     ;(async () => {
-      const token = localStorage.getItem('auth_token')
-      if (!token) { setLoading(false); return }
       try {
-        const me = await api<{ user: User }>('/api/auth/me')
-        setUser(me.user)
-      } catch {
-        localStorage.removeItem('auth_token')
+        const result = await getSessionAuth()
+        if (!active) return
+        setUser(toUser(result.data))
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     })()
+    return () => { active = false }
   }, [])
 
   const value = useMemo<AuthState>(() => ({
     user,
     loading,
-    async login(username, password) {
-      const res = await api<{ token: string; user: User }>('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password })
-      })
-      localStorage.setItem('auth_token', res.token)
-      setUser(res.user)
+    async login(email, password) {
+      const result = await signInEmail(email, password)
+      if (result.error) throw new Error(result.error.message || 'Login failed')
+      await refreshSession()
     },
-    logout() {
-      // best-effort server-side session cleanup (still works offline if server already stopped)
-      ;(async () => {
-        try { await api<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }) } catch {}
-      })()
-      localStorage.removeItem('auth_token')
+    async logout() {
+      const result = await signOutAuth()
+      if (result.error) throw new Error(result.error.message || 'Logout failed')
       setUser(null)
     },
-    async register(email, password) {
-      await api<{ message: string }>('/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({ email, password })
-      })
-    }
+    async register(name, email, password) {
+      const result = await signUpEmail(email, password, name.trim() || email.split('@')[0])
+      if (result.error) throw new Error(result.error.message || 'Registration failed')
+      await refreshSession()
+    },
+    refreshSession,
   }), [user, loading])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
