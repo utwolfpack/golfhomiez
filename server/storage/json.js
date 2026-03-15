@@ -202,15 +202,7 @@ export async function getScoreById(id) {
 
 export async function createScore(entry) {
   const scores = readJson(scoresPath, [])
-  const score = {
-    id: uuidv4(),
-    courseRating: entry.courseRating ?? null,
-    slopeRating: entry.slopeRating ?? null,
-    par: entry.par ?? null,
-    handicapDifferential: entry.handicapDifferential ?? null,
-    ...entry,
-    createdAt: new Date().toISOString(),
-  }
+  const score = { id: uuidv4(), ...entry, createdAt: new Date().toISOString() }
   scores.unshift(score)
   writeJson(scoresPath, scores)
   return score

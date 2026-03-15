@@ -9,7 +9,6 @@ import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { auth } from './auth.js'
 import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
-import { getCourseDetails, calculateHandicapDifferential } from './course-data.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -17,8 +16,24 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const PORT = Number(process.env.PORT || 5001)
 const clientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+const allowedOrigins = new Set([
+  clientOrigin,
+  'http://127.0.0.1:5174',
+  'http://localhost:5174',
+  'http://127.0.0.1:5001',
+  'http://localhost:5001',
+].filter(Boolean))
 
-app.use(cors({ origin: [clientOrigin, 'http://127.0.0.1:5174'], credentials: true }))
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true)
+    return callback(new Error(`CORS blocked for origin: ${origin}`))
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}))
+app.options('*', cors())
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
 
@@ -121,10 +136,6 @@ app.post('/api/teams', authMiddleware, async (req, res) => {
     const exists = await storage.getTeamByName(trimmed)
     if (exists) return res.status(409).json({ message: 'Team already exists' })
 
-    const requesterEmail = normalizeEmail(req.user.email)
-    const requesterIsMember = normalizedMembers.some((m) => m.email === requesterEmail)
-    if (!requesterIsMember) return res.status(403).json({ message: 'You can only create a team that includes your email on the roster' })
-
     const team = await storage.createTeam({ name: trimmed, members: normalizedMembers })
     res.status(201).json(team)
   } catch (error) {
@@ -175,9 +186,6 @@ app.put('/api/teams/:id', authMiddleware, async (req, res) => {
     const canEdit = (existing.members || []).some((m) => normalizeEmail(m.email) === requesterEmail)
     if (!canEdit) return res.status(403).json({ message: 'Only team members can edit this team' })
 
-    const requesterStillMember = normalizedMembers.some((m) => m.email === requesterEmail)
-    if (!requesterStillMember) return res.status(403).json({ message: 'You must remain on the team roster to save changes' })
-
     const updated = await storage.updateTeam(id, { name: trimmed, members: normalizedMembers })
     res.json(updated)
   } catch (error) {
@@ -209,18 +217,12 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
       if (typeof roundScore !== 'number' || Number.isNaN(roundScore)) return res.status(400).json({ message: 'roundScore must be a number' })
       if (roundScore < 0) return res.status(400).json({ message: 'roundScore must be zero or greater' })
 
-      const normalizedState = String(state).toUpperCase()
-      const courseDetails = getCourseDetails(normalizedState, course)
       const entry = await storage.createScore({
         mode: 'solo',
         date,
-        state: normalizedState,
+        state: String(state).toUpperCase(),
         course,
         roundScore,
-        courseRating: courseDetails?.courseRating ?? 72,
-        slopeRating: courseDetails?.slopeRating ?? 113,
-        par: courseDetails?.par ?? 72,
-        handicapDifferential: calculateHandicapDifferential(roundScore, courseDetails?.courseRating ?? 72, courseDetails?.slopeRating ?? 113),
         holes: Array.isArray(holes) ? holes : null,
         createdByUserId: req.user.id,
         createdByEmail: req.user.email,
