@@ -1,11 +1,4 @@
-export type ScoreMetadata = {
-  courseRating?: number | null
-  slopeRating?: number | null
-  par?: number | null
-  handicapDifferential?: number | null
-}
-
-export type TeamScoreEntry = ScoreMetadata & {
+export type TeamScoreEntry = {
   id: string
   mode: 'team'
   date: string // YYYY-MM-DD
@@ -23,7 +16,7 @@ export type TeamScoreEntry = ScoreMetadata & {
   createdAt: string
 }
 
-export type SoloScoreEntry = ScoreMetadata & {
+export type SoloScoreEntry = {
   id: string
   mode: 'solo'
   date: string // YYYY-MM-DD

@@ -7,7 +7,6 @@ import { getCoursesForState } from '../data/coursesByState'
 import { createTeam, fetchTeams } from '../lib/teams'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
-import { useNearestCourseDefault } from '../hooks/useNearestCourseDefault'
 
 const NUM_HOLES = 18
 type DraftMember = { firstName: string; lastName: string; email: string }
@@ -82,7 +81,6 @@ function GolfLoggerInner() {
 
   const holesTotal = useMemo(() => holes.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0), [holes])
   const courseOptions = useMemo(() => getCoursesForState(stateAbbr), [stateAbbr])
-  const locationStatus = useNearestCourseDefault(stateAbbr, course, setCourse, courseOptions)
 
   const totals = useMemo(() => {
     const your = Number(teamTotal)
@@ -232,9 +230,6 @@ function GolfLoggerInner() {
                 <option key={c} value={c} />
               ))}
             </datalist>
-            <div className="small" style={{ marginTop: 6 }}>
-              {locationStatus === 'granted' ? 'Defaulted to the nearest supported course for your current location.' : locationStatus === 'requesting' ? 'Checking your location for the nearest course…' : 'Using the first available course because location was unavailable.'}
-            </div>
           </div>
           <div>
             <label className="label">Your team</label>

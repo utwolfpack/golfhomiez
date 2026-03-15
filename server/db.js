@@ -65,10 +65,6 @@ async function ensureAppTables(db) {
       round_score INT NULL,
       money DECIMAL(10,2) NULL,
       won TINYINT NULL,
-      course_rating DECIMAL(5,1) NULL,
-      slope_rating INT NULL,
-      par INT NULL,
-      handicap_differential DECIMAL(5,1) NULL,
       holes_json JSON NULL,
       created_by_user_id VARCHAR(191) NOT NULL,
       created_by_email VARCHAR(191) NOT NULL,
@@ -79,41 +75,12 @@ async function ensureAppTables(db) {
   `)
 }
 
-async function addColumnIfMissing(db, tableName, columnName, definition) {
-  const [rows] = await db.query(
-    `
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = DATABASE()
-        AND table_name = ?
-        AND column_name = ?
-      LIMIT 1
-    `,
-    [tableName, columnName],
-  )
-
-  if (Array.isArray(rows) && rows.length > 0) {
-    return
-  }
-
-  await db.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
-}
-
-async function ensureScoreColumns(db) {
-  await addColumnIfMissing(db, 'scores', 'course_rating', 'DECIMAL(5,1) NULL AFTER won')
-  await addColumnIfMissing(db, 'scores', 'slope_rating', 'INT NULL AFTER course_rating')
-  await addColumnIfMissing(db, 'scores', 'par', 'INT NULL AFTER slope_rating')
-  await addColumnIfMissing(db, 'scores', 'handicap_differential', 'DECIMAL(5,1) NULL AFTER par')
-}
-
 export async function initDb() {
   const db = getPool()
   await db.query('SELECT 1')
   await ensureAuthSchema()
   await ensureAppTables(db)
-  await ensureScoreColumns(db)
 }
-
 
 export async function closeDb() {
   if (pool) {

@@ -8,7 +8,7 @@ type AuthState = {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
-  register: (name: string, email: string, password: string) => Promise<void>
+  register: (firstName: string, lastName: string, email: string, password: string) => Promise<void>
   refreshSession: () => Promise<void>
 }
 
@@ -58,8 +58,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (result.error) throw new Error(result.error.message || 'Logout failed')
       setUser(null)
     },
-    async register(name, email, password) {
-      const result = await signUpEmail(email, password, name.trim() || email.split('@')[0])
+    async register(firstName, lastName, email, password) {
+      const fullName = `${firstName} ${lastName}`.replace(/\s+/g, ' ').trim() || email.split('@')[0]
+      const result = await signUpEmail(email, password, fullName)
       if (result.error) throw new Error(result.error.message || 'Registration failed')
       await refreshSession()
     },

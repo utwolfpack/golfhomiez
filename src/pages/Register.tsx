@@ -2,9 +2,13 @@ import { FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
+import LocationInput from '../components/LocationInput'
+import type { SavedLocation } from '../lib/location-store'
 
 export default function Register() {
-  const [name, setName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [location, setLocation] = useState<SavedLocation | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -18,11 +22,14 @@ export default function Register() {
     setBusy(true)
     setError(null)
     try {
-      const trimmedName = name.trim()
-      if (!trimmedName) throw new Error('Name is required')
+      const trimmedFirstName = firstName.trim()
+      const trimmedLastName = lastName.trim()
+      if (!trimmedFirstName) throw new Error('First name is required')
+      if (!trimmedLastName) throw new Error('Last name is required')
+      if (!location) throw new Error('Location is required')
       if (password.length < 8) throw new Error('Password must be at least 8 characters')
       if (password !== confirmPassword) throw new Error('Passwords do not match')
-      await register(trimmedName, email.trim(), password)
+      await register(trimmedFirstName, trimmedLastName, email.trim(), password)
       navigate('/')
     } catch (err: any) {
       setError(err?.message || 'Registration failed')
@@ -41,10 +48,19 @@ export default function Register() {
         />
 
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
-          <div>
-            <label className="label">Full name</label>
-            <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="name" />
+          <div className="formRow formRow--split">
+            <div>
+              <label className="label">First name</label>
+              <input className="input" value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="First name" autoComplete="given-name" />
+            </div>
+
+            <div>
+              <label className="label">Last name</label>
+              <input className="input" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Last name" autoComplete="family-name" />
+            </div>
           </div>
+
+          <LocationInput value={location} onChange={setLocation} />
 
           <div>
             <label className="label">Email</label>
@@ -69,8 +85,6 @@ export default function Register() {
             </button>
             <Link className="btn" to="/login">Back to login</Link>
           </div>
-
-
         </form>
       </div>
     </div>

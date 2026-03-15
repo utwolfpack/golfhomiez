@@ -7,7 +7,6 @@ import { Link } from 'react-router-dom'
 import { US_STATES } from '../data/usStates'
 import bannerImg from '../assets/golf-banner.png'
 import { jumpToFirstByLetter } from '../lib/selectHotkey'
-import { calculateHandicapIndex } from '../data/courseDetails'
 
 function formatMoney(n: number) {
   const fmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
@@ -141,13 +140,7 @@ export default function Home() {
     const total = soloOnly.length
     const avg = total === 0 ? 0 : soloOnly.reduce((s, x) => s + x.roundScore, 0) / total
     const best = total === 0 ? 0 : Math.min(...soloOnly.map(x => x.roundScore))
-    const handicapIndex = calculateHandicapIndex(
-      soloOnly
-        .slice(0, 20)
-        .map((x) => x.handicapDifferential)
-        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-    )
-    return { total, avg, best, handicapIndex }
+    return { total, avg, best }
   }, [filteredScores])
 
   const recent = useMemo(() => sortScoresNewestFirst(filteredScores), [filteredScores])
@@ -206,7 +199,7 @@ export default function Home() {
               className="input"
               value={stateFilter}
               onChange={(e) => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }}
-              onKeyDown={(e) => jumpToFirstByLetter(e.key, stateOptions.map((value) => ({ value })), (v) => { setStateFilter(v); setCourseFilter('all'); setTeamFilter('all') }, stateFilter)}
+              onKeyDown={(e) => jumpToFirstByLetter(e, stateOptions, (v) => { setStateFilter(v); setCourseFilter('all'); setTeamFilter('all') })}
             >
               {stateOptions.length > 1 ? <option value="all">All states</option> : null}
               {stateOptions.map((abbr) => (
@@ -220,7 +213,7 @@ export default function Home() {
               className="input"
               value={courseFilter}
               onChange={(e) => { setCourseFilter(e.target.value); setTeamFilter('all') }}
-              onKeyDown={(e) => jumpToFirstByLetter(e.key, courseOptions.map((value) => ({ value })), (v) => { setCourseFilter(v); setTeamFilter('all') }, courseFilter)}
+              onKeyDown={(e) => jumpToFirstByLetter(e, courseOptions, (v) => { setCourseFilter(v); setTeamFilter('all') })}
             >
               <option value="all">All courses</option>
               {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -233,7 +226,7 @@ export default function Home() {
                 className="input"
                 value={teamFilter}
                 onChange={(e) => setTeamFilter(e.target.value)}
-                onKeyDown={(e) => jumpToFirstByLetter(e.key, teamOptions.map((value) => ({ value })), (v) => setTeamFilter(v), teamFilter)}
+                onKeyDown={(e) => jumpToFirstByLetter(e, teamOptions, (v) => setTeamFilter(v))}
               >
                 <option value="all">All teams</option>
                 {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -256,7 +249,6 @@ export default function Home() {
             <StatCard title="Solo Rounds" value={`${soloStats.total}`} subtitle="Filtered view" />
             <StatCard title="Average Score" value={soloStats.total ? soloStats.avg.toFixed(1) : '—'} subtitle="Lower is better" />
             <StatCard title="Best Score" value={soloStats.total ? `${soloStats.best}` : '—'} subtitle="Your lowest round" />
-            <StatCard title="Handicap Index" value={soloStats.handicapIndex !== null ? soloStats.handicapIndex.toFixed(1) : '—'} subtitle={soloStats.total ? 'Calculated from saved course-adjusted differentials' : 'Log solo rounds to start tracking'} />
           </div>
         ) : (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginTop: 14 }}>
