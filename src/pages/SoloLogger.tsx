@@ -5,25 +5,32 @@ import { US_STATES } from '../data/usStates'
 import { getCoursesForState } from '../data/coursesByState'
 import { useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
+import { getUserTodayISO } from '../lib/date'
+
+const NUM_HOLES = 18
 
 export default function SoloLogger() {
   const { user } = useAuth()
   const nav = useNavigate()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = getUserTodayISO()
 
   const statesWithCourses = useMemo(() => {
     return US_STATES.filter(s => getCoursesForState(s.abbr).length > 0)
   }, [])
 
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => getUserTodayISO())
   const [state, setState] = useState('UT')
   const [course, setCourse] = useState('')
   const [roundScore, setRoundScore] = useState<string>('')
+  const [useHoles, setUseHoles] = useState(false)
+  const [holes, setHoles] = useState<number[]>(Array(NUM_HOLES).fill(0))
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showValidation, setShowValidation] = useState(false)
 
   const courses = useMemo(() => getCoursesForState(state), [state])
+  const holesTotal = useMemo(() => holes.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0), [holes])
   const missingFields = useMemo(() => {
     const missing: string[] = []
     const scoreNum = Number(roundScore)
@@ -45,6 +52,7 @@ export default function SoloLogger() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    setShowValidation(true)
     if (missingFields.length) {
       setError(`Please complete: ${missingFields.join(', ')}`)
       return
@@ -72,7 +80,7 @@ export default function SoloLogger() {
           state,
           course,
           roundScore: scoreNum,
-          holes: null
+          holes: useHoles ? holes : null
         })
       })
       nav('/')
@@ -133,9 +141,32 @@ export default function SoloLogger() {
                 min={0}
               />
             </div>
+
+            <div>
+              <label className="label">Per-hole entry (future-friendly)</label>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <input type="checkbox" checked={useHoles} onChange={e => setUseHoles(e.target.checked)} />
+                <span className="small">Enable 18-hole inputs (optional)</span>
+              </div>
+              {useHoles ? <div className="small" style={{ marginTop: 6 }}>Per-hole total: <strong>{holesTotal}</strong></div> : null}
+            </div>
           </div>
 
-          {missingFields.length ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
+          {useHoles ? (
+            <div className="card" style={{ marginTop: 16, background: '#fafbff' }}>
+              <div style={{ fontWeight: 700, marginBottom: 10 }}>Hole Scores (Course specific)</div>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 10 }}>
+                {holes.map((v, idx) => (
+                  <div key={idx}>
+                    <label className="label">Hole {idx + 1}</label>
+                    <input className="input" type="number" value={v} onChange={e => { const next = holes.slice(); next[idx] = Number(e.target.value); setHoles(next) }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {showValidation && missingFields.length ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
           {error ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>{error}</div> : null}
 
           <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
