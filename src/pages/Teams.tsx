@@ -194,6 +194,8 @@ function TeamsInner() {
               <button type="button" className="btn" disabled={draftMembers.length >= 4} onClick={addMember}>+ Add member</button>
             </div>
 
+            <div className="small" style={{ marginTop: 6 }}>Teams must have between 2 and 4 players.</div>
+
             <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
               {draftMembers.map(m => (
                 <div key={m.id} className="card" style={{ padding: 12 }}>
@@ -210,7 +212,7 @@ function TeamsInner() {
                       <label className="label">Email</label>
                       <input className="input" type="email" value={m.email} onChange={e => patchMember(m.id, 'email', e.target.value)} />
                     </div>
-                    <button type="button" className="btn" onClick={() => removeMember(m.id)}>Remove</button>
+                    <button type="button" className="btn" disabled={draftMembers.length <= 2} onClick={() => removeMember(m.id)}>Remove</button>
                   </div>
                 </div>
               ))}

@@ -4,11 +4,12 @@ import cors from 'cors'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { v4 as uuidv4 } from 'uuid'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { auth } from './auth.js'
 import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
+import { isValidPastOrTodayDate } from './lib/date-utils.js'
+import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -31,29 +32,12 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone'],
 }))
 app.options('*', cors())
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
 
-function normalizeEmail(s) {
-  return String(s || '').trim().toLowerCase()
-}
-
-function isEmail(s) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim())
-}
-
-function isValidPastOrTodayDate(dateStr) {
-  const value = String(dateStr || '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-  const dt = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(dt.getTime())) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return dt.getTime() <= today.getTime()
-}
 
 async function authMiddleware(req, res, next) {
   try {
@@ -110,15 +94,10 @@ app.post('/api/teams', authMiddleware, async (req, res) => {
     const trimmed = String(name || '').trim()
     if (!trimmed) return res.status(400).json({ message: 'Team name required' })
 
-    const mem = Array.isArray(members) ? members : []
-    const normalizedMembers = mem
-      .map((m) => ({
-        id: m && m.id ? String(m.id) : uuidv4(),
-        name: String((m && m.name) || '').trim(),
-        email: normalizeEmail((m && m.email) || ''),
-      }))
-      .filter((m) => m.name || m.email)
+    const normalizedMembers = normalizeCreateTeamMembers(members, req.user)
 
+    if (!normalizedMembers[0]?.email) return res.status(400).json({ message: 'The signed-in user must have an email to create a team' })
+    if (normalizedMembers.length < 2) return res.status(400).json({ message: 'A team must have at least 2 members' })
     if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
 
     for (const m of normalizedMembers) {
@@ -153,15 +132,10 @@ app.put('/api/teams/:id', authMiddleware, async (req, res) => {
     const trimmed = String(name || '').trim()
     if (!trimmed) return res.status(400).json({ message: 'Team name required' })
 
-    const mem = Array.isArray(members) ? members : []
-    const normalizedMembers = mem
-      .map((m) => ({
-        id: m && m.id ? String(m.id) : uuidv4(),
-        name: String((m && m.name) || '').trim(),
-        email: normalizeEmail((m && m.email) || ''),
-      }))
-      .filter((m) => m.name || m.email)
+    const normalizedMembers = normalizeCreateTeamMembers(members, req.user)
 
+    if (!normalizedMembers[0]?.email) return res.status(400).json({ message: 'The signed-in user must have an email to create a team' })
+    if (normalizedMembers.length < 2) return res.status(400).json({ message: 'A team must have at least 2 members' })
     if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
 
     for (const m of normalizedMembers) {
@@ -212,7 +186,7 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
     if (mode === 'solo') {
       const { date, state, course, roundScore, holes } = body
       if (!date || !course) return res.status(400).json({ message: 'date and course required' })
-      if (!isValidPastOrTodayDate(date)) return res.status(400).json({ message: 'Date must be today or earlier' })
+      if (!isValidPastOrTodayDate(date, req.headers['x-user-timezone'])) return res.status(400).json({ message: 'Date must be today or earlier in your local time zone' })
       if (!state || typeof state !== 'string' || !String(state).trim()) return res.status(400).json({ message: 'state required' })
       if (typeof roundScore !== 'number' || Number.isNaN(roundScore)) return res.status(400).json({ message: 'roundScore must be a number' })
       if (roundScore < 0) return res.status(400).json({ message: 'roundScore must be zero or greater' })
@@ -232,7 +206,7 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
 
     const { date, state, course, team, opponentTeam, teamTotal, opponentTotal, holes } = body
     if (!date || !course || !team) return res.status(400).json({ message: 'date, course, team required' })
-    if (!isValidPastOrTodayDate(date)) return res.status(400).json({ message: 'Date must be today or earlier' })
+    if (!isValidPastOrTodayDate(date, req.headers['x-user-timezone'])) return res.status(400).json({ message: 'Date must be today or earlier in your local time zone' })
     if (!state || typeof state !== 'string' || !String(state).trim()) return res.status(400).json({ message: 'state required' })
     if (!opponentTeam || !String(opponentTeam).trim()) return res.status(400).json({ message: 'opponentTeam required' })
     if (String(opponentTeam).trim().toLowerCase() === String(team).trim().toLowerCase()) {

@@ -5,11 +5,19 @@ import type { ScoreEntry, TeamMember } from '../types'
 import { US_STATES } from '../data/usStates'
 import { getCoursesForState } from '../data/coursesByState'
 import { createTeam, fetchTeams } from '../lib/teams'
+import { getUserTodayISO } from '../lib/date'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 
 const NUM_HOLES = 18
 type DraftMember = { firstName: string; lastName: string; email: string }
+
+function splitUserName(name: string | null | undefined, email: string | null | undefined) {
+  const trimmed = String(name || '').trim()
+  if (!trimmed) return { firstName: String(email || '').split('@')[0] || '', lastName: '' }
+  const [firstName = '', ...rest] = trimmed.split(/\s+/)
+  return { firstName, lastName: rest.join(' ') }
+}
 
 export default function GolfLoggerPage() {
   return (
@@ -21,8 +29,8 @@ export default function GolfLoggerPage() {
 
 function GolfLoggerInner() {
   const { user } = useAuth()
-  const today = new Date().toISOString().slice(0, 10)
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const today = getUserTodayISO()
+  const [date, setDate] = useState(() => getUserTodayISO())
   const [stateAbbr, setStateAbbr] = useState('UT')
   const [allTeams, setAllTeams] = useState<string[]>([])
   const [myTeams, setMyTeams] = useState<string[]>([])
@@ -36,10 +44,16 @@ function GolfLoggerInner() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [showRoundValidation, setShowRoundValidation] = useState(false)
+  const [showCreateTeamValidation, setShowCreateTeamValidation] = useState(false)
 
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
-  const [newMembers, setNewMembers] = useState<DraftMember[]>([{ firstName: '', lastName: '', email: user?.email || '' }])
+  const leadMember = useMemo(() => {
+    const names = splitUserName(user?.name, user?.email)
+    return { firstName: names.firstName, lastName: names.lastName, email: user?.email || '' }
+  }, [user?.email, user?.name])
+  const [newMembers, setNewMembers] = useState<DraftMember[]>([leadMember])
 
   async function loadTeams() {
     try {
@@ -72,12 +86,12 @@ function GolfLoggerInner() {
 
   useEffect(() => {
     setNewMembers(prev => {
-      if (!prev.length) return [{ firstName: '', lastName: '', email: user?.email || '' }]
+      if (!prev.length) return [leadMember]
       const next = [...prev]
-      if (!next[0].email && user?.email) next[0] = { ...next[0], email: user.email }
+      next[0] = leadMember
       return next
     })
-  }, [user?.email])
+  }, [leadMember])
 
   const holesTotal = useMemo(() => holes.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0), [holes])
   const courseOptions = useMemo(() => getCoursesForState(stateAbbr), [stateAbbr])
@@ -157,27 +171,29 @@ function GolfLoggerInner() {
                     <div key={idx} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'end' }}>
                       <div style={{ minWidth: 170, flex: 1 }}>
                         <label className="label">First name</label>
-                        <input className="input" value={m.firstName} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, firstName: e.target.value } : x))} />
+                        <input className="input" value={m.firstName} readOnly={idx === 0} aria-readonly={idx === 0} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, firstName: e.target.value } : x))} />
                       </div>
                       <div style={{ minWidth: 170, flex: 1 }}>
                         <label className="label">Last name</label>
-                        <input className="input" value={m.lastName} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, lastName: e.target.value } : x))} />
+                        <input className="input" value={m.lastName} readOnly={idx === 0} aria-readonly={idx === 0} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, lastName: e.target.value } : x))} />
                       </div>
                       <div style={{ minWidth: 250, flex: 1.2 }}>
                         <label className="label">Email</label>
-                        <input className="input" type="email" value={m.email} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, email: e.target.value } : x))} />
+                        <input className="input" type="email" value={m.email} readOnly={idx === 0} aria-readonly={idx === 0} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, email: e.target.value } : x))} />
                       </div>
-                      <button type="button" className="btn" disabled={newMembers.length === 1} onClick={() => setNewMembers(prev => prev.filter((_, i) => i !== idx))}>Remove</button>
+                      <button type="button" className="btn" disabled={newMembers.length === 1 || idx === 0} onClick={() => setNewMembers(prev => prev.filter((_, i) => i !== idx))}>Remove</button>
                     </div>
                   ))}
                 </div>
+                <div className="small" style={{ marginTop: 6 }}>Member 1 is always the signed-in user and cannot be changed.</div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
                   <button type="button" className="btn" disabled={newMembers.length >= 4} onClick={() => setNewMembers(prev => [...prev, { firstName: '', lastName: '', email: '' }])}>+ Add member</button>
                   <button
                     type="button"
-                    className="btnPrimary"
+                    className="btn btnSmall btnLightBlue"
                     disabled={busy}
                     onClick={async () => {
+                      setShowCreateTeamValidation(true)
                       if (createMissing.length) {
                         setErr(`Please complete: ${createMissing.join(', ')}`)
                         return
@@ -189,8 +205,9 @@ function GolfLoggerInner() {
                         const created = await createTeam(newTeamName.trim(), cleanedNewMembers as Omit<TeamMember, 'id'>[])
                         setMsg(`Team ${created.name} created.`)
                         setShowCreateTeam(false)
+                        setShowCreateTeamValidation(false)
                         setNewTeamName('')
-                        setNewMembers([{ firstName: '', lastName: '', email: user?.email || '' }])
+                        setNewMembers([leadMember])
                         await loadTeams()
                         setTeam(created.name)
                       } catch (e: any) {
@@ -203,7 +220,7 @@ function GolfLoggerInner() {
                     {busy ? 'Creating…' : 'Save Team'}
                   </button>
                 </div>
-                {createMissing.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 10 }}>Missing or invalid: {createMissing.join(', ')}</div> : null}
+                {showCreateTeamValidation && createMissing.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 10 }}>Missing or invalid: {createMissing.join(', ')}</div> : null}
               </div>
             </div>
           </div>
@@ -304,15 +321,16 @@ function GolfLoggerInner() {
         ) : null}
 
         {msg ? <div className="small" style={{ color: '#166534', marginTop: 12 }}>{msg}</div> : null}
-        {missingFields.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 12 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
+        {showRoundValidation && missingFields.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 12 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
         {err ? <div className="small" style={{ color: '#b91c1c', marginTop: 8 }}>{err}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
           <button
             type="button"
-            className="btn btnPrimary"
+            className="btn btnSmall btnLightBlue"
             disabled={busy}
             onClick={async () => {
+              setShowRoundValidation(true)
               if (missingFields.length) {
                 setErr(`Please complete: ${missingFields.join(', ')}`)
                 return
@@ -350,6 +368,7 @@ function GolfLoggerInner() {
                 setTeamTotal('')
                 setOpponentTotal('')
                 setHoles(Array(NUM_HOLES).fill(0))
+                setShowRoundValidation(false)
               } catch (e: any) {
                 setErr(e.message || 'Failed to save')
               } finally {

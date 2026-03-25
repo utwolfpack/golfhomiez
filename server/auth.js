@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { getPool } from './db.js'
-import { setLatestPasswordReset } from './auth-debug.js'
+import { sendMail } from './mailer.js'
+import { sendResetPasswordEmail, sendVerificationEmail } from './lib/auth-email.js'
 
 const authSecret = process.env.BETTER_AUTH_SECRET || 'dev-only-secret-change-me-1234567890123456'
 
@@ -20,15 +21,17 @@ export const auth = betterAuth({
   ].filter(Boolean),
   emailAndPassword: {
     enabled: true,
+    requireEmailVerification: false,
     sendResetPassword: async ({ user, url, token }, request) => {
       const expiresAt = request?.body?.expiresAt || null
-      setLatestPasswordReset({
-        email: user.email,
-        token,
-        url,
-        expiresAt,
-      })
-      console.log(`[better-auth] password reset for ${user.email}: ${url}`)
+      await sendResetPasswordEmail({ sendMail, user, url, token, expiresAt })
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendVerificationEmail({ sendMail, user, url })
     },
   },
 })
