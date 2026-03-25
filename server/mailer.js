@@ -159,6 +159,7 @@ async function sendViaSmtp(config, { to, subject, text, html }) {
     socket.end()
     return { accepted: [to], transport: 'smtp' }
   } catch (error) {
+    console.error('[mailer] SMTP send failed:', error)
     socket.destroy()
     throw error
   }
