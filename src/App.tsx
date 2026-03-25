@@ -25,7 +25,7 @@ export default function App() {
         <Route path="/directions" element={<Directions />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/request-password-reset" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

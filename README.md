@@ -15,7 +15,7 @@ npm run dev
 ```
 
 Local password reset:
-- Go to /forgot-password
+- Go to /
 - Submit your email
 - The server sends the reset email through Brevo SMTP and also stores the latest reset link for local debugging
 
