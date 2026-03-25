@@ -23,7 +23,7 @@ export default function NavBar() {
 
   return (
     <div className="nav">
-      <Link to="/" style={{ fontWeight: 700 }}>⛳ Golf Homiez!</Link>
+      <Link to="/" className="navBrand">⛳ Golf Homiez!</Link>
       <div className="navLinks">
         <A to="/">Home</A>
         {user ? (
@@ -37,7 +37,7 @@ export default function NavBar() {
           <A to="/login">Login/Register</A>
         ) : (
           <>
-            <span className="small">Signed in as <strong>{user.email}</strong></span>
+            <span className="small navUser">Signed in as <strong>{user.email}</strong></span>
             <button className="btn" onClick={() => { logout(); navigate('/login') }}>Logout</button>
           </>
         )}

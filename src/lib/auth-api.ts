@@ -6,22 +6,50 @@ function isLoopbackHost(hostname: string) {
   return hostname === 'localhost' || hostname === '127.0.0.1'
 }
 
+function normalizeUrl(url: string) {
+  return url.replace(/\/$/, '')
+}
+
 function getAuthBase() {
-  const raw = String(import.meta.env.VITE_AUTH_BASE_URL || '/api/auth').trim()
-  if (typeof window === 'undefined') return raw.replace(/\/$/, '')
+  const raw = String(import.meta.env.VITE_AUTH_BASE_URL || '').trim()
+  const sameOriginDefault = '/api/auth'
+
+  if (typeof window === 'undefined') return normalizeUrl(raw || sameOriginDefault)
 
   const pageUrl = new URL(window.location.origin)
-  const targetUrl = new URL(raw, window.location.origin)
+  if (!raw) return normalizeUrl(new URL(sameOriginDefault, pageUrl).toString())
 
-  if (isLoopbackHost(pageUrl.hostname) && isLoopbackHost(targetUrl.hostname) && pageUrl.port === targetUrl.port) {
+  const targetUrl = new URL(raw, window.location.origin)
+  const pageIsLoopback = isLoopbackHost(pageUrl.hostname)
+  const targetIsLoopback = isLoopbackHost(targetUrl.hostname)
+
+  if (pageIsLoopback && targetIsLoopback && pageUrl.port === targetUrl.port) {
     targetUrl.protocol = pageUrl.protocol
     targetUrl.hostname = pageUrl.hostname
+    return normalizeUrl(targetUrl.toString())
   }
 
-  return targetUrl.toString().replace(/\/$/, '')
+  // Production safety: if the frontend is running on a public domain but the build
+  // still contains a localhost auth base, force auth requests back to same-origin.
+  if (!pageIsLoopback && targetIsLoopback) {
+    return normalizeUrl(new URL(sameOriginDefault, pageUrl).toString())
+  }
+
+  return normalizeUrl(targetUrl.toString())
 }
 
 const AUTH_BASE = getAuthBase()
+
+function getCommonHeaders() {
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (timeZone) headers.set('X-User-Timezone', timeZone)
+  } catch {
+    // ignore
+  }
+  return headers
+}
 
 async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
   const text = await res.text()
@@ -37,7 +65,7 @@ async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
 export async function signUpEmail(email: string, password: string, name: string) {
   const res = await fetch(`${AUTH_BASE}/sign-up/email`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getCommonHeaders(),
     body: JSON.stringify({
       email,
       password,
@@ -51,7 +79,7 @@ export async function signUpEmail(email: string, password: string, name: string)
 export async function signInEmail(email: string, password: string) {
   const res = await fetch(`${AUTH_BASE}/sign-in/email`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getCommonHeaders(),
     body: JSON.stringify({
       email,
       password,
@@ -80,7 +108,7 @@ export async function getSessionAuth() {
 export async function forgotPassword(email: string, redirectTo: string) {
   const res = await fetch(`${AUTH_BASE}/request-password-reset`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getCommonHeaders(),
     credentials: 'include',
     body: JSON.stringify({ email, redirectTo }),
   })
@@ -90,7 +118,7 @@ export async function forgotPassword(email: string, redirectTo: string) {
 export async function resetPassword(token: string, newPassword: string) {
   const res = await fetch(`${AUTH_BASE}/reset-password`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getCommonHeaders(),
     credentials: 'include',
     body: JSON.stringify({ token, newPassword }),
   })
