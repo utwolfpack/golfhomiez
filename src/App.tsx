@@ -13,30 +13,11 @@ import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import ProtectedRoute from './components/ProtectedRoute'
-import { logFrontendEvent } from './lib/frontend-logger'
-
-function RouteChangeLogger() {
-  const location = useLocation()
-
-  useEffect(() => {
-    logFrontendEvent({
-      category: 'navigation',
-      message: 'route_changed',
-      data: {
-        pathname: location.pathname,
-        search: location.search,
-        hash: location.hash,
-      },
-    })
-  }, [location])
-
-  return null
-}
 
 export default function App() {
   return (
     <AuthProvider>
-      <RouteChangeLogger />
+      <BootMilestones />
       <NavBar />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -53,4 +34,23 @@ export default function App() {
       </Routes>
     </AuthProvider>
   )
+}
+
+
+function BootMilestones() {
+  const location = useLocation()
+
+  useEffect(() => {
+    import('./lib/frontend-logger').then(({ logFrontendEvent }) => {
+      logFrontendEvent('app_component_mounted')
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    import('./lib/frontend-logger').then(({ logFrontendEvent }) => {
+      logFrontendEvent('route_changed', { pathname: location.pathname, search: location.search })
+    }).catch(() => {})
+  }, [location.pathname, location.search])
+
+  return null
 }
