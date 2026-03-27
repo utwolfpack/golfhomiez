@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { getSessionAuth, signInEmail, signOutAuth, signUpEmail } from '../lib/auth-api'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 export type User = { id: string; email: string; name?: string | null }
 
@@ -25,10 +26,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function refreshSession() {
     const result = await getSessionAuth()
     if (result.error) {
+      logFrontendEvent({ level: 'warn', category: 'auth.session', message: 'refresh_session_failed', data: { error: result.error.message || null } })
       setUser(null)
       return
     }
     setUser(toUser(result.data))
+    logFrontendEvent({ category: 'auth.session', message: 'refresh_session_succeeded', data: { hasUser: Boolean(result.data?.user) } })
   }
 
   useEffect(() => {
@@ -37,7 +40,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const result = await getSessionAuth()
         if (!active) return
+        if (result.error) {
+          logFrontendEvent({ level: 'warn', category: 'auth.session', message: 'initial_session_failed', data: { error: result.error.message || null } })
+        }
         setUser(toUser(result.data))
+        logFrontendEvent({ category: 'auth.session', message: 'initial_session_checked', data: { hasUser: Boolean(result.data?.user) } })
       } finally {
         if (active) setLoading(false)
       }

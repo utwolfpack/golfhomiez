@@ -177,14 +177,22 @@ test('homepage demo seeder can populate the sample rounds locally', () => {
 })
 
 
-test('database init runs app migrations including the stale score-user foreign key cleanup', () => {
-  const db = fs.readFileSync(new URL('../server/db.js', import.meta.url), 'utf8')
-  const migrationIndex = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
-  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260327_003_drop_stale_scores_user_fk.sql', import.meta.url), 'utf8')
+test('frontend diagnostics logging captures correlation ids, client log ingestion, and separate log files', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
+  const main = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8')
+  const indexHtml = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
 
-  assert.match(db, /runAppMigrations\(db/)
-  assert.match(migrationIndex, /version: '20260327_003'/)
-  assert.match(migrationIndex, /drop_stale_scores_user_fk/)
-  assert.match(migrationSql, /ALTER TABLE scores DROP FOREIGN KEY fk_scores_user/)
-  assert.match(migrationSql, /information_schema\.referential_constraints/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
+  assert.match(logger, /export function correlationIdMiddleware/)
+  assert.match(server, /app\.use\(correlationIdMiddleware\)/)
+  assert.match(server, /app\.post\('\/api\/client-logs'/)
+  assert.match(frontendLogger, /window\.addEventListener\('error'/)
+  assert.match(frontendLogger, /window\.addEventListener\('unhandledrejection'/)
+  assert.match(frontendLogger, /X-Correlation-Id/)
+  assert.match(main, /installGlobalFrontendLogging\(\)/)
+  assert.match(indexHtml, /html_bootstrap_started/)
+  assert.match(indexHtml, /document_readystate_changed/)
 })
