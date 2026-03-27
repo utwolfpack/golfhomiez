@@ -46,6 +46,18 @@ export const APP_MIGRATIONS = [
       return loadMigrationSql('20260326_002_align_scores_table.sql')
     },
   },
+
+  {
+    version: '20260327_003',
+    name: 'drop_stale_scores_user_fk',
+    filename: '20260327_003_drop_stale_scores_user_fk.sql',
+    async isSatisfied(db) {
+      return !(await foreignKeyExists(db, 'scores', 'fk_scores_user'))
+    },
+    async getSql() {
+      return loadMigrationSql('20260327_003_drop_stale_scores_user_fk.sql')
+    },
+  },
 ]
 
 export function sortMigrations(migrations) {
