@@ -10,7 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, getLogPaths, logError, logInfo, requestContext } from './lib/logger.js'
+import { accessLogMiddleware, getLogPaths, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -33,12 +33,13 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id', 'X-Log-Source'],
 }))
 app.options('*', cors())
+app.use(requestCorrelationMiddleware)
 app.use(accessLogMiddleware)
 app.all('/api/auth/*', toNodeHandler(auth))
-app.use(express.json())
+app.use(express.json({ limit: '256kb' }))
 
 function logRouteError(message, req, error, extra = {}) {
   logError(message, {
@@ -74,6 +75,35 @@ async function isUserOnTeam(teamName, userEmail) {
   const e = normalizeEmail(userEmail)
   return (team.members || []).some((m) => normalizeEmail(m.email) === e)
 }
+
+
+app.post('/api/client-logs', (req, res) => {
+  try {
+    const body = req.body || {}
+    const entries = Array.isArray(body.entries) ? body.entries : [body]
+    for (const entry of entries.slice(0, 50)) {
+      logFrontend({
+        correlationId: req.correlationId,
+        level: entry.level || 'info',
+        type: entry.type || 'frontend_event',
+        message: entry.message || 'frontend log',
+        route: entry.route || null,
+        action: entry.action || null,
+        status: entry.status || null,
+        metadata: entry.metadata || null,
+        userAgent: req.headers['user-agent'] || null,
+      })
+    }
+    res.status(202).json({ ok: true, correlationId: req.correlationId })
+  } catch (error) {
+    logError('Client log ingestion failed', {
+      correlationId: req.correlationId,
+      error,
+      body: req.body,
+    })
+    res.status(500).json({ message: 'Could not store client log' })
+  }
+})
 
 app.get('/api/health', async (req, res) => {
   const backend = await storage.getBackendName()
