@@ -1,4 +1,4 @@
-import { requestJson } from './request'
+import { attachRequestMetadata, logFrontendEvent } from './frontend-logger'
 
 export type SessionUser = { id: string; email: string; name?: string | null }
 
@@ -40,60 +40,123 @@ function getAuthBase() {
 
 const AUTH_BASE = getAuthBase()
 
-async function parseResponse<T>(url: string, opts: RequestInit): Promise<AuthResult<T>> {
-  const { data, response } = await requestJson<T>(url, opts)
-  if (!response.ok) {
+function getCommonHeaders() {
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (timeZone) headers.set('X-User-Timezone', timeZone)
+  } catch {
+    // ignore
+  }
+  return headers
+}
+
+async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : null
+  if (!res.ok) {
     return {
-      error: { message: (data as { message?: string; error?: { message?: string } } | null)?.message || (data as { error?: { message?: string } } | null)?.error?.message || `Request failed (${response.status})` },
+      error: { message: data?.message || data?.error?.message || `Request failed (${res.status})` },
     }
   }
   return { data: data as T }
 }
 
+async function authFetch<T>(url: string, init: RequestInit, requestName: string) {
+  const startedAt = Date.now()
+  const requestInit = attachRequestMetadata(init)
+
+  try {
+    const res = await fetch(url, {
+      ...requestInit,
+      credentials: 'include',
+    })
+
+    logFrontendEvent({
+      category: 'auth.fetch',
+      level: res.ok ? 'info' : 'warn',
+      message: requestName,
+      data: {
+        url,
+        method: requestInit.method || 'GET',
+        status: res.status,
+        ok: res.ok,
+        durationMs: Date.now() - startedAt,
+      },
+    })
+
+    return parseResponse<T>(res)
+  } catch (error) {
+    logFrontendEvent({
+      category: 'auth.fetch',
+      level: 'error',
+      message: `${requestName}_failed`,
+      data: {
+        url,
+        method: requestInit.method || 'GET',
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+      },
+    })
+    throw error
+  }
+}
+
 export async function signUpEmail(email: string, password: string, name: string) {
-  return parseResponse(`${AUTH_BASE}/sign-up/email`, {
+  return authFetch(`${AUTH_BASE}/sign-up/email`, {
     method: 'POST',
-    body: JSON.stringify({ email, password, name }),
-  })
+    headers: getCommonHeaders(),
+    body: JSON.stringify({
+      email,
+      password,
+      name,
+    }),
+  }, 'auth_sign_up_email')
 }
 
 export async function signInEmail(email: string, password: string) {
-  return parseResponse(`${AUTH_BASE}/sign-in/email`, {
+  return authFetch(`${AUTH_BASE}/sign-in/email`, {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
-  })
+    headers: getCommonHeaders(),
+    body: JSON.stringify({
+      email,
+      password,
+    }),
+  }, 'auth_sign_in_email')
 }
 
 export async function signOutAuth() {
-  return parseResponse(`${AUTH_BASE}/sign-out`, {
+  return authFetch(`${AUTH_BASE}/sign-out`, {
     method: 'POST',
-  })
+  }, 'auth_sign_out')
 }
 
 export async function getSessionAuth() {
-  return parseResponse<{ session: unknown; user: SessionUser } | null>(`${AUTH_BASE}/get-session`, {
+  return authFetch<{ session: unknown; user: SessionUser } | null>(`${AUTH_BASE}/get-session`, {
     method: 'GET',
-  })
+  }, 'auth_get_session')
 }
 
 export async function forgotPassword(email: string, redirectTo: string) {
-  return parseResponse<{ ok?: boolean }>(`${AUTH_BASE}/request-password-reset`, {
+  return authFetch<{ ok?: boolean }>(`${AUTH_BASE}/request-password-reset`, {
     method: 'POST',
+    headers: getCommonHeaders(),
     body: JSON.stringify({ email, redirectTo }),
-  })
+  }, 'auth_request_password_reset')
 }
 
 export async function resetPassword(token: string, newPassword: string) {
-  return parseResponse<{ ok?: boolean }>(`${AUTH_BASE}/reset-password`, {
+  return authFetch<{ ok?: boolean }>(`${AUTH_BASE}/reset-password`, {
     method: 'POST',
+    headers: getCommonHeaders(),
     body: JSON.stringify({ token, newPassword }),
-  })
+  }, 'auth_reset_password')
 }
 
 export async function getLatestResetLink(email: string) {
   const url = new URL('/api/auth-debug/latest-reset', window.location.origin)
   url.searchParams.set('email', email)
-  return parseResponse<{ email: string; token: string; url: string; expiresAt?: string | null } | null>(url.toString(), {
+  return authFetch<{ email: string; token: string; url: string; expiresAt?: string | null } | null>(url.toString(), {
     method: 'GET',
-  })
+  }, 'auth_debug_latest_reset')
 }
