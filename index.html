@@ -8,6 +8,15 @@
       (function () {
         var storageKey = 'gh_correlation_id';
         var correlationId = null;
+        var isSending = false;
+        var isHandlingError = false;
+        var isHandlingRejection = false;
+        var sendCount = 0;
+        var sendLimit = 50;
+
+        function nowId() {
+          return String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        }
 
         try {
           correlationId = window.sessionStorage.getItem(storageKey);
@@ -17,9 +26,9 @@
           try {
             correlationId = window.crypto && typeof window.crypto.randomUUID === 'function'
               ? window.crypto.randomUUID()
-              : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+              : nowId();
           } catch (e) {
-            correlationId = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+            correlationId = nowId();
           }
         }
 
@@ -29,7 +38,43 @@
 
         window.__ghCorrelationId = correlationId;
 
+        function getString(value, fallback) {
+          if (typeof value === 'string') return value;
+          if (value == null) return fallback;
+          try {
+            return String(value);
+          } catch (e) {
+            return fallback;
+          }
+        }
+
+        function safePayload(payload) {
+          try {
+            return JSON.parse(JSON.stringify(payload || {}));
+          } catch (e) {
+            return {
+              serializationError: true,
+              originalType: Object.prototype.toString.call(payload)
+            };
+          }
+        }
+
+        function assetSource(target) {
+          if (!target) return null;
+          try {
+            return target.src || target.href || null;
+          } catch (e) {
+            return null;
+          }
+        }
+
         function sendLog(eventType, payload) {
+          if (isSending) return false;
+          if (sendCount >= sendLimit) return false;
+
+          isSending = true;
+          sendCount += 1;
+
           try {
             var message = JSON.stringify({
               source: 'preboot',
@@ -40,28 +85,43 @@
               path: window.location.pathname,
               userAgent: navigator.userAgent,
               viewport: { width: window.innerWidth, height: window.innerHeight },
-              payload: payload || {}
+              payload: safePayload(payload)
             });
 
             if (navigator.sendBeacon) {
-              var beacon = new Blob([message], { type: 'application/json' });
-              if (navigator.sendBeacon('/api/client-logs', beacon)) return;
+              try {
+                var beacon = new Blob([message], { type: 'application/json' });
+                if (navigator.sendBeacon('/api/client-logs', beacon)) {
+                  return true;
+                }
+              } catch (e) {}
             }
 
-            fetch('/api/client-logs', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Correlation-Id': correlationId
-              },
-              body: message,
-              credentials: 'include',
-              keepalive: true
-            }).catch(function () {});
-          } catch (e) {}
+            try {
+              fetch('/api/client-logs', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Correlation-Id': correlationId
+                },
+                body: message,
+                credentials: 'include',
+                keepalive: true
+              }).catch(function () {});
+              return true;
+            } catch (e) {
+              return false;
+            }
+          } catch (e) {
+            return false;
+          } finally {
+            isSending = false;
+          }
         }
 
         window.__ghSendPrebootLog = sendLog;
+
+        try { console.log('[GH preboot] script start'); } catch (e) {}
 
         sendLog('html_preboot_start', {
           readyState: document.readyState,
@@ -74,26 +134,43 @@
         });
 
         window.addEventListener('error', function (event) {
-          var target = event.target;
-          var isAsset = target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK' || target.tagName === 'IMG');
+          if (isHandlingError) return;
+          isHandlingError = true;
 
-          sendLog(isAsset ? 'asset_load_failure_preboot' : 'window_error_preboot', {
-            message: event.message,
-            filename: event.filename,
-            lineno: event.lineno,
-            colno: event.colno,
-            stack: event.error && event.error.stack ? event.error.stack : null,
-            tagName: target && target.tagName ? target.tagName : null,
-            src: target && target.src ? target.src : (target && target.href ? target.href : null)
-          });
+          try {
+            var target = event && event.target ? event.target : null;
+            var tagName = target && target.tagName ? getString(target.tagName, null) : null;
+            var isAsset = tagName === 'SCRIPT' || tagName === 'LINK' || tagName === 'IMG';
+
+            sendLog(isAsset ? 'asset_load_failure_preboot' : 'window_error_preboot', {
+              message: getString(event && event.message, 'unknown error'),
+              filename: getString(event && event.filename, ''),
+              lineno: event && typeof event.lineno === 'number' ? event.lineno : 0,
+              colno: event && typeof event.colno === 'number' ? event.colno : 0,
+              stack: event && event.error && event.error.stack ? getString(event.error.stack, null) : null,
+              tagName: tagName,
+              src: assetSource(target)
+            });
+          } catch (e) {
+          } finally {
+            isHandlingError = false;
+          }
         }, true);
 
         window.addEventListener('unhandledrejection', function (event) {
-          var reason = event.reason || {};
-          sendLog('unhandled_rejection_preboot', {
-            message: reason.message || String(reason),
-            stack: reason.stack || null
-          });
+          if (isHandlingRejection) return;
+          isHandlingRejection = true;
+
+          try {
+            var reason = event ? event.reason : null;
+            sendLog('unhandled_rejection_preboot', {
+              message: reason && reason.message ? getString(reason.message, 'Unhandled promise rejection') : getString(reason, 'Unhandled promise rejection'),
+              stack: reason && reason.stack ? getString(reason.stack, null) : null
+            });
+          } catch (e) {
+          } finally {
+            isHandlingRejection = false;
+          }
         });
 
         document.addEventListener('readystatechange', function () {
@@ -104,6 +181,9 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      try { console.log('[GH preboot] before app bundle'); } catch (e) {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
