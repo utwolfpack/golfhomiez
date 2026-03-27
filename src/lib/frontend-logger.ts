@@ -1,7 +1,12 @@
 const FRONTEND_LOG_ENDPOINT = '/api/client-logs'
 const CORRELATION_STORAGE_KEY = 'gh_correlation_id'
+const MAX_CLIENT_LOGS_PER_PAGE = 200
 
-type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+let frontendLogCount = 0
+let frontendLoggerBusy = false
+let runtimeHandlersInstalled = false
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 type StructuredLogEvent = {
   category?: string
@@ -96,33 +101,14 @@ function normalizeEvent(
   }
 }
 
-export function logFrontendEvent(
-  eventOrType: string | StructuredLogEvent,
-  payload: Record<string, unknown> = {}
-) {
-  if (typeof window === 'undefined') return
+function shouldSkipLogging(): boolean {
+  if (typeof window === 'undefined') return true
+  if (frontendLoggerBusy) return true
+  if (frontendLogCount >= MAX_CLIENT_LOGS_PER_PAGE) return true
+  return false
+}
 
-  const event = normalizeEvent(eventOrType, payload)
-  const body = {
-    source: 'frontend',
-    category: event.category,
-    level: event.level,
-    eventType: event.message,
-    message: event.message,
-    correlationId: getCorrelationId(),
-    timestamp: new Date().toISOString(),
-    url: window.location.href,
-    path: window.location.pathname,
-    userAgent: window.navigator.userAgent,
-    viewport: {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    },
-    payload: safeJson(event.data),
-  }
-
-  const serialized = JSON.stringify(body)
-
+function postFrontendLog(serialized: string): void {
   try {
     if (typeof navigator.sendBeacon === 'function') {
       const blob = new Blob([serialized], { type: 'application/json' })
@@ -132,25 +118,66 @@ export function logFrontendEvent(
     // ignore and fall back to fetch
   }
 
-  fetch(FRONTEND_LOG_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Correlation-Id': getCorrelationId(),
-    },
-    body: serialized,
-    credentials: 'include',
-    keepalive: true,
-  }).catch(() => {
-    // ignore logging failures
-  })
+  try {
+    fetch(FRONTEND_LOG_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Correlation-Id': getCorrelationId(),
+      },
+      body: serialized,
+      credentials: 'include',
+      keepalive: true,
+    }).catch(() => {
+      // swallow logger transport failures
+    })
+  } catch {
+    // swallow logger transport failures
+  }
+}
+
+export function logFrontendEvent(
+  eventOrType: string | StructuredLogEvent,
+  payload: Record<string, unknown> = {}
+) {
+  if (shouldSkipLogging()) return
+
+  const event = normalizeEvent(eventOrType, payload)
+
+  frontendLoggerBusy = true
+  frontendLogCount += 1
+
+  try {
+    const body = {
+      source: 'frontend',
+      category: event.category,
+      level: event.level,
+      eventType: event.message,
+      message: event.message,
+      correlationId: getCorrelationId(),
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      path: window.location.pathname,
+      userAgent: window.navigator.userAgent,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      },
+      payload: safeJson(event.data),
+    }
+
+    postFrontendLog(JSON.stringify(body))
+  } catch {
+    // swallow logger serialization failures
+  } finally {
+    frontendLoggerBusy = false
+  }
 }
 
 export function installBootDiagnostics() {
   if (typeof window === 'undefined') return
-  const diagnosticWindow = window as typeof window & { __ghDiagnosticsInstalled?: boolean }
-  if (diagnosticWindow.__ghDiagnosticsInstalled) return
-  diagnosticWindow.__ghDiagnosticsInstalled = true
+  if (runtimeHandlersInstalled) return
+  runtimeHandlersInstalled = true
 
   logFrontendEvent('main_tsx_loaded', {
     readyState: document.readyState,
@@ -158,28 +185,45 @@ export function installBootDiagnostics() {
     onLine: navigator.onLine,
   })
 
-  window.addEventListener('error', (event) => {
-    const target = event.target as HTMLElement | null
-    const isAssetFailure = !!(target && ['SCRIPT', 'LINK', 'IMG'].includes(target.tagName))
-    const sourceTarget = target as HTMLScriptElement | HTMLLinkElement | HTMLImageElement | null
+  let runtimeErrorBusy = false
+  let rejectionBusy = false
 
-    logFrontendEvent(isAssetFailure ? 'asset_load_failure_runtime' : 'window_error_runtime', {
-      message: event.message,
-      filename: event.filename,
-      lineno: event.lineno,
-      colno: event.colno,
-      stack: event.error instanceof Error ? event.error.stack : null,
-      tagName: target?.tagName ?? null,
-      src: sourceTarget?.src || sourceTarget?.getAttribute?.('href') || null,
-    })
+  window.addEventListener('error', (event) => {
+    if (runtimeErrorBusy) return
+    runtimeErrorBusy = true
+
+    try {
+      const target = event.target as HTMLElement | null
+      const isAssetFailure = !!(target && ['SCRIPT', 'LINK', 'IMG'].includes(target.tagName))
+      const sourceTarget = target as HTMLScriptElement | HTMLLinkElement | HTMLImageElement | null
+
+      logFrontendEvent(isAssetFailure ? 'asset_load_failure_runtime' : 'window_error_runtime', {
+        message: typeof event.message === 'string' ? event.message : 'unknown error',
+        filename: typeof event.filename === 'string' ? event.filename : '',
+        lineno: typeof event.lineno === 'number' ? event.lineno : 0,
+        colno: typeof event.colno === 'number' ? event.colno : 0,
+        stack: event.error instanceof Error ? event.error.stack ?? null : null,
+        tagName: target?.tagName ?? null,
+        src: sourceTarget?.src || sourceTarget?.getAttribute?.('href') || null,
+      })
+    } finally {
+      runtimeErrorBusy = false
+    }
   }, true)
 
   window.addEventListener('unhandledrejection', (event) => {
-    const reason = event.reason as { message?: string; stack?: string } | string | undefined
-    logFrontendEvent('unhandled_rejection_runtime', {
-      message: typeof reason === 'string' ? reason : reason?.message ?? 'Unhandled promise rejection',
-      stack: typeof reason === 'string' ? null : reason?.stack ?? null,
-    })
+    if (rejectionBusy) return
+    rejectionBusy = true
+
+    try {
+      const reason = event.reason as { message?: string; stack?: string } | string | undefined
+      logFrontendEvent('unhandled_rejection_runtime', {
+        message: typeof reason === 'string' ? reason : reason?.message ?? 'Unhandled promise rejection',
+        stack: typeof reason === 'string' ? null : reason?.stack ?? null,
+      })
+    } finally {
+      rejectionBusy = false
+    }
   })
 
   document.addEventListener('readystatechange', () => {
