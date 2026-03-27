@@ -33,47 +33,32 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone'],
 }))
 app.options('*', cors())
 app.use(accessLogMiddleware)
-app.all('/api/auth/*', toNodeHandler(auth))
-app.use(express.json({ limit: '256kb' }))
 
-app.post('/api/client-logs', (req, res) => {
-  try {
-    const body = req.body && typeof req.body === 'object' ? req.body : {}
-    logFrontend(body.eventType || 'client_log', {
-      correlationId: req.headers['x-correlation-id'] || body.correlationId || null,
-      source: body.source || 'frontend',
-      url: body.url || null,
-      path: body.path || null,
-      userAgent: body.userAgent || req.headers['user-agent'] || null,
-      viewport: body.viewport || null,
-      payload: body.payload || {},
-      ip: req.ip,
-    })
-    return res.status(204).end()
-  } catch (error) {
-    logError('Client log ingestion failed', { error, body: req.body, ip: req.ip })
-    return res.status(204).end()
-  }
-})
+const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
 
 app.get('/diag/pixel.gif', (req, res) => {
-  logFrontend('diag_pixel_hit', {
-    correlationId: req.headers['x-correlation-id'] || req.query.correlationId || null,
-    path: req.originalUrl || req.url,
+  logFrontend('frontend_stage', {
+    correlationId: String(req.query.cid || '').trim() || null,
+    stage: String(req.query.stage || '').trim() || 'unknown',
+    detail: String(req.query.detail || '').trim() || null,
+    path: String(req.query.path || req.path || '').trim() || null,
     ip: req.ip,
     userAgent: req.headers['user-agent'] || null,
     referer: req.headers.referer || null,
   })
 
-  const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
   res.setHeader('Content-Type', 'image/gif')
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
-  return res.send(gif)
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Expires', '0')
+  res.send(TRANSPARENT_GIF)
 })
+app.all('/api/auth/*', toNodeHandler(auth))
+app.use(express.json())
 
 function logRouteError(message, req, error, extra = {}) {
   logError(message, {
