@@ -10,7 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, correlationIdMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
+import { accessLogMiddleware, getLogPaths, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,22 +34,53 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id'],
-  exposedHeaders: ['X-Correlation-Id'],
 }))
 app.options('*', cors())
-app.use(correlationIdMiddleware)
 app.use(accessLogMiddleware)
 app.all('/api/auth/*', toNodeHandler(auth))
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '256kb' }))
+
+app.post('/api/client-logs', (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    logFrontend(body.eventType || 'client_log', {
+      correlationId: req.headers['x-correlation-id'] || body.correlationId || null,
+      source: body.source || 'frontend',
+      url: body.url || null,
+      path: body.path || null,
+      userAgent: body.userAgent || req.headers['user-agent'] || null,
+      viewport: body.viewport || null,
+      payload: body.payload || {},
+      ip: req.ip,
+    })
+    return res.status(204).end()
+  } catch (error) {
+    logError('Client log ingestion failed', { error, body: req.body, ip: req.ip })
+    return res.status(204).end()
+  }
+})
+
+app.get('/diag/pixel.gif', (req, res) => {
+  logFrontend('diag_pixel_hit', {
+    correlationId: req.headers['x-correlation-id'] || req.query.correlationId || null,
+    path: req.originalUrl || req.url,
+    ip: req.ip,
+    userAgent: req.headers['user-agent'] || null,
+    referer: req.headers.referer || null,
+  })
+
+  const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
+  res.setHeader('Content-Type', 'image/gif')
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+  return res.send(gif)
+})
 
 function logRouteError(message, req, error, extra = {}) {
-  const context = {
+  logError(message, {
     ...requestContext(req),
     ...extra,
     error,
-  }
-  logApi(message, { ...context, level: 'error' })
-  logError(message, context)
+  })
 }
 
 async function authMiddleware(req, res, next) {
@@ -79,39 +110,9 @@ async function isUserOnTeam(teamName, userEmail) {
   return (team.members || []).some((m) => normalizeEmail(m.email) === e)
 }
 
-
-app.post('/api/client-logs', async (req, res) => {
-  try {
-    const body = req.body || {}
-    const entries = Array.isArray(body.entries) ? body.entries : []
-    if (!entries.length) return res.status(400).json({ message: 'entries required' })
-
-    for (const entry of entries.slice(0, 50)) {
-      logFrontend('client_log', {
-        correlationId: entry.correlationId || req.correlationId,
-        level: entry.level || 'info',
-        category: entry.category || 'app',
-        route: entry.route || null,
-        pageUrl: entry.pageUrl || null,
-        userAgent: entry.userAgent || req.headers['user-agent'] || null,
-        receivedAt: new Date().toISOString(),
-        clientTimestamp: entry.timestamp || null,
-        data: entry.data || null,
-        message: entry.message || 'frontend_event',
-      })
-    }
-
-    res.json({ ok: true, correlationId: req.correlationId })
-  } catch (error) {
-    logRouteError('Client log ingestion error', req, error)
-    res.status(500).json({ message: 'Could not record client logs' })
-  }
-})
-
 app.get('/api/health', async (req, res) => {
   const backend = await storage.getBackendName()
-  logApi('Health check', { ...requestContext(req), backend })
-  res.json({ ok: true, storage: backend, correlationId: req.correlationId })
+  res.json({ ok: true, storage: backend })
 })
 
 app.get('/api/auth-debug/latest-reset', (req, res) => {
@@ -244,7 +245,6 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
         createdByUserId: req.user.id,
         createdByEmail: req.user.email,
       })
-      logApi('Create solo score succeeded', { ...requestContext(req), scoreId: entry.id, mode: 'solo' })
       return res.status(201).json(entry)
     }
 
@@ -286,7 +286,6 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
       createdByUserId: req.user.id,
       createdByEmail: req.user.email,
     })
-    logApi('Create team score succeeded', { ...requestContext(req), scoreId: entry.id, mode: 'team' })
     res.status(201).json(entry)
   } catch (error) {
     logRouteError('Create score error', req, error)

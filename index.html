@@ -3,87 +3,107 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Golf Homiez</title>
+    <title>Golf Homiez! Tracker</title>
     <script>
       (function () {
-        var BOOT_LOG_KEY = 'golfhomiez.frontend.bootLogs'
-        var SESSION_KEY = 'golfhomiez.frontend.correlationId'
+        var storageKey = 'gh_correlation_id';
+        var correlationId = null;
 
-        function getCorrelationId() {
+        try {
+          correlationId = window.sessionStorage.getItem(storageKey);
+        } catch (e) {}
+
+        if (!correlationId) {
           try {
-            var existing = window.sessionStorage.getItem(SESSION_KEY)
-            if (existing) return existing
-            var created = window.crypto && window.crypto.randomUUID
+            correlationId = window.crypto && typeof window.crypto.randomUUID === 'function'
               ? window.crypto.randomUUID()
-              : 'cid-' + Date.now() + '-' + Math.random().toString(16).slice(2)
-            window.sessionStorage.setItem(SESSION_KEY, created)
-            return created
-          } catch (error) {
-            return 'cid-storage-unavailable'
+              : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+          } catch (e) {
+            correlationId = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
           }
         }
 
-        function readLogs() {
+        try {
+          window.sessionStorage.setItem(storageKey, correlationId);
+        } catch (e) {}
+
+        window.__ghCorrelationId = correlationId;
+
+        function sendLog(eventType, payload) {
           try {
-            var raw = window.localStorage.getItem(BOOT_LOG_KEY)
-            return raw ? JSON.parse(raw) : []
-          } catch (error) {
-            return []
-          }
+            var message = JSON.stringify({
+              source: 'preboot',
+              eventType: eventType,
+              correlationId: correlationId,
+              timestamp: new Date().toISOString(),
+              url: window.location.href,
+              path: window.location.pathname,
+              userAgent: navigator.userAgent,
+              viewport: { width: window.innerWidth, height: window.innerHeight },
+              payload: payload || {}
+            });
+
+            if (navigator.sendBeacon) {
+              var beacon = new Blob([message], { type: 'application/json' });
+              if (navigator.sendBeacon('/api/client-logs', beacon)) return;
+            }
+
+            fetch('/api/client-logs', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Correlation-Id': correlationId
+              },
+              body: message,
+              credentials: 'include',
+              keepalive: true
+            }).catch(function () {});
+          } catch (e) {}
         }
 
-        function writeLogs(entries) {
-          try {
-            window.localStorage.setItem(BOOT_LOG_KEY, JSON.stringify(entries.slice(-50)))
-          } catch (error) {
-            // ignore
-          }
-        }
+        window.__ghSendPrebootLog = sendLog;
 
-        function capture(message, level, category, data) {
-          var logs = readLogs()
-          logs.push({
-            timestamp: new Date().toISOString(),
-            message: message,
-            level: level || 'info',
-            category: category || 'boot',
-            correlationId: getCorrelationId(),
-            data: data || {},
-          })
-          writeLogs(logs)
-        }
-
-        capture('html_bootstrap_started', 'info', 'boot', {
-          href: window.location.href,
-          userAgent: navigator.userAgent,
+        sendLog('html_preboot_start', {
+          readyState: document.readyState,
           language: navigator.language,
           platform: navigator.platform,
-          viewport: { width: window.innerWidth, height: window.innerHeight, pixelRatio: window.devicePixelRatio || null },
-          cookiesEnabled: navigator.cookieEnabled,
-          online: navigator.onLine,
-        })
+          onLine: navigator.onLine,
+          cookieEnabled: navigator.cookieEnabled,
+          screen: { width: screen.width, height: screen.height },
+          referrer: document.referrer || null
+        });
 
         window.addEventListener('error', function (event) {
-          capture(event.message || 'window_error_before_app', 'error', 'boot.window.error', {
+          var target = event.target;
+          var isAsset = target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK' || target.tagName === 'IMG');
+
+          sendLog(isAsset ? 'asset_load_failure_preboot' : 'window_error_preboot', {
+            message: event.message,
             filename: event.filename,
             lineno: event.lineno,
             colno: event.colno,
-          })
-        })
+            stack: event.error && event.error.stack ? event.error.stack : null,
+            tagName: target && target.tagName ? target.tagName : null,
+            src: target && target.src ? target.src : (target && target.href ? target.href : null)
+          });
+        }, true);
 
         window.addEventListener('unhandledrejection', function (event) {
-          var reason = event.reason && event.reason.message ? event.reason.message : String(event.reason)
-          capture('boot_unhandled_rejection', 'error', 'boot.unhandledrejection', { reason: reason })
-        })
+          var reason = event.reason || {};
+          sendLog('unhandled_rejection_preboot', {
+            message: reason.message || String(reason),
+            stack: reason.stack || null
+          });
+        });
 
         document.addEventListener('readystatechange', function () {
-          capture('document_readystate_changed', 'info', 'boot', { readyState: document.readyState })
-        })
-      })()
+          sendLog('document_readystatechange_preboot', { readyState: document.readyState });
+        });
+      })();
     </script>
-    <script type="module" crossorigin src="/src/main.tsx"></script>
   </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
