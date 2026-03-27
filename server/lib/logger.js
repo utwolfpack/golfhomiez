@@ -52,12 +52,7 @@ function writeLine(stream, payload) {
 
 export function getLogPaths() {
   ensureLogDir()
-  return {
-    logDir: LOG_DIR,
-    accessLogPath: ACCESS_LOG_PATH,
-    errorLogPath: ERROR_LOG_PATH,
-    frontendLogPath: FRONTEND_LOG_PATH,
-  }
+  return { logDir: LOG_DIR, accessLogPath: ACCESS_LOG_PATH, errorLogPath: ERROR_LOG_PATH, frontendLogPath: FRONTEND_LOG_PATH }
 }
 
 export function logAccess(entry) {
@@ -78,6 +73,7 @@ export function logError(message, details = {}) {
   writeLine(errorStream, payload)
   console.error(message, payload.error || details)
 }
+
 
 export function logFrontend(message, details = {}) {
   const payload = {
@@ -102,7 +98,6 @@ export function logInfo(message, details = {}) {
 
 export function requestContext(req) {
   return safeValue({
-    correlationId: req.correlationId || req.headers['x-correlation-id'] || null,
     method: req.method,
     path: req.originalUrl || req.url,
     ip: req.ip,
@@ -114,20 +109,13 @@ export function requestContext(req) {
   })
 }
 
-function makeCorrelationId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
 export function accessLogMiddleware(req, res, next) {
   const startedAt = process.hrtime.bigint()
-  req.correlationId = req.headers['x-correlation-id'] || makeCorrelationId()
-  res.setHeader('X-Correlation-Id', req.correlationId)
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
     logAccess({
       type: 'http_access',
-      correlationId: req.correlationId || req.headers['x-correlation-id'] || null,
-    method: req.method,
+      method: req.method,
       path: req.originalUrl || req.url,
       statusCode: res.statusCode,
       durationMs: Number(durationMs.toFixed(2)),
