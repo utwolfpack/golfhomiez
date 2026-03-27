@@ -3,30 +3,15 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
-import { installGlobalFrontendLogging, logFrontendEvent } from './lib/frontend-logger'
+import { installBootDiagnostics, logFrontendEvent } from './lib/frontend-logger'
 
-installGlobalFrontendLogging()
+installBootDiagnostics()
+logFrontendEvent('react_bootstrap_start')
 
 const rootElement = document.getElementById('root')
+logFrontendEvent('react_root_lookup', { rootFound: Boolean(rootElement) })
 
-if (!rootElement) {
-  logFrontendEvent({
-    level: 'error',
-    category: 'bootstrap',
-    message: 'root_element_missing',
-    data: {
-      htmlLength: document.documentElement?.outerHTML?.length || null,
-    },
-  })
-  throw new Error('React root element not found')
-}
-
-logFrontendEvent({
-  category: 'bootstrap',
-  message: 'react_render_starting',
-})
-
-ReactDOM.createRoot(rootElement).render(
+ReactDOM.createRoot(rootElement!).render(
   <React.StrictMode>
     <BrowserRouter>
       <App />
