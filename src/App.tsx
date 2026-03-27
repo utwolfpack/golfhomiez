@@ -13,11 +13,26 @@ import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import ProtectedRoute from './components/ProtectedRoute'
+import { emitFrontendStage } from './lib/frontend-logger'
+
+function RouteDiagnostics() {
+  const location = useLocation()
+
+  useEffect(() => {
+    emitFrontendStage(`route:${location.pathname}`)
+  }, [location.pathname])
+
+  return null
+}
 
 export default function App() {
+  useEffect(() => {
+    emitFrontendStage('app_mounted')
+  }, [])
+
   return (
     <AuthProvider>
-      <BootMilestones />
+      <RouteDiagnostics />
       <NavBar />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -34,23 +49,4 @@ export default function App() {
       </Routes>
     </AuthProvider>
   )
-}
-
-
-function BootMilestones() {
-  const location = useLocation()
-
-  useEffect(() => {
-    import('./lib/frontend-logger').then(({ logFrontendEvent }) => {
-      logFrontendEvent('app_component_mounted')
-    }).catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    import('./lib/frontend-logger').then(({ logFrontendEvent }) => {
-      logFrontendEvent('route_changed', { pathname: location.pathname, search: location.search })
-    }).catch(() => {})
-  }, [location.pathname, location.search])
-
-  return null
 }
