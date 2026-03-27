@@ -10,7 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, getLogPaths, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
+import { accessLogMiddleware, correlationIdMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -33,20 +33,23 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id', 'X-Log-Source'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id'],
+  exposedHeaders: ['X-Correlation-Id'],
 }))
 app.options('*', cors())
-app.use(requestCorrelationMiddleware)
+app.use(correlationIdMiddleware)
 app.use(accessLogMiddleware)
 app.all('/api/auth/*', toNodeHandler(auth))
-app.use(express.json({ limit: '256kb' }))
+app.use(express.json({ limit: '1mb' }))
 
 function logRouteError(message, req, error, extra = {}) {
-  logError(message, {
+  const context = {
     ...requestContext(req),
     ...extra,
     error,
-  })
+  }
+  logApi(message, { ...context, level: 'error' })
+  logError(message, context)
 }
 
 async function authMiddleware(req, res, next) {
@@ -77,37 +80,38 @@ async function isUserOnTeam(teamName, userEmail) {
 }
 
 
-app.post('/api/client-logs', (req, res) => {
+app.post('/api/client-logs', async (req, res) => {
   try {
     const body = req.body || {}
-    const entries = Array.isArray(body.entries) ? body.entries : [body]
+    const entries = Array.isArray(body.entries) ? body.entries : []
+    if (!entries.length) return res.status(400).json({ message: 'entries required' })
+
     for (const entry of entries.slice(0, 50)) {
-      logFrontend({
-        correlationId: req.correlationId,
+      logFrontend('client_log', {
+        correlationId: entry.correlationId || req.correlationId,
         level: entry.level || 'info',
-        type: entry.type || 'frontend_event',
-        message: entry.message || 'frontend log',
+        category: entry.category || 'app',
         route: entry.route || null,
-        action: entry.action || null,
-        status: entry.status || null,
-        metadata: entry.metadata || null,
-        userAgent: req.headers['user-agent'] || null,
+        pageUrl: entry.pageUrl || null,
+        userAgent: entry.userAgent || req.headers['user-agent'] || null,
+        receivedAt: new Date().toISOString(),
+        clientTimestamp: entry.timestamp || null,
+        data: entry.data || null,
+        message: entry.message || 'frontend_event',
       })
     }
-    res.status(202).json({ ok: true, correlationId: req.correlationId })
+
+    res.json({ ok: true, correlationId: req.correlationId })
   } catch (error) {
-    logError('Client log ingestion failed', {
-      correlationId: req.correlationId,
-      error,
-      body: req.body,
-    })
-    res.status(500).json({ message: 'Could not store client log' })
+    logRouteError('Client log ingestion error', req, error)
+    res.status(500).json({ message: 'Could not record client logs' })
   }
 })
 
 app.get('/api/health', async (req, res) => {
   const backend = await storage.getBackendName()
-  res.json({ ok: true, storage: backend })
+  logApi('Health check', { ...requestContext(req), backend })
+  res.json({ ok: true, storage: backend, correlationId: req.correlationId })
 })
 
 app.get('/api/auth-debug/latest-reset', (req, res) => {
@@ -240,6 +244,7 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
         createdByUserId: req.user.id,
         createdByEmail: req.user.email,
       })
+      logApi('Create solo score succeeded', { ...requestContext(req), scoreId: entry.id, mode: 'solo' })
       return res.status(201).json(entry)
     }
 
@@ -281,6 +286,7 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
       createdByUserId: req.user.id,
       createdByEmail: req.user.email,
     })
+    logApi('Create team score succeeded', { ...requestContext(req), scoreId: entry.id, mode: 'team' })
     res.status(201).json(entry)
   } catch (error) {
     logRouteError('Create score error', req, error)

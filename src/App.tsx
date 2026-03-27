@@ -13,24 +13,30 @@ import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import ProtectedRoute from './components/ProtectedRoute'
-import { createCorrelationId, sendFrontendLog } from './lib/frontend-logger'
+import { logFrontendEvent } from './lib/frontend-logger'
 
-function AppRoutes() {
+function RouteChangeLogger() {
   const location = useLocation()
 
   useEffect(() => {
-    void sendFrontendLog({
-      correlationId: createCorrelationId(),
-      level: 'info',
-      type: 'page_view',
-      message: 'Route viewed',
-      route: `${location.pathname}${location.search}`,
-      status: 'viewed',
+    logFrontendEvent({
+      category: 'navigation',
+      message: 'route_changed',
+      data: {
+        pathname: location.pathname,
+        search: location.search,
+        hash: location.hash,
+      },
     })
-  }, [location.pathname, location.search])
+  }, [location])
 
+  return null
+}
+
+export default function App() {
   return (
-    <>
+    <AuthProvider>
+      <RouteChangeLogger />
       <NavBar />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -45,14 +51,6 @@ function AppRoutes() {
         <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </>
-  )
-}
-
-export default function App() {
-  return (
-    <AuthProvider>
-      <AppRoutes />
     </AuthProvider>
   )
 }
