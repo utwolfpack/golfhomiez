@@ -20,7 +20,7 @@ const errorStream = createStream(ERROR_LOG_PATH)
 
 function safeValue(value, depth = 0) {
   if (value == null) return value
-  if (depth > 4) return '[truncated]'
+  if (depth > 5) return '[truncated]'
   if (Array.isArray(value)) return value.map((item) => safeValue(item, depth + 1))
   if (typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, val]) => {
@@ -28,7 +28,7 @@ function safeValue(value, depth = 0) {
       return [key, safeValue(val, depth + 1)]
     }))
   }
-  if (typeof value === 'string' && value.length > 1000) return `${value.slice(0, 997)}...`
+  if (typeof value === 'string' && value.length > 3000) return `${value.slice(0, 2997)}...`
   return value
 }
 
@@ -48,6 +48,17 @@ function writeLine(stream, payload) {
   stream.write(`${JSON.stringify(payload)}\n`)
 }
 
+function normalizePayload(message, details = {}, level = 'info') {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...safeValue(details),
+  }
+  if (details.error) payload.error = serializeError(details.error)
+  return payload
+}
+
 export function getLogPaths() {
   ensureLogDir()
   return { logDir: LOG_DIR, accessLogPath: ACCESS_LOG_PATH, errorLogPath: ERROR_LOG_PATH }
@@ -60,27 +71,17 @@ export function logAccess(entry) {
   })
 }
 
-export function logError(message, details = {}) {
-  const payload = {
-    timestamp: new Date().toISOString(),
-    level: 'error',
-    message,
-    ...safeValue(details),
-  }
-  if (details.error) payload.error = serializeError(details.error)
-  writeLine(errorStream, payload)
-  console.error(message, payload.error || details)
+export function logInfo(message, details = {}) {
+  const payload = normalizePayload(message, details, 'info')
+  writeLine(accessStream, payload)
+  return payload
 }
 
-export function logInfo(message, details = {}) {
-  const payload = {
-    timestamp: new Date().toISOString(),
-    level: 'info',
-    message,
-    ...safeValue(details),
-  }
-  writeLine(accessStream, payload)
-  console.log(message)
+export function logError(message, details = {}) {
+  const payload = normalizePayload(message, details, 'error')
+  writeLine(errorStream, payload)
+  console.error(message, payload.error || details)
+  return payload
 }
 
 export function requestContext(req) {
@@ -89,7 +90,7 @@ export function requestContext(req) {
     path: req.originalUrl || req.url,
     ip: req.ip,
     userAgent: req.headers['user-agent'] || null,
-    user: req.user ? { id: req.user.id, email: req.user.email } : null,
+    user: req.user ? { id: req.user.id, email: req.user.email, dbUserId: req.user.dbUserId || null } : null,
     params: req.params,
     query: req.query,
     body: req.body,
@@ -113,4 +114,11 @@ export function accessLogMiddleware(req, res, next) {
     })
   })
   next()
+}
+
+export function logClientDiagnostic(message, details = {}) {
+  const level = details.level === 'error' ? 'error' : 'info'
+  return level === 'error'
+    ? logError(message, { source: 'client', ...details })
+    : logInfo(message, { source: 'client', ...details })
 }

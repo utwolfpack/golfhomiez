@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { getSessionAuth, signInEmail, signOutAuth, signUpEmail } from '../lib/auth-api'
+import { logClientEvent } from '../lib/clientLogger'
 
 export type User = { id: string; email: string; name?: string | null }
 
@@ -25,6 +26,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function refreshSession() {
     const result = await getSessionAuth()
     if (result.error) {
+      logClientEvent('auth_refresh_error', 'Refreshing the auth session failed', { error: result.error }, 'error')
       setUser(null)
       return
     }
@@ -37,7 +39,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const result = await getSessionAuth()
         if (!active) return
-        setUser(toUser(result.data))
+        if (result.error) {
+          logClientEvent('auth_bootstrap_error', 'Initial auth session lookup failed', { error: result.error }, 'error')
+          setUser(null)
+        } else {
+          setUser(toUser(result.data))
+        }
+      } catch (error) {
+        logClientEvent('auth_bootstrap_exception', 'Initial auth bootstrap threw an exception', { error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : { value: String(error) } }, 'error')
+        if (active) setUser(null)
       } finally {
         if (active) setLoading(false)
       }

@@ -61,6 +61,32 @@ export async function getUserByEmail(email) {
   return users.find((u) => normalizeEmail(u.email) === e) || null
 }
 
+
+export async function ensureUserRecord(user) {
+  if (!user?.email && !user?.id) return null
+
+  if (user?.id) {
+    const existingById = await getUserById(user.id)
+    if (existingById) return existingById
+  }
+
+  if (user?.email) {
+    const existingByEmail = await getUserByEmail(user.email)
+    if (existingByEmail) return existingByEmail
+  }
+
+  const users = readJson(usersPath, [])
+  const created = {
+    id: user.id || uuidv4(),
+    email: normalizeEmail(user.email),
+    name: String(user.name || '').trim() || null,
+    createdAt: new Date().toISOString(),
+  }
+  users.push(created)
+  writeJson(usersPath, users)
+  return created
+}
+
 export async function createUser({ email, passwordHash }) {
   const users = readJson(usersPath, [])
   const user = { id: uuidv4(), email: normalizeEmail(email), passwordHash, createdAt: new Date().toISOString() }

@@ -8,12 +8,15 @@
     "dev:client": "vite",
     "dev:server": "nodemon server/index.js",
     "start": "node server/index.js",
-    "build": "vite build",
+    "build": "npm run migrate && npm run migrate:user-sync && vite build",
+    "migrate": "node server/run-migrations.js",
+    "migrate:user-sync": "node server/scripts/apply-user-sync-migration.js",
+    "backfill:app-users": "node server/scripts/backfill-app-users.js",
+    "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js",
     "postinstall": "npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "node --test",
-    "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

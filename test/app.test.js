@@ -94,11 +94,11 @@ test('logged event rows remain clickable buttons for round detail access', () =>
   const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
 
-  assert.match(home, /function RoundRow\({ round, onClick }/)
+  assert.match(home, /function RoundRow\(\{ round, onClick \}/)
   assert.match(home, /<button type="button" className=\{roundRowClass\(round\)\} onClick=\{onClick\}>/)
   assert.match(home, /Tap for details/)
 
-  assert.match(scoresPage, /function ScoreButton\({ round, onClick }/)
+  assert.match(scoresPage, /function ScoreButton\(\{ round, onClick \}/)
   assert.match(scoresPage, /<button type="button" className=\{rowClass\(round\)\} onClick=\{onClick\}>/)
   assert.match(scoresPage, /<RoundDetailModal round=\{selectedRound\}/)
 })
@@ -139,39 +139,72 @@ test('validation warnings stay hidden until save is attempted', () => {
   assert.match(golfLogger, /showCreateTeamValidation && createMissing.length/)
 })
 
-test('homepage shows guest sample scores when no user is logged in', () => {
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
-  const sample = fs.readFileSync(new URL('../src/lib/dashboardSample.ts', import.meta.url), 'utf8')
+test('seed script provides rated solo rounds on real courses for handicap displays', () => {
+  const seed = fs.readFileSync(new URL('../server/scripts/seed-use-info-record.js', import.meta.url), 'utf8')
 
-  assert.match(home, /setScores\(GUEST_HOME_SCORES\)/)
-  assert.match(home, /user\?\.email \|\| GUEST_HOME_EMAIL/)
-  assert.match(home, /Showing homepage demo data\./)
-  assert.match(sample, /Bonneville Golf Course/)
-  assert.match(sample, /Homie Hustlers/)
+  assert.match(seed, /const soloCourses = \[/)
+  assert.match(seed, /const scrambleCourses = \[/)
+  assert.match(seed, /Blue Mesa Golf Club/)
+  assert.match(seed, /Wasatch Greens/)
+  assert.match(seed, /roundScore = clamp\(78 \+ \(i % 11\) \+ \(Math\.floor\(i \/ 8\) % 4\), 72, 98\)/)
 })
 
-test('logging writes to root access and error log files with request middleware support', () => {
-  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+test('homepage demo seeding is manual-only and does not run on app startup', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const db = fs.readFileSync(new URL('../server/db.js', import.meta.url), 'utf8')
+
+  assert.equal(pkg.scripts['seed:homepage-demo'], 'node server/scripts/seed-homepage-demo.js')
+  assert.doesNotMatch(serverIndex, /seed-homepage-demo/)
+  assert.doesNotMatch(serverIndex, /seedHomepageDemo\(/)
+  assert.doesNotMatch(db, /seed-homepage-demo/)
+  assert.doesNotMatch(db, /seedHomepageDemo\(/)
+})
+
+test('auth requests sync the app user record before protected writes', () => {
+  const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(serverIndex, /typeof storage\.ensureUserRecord === 'function'/)
+  assert.match(serverIndex, /const appUser = await storage\.ensureUserRecord\(req\.user\)/)
+  assert.match(serverIndex, /req\.user\.dbUserId = appUser\.id/)
+  assert.match(serverIndex, /createdByUserId: req\.user\.dbUserId/)
+})
+
+test('mysql storage resolves an app user record before inserting scores', () => {
+  const mysqlStorage = fs.readFileSync(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
+
+  assert.match(mysqlStorage, /export async function ensureUserRecord\(user\)/)
+  assert.match(mysqlStorage, /const appUser = await ensureAppUserRecord\(/)
+  assert.match(mysqlStorage, /resolvedUserId = appUser\.id/)
+  assert.match(mysqlStorage, /resolvedEmail = appUser\.email/)
+})
+
+test('client-side diagnostic logging is wired for mobile blank-screen debugging', () => {
+  const indexHtml = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+  const main = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8')
+  const clientLogger = fs.readFileSync(new URL('../src/lib/clientLogger.ts', import.meta.url), 'utf8')
+  const boundary = fs.readFileSync(new URL('../src/components/AppErrorBoundary.tsx', import.meta.url), 'utf8')
+  const apiClient = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
+
+  assert.match(indexHtml, /bootstrap_blank_screen_probe/)
+  assert.match(indexHtml, /navigator\.sendBeacon/)
+  assert.match(main, /initClientLogging\(\)/)
+  assert.match(main, /client_bootstrap_start/)
+  assert.match(clientLogger, /window\.addEventListener\('error'/)
+  assert.match(clientLogger, /blank_screen_probe/)
+  assert.match(apiClient, /api_network_error/)
+  assert.match(boundary, /react_render_error/)
+})
+
+test('server accepts client diagnostic logs and writes to dedicated logging files', () => {
+  const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
   const gitignore = fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8')
 
-  assert.match(server, /app\.use\(accessLogMiddleware\)/)
-  assert.match(server, /logRouteError\('/)
-  assert.match(logger, /path\.resolve\(process\.cwd\(\), 'logging'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'access\.log'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'error\.log'\)/)
-  assert.match(logger, /res\.on\('finish'/)
+  assert.match(serverIndex, /app\.post\('\/api\/client-log'/)
+  assert.match(serverIndex, /logClientDiagnostic\(/)
+  assert.match(logger, /ACCESS_LOG_PATH/)
+  assert.match(logger, /ERROR_LOG_PATH/)
+  assert.match(logger, /accessLogMiddleware/)
   assert.match(gitignore, /logging\/\*\.log/)
-  assert.match(gitignore, /!logging\/\.gitkeep/)
-})
-
-test('homepage demo seeder can populate the sample rounds locally', () => {
-  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-  const seed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
-
-  assert.match(pkg, /"seed:homepage-demo"/)
-  assert.match(seed, /const DEMO_EMAIL = 'thegolfhomie@example\.com'/)
-  assert.match(seed, /Bonneville Golf Course/)
-  assert.match(seed, /Homie Hustlers/)
-  assert.match(seed, /Seeded homepage demo data/)
 })

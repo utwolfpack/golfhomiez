@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { getMigrations } from 'better-auth/db/migration'
+import { ensureAppUserSchemaAndBackfill } from './lib/app-user-sync.js'
 import { logError, logInfo } from './lib/logger.js'
 
 let pool
@@ -25,9 +26,7 @@ export function getDbConfig() {
 
 export function getPool() {
   if (!pool) {
-    const config = getDbConfig()
-    pool = mysql.createPool(config)
-    logInfo('Created MySQL pool', { host: config.host, port: config.port, database: config.database, connectionLimit: config.connectionLimit })
+    pool = mysql.createPool(getDbConfig())
   }
   return pool
 }
@@ -40,6 +39,17 @@ async function ensureAuthSchema() {
 
 async function ensureAppTables(db) {
   await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id VARCHAR(191) PRIMARY KEY,
+      email VARCHAR(191) NOT NULL,
+      name VARCHAR(191) NULL,
+      auth_user_id VARCHAR(191) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_users_email (email),
+      UNIQUE KEY uq_users_auth_user_id (auth_user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS teams (
       id VARCHAR(191) PRIMARY KEY,
       name VARCHAR(191) NOT NULL UNIQUE,
@@ -73,7 +83,8 @@ async function ensureAppTables(db) {
       created_by_email VARCHAR(191) NOT NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_scores_created_by (created_by_user_id),
-      INDEX idx_scores_date (date)
+      INDEX idx_scores_date (date),
+      CONSTRAINT fk_scores_user FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
     );
   `)
 }
@@ -84,9 +95,10 @@ export async function initDb() {
     await db.query('SELECT 1')
     await ensureAuthSchema()
     await ensureAppTables(db)
-    logInfo('Database initialization complete')
+    await ensureAppUserSchemaAndBackfill()
+    logInfo('Database initialization completed', { database: getDbConfig().database })
   } catch (error) {
-    logError('Database initialization failed', { error })
+    logError('Database initialization failed', { database: getDbConfig().database, error })
     throw error
   }
 }
@@ -94,7 +106,6 @@ export async function initDb() {
 export async function closeDb() {
   if (pool) {
     await pool.end()
-    logInfo('Closed MySQL pool')
     pool = null
   }
 }
