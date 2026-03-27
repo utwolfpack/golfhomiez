@@ -3,10 +3,87 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Golf Homiez! Tracker</title>
+    <title>Golf Homiez</title>
+    <script>
+      (function () {
+        var BOOT_LOG_KEY = 'golfhomiez.frontend.bootLogs'
+        var SESSION_KEY = 'golfhomiez.frontend.correlationId'
+
+        function getCorrelationId() {
+          try {
+            var existing = window.sessionStorage.getItem(SESSION_KEY)
+            if (existing) return existing
+            var created = window.crypto && window.crypto.randomUUID
+              ? window.crypto.randomUUID()
+              : 'cid-' + Date.now() + '-' + Math.random().toString(16).slice(2)
+            window.sessionStorage.setItem(SESSION_KEY, created)
+            return created
+          } catch (error) {
+            return 'cid-storage-unavailable'
+          }
+        }
+
+        function readLogs() {
+          try {
+            var raw = window.localStorage.getItem(BOOT_LOG_KEY)
+            return raw ? JSON.parse(raw) : []
+          } catch (error) {
+            return []
+          }
+        }
+
+        function writeLogs(entries) {
+          try {
+            window.localStorage.setItem(BOOT_LOG_KEY, JSON.stringify(entries.slice(-50)))
+          } catch (error) {
+            // ignore
+          }
+        }
+
+        function capture(message, level, category, data) {
+          var logs = readLogs()
+          logs.push({
+            timestamp: new Date().toISOString(),
+            message: message,
+            level: level || 'info',
+            category: category || 'boot',
+            correlationId: getCorrelationId(),
+            data: data || {},
+          })
+          writeLogs(logs)
+        }
+
+        capture('html_bootstrap_started', 'info', 'boot', {
+          href: window.location.href,
+          userAgent: navigator.userAgent,
+          language: navigator.language,
+          platform: navigator.platform,
+          viewport: { width: window.innerWidth, height: window.innerHeight, pixelRatio: window.devicePixelRatio || null },
+          cookiesEnabled: navigator.cookieEnabled,
+          online: navigator.onLine,
+        })
+
+        window.addEventListener('error', function (event) {
+          capture(event.message || 'window_error_before_app', 'error', 'boot.window.error', {
+            filename: event.filename,
+            lineno: event.lineno,
+            colno: event.colno,
+          })
+        })
+
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event.reason && event.reason.message ? event.reason.message : String(event.reason)
+          capture('boot_unhandled_rejection', 'error', 'boot.unhandledrejection', { reason: reason })
+        })
+
+        document.addEventListener('readystatechange', function () {
+          capture('document_readystate_changed', 'info', 'boot', { readyState: document.readyState })
+        })
+      })()
+    </script>
+    <script type="module" crossorigin src="/src/main.tsx"></script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
