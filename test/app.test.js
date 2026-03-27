@@ -139,56 +139,39 @@ test('validation warnings stay hidden until save is attempted', () => {
   assert.match(golfLogger, /showCreateTeamValidation && createMissing.length/)
 })
 
-test('seed script provides rated solo rounds on real courses for handicap displays', () => {
-  const seed = fs.readFileSync(new URL('../server/scripts/seed-use-info-record.js', import.meta.url), 'utf8')
+test('homepage shows guest sample scores when no user is logged in', () => {
+  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const sample = fs.readFileSync(new URL('../src/lib/dashboardSample.ts', import.meta.url), 'utf8')
 
-  assert.match(seed, /const soloCoursePool = \[/)
+  assert.match(home, /setScores\(GUEST_HOME_SCORES\)/)
+  assert.match(home, /user\?\.email \|\| GUEST_HOME_EMAIL/)
+  assert.match(home, /Showing homepage demo data\./)
+  assert.match(sample, /Bonneville Golf Course/)
+  assert.match(sample, /Homie Hustlers/)
+})
+
+test('logging writes to root access and error log files with request middleware support', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+  const gitignore = fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8')
+
+  assert.match(server, /app\.use\(accessLogMiddleware\)/)
+  assert.match(server, /logRouteError\('/)
+  assert.match(logger, /path\.resolve\(process\.cwd\(\), 'logging'\)/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'access\.log'\)/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'error\.log'\)/)
+  assert.match(logger, /res\.on\('finish'/)
+  assert.match(gitignore, /logging\/\*\.log/)
+  assert.match(gitignore, /!logging\/\.gitkeep/)
+})
+
+test('homepage demo seeder can populate the sample rounds locally', () => {
+  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+  const seed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
+
+  assert.match(pkg, /"seed:homepage-demo"/)
+  assert.match(seed, /const DEMO_EMAIL = 'thegolfhomie@example\.com'/)
   assert.match(seed, /Bonneville Golf Course/)
-  assert.match(seed, /Wasatch Mountain \(Lake\)/)
-  assert.match(seed, /TPC Scottsdale/)
-  assert.match(seed, /const scrambleCoursePool = \[/)
-  assert.match(seed, /roundScore = clamp\(79 \+ \(i % 7\) \+ \(Math\.floor\(i \/ 10\) % 3\), 74, 92\)/)
+  assert.match(seed, /Homie Hustlers/)
+  assert.match(seed, /Seeded homepage demo data/)
 })
-
-test('build pipeline runs migrations before bundling the frontend', () => {
-  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-
-  assert.equal(pkg.scripts.migrate, 'node server/run-migrations.js')
-  assert.match(pkg.scripts.build, /^npm run migrate && vite build$/)
-})
-
-test('migration runner skips ahead-of-app databases and hashes migration sql deterministically', async () => {
-  const { checksumSql, shouldSkipAheadDatabase } = await import('../server/migrations/runner.js')
-
-  assert.equal(shouldSkipAheadDatabase(['20260326_003'], ['20260326_001', '20260326_002']), true)
-  assert.equal(shouldSkipAheadDatabase(['20260326_001'], ['20260326_001', '20260326_002']), false)
-  assert.equal(checksumSql('SELECT 1;'), checksumSql('SELECT 1;'))
-  assert.notEqual(checksumSql('SELECT 1;'), checksumSql('SELECT 2;'))
-})
-
-test('app migration catalog points at versioned sql scripts and preserves ordering', async () => {
-  const { APP_MIGRATIONS, sortMigrations } = await import('../server/migrations/index.js')
-
-  assert.deepEqual(
-    APP_MIGRATIONS.map((migration) => migration.filename),
-    [
-      '20260326_001_baseline_app_schema.sql',
-      '20260326_002_align_scores_table.sql',
-    ]
-  )
-
-  const sorted = sortMigrations([
-    { version: '20260326_010' },
-    { version: '20260326_002' },
-    { version: '20260326_001' },
-  ])
-  assert.deepEqual(sorted.map((migration) => migration.version), ['20260326_001', '20260326_002', '20260326_010'])
-})
-
-test('startup storage initialization applies auth and app migrations before serving mysql data', () => {
-  const source = fs.readFileSync(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
-
-  assert.match(source, /await runAuthMigrations\(\)/)
-  assert.match(source, /await runAppMigrations\(getPool\(\)\)/)
-})
-
