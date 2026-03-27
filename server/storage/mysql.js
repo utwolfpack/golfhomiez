@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import { initDb, getPool } from '../db.js'
+import { logError, logInfo } from '../lib/logger.js'
 
 function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase()
@@ -46,6 +47,7 @@ function mapScore(row) {
 
 export async function initStorage() {
   await initDb()
+  logInfo('MySQL storage initialized')
 }
 
 export async function getBackendName() {
@@ -87,13 +89,15 @@ export async function createTeam({ name, members }) {
       )
     }
     await conn.commit()
+    logInfo('Created team', { teamId: team.id, teamName: team.name, memberCount: members.length })
+    return team
   } catch (error) {
     await conn.rollback()
+    logError('Failed to create team in MySQL storage', { error, teamName: team.name })
     throw error
   } finally {
     conn.release()
   }
-  return team
 }
 
 export async function updateTeam(id, { name, members }) {
@@ -117,13 +121,15 @@ export async function updateTeam(id, { name, members }) {
       await conn.execute('UPDATE scores SET opponent_team = ? WHERE opponent_team = ?', [String(name).trim(), existing.name])
     }
     await conn.commit()
+    logInfo('Updated team', { teamId: id, teamName: String(name).trim(), memberCount: members.length })
+    return getTeamById(id)
   } catch (error) {
     await conn.rollback()
+    logError('Failed to update team in MySQL storage', { error, teamId: id, teamName: String(name).trim() })
     throw error
   } finally {
     conn.release()
   }
-  return getTeamById(id)
 }
 
 export async function listScores() {
@@ -145,34 +151,46 @@ export async function createScore(entry) {
     ...entry,
     createdAt: new Date().toISOString(),
   }
-  await db.execute(
-    `INSERT INTO scores (
-      id, mode, date, state, course, team, opponent_team,
-      team_total, opponent_total, round_score, money, won,
-      holes_json, created_by_user_id, created_by_email, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-    [
-      score.id,
-      score.mode,
-      score.date,
-      score.state,
-      score.course,
-      score.team ?? null,
-      score.opponentTeam ?? null,
-      score.teamTotal ?? null,
-      score.opponentTotal ?? null,
-      score.roundScore ?? null,
-      score.money ?? null,
-      score.won === true ? 1 : score.won === false ? 0 : null,
-      score.holes ? JSON.stringify(score.holes) : null,
-      score.createdByUserId,
-      score.createdByEmail,
-    ]
-  )
-  return score
+  try {
+    await db.execute(
+      `INSERT INTO scores (
+        id, mode, date, state, course, team, opponent_team,
+        team_total, opponent_total, round_score, money, won,
+        holes_json, created_by_user_id, created_by_email, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        score.id,
+        score.mode,
+        score.date,
+        score.state,
+        score.course,
+        score.team ?? null,
+        score.opponentTeam ?? null,
+        score.teamTotal ?? null,
+        score.opponentTotal ?? null,
+        score.roundScore ?? null,
+        score.money ?? null,
+        score.won === true ? 1 : score.won === false ? 0 : null,
+        score.holes ? JSON.stringify(score.holes) : null,
+        score.createdByUserId,
+        score.createdByEmail,
+      ]
+    )
+    logInfo('Created score', { scoreId: score.id, mode: score.mode, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
+    return score
+  } catch (error) {
+    logError('Failed to create score in MySQL storage', { error, scoreId: score.id, mode: score.mode, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
+    throw error
+  }
 }
 
 export async function deleteScoreById(id) {
   const db = getPool()
-  await db.execute('DELETE FROM scores WHERE id = ?', [id])
+  try {
+    await db.execute('DELETE FROM scores WHERE id = ?', [id])
+    logInfo('Deleted score', { scoreId: id })
+  } catch (error) {
+    logError('Failed to delete score in MySQL storage', { error, scoreId: id })
+    throw error
+  }
 }

@@ -1,3 +1,5 @@
+import { requestJson } from './request'
+
 export type SessionUser = { id: string; email: string; name?: string | null }
 
 type AuthResult<T> = { data?: T; error?: { message?: string } }
@@ -29,8 +31,6 @@ function getAuthBase() {
     return normalizeUrl(targetUrl.toString())
   }
 
-  // Production safety: if the frontend is running on a public domain but the build
-  // still contains a localhost auth base, force auth requests back to same-origin.
   if (!pageIsLoopback && targetIsLoopback) {
     return normalizeUrl(new URL(sameOriginDefault, pageUrl).toString())
   }
@@ -40,94 +40,60 @@ function getAuthBase() {
 
 const AUTH_BASE = getAuthBase()
 
-function getCommonHeaders() {
-  const headers = new Headers({ 'Content-Type': 'application/json' })
-  try {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    if (timeZone) headers.set('X-User-Timezone', timeZone)
-  } catch {
-    // ignore
-  }
-  return headers
-}
-
-async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
-  const text = await res.text()
-  const data = text ? JSON.parse(text) : null
-  if (!res.ok) {
+async function parseResponse<T>(url: string, opts: RequestInit): Promise<AuthResult<T>> {
+  const { data, response } = await requestJson<T>(url, opts)
+  if (!response.ok) {
     return {
-      error: { message: data?.message || data?.error?.message || `Request failed (${res.status})` },
+      error: { message: (data as { message?: string; error?: { message?: string } } | null)?.message || (data as { error?: { message?: string } } | null)?.error?.message || `Request failed (${response.status})` },
     }
   }
   return { data: data as T }
 }
 
 export async function signUpEmail(email: string, password: string, name: string) {
-  const res = await fetch(`${AUTH_BASE}/sign-up/email`, {
+  return parseResponse(`${AUTH_BASE}/sign-up/email`, {
     method: 'POST',
-    headers: getCommonHeaders(),
-    body: JSON.stringify({
-      email,
-      password,
-      name,
-    }),
-    credentials: 'include',
+    body: JSON.stringify({ email, password, name }),
   })
-  return parseResponse(res)
 }
 
 export async function signInEmail(email: string, password: string) {
-  const res = await fetch(`${AUTH_BASE}/sign-in/email`, {
+  return parseResponse(`${AUTH_BASE}/sign-in/email`, {
     method: 'POST',
-    headers: getCommonHeaders(),
-    body: JSON.stringify({
-      email,
-      password,
-    }),
-    credentials: 'include',
+    body: JSON.stringify({ email, password }),
   })
-  return parseResponse(res)
 }
 
 export async function signOutAuth() {
-  const res = await fetch(`${AUTH_BASE}/sign-out`, {
+  return parseResponse(`${AUTH_BASE}/sign-out`, {
     method: 'POST',
-    credentials: 'include',
   })
-  return parseResponse(res)
 }
 
 export async function getSessionAuth() {
-  const res = await fetch(`${AUTH_BASE}/get-session`, {
+  return parseResponse<{ session: unknown; user: SessionUser } | null>(`${AUTH_BASE}/get-session`, {
     method: 'GET',
-    credentials: 'include',
   })
-  return parseResponse<{ session: unknown; user: SessionUser } | null>(res)
 }
 
 export async function forgotPassword(email: string, redirectTo: string) {
-  const res = await fetch(`${AUTH_BASE}/request-password-reset`, {
+  return parseResponse<{ ok?: boolean }>(`${AUTH_BASE}/request-password-reset`, {
     method: 'POST',
-    headers: getCommonHeaders(),
-    credentials: 'include',
     body: JSON.stringify({ email, redirectTo }),
   })
-  return parseResponse<{ ok?: boolean }>(res)
 }
 
 export async function resetPassword(token: string, newPassword: string) {
-  const res = await fetch(`${AUTH_BASE}/reset-password`, {
+  return parseResponse<{ ok?: boolean }>(`${AUTH_BASE}/reset-password`, {
     method: 'POST',
-    headers: getCommonHeaders(),
-    credentials: 'include',
     body: JSON.stringify({ token, newPassword }),
   })
-  return parseResponse<{ ok?: boolean }>(res)
 }
 
 export async function getLatestResetLink(email: string) {
   const url = new URL('/api/auth-debug/latest-reset', window.location.origin)
   url.searchParams.set('email', email)
-  const res = await fetch(url.toString(), { credentials: 'include' })
-  return parseResponse<{ email: string; token: string; url: string; expiresAt?: string | null } | null>(res)
+  return parseResponse<{ email: string; token: string; url: string; expiresAt?: string | null } | null>(url.toString(), {
+    method: 'GET',
+  })
 }
