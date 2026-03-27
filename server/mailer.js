@@ -1,34 +1,30 @@
 import net from 'net'
 import tls from 'tls'
-import { logError, logInfo } from './lib/logger.js'
 
-export function resolveMailConfig(env = process.env) {
-  const brevoApiKey = String(env.BREVO_API_KEY || '').trim()
-  const smtpHost = String(env.SMTP_HOST || env.BREVO_SMTP_HOST || '').trim()
-  const smtpPort = Number(env.SMTP_PORT || env.BREVO_SMTP_PORT || 0)
-  const smtpUser = String(env.SMTP_USER || env.BREVO_SMTP_LOGIN || '').trim()
-  const smtpPass = String(env.SMTP_PASS || env.BREVO_SMTP_KEY || '').trim()
-  const smtpSecure = String(env.SMTP_SECURE || '').trim()
-  const secure = smtpSecure ? smtpSecure === 'true' : smtpPort === 465
-  const fromEmail = String(env.BREVO_SENDER_EMAIL || env.SMTP_FROM_EMAIL || '').trim()
-  const fromName = String(env.BREVO_SENDER_NAME || env.SMTP_FROM_NAME || 'Golf Homiez').trim()
-  const from = String(env.SMTP_FROM || (fromEmail ? `${fromName} <${fromEmail}>` : '')).trim()
+function getBrevoApiKey() {
+  return process.env.BREVO_API_KEY || process.env.SENDINBLUE_API_KEY || ''
+}
+
+function getSmtpConfig() {
+  const from =
+    process.env.SMTP_FROM ||
+    (process.env.BREVO_SENDER_EMAIL
+      ? `${process.env.BREVO_SENDER_NAME || 'Golf Homiez'} <${process.env.BREVO_SENDER_EMAIL}>`
+      : '')
 
   return {
-    mode: brevoApiKey ? 'brevo-api' : (smtpHost && smtpPort && from ? 'smtp' : 'fallback'),
-    brevoApiKey,
-    host: smtpHost,
-    port: smtpPort,
-    secure,
-    user: smtpUser,
-    pass: smtpPass,
-    from: from || 'Golf Homiez <no-reply@example.local>',
-    clientName: String(env.SMTP_CLIENT_NAME || 'localhost').trim(),
+    host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+    user: process.env.SMTP_USER || process.env.BREVO_SMTP_LOGIN || '',
+    pass: process.env.SMTP_PASS || process.env.BREVO_SMTP_KEY || '',
+    from,
+    clientName: process.env.SMTP_CLIENT_NAME || 'localhost',
   }
 }
 
-export function hasSmtpConfig(env = process.env) {
-  return resolveMailConfig(env).mode === 'smtp'
+function hasSmtpConfig(config = getSmtpConfig()) {
+  return Boolean(config.host && config.port && config.from)
 }
 
 function onceLine(socket) {
@@ -81,9 +77,9 @@ function toBase64(value) {
   return Buffer.from(String(value || ''), 'utf8').toString('base64')
 }
 
-export function buildMessage({ from, to, subject, text, html }) {
+function buildMessage({ from, to, subject, text, html }) {
   const boundary = `boundary_${Date.now().toString(36)}`
-  return [
+  const parts = [
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${subject}`,
@@ -104,7 +100,8 @@ export function buildMessage({ from, to, subject, text, html }) {
     '',
     `--${boundary}--`,
     '',
-  ].join('\r\n')
+  ]
+  return parts.join('\r\n')
 }
 
 function upgradeToTls(socket, host) {
@@ -114,99 +111,138 @@ function upgradeToTls(socket, host) {
   })
 }
 
-async function connectSocket(config) {
-  return new Promise((resolve, reject) => {
-    const conn = config.secure
-      ? tls.connect({ host: config.host, port: config.port, servername: config.host })
-      : net.createConnection({ host: config.host, port: config.port })
-    conn.once('error', reject)
-    conn.once(config.secure ? 'secureConnect' : 'connect', () => resolve(conn))
-  })
+function parseFrom(from) {
+  const email = from.match(/<([^>]+)>/)?.[1] || from
+  const name = from.includes('<') ? from.replace(/\s*<[^>]+>\s*$/, '').trim() : undefined
+  return { email, name }
 }
 
-async function sendViaSmtp(config, { to, subject, text, html }) {
-  let socket = await connectSocket(config)
+async function sendWithBrevoApi({ from, to, subject, text, html }) {
+  const apiKey = getBrevoApiKey()
+  if (!apiKey) return null
+
+  const sender = parseFrom(from)
+  const payload = {
+    sender: sender.name ? sender : { email: sender.email },
+    to: [{ email: to }],
+    subject,
+    textContent: text || '',
+    htmlContent: html || `<pre>${text || ''}</pre>`,
+  }
+
+  console.log('[mailer] attempting Brevo API send', {
+    sender: sender.email,
+    to,
+  })
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'api-key': apiKey,
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Brevo API send failed: ${response.status} ${body}`)
+  }
+
+  const body = await response.json().catch(() => ({}))
+  return {
+    accepted: [to],
+    provider: 'brevo-api',
+    messageId: body?.messageId || null,
+  }
+}
+
+async function sendWithSmtp({ to, subject, text, html }) {
+  const config = getSmtpConfig()
+  const { host, port, secure, user, pass, from, clientName } = config
+
+  console.log('[mailer] attempting SMTP send', {
+    host,
+    port,
+    secure,
+    from,
+    to,
+    hasUser: Boolean(user),
+    hasPass: Boolean(pass),
+  })
+
+  let socket = await new Promise((resolve, reject) => {
+    const conn = secure
+      ? tls.connect({ host, port, servername: host })
+      : net.createConnection({ host, port })
+    conn.once('error', reject)
+    conn.once('connect', () => {
+      if (!secure) resolve(conn)
+    })
+    if (secure) conn.once('secureConnect', () => resolve(conn))
+  })
 
   try {
     const greeting = await onceLine(socket)
     if (getCode(greeting) !== 220) throw new Error(`SMTP greeting failed: ${greeting.join(' | ')}`)
 
-    let ehlo = await sendCommand(socket, `EHLO ${config.clientName}`, [250])
-    const supportsStartTls = ehlo.some((line) => /^250[ -]STARTTLS$/i.test(line))
+    let ehlo = await sendCommand(socket, `EHLO ${clientName}`, [250])
 
-    if (!config.secure && supportsStartTls) {
-      await sendCommand(socket, 'STARTTLS', [220])
-      socket = await upgradeToTls(socket, config.host)
-      ehlo = await sendCommand(socket, `EHLO ${config.clientName}`, [250])
-    }
-
-    if (config.user) {
-      await sendCommand(socket, 'AUTH LOGIN', [334])
-      await sendCommand(socket, toBase64(config.user), [334])
-      const authReply = await sendCommand(socket, toBase64(config.pass || ''), [235, 535])
-      if (getCode(authReply) === 535) {
-        throw new Error('SMTP authentication failed. Check your Brevo SMTP login/key or SMTP credentials.')
+    if (!secure) {
+      const supportsStartTls = ehlo.some((line) => /STARTTLS/i.test(line))
+      if (supportsStartTls) {
+        await sendCommand(socket, 'STARTTLS', [220])
+        socket = await upgradeToTls(socket, host)
+        ehlo = await sendCommand(socket, `EHLO ${clientName}`, [250])
       }
     }
 
-    const envelopeFrom = config.from.match(/<([^>]+)>/)?.[1] || config.from
+    if (user) {
+      await sendCommand(socket, 'AUTH LOGIN', [334])
+      await sendCommand(socket, toBase64(user), [334])
+      await sendCommand(socket, toBase64(pass || ''), [235])
+    }
+
+    const envelopeFrom = parseFrom(from).email
     await sendCommand(socket, `MAIL FROM:<${envelopeFrom}>`, [250])
     await sendCommand(socket, `RCPT TO:<${to}>`, [250, 251])
     await sendCommand(socket, 'DATA', [354])
-    socket.write(`${buildMessage({ from: config.from, to, subject, text, html })}\r\n.\r\n`)
+    socket.write(`${buildMessage({ from, to, subject, text, html })}\r\n.\r\n`)
     const accepted = await onceLine(socket)
     if (getCode(accepted) !== 250) throw new Error(`SMTP DATA failed: ${accepted.join(' | ')}`)
     await sendCommand(socket, 'QUIT', [221])
     socket.end()
-    return { accepted: [to], transport: 'smtp' }
+    return { accepted: [to], provider: 'smtp' }
   } catch (error) {
-    logError('SMTP send failed', { error, transport: 'smtp' })
+    console.error('[mailer] SMTP send failed:', error)
     socket.destroy()
     throw error
   }
 }
 
-async function sendViaBrevoApi(config, { to, subject, text, html }) {
-  const senderEmail = config.from.match(/<([^>]+)>/)?.[1] || config.from
-  const senderName = config.from.match(/^([^<]+)</)?.[1]?.trim() || 'Golf Homiez'
+export async function sendMail({ to, subject, text, html }) {
+  const smtpConfig = getSmtpConfig()
+  const from = smtpConfig.from || 'Golf Homiez <no-reply@example.local>'
+  const apiKey = getBrevoApiKey()
 
-  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'api-key': config.brevoApiKey,
-    },
-    body: JSON.stringify({
-      sender: { email: senderEmail, name: senderName },
-      to: [{ email: to }],
-      subject,
-      textContent: text || '',
-      htmlContent: html || `<pre>${text || ''}</pre>`,
-    }),
-  })
-
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Brevo API send failed (${response.status}): ${body}`)
+  if (apiKey) {
+    return sendWithBrevoApi({ from, to, subject, text, html })
   }
 
-  return { accepted: [to], transport: 'brevo-api' }
-}
-
-export async function sendMail(message) {
-  const config = resolveMailConfig(process.env)
-
-  if (config.mode === 'brevo-api') {
-    logInfo('Sending mail through Brevo API', { to: message.to, subject: message.subject })
-    return sendViaBrevoApi(config, message)
-  }
-  if (config.mode === 'smtp') {
-    logInfo('Sending mail through SMTP', { to: message.to, subject: message.subject, host: config.host, port: config.port })
-    return sendViaSmtp(config, message)
+  if (!hasSmtpConfig(smtpConfig)) {
+    console.log(`[mail:dev-fallback] to=${to} subject=${subject}\n${text}\n`)
+    return { accepted: [to], fallback: true }
   }
 
-  logInfo('Using console mail fallback', { to: message.to, subject: message.subject })
-  console.log(`[mail:dev-fallback] to=${message.to} subject=${message.subject}\n${message.text}\n`)
-  return { accepted: [message.to], fallback: true, transport: 'console' }
+  try {
+    return await sendWithSmtp({ to, subject, text, html })
+  } catch (error) {
+    if (/535\s+5\.7\.8/i.test(String(error?.message || ''))) {
+      throw new Error(
+        'Brevo SMTP authentication failed. Set BREVO_API_KEY to use the Brevo transactional API, or update SMTP_USER/SMTP_PASS (or BREVO_SMTP_LOGIN/BREVO_SMTP_KEY) with valid Brevo SMTP credentials.',
+      )
+    }
+    throw error
+  }
 }
