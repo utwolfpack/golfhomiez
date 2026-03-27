@@ -6,184 +6,41 @@
     <title>Golf Homiez! Tracker</title>
     <script>
       (function () {
-        var storageKey = 'gh_correlation_id';
-        var correlationId = null;
-        var isSending = false;
-        var isHandlingError = false;
-        var isHandlingRejection = false;
-        var sendCount = 0;
-        var sendLimit = 50;
-
-        function nowId() {
-          return String(Date.now()) + '-' + Math.random().toString(16).slice(2);
-        }
-
         try {
-          correlationId = window.sessionStorage.getItem(storageKey);
-        } catch (e) {}
+          var existing = null
+          try { existing = window.sessionStorage.getItem('gh_correlation_id') } catch (_) {}
+          var correlationId = existing || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10))
+          window.__GH_CORRELATION_ID__ = correlationId
+          try { window.sessionStorage.setItem('gh_correlation_id', correlationId) } catch (_) {}
 
-        if (!correlationId) {
-          try {
-            correlationId = window.crypto && typeof window.crypto.randomUUID === 'function'
-              ? window.crypto.randomUUID()
-              : nowId();
-          } catch (e) {
-            correlationId = nowId();
-          }
-        }
-
-        try {
-          window.sessionStorage.setItem(storageKey, correlationId);
-        } catch (e) {}
-
-        window.__ghCorrelationId = correlationId;
-
-        function getString(value, fallback) {
-          if (typeof value === 'string') return value;
-          if (value == null) return fallback;
-          try {
-            return String(value);
-          } catch (e) {
-            return fallback;
-          }
-        }
-
-        function safePayload(payload) {
-          try {
-            return JSON.parse(JSON.stringify(payload || {}));
-          } catch (e) {
-            return {
-              serializationError: true,
-              originalType: Object.prototype.toString.call(payload)
-            };
-          }
-        }
-
-        function assetSource(target) {
-          if (!target) return null;
-          try {
-            return target.src || target.href || null;
-          } catch (e) {
-            return null;
-          }
-        }
-
-        function sendLog(eventType, payload) {
-          if (isSending) return false;
-          if (sendCount >= sendLimit) return false;
-
-          isSending = true;
-          sendCount += 1;
-
-          try {
-            var message = JSON.stringify({
-              source: 'preboot',
-              eventType: eventType,
-              correlationId: correlationId,
-              timestamp: new Date().toISOString(),
-              url: window.location.href,
-              path: window.location.pathname,
-              userAgent: navigator.userAgent,
-              viewport: { width: window.innerWidth, height: window.innerHeight },
-              payload: safePayload(payload)
-            });
-
-            if (navigator.sendBeacon) {
-              try {
-                var beacon = new Blob([message], { type: 'application/json' });
-                if (navigator.sendBeacon('/api/client-logs', beacon)) {
-                  return true;
-                }
-              } catch (e) {}
-            }
-
+          function sendStage(stage) {
             try {
-              fetch('/api/client-logs', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-Correlation-Id': correlationId
-                },
-                body: message,
-                credentials: 'include',
-                keepalive: true
-              }).catch(function () {});
-              return true;
-            } catch (e) {
-              return false;
-            }
-          } catch (e) {
-            return false;
-          } finally {
-            isSending = false;
+              var img = new Image(1, 1)
+              img.src = '/diag/pixel.gif?cid=' + encodeURIComponent(correlationId)
+                + '&stage=' + encodeURIComponent(stage)
+                + '&path=' + encodeURIComponent(window.location.pathname)
+                + '&ts=' + Date.now()
+            } catch (_) {}
           }
-        }
 
-        window.__ghSendPrebootLog = sendLog;
+          console.log('[GH preboot] script_started')
+          sendStage('html_script_started')
 
-        try { console.log('[GH preboot] script start'); } catch (e) {}
+          document.addEventListener('readystatechange', function () {
+            if (document.readyState === 'interactive') sendStage('document_interactive')
+            if (document.readyState === 'complete') sendStage('document_complete')
+          })
 
-        sendLog('html_preboot_start', {
-          readyState: document.readyState,
-          language: navigator.language,
-          platform: navigator.platform,
-          onLine: navigator.onLine,
-          cookieEnabled: navigator.cookieEnabled,
-          screen: { width: screen.width, height: screen.height },
-          referrer: document.referrer || null
-        });
-
-        window.addEventListener('error', function (event) {
-          if (isHandlingError) return;
-          isHandlingError = true;
-
-          try {
-            var target = event && event.target ? event.target : null;
-            var tagName = target && target.tagName ? getString(target.tagName, null) : null;
-            var isAsset = tagName === 'SCRIPT' || tagName === 'LINK' || tagName === 'IMG';
-
-            sendLog(isAsset ? 'asset_load_failure_preboot' : 'window_error_preboot', {
-              message: getString(event && event.message, 'unknown error'),
-              filename: getString(event && event.filename, ''),
-              lineno: event && typeof event.lineno === 'number' ? event.lineno : 0,
-              colno: event && typeof event.colno === 'number' ? event.colno : 0,
-              stack: event && event.error && event.error.stack ? getString(event.error.stack, null) : null,
-              tagName: tagName,
-              src: assetSource(target)
-            });
-          } catch (e) {
-          } finally {
-            isHandlingError = false;
-          }
-        }, true);
-
-        window.addEventListener('unhandledrejection', function (event) {
-          if (isHandlingRejection) return;
-          isHandlingRejection = true;
-
-          try {
-            var reason = event ? event.reason : null;
-            sendLog('unhandled_rejection_preboot', {
-              message: reason && reason.message ? getString(reason.message, 'Unhandled promise rejection') : getString(reason, 'Unhandled promise rejection'),
-              stack: reason && reason.stack ? getString(reason.stack, null) : null
-            });
-          } catch (e) {
-          } finally {
-            isHandlingRejection = false;
-          }
-        });
-
-        document.addEventListener('readystatechange', function () {
-          sendLog('document_readystatechange_preboot', { readyState: document.readyState });
-        });
-      })();
+          window.addEventListener('load', function () {
+            console.log('[GH preboot] window_load')
+            sendStage('window_load')
+          })
+        } catch (_) {}
+      })()
     </script>
   </head>
   <body>
     <div id="root"></div>
-    <script>
-      try { console.log('[GH preboot] before app bundle'); } catch (e) {}
-    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
