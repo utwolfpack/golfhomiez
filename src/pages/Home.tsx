@@ -8,6 +8,7 @@ import StatCard from '../components/StatCard'
 import { useAuth } from '../context/AuthContext'
 import { US_STATES } from '../data/usStates'
 import { api } from '../lib/api'
+import { GUEST_HOME_EMAIL, GUEST_HOME_SCORES } from '../lib/dashboardSample'
 import { jumpToFirstByLetter } from '../lib/selectHotkey'
 import { sortScoresNewestFirst } from '../lib/roundInsights'
 import { calculateHandicapFromScores } from '../lib/handicap'
@@ -77,7 +78,7 @@ export default function Home() {
   useEffect(() => {
     ;(async () => {
       if (!user) {
-        setScores([])
+        setScores(GUEST_HOME_SCORES)
         setLoading(false)
         return
       }
@@ -97,7 +98,7 @@ export default function Home() {
   }, [user])
 
   const userScores = useMemo(() => {
-    const email = String(user?.email || '').toLowerCase()
+    const email = String(user?.email || GUEST_HOME_EMAIL).toLowerCase()
     if (!email) return []
     return scores.filter((s) => String((s as any).createdByEmail || '').toLowerCase() === email)
   }, [scores, user?.email])
@@ -212,7 +213,7 @@ export default function Home() {
             <h2 style={{ margin: 0 }}>Dashboard</h2>
             <div className="small">Smaller stats up top, bigger score rows below.</div>
           </div>
-          {!user ? <div className="small">Please <Link to="/login"><strong>login</strong></Link> to view and track rounds.</div> : null}
+          {!user ? <div className="small">Showing homepage demo data. <Link to="/login"><strong>Log in</strong></Link> to view and track your own rounds.</div> : null}
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
@@ -262,7 +263,7 @@ export default function Home() {
 
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16, gap: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>Most Recent 10 Logged Events</h3>
-          {view === 'team' ? <Link className="small" to="/golf-logger">Log a team round</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">Open My Golf Scores</Link>}
+          {!user ? <Link className="small" to="/login">Log in to save rounds</Link> : view === 'team' ? <Link className="small" to="/golf-logger">Log a team round</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">Open My Golf Scores</Link>}
         </div>
 
         <div className="roundRowsStack" style={{ marginTop: 12 }}>

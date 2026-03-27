@@ -24,7 +24,7 @@ test('forgot password client points at the correct Better Auth endpoint', () => 
 })
 
 test('API client attaches the user timezone header for server-side date validation', () => {
-  const source = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/lib/request.ts', import.meta.url), 'utf8')
   assert.match(source, /X-User-Timezone/)
   assert.match(source, /resolvedOptions\(\)\.timeZone/)
 })
@@ -139,13 +139,77 @@ test('validation warnings stay hidden until save is attempted', () => {
   assert.match(golfLogger, /showCreateTeamValidation && createMissing.length/)
 })
 
-test('seed script provides rated solo rounds on real courses for handicap displays', () => {
-  const seed = fs.readFileSync(new URL('../server/scripts/seed-use-info-record.js', import.meta.url), 'utf8')
+test('homepage shows guest sample scores when no user is logged in', () => {
+  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const sample = fs.readFileSync(new URL('../src/lib/dashboardSample.ts', import.meta.url), 'utf8')
 
-  assert.match(seed, /const soloCoursePool = \[/)
+  assert.match(home, /setScores\(GUEST_HOME_SCORES\)/)
+  assert.match(home, /user\?\.email \|\| GUEST_HOME_EMAIL/)
+  assert.match(home, /Showing homepage demo data\./)
+  assert.match(sample, /Bonneville Golf Course/)
+  assert.match(sample, /Homie Hustlers/)
+})
+
+test('logging writes correlation-aware access, api, and frontend log files with request middleware support', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+  const gitignore = fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8')
+
+  assert.match(server, /app\.use\(requestCorrelationMiddleware\)/)
+  assert.match(server, /app\.use\(accessLogMiddleware\)/)
+  assert.match(server, /app\.post\('\/api\/client-logs'/)
+  assert.match(server, /X-Correlation-Id/)
+  assert.match(server, /X-Log-Source/)
+  assert.match(server, /logRouteError\('/)
+  assert.match(logger, /path\.resolve\(process\.cwd\(\), 'logging'\)/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'access\.log'\)/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
+  assert.match(logger, /req\.correlationId/)
+  assert.match(logger, /res\.setHeader\('X-Correlation-Id'/)
+  assert.match(logger, /res\.on\('finish'/)
+  assert.match(gitignore, /logging\/\*\.log/)
+  assert.match(gitignore, /!logging\/\.gitkeep/)
+})
+
+
+test('frontend request helpers attach correlation ids and emit frontend logging', () => {
+  const apiClient = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
+  const authApi = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
+  const requestHelper = fs.readFileSync(new URL('../src/lib/request.ts', import.meta.url), 'utf8')
+  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
+  const main = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8')
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+
+  assert.match(apiClient, /requestJson/)
+  assert.match(authApi, /requestJson/)
+  assert.match(requestHelper, /headers\.set\('X-Correlation-Id', correlationId\)/)
+  assert.match(requestHelper, /sendFrontendLog\(/)
+  assert.match(frontendLogger, /const FRONTEND_LOG_ENDPOINT = '\/api\/client-logs'/)
+  assert.match(frontendLogger, /window\.addEventListener\('error'/)
+  assert.match(frontendLogger, /window\.addEventListener\('unhandledrejection'/)
+  assert.match(main, /installGlobalFrontendLogging\(\)/)
+  assert.match(app, /type: 'page_view'/)
+})
+
+
+test('database initialization runs tracked app migrations for production-safe schema rollout', () => {
+  const db = fs.readFileSync(new URL('../server/db.js', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/runner.js', import.meta.url), 'utf8')
+
+  assert.match(db, /runAppMigrations\(db/)
+  assert.match(db, /runBetterAuthMigrations\(\)/)
+  assert.match(migrations, /CREATE TABLE IF NOT EXISTS \$\{MIGRATIONS_TABLE\}/)
+  assert.match(migrations, /execution_mode ENUM\('executed','detected_existing_schema'\)/)
+})
+
+test('homepage demo seeder can populate the sample rounds locally', () => {
+  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+  const seed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
+
+  assert.match(pkg, /"seed:homepage-demo"/)
+  assert.match(seed, /const DEMO_EMAIL = 'thegolfhomie@example\.com'/)
   assert.match(seed, /Bonneville Golf Course/)
-  assert.match(seed, /Wasatch Mountain \(Lake\)/)
-  assert.match(seed, /TPC Scottsdale/)
-  assert.match(seed, /const scrambleCoursePool = \[/)
-  assert.match(seed, /roundScore = clamp\(79 \+ \(i % 7\) \+ \(Math\.floor\(i \/ 10\) % 3\), 74, 92\)/)
+  assert.match(seed, /Homie Hustlers/)
+  assert.match(seed, /Seeded homepage demo data/)
 })

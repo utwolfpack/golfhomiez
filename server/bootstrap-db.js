@@ -1,10 +1,12 @@
 import 'dotenv/config'
+import { initDb, getPool } from './db.js'
 import { runAuthMigrations } from './auth-migrations.js'
-import { initDb } from './db.js'
+import { runAppMigrations } from './migrations/runner.js'
 
 async function main() {
-  await runAuthMigrations()
   await initDb()
+  await runAuthMigrations()
+  await runAppMigrations(getPool())
   console.log('MySQL database ready')
 }
 

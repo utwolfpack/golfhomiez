@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import NavBar from './components/NavBar'
 import { AuthProvider } from './context/AuthContext'
 import Home from './pages/Home'
@@ -12,10 +13,24 @@ import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import ProtectedRoute from './components/ProtectedRoute'
+import { createCorrelationId, sendFrontendLog } from './lib/frontend-logger'
 
-export default function App() {
+function AppRoutes() {
+  const location = useLocation()
+
+  useEffect(() => {
+    void sendFrontendLog({
+      correlationId: createCorrelationId(),
+      level: 'info',
+      type: 'page_view',
+      message: 'Route viewed',
+      route: `${location.pathname}${location.search}`,
+      status: 'viewed',
+    })
+  }, [location.pathname, location.search])
+
   return (
-    <AuthProvider>
+    <>
       <NavBar />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -30,6 +45,14 @@ export default function App() {
         <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
     </AuthProvider>
   )
 }
