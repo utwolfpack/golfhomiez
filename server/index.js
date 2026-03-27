@@ -10,6 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
+import { accessLogMiddleware, getLogPaths, logError, logInfo, requestContext } from './lib/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -35,9 +36,17 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone'],
 }))
 app.options('*', cors())
+app.use(accessLogMiddleware)
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
 
+function logRouteError(message, req, error, extra = {}) {
+  logError(message, {
+    ...requestContext(req),
+    ...extra,
+    error,
+  })
+}
 
 async function authMiddleware(req, res, next) {
   try {
@@ -50,7 +59,7 @@ async function authMiddleware(req, res, next) {
     }
     next()
   } catch (error) {
-    console.error('Auth middleware error:', error)
+    logRouteError('Auth middleware error', req, error)
     res.status(500).json({ message: 'Authentication failed' })
   }
 }
@@ -83,7 +92,7 @@ app.get('/api/teams', authMiddleware, async (req, res) => {
     const teams = await storage.listTeams()
     res.json(teams)
   } catch (error) {
-    console.error('List teams error:', error)
+    logRouteError('List teams error', req, error)
     res.status(500).json({ message: 'Could not load teams' })
   }
 })
@@ -118,7 +127,7 @@ app.post('/api/teams', authMiddleware, async (req, res) => {
     const team = await storage.createTeam({ name: trimmed, members: normalizedMembers })
     res.status(201).json(team)
   } catch (error) {
-    console.error('Create team error:', error)
+    logRouteError('Create team error', req, error)
     res.status(500).json({ message: 'Could not create team' })
   }
 })
@@ -163,7 +172,7 @@ app.put('/api/teams/:id', authMiddleware, async (req, res) => {
     const updated = await storage.updateTeam(id, { name: trimmed, members: normalizedMembers })
     res.json(updated)
   } catch (error) {
-    console.error('Update team error:', error)
+    logRouteError('Update team error', req, error)
     res.status(500).json({ message: 'Could not update team' })
   }
 })
@@ -173,7 +182,7 @@ app.get('/api/scores', authMiddleware, async (req, res) => {
     const scores = await storage.listScores()
     res.json(scores)
   } catch (error) {
-    console.error('List scores error:', error)
+    logRouteError('List scores error', req, error)
     res.status(500).json({ message: 'Could not load scores' })
   }
 })
@@ -244,7 +253,7 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
     })
     res.status(201).json(entry)
   } catch (error) {
-    console.error('Create score error:', error)
+    logRouteError('Create score error', req, error)
     res.status(500).json({ message: 'Could not create score' })
   }
 })
@@ -261,7 +270,7 @@ app.delete('/api/scores/:id', authMiddleware, async (req, res) => {
     await storage.deleteScoreById(id)
     res.json({ ok: true })
   } catch (error) {
-    console.error('Delete score error:', error)
+    logRouteError('Delete score error', req, error)
     res.status(500).json({ message: 'Could not delete score' })
   }
 })
@@ -277,14 +286,15 @@ if (fs.existsSync(distDir)) {
 async function bootstrap() {
   await storage.initStorage()
   const backend = await storage.getBackendName()
-  console.log(`Storage backend: ${backend}`)
+  const logPaths = getLogPaths()
+  logInfo('Storage backend initialized', { backend, ...logPaths })
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on port ${PORT}`)
+    logInfo('Server listening', { port: PORT, ...logPaths })
   })
 }
 
 bootstrap().catch((error) => {
-  console.error('Startup failed:', error)
+  logError('Startup failed', { error })
   process.exit(1)
 })

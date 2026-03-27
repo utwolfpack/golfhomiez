@@ -1,5 +1,6 @@
 import net from 'net'
 import tls from 'tls'
+import { logError, logInfo } from './lib/logger.js'
 
 export function resolveMailConfig(env = process.env) {
   const brevoApiKey = String(env.BREVO_API_KEY || '').trim()
@@ -159,7 +160,7 @@ async function sendViaSmtp(config, { to, subject, text, html }) {
     socket.end()
     return { accepted: [to], transport: 'smtp' }
   } catch (error) {
-    console.error('[mailer] SMTP send failed:', error)
+    logError('SMTP send failed', { error, transport: 'smtp' })
     socket.destroy()
     throw error
   }
@@ -196,9 +197,16 @@ async function sendViaBrevoApi(config, { to, subject, text, html }) {
 export async function sendMail(message) {
   const config = resolveMailConfig(process.env)
 
-  if (config.mode === 'brevo-api') return sendViaBrevoApi(config, message)
-  if (config.mode === 'smtp') return sendViaSmtp(config, message)
+  if (config.mode === 'brevo-api') {
+    logInfo('Sending mail through Brevo API', { to: message.to, subject: message.subject })
+    return sendViaBrevoApi(config, message)
+  }
+  if (config.mode === 'smtp') {
+    logInfo('Sending mail through SMTP', { to: message.to, subject: message.subject, host: config.host, port: config.port })
+    return sendViaSmtp(config, message)
+  }
 
+  logInfo('Using console mail fallback', { to: message.to, subject: message.subject })
   console.log(`[mail:dev-fallback] to=${message.to} subject=${message.subject}\n${message.text}\n`)
   return { accepted: [message.to], fallback: true, transport: 'console' }
 }
