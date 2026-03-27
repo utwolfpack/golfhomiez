@@ -4,6 +4,82 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Golf Homiez! Tracker</title>
+    <script>
+      (function () {
+        var endpoint = '/api/client-log'
+        window.__golfhomiezLogQueue = window.__golfhomiezLogQueue || []
+
+        function send(payload) {
+          window.__golfhomiezLogQueue.push(payload)
+          var body = JSON.stringify(payload)
+          try {
+            if (navigator.sendBeacon) {
+              var ok = navigator.sendBeacon(endpoint, new Blob([body], { type: 'application/json' }))
+              if (ok) return
+            }
+          } catch (err) {}
+          try {
+            fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              keepalive: true,
+              body: body,
+            })
+          } catch (err) {}
+        }
+
+        function baseDetails(extra) {
+          return Object.assign({
+            level: 'error',
+            source: 'client-bootstrap',
+            href: window.location.href,
+            userAgent: navigator.userAgent,
+            readyState: document.readyState,
+          }, extra || {})
+        }
+
+        window.addEventListener('error', function (event) {
+          send({
+            timestamp: new Date().toISOString(),
+            type: 'bootstrap_window_error',
+            message: event.message || 'Unhandled browser bootstrap error',
+            details: baseDetails({ filename: event.filename, lineno: event.lineno, colno: event.colno }),
+            level: 'error',
+          })
+        })
+
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event && event.reason
+          send({
+            timestamp: new Date().toISOString(),
+            type: 'bootstrap_unhandled_rejection',
+            message: 'Unhandled promise rejection during bootstrap',
+            details: baseDetails({ reason: reason && reason.message ? reason.message : String(reason) }),
+            level: 'error',
+          })
+        })
+
+        window.addEventListener('load', function () {
+          window.setTimeout(function () {
+            var root = document.getElementById('root')
+            var hasVisibleContent = !!(root && (root.childElementCount > 0 || String(root.textContent || '').trim()))
+            if (!hasVisibleContent) {
+              send({
+                timestamp: new Date().toISOString(),
+                type: 'bootstrap_blank_screen_probe',
+                message: 'Root container is still blank after page load',
+                details: baseDetails({
+                  rootChildElementCount: root ? root.childElementCount : null,
+                  rootTextLength: root && root.textContent ? root.textContent.trim().length : 0,
+                }),
+                level: 'error',
+              })
+            }
+          }, 5000)
+        })
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

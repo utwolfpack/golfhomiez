@@ -10,7 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, getLogPaths, logError, logInfo, requestContext } from './lib/logger.js'
+import { accessLogMiddleware, getLogPaths, logClientDiagnostic, logError, logInfo, requestContext } from './lib/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -38,7 +38,7 @@ app.use(cors({
 app.options('*', cors())
 app.use(accessLogMiddleware)
 app.all('/api/auth/*', toNodeHandler(auth))
-app.use(express.json())
+app.use(express.json({ limit: '256kb' }))
 
 function logRouteError(message, req, error, extra = {}) {
   logError(message, {
@@ -56,7 +56,15 @@ async function authMiddleware(req, res, next) {
       id: session.user.id,
       email: session.user.email,
       name: session.user.name,
+      dbUserId: session.user.id,
     }
+
+    if (typeof storage.ensureUserRecord === 'function') {
+      const appUser = await storage.ensureUserRecord(req.user)
+      if (appUser?.id) req.user.dbUserId = appUser.id
+      if (appUser?.email) req.user.email = appUser.email
+    }
+
     next()
   } catch (error) {
     logRouteError('Auth middleware error', req, error)
@@ -85,6 +93,29 @@ app.get('/api/auth-debug/latest-reset', (req, res) => {
   if (!email) return res.status(400).json({ message: 'email query parameter required' })
   const latest = getLatestPasswordReset(email)
   res.json(latest || null)
+})
+
+
+app.post('/api/client-log', (req, res) => {
+  try {
+    const body = req.body || {}
+    const type = String(body.type || 'client_event')
+    const message = String(body.message || 'Client diagnostic event')
+    const level = body.level === 'error' ? 'error' : 'info'
+    logClientDiagnostic(message, {
+      level,
+      type,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] || null,
+      requestPath: req.originalUrl || req.url,
+      clientTimestamp: body.timestamp || null,
+      details: body.details || {},
+    })
+    res.status(204).end()
+  } catch (error) {
+    logRouteError('Client log ingestion error', req, error)
+    res.status(500).json({ message: 'Could not record client log' })
+  }
 })
 
 app.get('/api/teams', authMiddleware, async (req, res) => {
@@ -207,7 +238,7 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
         course,
         roundScore,
         holes: Array.isArray(holes) ? holes : null,
-        createdByUserId: req.user.id,
+        createdByUserId: req.user.dbUserId,
         createdByEmail: req.user.email,
       })
       return res.status(201).json(entry)
@@ -248,12 +279,12 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
       money,
       won,
       holes: Array.isArray(holes) ? holes : null,
-      createdByUserId: req.user.id,
+      createdByUserId: req.user.dbUserId,
       createdByEmail: req.user.email,
     })
     res.status(201).json(entry)
   } catch (error) {
-    logRouteError('Create score error', req, error)
+    logRouteError('Create score error', req, error, { mode: req.body?.mode, createdByUserId: req.user?.dbUserId, createdByEmail: req.user?.email })
     res.status(500).json({ message: 'Could not create score' })
   }
 })
@@ -287,10 +318,10 @@ async function bootstrap() {
   await storage.initStorage()
   const backend = await storage.getBackendName()
   const logPaths = getLogPaths()
-  logInfo('Storage backend initialized', { backend, ...logPaths })
+  logInfo('Storage backend initialized', { backend, ...logPaths, clientOrigin })
 
   app.listen(PORT, '0.0.0.0', () => {
-    logInfo('Server listening', { port: PORT, ...logPaths })
+    logInfo('Server listening', { port: PORT, backend, ...logPaths })
   })
 }
 

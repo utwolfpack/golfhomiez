@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+// import fs from 'node:fs'
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
+import path from 'node:path'
 
 import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
 import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
@@ -139,39 +142,76 @@ test('validation warnings stay hidden until save is attempted', () => {
   assert.match(golfLogger, /showCreateTeamValidation && createMissing.length/)
 })
 
-test('homepage shows guest sample scores when no user is logged in', () => {
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
-  const sample = fs.readFileSync(new URL('../src/lib/dashboardSample.ts', import.meta.url), 'utf8')
+test('seed script provides rated solo rounds on real courses for handicap displays', async () => {
+  const seedScript = await fsp.readFile(
+    path.join(process.cwd(), 'server', 'scripts', 'seed-use-info-record.js'),
+    'utf8'
+  )
 
-  assert.match(home, /setScores\(GUEST_HOME_SCORES\)/)
-  assert.match(home, /user\?\.email \|\| GUEST_HOME_EMAIL/)
-  assert.match(home, /Showing homepage demo data\./)
-  assert.match(sample, /Bonneville Golf Course/)
-  assert.match(sample, /Homie Hustlers/)
+  assert.match(seedScript, /const soloCourse(?:Pool|s) = \[/)
+  assert.match(seedScript, /Blue Mesa Golf Club/)
+  assert.match(seedScript, /Wasatch Greens/)
 })
 
-test('logging writes to root access and error log files with request middleware support', () => {
-  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+test('auth requests sync the app user record before protected writes', () => {
+  const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(serverIndex, /typeof storage\.ensureUserRecord === 'function'/)
+  assert.match(serverIndex, /const appUser = await storage\.ensureUserRecord\(req\.user\)/)
+  assert.match(serverIndex, /req\.user\.dbUserId = appUser\.id/)
+  assert.match(serverIndex, /createdByUserId: req\.user\.dbUserId/)
+})
+
+test('mysql storage resolves an app user record before inserting scores', () => {
+  const mysqlStorage = fs.readFileSync(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
+
+  assert.match(mysqlStorage, /export async function ensureUserRecord\(user\)/)
+  assert.match(mysqlStorage, /const appUser = await ensureAppUserRecord\(/)
+  assert.match(mysqlStorage, /resolvedUserId = appUser\.id/)
+  assert.match(mysqlStorage, /resolvedEmail = appUser\.email/)
+})
+
+test('user sync migration assets are present for production backfill', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const helper = fs.readFileSync(new URL('../server/lib/app-user-sync.js', import.meta.url), 'utf8')
+  const migration = fs.readFileSync(new URL('../migration_scripts/20260327_001_app_users_auth_sync.sql', import.meta.url), 'utf8')
+  const backfill = fs.readFileSync(new URL('../server/scripts/backfill-app-users.js', import.meta.url), 'utf8')
+
+  assert.equal(pkg.scripts['migrate:user-sync'], 'node server/scripts/apply-user-sync-migration.js')
+  assert.equal(pkg.scripts['backfill:app-users'], 'node server/scripts/backfill-app-users.js')
+  assert.match(helper, /auth_user_id/)
+  assert.match(helper, /UPDATE scores/)
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS users/)
+  assert.match(backfill, /backfillAppUsers/)
+})
+
+
+test('client-side diagnostic logging is wired for mobile blank-screen debugging', () => {
+  const indexHtml = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+  const main = fs.readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8')
+  const clientLogger = fs.readFileSync(new URL('../src/lib/clientLogger.ts', import.meta.url), 'utf8')
+  const boundary = fs.readFileSync(new URL('../src/components/AppErrorBoundary.tsx', import.meta.url), 'utf8')
+  const apiClient = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
+
+  assert.match(indexHtml, /bootstrap_blank_screen_probe/)
+  assert.match(indexHtml, /navigator\.sendBeacon/)
+  assert.match(main, /initClientLogging\(\)/)
+  assert.match(main, /client_bootstrap_start/)
+  assert.match(clientLogger, /window\.addEventListener\('error'/)
+  assert.match(clientLogger, /blank_screen_probe/)
+  assert.match(apiClient, /api_network_error/)
+  assert.match(boundary, /react_render_error/)
+})
+
+test('server accepts client diagnostic logs and writes to dedicated logging files', () => {
+  const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
   const gitignore = fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8')
 
-  assert.match(server, /app\.use\(accessLogMiddleware\)/)
-  assert.match(server, /logRouteError\('/)
-  assert.match(logger, /path\.resolve\(process\.cwd\(\), 'logging'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'access\.log'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'error\.log'\)/)
-  assert.match(logger, /res\.on\('finish'/)
+  assert.match(serverIndex, /app\.post\('\/api\/client-log'/)
+  assert.match(serverIndex, /logClientDiagnostic\(/)
+  assert.match(logger, /ACCESS_LOG_PATH/)
+  assert.match(logger, /ERROR_LOG_PATH/)
+  assert.match(logger, /accessLogMiddleware/)
   assert.match(gitignore, /logging\/\*\.log/)
-  assert.match(gitignore, /!logging\/\.gitkeep/)
-})
-
-test('homepage demo seeder can populate the sample rounds locally', () => {
-  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-  const seed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
-
-  assert.match(pkg, /"seed:homepage-demo"/)
-  assert.match(seed, /const DEMO_EMAIL = 'thegolfhomie@example\.com'/)
-  assert.match(seed, /Bonneville Golf Course/)
-  assert.match(seed, /Homie Hustlers/)
-  assert.match(seed, /Seeded homepage demo data/)
 })
