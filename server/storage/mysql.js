@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { initDb, getPool } from '../db.js'
+import { runAuthMigrations } from '../auth-migrations.js'
+import { runAppMigrations } from '../migrations/runner.js'
 
 function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase()
@@ -46,6 +48,8 @@ function mapScore(row) {
 
 export async function initStorage() {
   await initDb()
+  await runAuthMigrations()
+  await runAppMigrations(getPool())
 }
 
 export async function getBackendName() {

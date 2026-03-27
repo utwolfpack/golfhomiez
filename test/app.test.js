@@ -149,3 +149,46 @@ test('seed script provides rated solo rounds on real courses for handicap displa
   assert.match(seed, /const scrambleCoursePool = \[/)
   assert.match(seed, /roundScore = clamp\(79 \+ \(i % 7\) \+ \(Math\.floor\(i \/ 10\) % 3\), 74, 92\)/)
 })
+
+test('build pipeline runs migrations before bundling the frontend', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+
+  assert.equal(pkg.scripts.migrate, 'node server/run-migrations.js')
+  assert.match(pkg.scripts.build, /^npm run migrate && vite build$/)
+})
+
+test('migration runner skips ahead-of-app databases and hashes migration sql deterministically', async () => {
+  const { checksumSql, shouldSkipAheadDatabase } = await import('../server/migrations/runner.js')
+
+  assert.equal(shouldSkipAheadDatabase(['20260326_003'], ['20260326_001', '20260326_002']), true)
+  assert.equal(shouldSkipAheadDatabase(['20260326_001'], ['20260326_001', '20260326_002']), false)
+  assert.equal(checksumSql('SELECT 1;'), checksumSql('SELECT 1;'))
+  assert.notEqual(checksumSql('SELECT 1;'), checksumSql('SELECT 2;'))
+})
+
+test('app migration catalog points at versioned sql scripts and preserves ordering', async () => {
+  const { APP_MIGRATIONS, sortMigrations } = await import('../server/migrations/index.js')
+
+  assert.deepEqual(
+    APP_MIGRATIONS.map((migration) => migration.filename),
+    [
+      '20260326_001_baseline_app_schema.sql',
+      '20260326_002_align_scores_table.sql',
+    ]
+  )
+
+  const sorted = sortMigrations([
+    { version: '20260326_010' },
+    { version: '20260326_002' },
+    { version: '20260326_001' },
+  ])
+  assert.deepEqual(sorted.map((migration) => migration.version), ['20260326_001', '20260326_002', '20260326_010'])
+})
+
+test('startup storage initialization applies auth and app migrations before serving mysql data', () => {
+  const source = fs.readFileSync(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
+
+  assert.match(source, /await runAuthMigrations\(\)/)
+  assert.match(source, /await runAppMigrations\(getPool\(\)\)/)
+})
+
