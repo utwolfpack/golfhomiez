@@ -29,16 +29,6 @@ test('API client attaches the user timezone header for server-side date validati
   assert.match(source, /resolvedOptions\(\)\.timeZone/)
 })
 
-
-
-test('registration location input no longer uses browser geolocation', () => {
-  const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
-
-  assert.doesNotMatch(locationInput, /navigator\.geolocation/)
-  assert.doesNotMatch(locationInput, /Use my location/)
-  assert.match(locationInput, /Registration no longer detects your current location automatically\./)
-})
-
 test('create-team normalization always makes the signed-in user the first member', () => {
   const user = { id: 'user-1', email: 'captain@example.com', name: 'Casey Captain' }
   const members = [
@@ -184,4 +174,37 @@ test('homepage demo seeder can populate the sample rounds locally', () => {
   assert.match(seed, /Bonneville Golf Course/)
   assert.match(seed, /Homie Hustlers/)
   assert.match(seed, /Seeded homepage demo data/)
+})
+
+test('safe mobile diagnostics use pixel beacons instead of recursive preboot network logging', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+
+  assert.match(html, /\/diag\/pixel\.gif\?cid=/)
+  assert.doesNotMatch(html, /api\/client-logs/)
+  assert.doesNotMatch(html, /sendBeacon/)
+  assert.match(frontendLogger, /new Image\(1, 1\)/)
+  assert.doesNotMatch(frontendLogger, /window\.fetch\s*=/)
+  assert.match(server, /app\.get\('\/diag\/pixel\.gif'/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
+})
+
+
+test('register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle', () => {
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /lazy\(\(\) => import\('\.\/pages\/Register'\)\)/)
+  assert.match(app, /Suspense fallback=/)
+})
+
+test('location resources load on demand instead of on initial render', () => {
+  const locations = fs.readFileSync(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
+  const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
+
+  assert.match(locations, /import\('country-state-city'\)/)
+  assert.doesNotMatch(locations, /import \{[^}]*City[^}]*\} from 'country-state-city'/)
+  assert.doesNotMatch(input, /didAutoDetect/)
+  assert.match(input, /searchLocations\(query, 8\)\s*\.then/)
+  assert.match(input, /await getNearestLocation\(position\.coords\.latitude, position\.coords\.longitude\)/)
 })

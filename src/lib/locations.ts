@@ -1,10 +1,18 @@
-import { City, State } from 'country-state-city'
-import type { ICity } from 'country-state-city'
+import type { ICity } from "country-state-city"
 import type { SavedLocation } from './location-store'
 
 type LocationOption = SavedLocation & { key: string }
+type CountryStateCityModule = typeof import('country-state-city')
 
+let cscModulePromise: Promise<CountryStateCityModule> | null = null
 let usLocationsCache: LocationOption[] | null = null
+
+function getCountryStateCityModule() {
+  if (!cscModulePromise) {
+    cscModulePromise = import('country-state-city')
+  }
+  return cscModulePromise
+}
 
 function normalize(value: string) {
   return String(value || '')
@@ -17,42 +25,49 @@ function buildLabel(city: string, stateName: string, stateCode: string) {
   return `${city}, ${stateCode} · ${stateName}`
 }
 
-function toLocation(city: ICity): LocationOption | null {
+function toLocation(city: ICity, stateName: string): LocationOption | null {
   if (city.countryCode !== 'US' || !city.stateCode || !city.name) return null
-  const state = State.getStateByCodeAndCountry(city.stateCode, 'US')
   const latitude = Number(city.latitude)
   const longitude = Number(city.longitude)
-  if (!state || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
+  if (!stateName || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
 
   return {
     key: `${city.name}|${city.stateCode}|${latitude}|${longitude}`,
     city: city.name,
     stateCode: city.stateCode,
-    stateName: state.name,
-    label: buildLabel(city.name, state.name, city.stateCode),
+    stateName,
+    label: buildLabel(city.name, stateName, city.stateCode),
     latitude,
     longitude,
   }
 }
 
-export function getUSLocations(): LocationOption[] {
+export async function getUSLocations(): Promise<LocationOption[]> {
   if (usLocationsCache) return usLocationsCache
 
+  const { City, State } = await getCountryStateCityModule()
   const seen = new Set<string>()
+  const statesByCode = new Map(
+    State.getStatesOfCountry('US')
+      .filter((state) => state.isoCode && state.name)
+      .map((state) => [state.isoCode, state.name]),
+  )
+
   usLocationsCache = City.getCitiesOfCountry('US')
-    .map(toLocation)
+    .map((city) => toLocation(city, statesByCode.get(city.stateCode) || ''))
     .filter((item): item is LocationOption => Boolean(item))
     .filter((item) => {
       if (seen.has(item.key)) return false
       seen.add(item.key)
       return true
     })
+
   return usLocationsCache
 }
 
-export function searchLocations(query: string, limit = 8): LocationOption[] {
+export async function searchLocations(query: string, limit = 8): Promise<LocationOption[]> {
   const q = normalize(query).trim()
-  const all = getUSLocations()
+  const all = await getUSLocations()
   if (!q) return all.slice(0, limit)
 
   const scored = all
@@ -89,8 +104,8 @@ function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) 
   return R * c
 }
 
-export function getNearestLocation(latitude: number, longitude: number): LocationOption | null {
-  const all = getUSLocations()
+export async function getNearestLocation(latitude: number, longitude: number): Promise<LocationOption | null> {
+  const all = await getUSLocations()
   if (!all.length || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
 
   let best: LocationOption | null = null
