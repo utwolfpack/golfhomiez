@@ -1,10 +1,9 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import NavBar from './components/NavBar'
 import { AuthProvider } from './context/AuthContext'
 import Home from './pages/Home'
 import Login from './pages/Login'
-import Register from './pages/Register'
 import GolfLogger from './pages/GolfLogger'
 import SoloLogger from './pages/SoloLogger'
 import Directions from './pages/Directions'
@@ -14,6 +13,8 @@ import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import ProtectedRoute from './components/ProtectedRoute'
 import { emitFrontendStage } from './lib/frontend-logger'
+
+const Register = lazy(() => import('./pages/Register'))
 
 function RouteDiagnostics() {
   const location = useLocation()
@@ -41,7 +42,14 @@ export default function App() {
         <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
         <Route path="/directions" element={<Directions />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        <Route
+          path="/register"
+          element={(
+            <Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading registration…</div></div>}>
+              <Register />
+            </Suspense>
+          )}
+        />
         <Route path="/request-password-reset" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
