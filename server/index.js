@@ -11,6 +11,7 @@ import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
+import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -62,6 +63,48 @@ app.get('/diag/pixel.gif', (req, res) => {
   res.setHeader('Expires', '0')
   res.send(TRANSPARENT_GIF)
 })
+
+app.get('/api/locations/search', (req, res) => {
+  try {
+    const query = String(req.query.q || '').trim()
+    const limit = Math.min(Math.max(Number(req.query.limit) || 8, 1), 20)
+    const results = searchServerLocations(query, limit)
+    logApi('location_search_completed', {
+      ...requestContext(req),
+      query,
+      limit,
+      resultCount: results.length,
+    })
+    res.json(results)
+  } catch (error) {
+    logRouteError('Location search error', req, error)
+    res.status(500).json({ message: 'Location suggestions are temporarily unavailable.' })
+  }
+})
+
+app.get('/api/locations/nearest', (req, res) => {
+  try {
+    const latitude = Number(req.query.lat)
+    const longitude = Number(req.query.lng)
+    if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+      return res.status(400).json({ message: 'lat and lng query parameters are required' })
+    }
+
+    const nearest = getNearestServerLocation(latitude, longitude)
+    logApi('location_nearest_completed', {
+      ...requestContext(req),
+      latitude,
+      longitude,
+      found: Boolean(nearest),
+      selectedLabel: nearest?.label || null,
+    })
+    res.json(nearest || null)
+  } catch (error) {
+    logRouteError('Nearest location error', req, error)
+    res.status(500).json({ message: 'Location lookup failed.' })
+  }
+})
+
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
 
