@@ -1,0 +1,109 @@
+diff --git a/server/index.js b/server/index.js
+index 93b958d..c325041 100644
+--- a/server/index.js
++++ b/server/index.js
+@@ -17,6 +17,7 @@ const __dirname = path.dirname(__filename)
+ 
+ const app = express()
+ const PORT = Number(process.env.PORT || 5001)
++let storageReady = false
+ const clientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+ const allowedOrigins = new Set([
+   clientOrigin,
+@@ -96,10 +97,15 @@ async function isUserOnTeam(teamName, userEmail) {
+ }
+ 
+ app.get('/api/health', async (req, res) => {
+-  const backend = await storage.getBackendName()
+-  res.json({ ok: true, storage: backend })
++  const backend = await storage.getBackendName().catch(() => 'unavailable')
++  res.status(storageReady ? 200 : 503).json({ ok: storageReady, storage: backend })
+ })
+ 
++function requireStorage(req, res, next) {
++  if (storageReady) return next()
++  return res.status(503).json({ message: 'Service temporarily unavailable' })
++}
++
+ app.get('/api/auth-debug/latest-reset', (req, res) => {
+   const email = String(req.query.email || '').trim()
+   if (!email) return res.status(400).json({ message: 'email query parameter required' })
+@@ -107,7 +113,7 @@ app.get('/api/auth-debug/latest-reset', (req, res) => {
+   res.json(latest || null)
+ })
+ 
+-app.get('/api/teams', authMiddleware, async (req, res) => {
++app.get('/api/teams', requireStorage, authMiddleware, async (req, res) => {
+   try {
+     const teams = await storage.listTeams()
+     res.json(teams)
+@@ -117,7 +123,7 @@ app.get('/api/teams', authMiddleware, async (req, res) => {
+   }
+ })
+ 
+-app.post('/api/teams', authMiddleware, async (req, res) => {
++app.post('/api/teams', requireStorage, authMiddleware, async (req, res) => {
+   try {
+     const { name, members } = req.body || {}
+     const trimmed = String(name || '').trim()
+@@ -152,7 +158,7 @@ app.post('/api/teams', authMiddleware, async (req, res) => {
+   }
+ })
+ 
+-app.put('/api/teams/:id', authMiddleware, async (req, res) => {
++app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
+   try {
+     const id = String(req.params.id || '').trim()
+     if (!id) return res.status(400).json({ message: 'Team id required' })
+@@ -197,7 +203,7 @@ app.put('/api/teams/:id', authMiddleware, async (req, res) => {
+   }
+ })
+ 
+-app.get('/api/scores', authMiddleware, async (req, res) => {
++app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
+   try {
+     const scores = await storage.listScores()
+     res.json(scores)
+@@ -207,7 +213,7 @@ app.get('/api/scores', authMiddleware, async (req, res) => {
+   }
+ })
+ 
+-app.post('/api/scores', authMiddleware, async (req, res) => {
++app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
+   try {
+     const body = req.body || {}
+     const mode = body.mode === 'solo' ? 'solo' : 'team'
+@@ -278,7 +284,7 @@ app.post('/api/scores', authMiddleware, async (req, res) => {
+   }
+ })
+ 
+-app.delete('/api/scores/:id', authMiddleware, async (req, res) => {
++app.delete('/api/scores/:id', requireStorage, authMiddleware, async (req, res) => {
+   try {
+     const id = String(req.params.id || '').trim()
+     const entry = await storage.getScoreById(id)
+@@ -304,13 +310,20 @@ if (fs.existsSync(distDir)) {
+ }
+ 
+ async function bootstrap() {
+-  await storage.initStorage()
+-  const backend = await storage.getBackendName()
+   const logPaths = getLogPaths()
+-  logInfo('Storage backend initialized', { backend, ...logPaths })
++
++  try {
++    await storage.initStorage()
++    storageReady = true
++    const backend = await storage.getBackendName()
++    logInfo('Storage backend initialized', { backend, storageReady, ...logPaths })
++  } catch (error) {
++    storageReady = false
++    logError('Storage initialization failed; starting in degraded mode', { error, storageReady, ...logPaths })
++  }
+ 
+   app.listen(PORT, '0.0.0.0', () => {
+-    logInfo('Server listening', { port: PORT, ...logPaths })
++    logInfo('Server listening', { port: PORT, storageReady, ...logPaths })
+   })
+ }
+ 
