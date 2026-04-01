@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import crypto from 'crypto'
+import { randomUUID } from 'crypto'
 
 const LOG_DIR = path.resolve(process.cwd(), 'logging')
 const ACCESS_LOG_PATH = path.join(LOG_DIR, 'access.log')
@@ -64,15 +64,14 @@ export function getLogPaths() {
   }
 }
 
-function createCorrelationId() {
-  return crypto.randomUUID()
+export function getCorrelationId(req) {
+  const incoming = String(req.headers['x-correlation-id'] || req.query?.cid || '').trim()
+  return incoming || randomUUID()
 }
 
-export function requestCorrelationMiddleware(req, res, next) {
-  const incoming = String(req.headers['x-correlation-id'] || '').trim()
-  const correlationId = incoming || createCorrelationId()
-  req.correlationId = correlationId
-  res.setHeader('X-Correlation-Id', correlationId)
+export function correlationIdMiddleware(req, res, next) {
+  req.correlationId = getCorrelationId(req)
+  res.setHeader('X-Correlation-Id', req.correlationId)
   next()
 }
 
@@ -90,7 +89,6 @@ export function logApi(message, details = {}) {
     message,
     ...safeValue(details),
   }
-  if (details.error) payload.error = serializeError(details.error)
   writeLine(apiStream, payload)
 }
 
@@ -134,6 +132,7 @@ export function requestContext(req) {
     path: req.originalUrl || req.url,
     ip: req.ip,
     userAgent: req.headers['user-agent'] || null,
+    referer: req.headers.referer || null,
     user: req.user ? { id: req.user.id, email: req.user.email } : null,
     params: req.params,
     query: req.query,
@@ -143,21 +142,9 @@ export function requestContext(req) {
 
 export function accessLogMiddleware(req, res, next) {
   const startedAt = process.hrtime.bigint()
-  const shouldWriteApiLog = req.path.startsWith('/api/') || req.path.startsWith('/diag/')
-
-  if (shouldWriteApiLog) {
-    logApi('api_request_started', {
-      correlationId: req.correlationId || null,
-      method: req.method,
-      path: req.originalUrl || req.url,
-      ip: req.ip,
-      userAgent: req.headers['user-agent'] || null,
-    })
-  }
-
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
-    const summary = {
+    logAccess({
       type: 'http_access',
       correlationId: req.correlationId || null,
       method: req.method,
@@ -168,14 +155,7 @@ export function accessLogMiddleware(req, res, next) {
       userAgent: req.headers['user-agent'] || null,
       userId: req.user?.id || null,
       userEmail: req.user?.email || null,
-    }
-
-    logAccess(summary)
-
-    if (shouldWriteApiLog) {
-      logApi('api_request_completed', summary)
-    }
+    })
   })
-
   next()
 }

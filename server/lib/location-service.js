@@ -1,12 +1,6 @@
-let cscModulePromise = null
-let usLocationsCache = null
+import { City, State } from 'country-state-city'
 
-function getCountryStateCityModule() {
-  if (!cscModulePromise) {
-    cscModulePromise = import('country-state-city')
-  }
-  return cscModulePromise
-}
+let usLocationsCache = null
 
 function normalize(value) {
   return String(value || '')
@@ -20,7 +14,7 @@ function buildLabel(city, stateName, stateCode) {
 }
 
 function toLocation(city, stateName) {
-  if (city.countryCode !== 'US' || !city.stateCode || !city.name) return null
+  if (!city || city.countryCode !== 'US' || !city.stateCode || !city.name) return null
   const latitude = Number(city.latitude)
   const longitude = Number(city.longitude)
   if (!stateName || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
@@ -36,34 +30,33 @@ function toLocation(city, stateName) {
   }
 }
 
-async function getUSLocations() {
+export function getUSLocations() {
   if (usLocationsCache) return usLocationsCache
 
-  const { City, State } = await getCountryStateCityModule()
+  const seen = new Set()
   const statesByCode = new Map(
     State.getStatesOfCountry('US')
       .filter((state) => state.isoCode && state.name)
       .map((state) => [state.isoCode, state.name]),
   )
-  const seen = new Set()
 
   usLocationsCache = City.getCitiesOfCountry('US')
     .map((city) => toLocation(city, statesByCode.get(city.stateCode) || ''))
     .filter(Boolean)
-    .filter((location) => {
-      if (seen.has(location.key)) return false
-      seen.add(location.key)
+    .filter((item) => {
+      if (seen.has(item.key)) return false
+      seen.add(item.key)
       return true
     })
 
   return usLocationsCache
 }
 
-export async function searchLocations(query, limit = 8) {
+export function searchUSLocations(query, limit = 8) {
   const q = normalize(query).trim()
-  if (!q) return []
+  const all = getUSLocations()
+  if (!q) return all.slice(0, limit)
 
-  const all = await getUSLocations()
   const scored = all
     .map((location) => {
       const city = normalize(location.city)
@@ -98,8 +91,8 @@ function haversineMiles(lat1, lon1, lat2, lon2) {
   return R * c
 }
 
-export async function getNearestLocation(latitude, longitude) {
-  const all = await getUSLocations()
+export function findNearestUSLocation(latitude, longitude) {
+  const all = getUSLocations()
   if (!all.length || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
 
   let best = null
