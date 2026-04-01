@@ -8,6 +8,7 @@ import { createTeam, fetchTeams } from '../lib/teams'
 import { getUserTodayISO } from '../lib/date'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
+import UseMyLocationButton from '../components/UseMyLocationButton'
 
 const NUM_HOLES = 18
 type DraftMember = { firstName: string; lastName: string; email: string }
@@ -44,6 +45,7 @@ function GolfLoggerInner() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [locationMessage, setLocationMessage] = useState<string | null>(null)
   const [showRoundValidation, setShowRoundValidation] = useState(false)
   const [showCreateTeamValidation, setShowCreateTeamValidation] = useState(false)
 
@@ -247,6 +249,18 @@ function GolfLoggerInner() {
                 <option key={c} value={c} />
               ))}
             </datalist>
+            <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <UseMyLocationButton
+                onResolved={(location) => {
+                  setStateAbbr(location.stateCode)
+                  const nextCourses = getCoursesForState(location.stateCode)
+                  setCourse(nextCourses[0] || '')
+                  setLocationMessage(`Location set to ${location.label}.`)
+                }}
+                onStatus={setLocationMessage}
+              />
+              {locationMessage ? <span className="small">{locationMessage}</span> : null}
+            </div>
           </div>
           <div>
             <label className="label">Your team</label>

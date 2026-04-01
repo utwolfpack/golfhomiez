@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { randomUUID } from 'crypto'
+import crypto from 'crypto'
 
 const LOG_DIR = path.resolve(process.cwd(), 'logging')
 const ACCESS_LOG_PATH = path.join(LOG_DIR, 'access.log')
@@ -53,6 +53,33 @@ function writeLine(stream, payload) {
   stream.write(`${JSON.stringify(payload)}\n`)
 }
 
+function makePayload(level, message, details = {}) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...safeValue(details),
+  }
+  if (details.error) payload.error = serializeError(details.error)
+  return payload
+}
+
+function randomId() {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  }
+}
+
+export function correlationIdMiddleware(req, res, next) {
+  const incoming = String(req.headers['x-correlation-id'] || '').trim()
+  const correlationId = incoming || randomId()
+  req.correlationId = correlationId
+  res.setHeader('X-Correlation-Id', correlationId)
+  next()
+}
+
 export function getLogPaths() {
   ensureLogDir()
   return {
@@ -64,17 +91,6 @@ export function getLogPaths() {
   }
 }
 
-export function getCorrelationId(req) {
-  const incoming = String(req.headers['x-correlation-id'] || req.query?.cid || '').trim()
-  return incoming || randomUUID()
-}
-
-export function correlationIdMiddleware(req, res, next) {
-  req.correlationId = getCorrelationId(req)
-  res.setHeader('X-Correlation-Id', req.correlationId)
-  next()
-}
-
 export function logAccess(entry) {
   writeLine(accessStream, {
     timestamp: new Date().toISOString(),
@@ -83,44 +99,24 @@ export function logAccess(entry) {
 }
 
 export function logApi(message, details = {}) {
-  const payload = {
-    timestamp: new Date().toISOString(),
-    level: 'info',
-    message,
-    ...safeValue(details),
-  }
+  const payload = makePayload('info', message, details)
   writeLine(apiStream, payload)
+  return payload
 }
 
 export function logError(message, details = {}) {
-  const payload = {
-    timestamp: new Date().toISOString(),
-    level: 'error',
-    message,
-    ...safeValue(details),
-  }
-  if (details.error) payload.error = serializeError(details.error)
+  const payload = makePayload('error', message, details)
   writeLine(errorStream, payload)
   console.error(message, payload.error || details)
 }
 
 export function logFrontend(message, details = {}) {
-  const payload = {
-    timestamp: new Date().toISOString(),
-    level: 'info',
-    message,
-    ...safeValue(details),
-  }
+  const payload = makePayload('info', message, details)
   writeLine(frontendStream, payload)
 }
 
 export function logInfo(message, details = {}) {
-  const payload = {
-    timestamp: new Date().toISOString(),
-    level: 'info',
-    message,
-    ...safeValue(details),
-  }
+  const payload = makePayload('info', message, details)
   writeLine(accessStream, payload)
   console.log(message)
 }
