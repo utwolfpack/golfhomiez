@@ -1,4 +1,5 @@
-const CORRELATION_STORAGE_KEY = 'gh.correlationId'
+export const CORRELATION_STORAGE_KEY = 'gh.correlationId'
+const CORRELATION_WINDOW_KEY = '__GH_CORRELATION_ID'
 const MAX_BEACONS_PER_PAGE = 50
 const MAX_DETAIL_LENGTH = 180
 
@@ -19,19 +20,19 @@ function randomId(): string {
 }
 
 export function getCorrelationId(): string {
-  const fromWindow = (globalThis as any).__GH_CORRELATION_ID
+  const fromWindow = (globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY]
   if (typeof fromWindow === 'string' && fromWindow) return fromWindow
 
   try {
     const stored = globalThis.sessionStorage?.getItem(CORRELATION_STORAGE_KEY)
     if (stored) {
-      ;(globalThis as any).__GH_CORRELATION_ID = stored
+      ;(globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY] = stored
       return stored
     }
   } catch {}
 
   const next = randomId()
-  ;(globalThis as any).__GH_CORRELATION_ID = next
+  ;(globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY] = next
   try {
     globalThis.sessionStorage?.setItem(CORRELATION_STORAGE_KEY, next)
   } catch {}
@@ -40,7 +41,7 @@ export function getCorrelationId(): string {
 
 export function setCorrelationId(correlationId: string): string {
   const next = correlationId || randomId()
-  ;(globalThis as any).__GH_CORRELATION_ID = next
+  ;(globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY] = next
   try {
     globalThis.sessionStorage?.setItem(CORRELATION_STORAGE_KEY, next)
   } catch {}
@@ -136,16 +137,16 @@ export function logFrontendEvent(
   }
 
   const stage = category ? `${category}:${message}` : message
-  const detail = stringifyDetail({ level, ...(data || {}) })
+  const detail = stringifyDetail({ correlationId: getCorrelationId(), level, ...(data || {}) })
   emitPixelBeacon(stage, detail)
 }
 
 export function markBootStage(stage: string, data?: Record<string, unknown>): void {
-  emitPixelBeacon(stage, stringifyDetail(data), true)
+  emitPixelBeacon(stage, stringifyDetail({ correlationId: getCorrelationId(), ...(data || {}) }), true)
 }
 
 export function emitFrontendStage(stage: string, detail?: string): void {
-  emitPixelBeacon(stage, detail, true)
+  emitPixelBeacon(stage, detail ? stringifyDetail({ correlationId: getCorrelationId(), detail }) : stringifyDetail({ correlationId: getCorrelationId() }), true)
 }
 
 export function installFrontendDiagnostics(): void {
@@ -159,6 +160,7 @@ export function installFrontendDiagnostics(): void {
       handlingRuntimeError = true
       try {
         const detail = stringifyDetail({
+          correlationId: getCorrelationId(),
           message: event?.message || event?.error?.message || 'window error',
           filename: event?.filename || '',
           lineno: typeof event?.lineno === 'number' ? event.lineno : 0,
@@ -177,7 +179,10 @@ export function installFrontendDiagnostics(): void {
     handlingRuntimeError = true
     try {
       const reason = event?.reason
-      const detail = stringifyDetail(reason?.message || reason || 'unhandled rejection')
+      const detail = stringifyDetail({
+        correlationId: getCorrelationId(),
+        reason: reason?.message || reason || 'unhandled rejection',
+      })
       emitPixelBeacon('runtime_unhandled_rejection', detail)
     } finally {
       handlingRuntimeError = false

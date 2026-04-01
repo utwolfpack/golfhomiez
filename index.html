@@ -8,10 +8,10 @@
       (function () {
         try {
           var existing = null
-          try { existing = window.sessionStorage.getItem('gh_correlation_id') } catch (_) {}
+          try { existing = window.sessionStorage.getItem('gh.correlationId') } catch (_) {}
           var correlationId = existing || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10))
-          window.__GH_CORRELATION_ID__ = correlationId
-          try { window.sessionStorage.setItem('gh_correlation_id', correlationId) } catch (_) {}
+          window.__GH_CORRELATION_ID = correlationId
+          try { window.sessionStorage.setItem('gh.correlationId', correlationId) } catch (_) {}
 
           function sendStage(stage) {
             try {
