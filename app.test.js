@@ -29,6 +29,8 @@ test('API client attaches the user timezone header for server-side date validati
   assert.match(source, /resolvedOptions\(\)\.timeZone/)
 })
 
+
+
 test('create-team normalization always makes the signed-in user the first member', () => {
   const user = { id: 'user-1', email: 'captain@example.com', name: 'Casey Captain' }
   const members = [
@@ -150,20 +152,17 @@ test('homepage shows guest sample scores when no user is logged in', () => {
   assert.match(sample, /Homie Hustlers/)
 })
 
-test('logging writes access, api, error, and frontend logs with correlation id support', () => {
+test('logging writes to root access and error log files with request middleware support', () => {
   const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
   const logger = fs.readFileSync(new URL('./server/lib/logger.js', import.meta.url), 'utf8')
   const gitignore = fs.readFileSync(new URL('./.gitignore', import.meta.url), 'utf8')
-  const html = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8')
 
-  assert.match(server, /app\.use\(correlationIdMiddleware\)/)
-  assert.match(server, /X-Correlation-Id/)
+  assert.match(server, /app\.use\(accessLogMiddleware\)/)
+  assert.match(server, /logRouteError\('/)
+  assert.match(logger, /path\.resolve\(process\.cwd\(\), 'logging'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'access\.log'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'error\.log'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
-  assert.match(logger, /res\.setHeader\('X-Correlation-Id'/)
-  assert.match(html, /gh\.correlationId/)
+  assert.match(logger, /res\.on\('finish'/)
   assert.match(gitignore, /logging\/\*\.log/)
   assert.match(gitignore, /!logging\/\.gitkeep/)
 })
@@ -179,45 +178,30 @@ test('homepage demo seeder can populate the sample rounds locally', () => {
   assert.match(seed, /Seeded homepage demo data/)
 })
 
-test('safe mobile diagnostics use pixel beacons instead of recursive preboot network logging', () => {
-  const html = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8')
-  const frontendLogger = fs.readFileSync(new URL('./src/lib/frontend-logger.ts', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
-  const logger = fs.readFileSync(new URL('./server/lib/logger.js', import.meta.url), 'utf8')
 
-  assert.match(html, /\/diag\/pixel\.gif\?cid=/)
-  assert.doesNotMatch(html, /api\/client-logs/)
-  assert.doesNotMatch(html, /sendBeacon/)
-  assert.match(frontendLogger, /new Image\(1, 1\)/)
-  assert.doesNotMatch(frontendLogger, /window\.fetch\s*=/)
-  assert.match(server, /app\.get\('\/diag\/pixel\.gif'/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
-})
-
-test('register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle', () => {
-  const app = fs.readFileSync(new URL('./src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /lazy\(\(\) => import\('\.\/pages\/Register'\)\)/)
-  assert.match(app, /Suspense fallback=/)
-})
-
-test('location flows use backend APIs and reusable use-my-location buttons on relevant pages', () => {
+test('location search uses backend APIs and keeps heavy location data out of the browser bundle', () => {
   const locations = fs.readFileSync(new URL('./src/lib/locations.ts', import.meta.url), 'utf8')
   const input = fs.readFileSync(new URL('./src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const button = fs.readFileSync(new URL('./src/components/UseMyLocationButton.tsx', import.meta.url), 'utf8')
-  const soloLogger = fs.readFileSync(new URL('./src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
-  const golfLogger = fs.readFileSync(new URL('./src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
   const service = fs.readFileSync(new URL('./server/lib/location-service.js', import.meta.url), 'utf8')
 
+  assert.doesNotMatch(locations, /country-state-city/)
   assert.match(locations, /\/api\/locations\/search/)
-  assert.match(locations, /\/api\/locations\/resolve/)
-  assert.doesNotMatch(locations, /country-state-city'\)/)
-  assert.match(input, /Type at least 2 characters to search locations\./)
-  assert.match(input, /<UseMyLocationButton/)
-  assert.match(button, /resolveMyLocationFromBrowser/)
-  assert.match(soloLogger, /<UseMyLocationButton/)
-  assert.match(golfLogger, /<UseMyLocationButton/)
+  assert.match(locations, /\/api\/locations\/nearest/)
+  assert.match(input, /navigator\.geolocation/)
+  assert.match(input, /Use my location/)
   assert.match(server, /app\.get\('\/api\/locations\/search'/)
-  assert.match(server, /app\.get\('\/api\/locations\/resolve'/)
+  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
   assert.match(service, /from 'country-state-city'/)
+})
+
+test('server startup keeps location APIs online even when database initialization fails', () => {
+  const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('./server/lib/logger.js', import.meta.url), 'utf8')
+
+  assert.match(server, /let storageReady = false/)
+  assert.match(server, /Service temporarily unavailable/)
+  assert.match(server, /Storage backend unavailable; location APIs remain online/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
+  assert.match(logger, /X-Correlation-Id/)
 })

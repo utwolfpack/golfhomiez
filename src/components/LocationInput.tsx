@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { searchLocations } from '../lib/locations'
+import { getNearestLocation, searchLocations } from '../lib/locations'
 import { loadSavedLocation, saveLocation, type SavedLocation } from '../lib/location-store'
-import UseMyLocationButton from './UseMyLocationButton'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 type Props = {
   value: SavedLocation | null
@@ -12,6 +12,7 @@ export default function LocationInput({ value, onChange }: Props) {
   const [query, setQuery] = useState(value?.label || '')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestions, setSuggestions] = useState<SavedLocation[]>([])
+  const [isDetecting, setIsDetecting] = useState(false)
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [helperText, setHelperText] = useState<string | null>(null)
   const blurTimer = useRef<number | null>(null)
@@ -45,6 +46,7 @@ export default function LocationInput({ value, onChange }: Props) {
     if (trimmed.length < 2) {
       setSuggestions([])
       setIsLoadingSuggestions(false)
+      setHelperText('Type at least 2 characters to search for a city or state.')
       return
     }
 
@@ -57,20 +59,75 @@ export default function LocationInput({ value, onChange }: Props) {
         .then((results) => {
           if (requestId !== searchRequestId.current) return
           setSuggestions(results)
-          if (!results.length) setHelperText('No matching cities were found. Keep typing to refine the search.')
+          if (!results.length) {
+            setHelperText('No matching locations found yet. Keep typing.')
+          }
         })
-        .catch(() => {
+        .catch((error) => {
           if (requestId !== searchRequestId.current) return
           setSuggestions([])
-          setHelperText('Location suggestions are temporarily unavailable. You can keep typing.')
+          setHelperText('Location suggestions are temporarily unavailable.')
+          logFrontendEvent({
+            category: 'location.search',
+            level: 'error',
+            message: 'search_failed',
+            data: { query: trimmed, error: error instanceof Error ? error.message : String(error) },
+          })
         })
         .finally(() => {
           if (requestId === searchRequestId.current) setIsLoadingSuggestions(false)
         })
-    }, 250)
+    }, 180)
 
     return () => window.clearTimeout(timer)
   }, [query, showSuggestions])
+
+  function detectNearestLocation() {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setHelperText('Location detection is not available in this browser.')
+      return
+    }
+
+    setIsDetecting(true)
+    setHelperText(null)
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const nearest = await getNearestLocation(position.coords.latitude, position.coords.longitude)
+          if (nearest) {
+            onChange(nearest)
+            setQuery(nearest.label)
+            setShowSuggestions(false)
+            setHelperText(`Nearest detected location selected: ${nearest.label}`)
+            saveLocation(nearest)
+          } else {
+            setHelperText('No nearby location match was found.')
+          }
+        } catch (error) {
+          setHelperText('Location lookup failed.')
+          logFrontendEvent({
+            category: 'location.detect',
+            level: 'error',
+            message: 'nearest_failed',
+            data: { error: error instanceof Error ? error.message : String(error) },
+          })
+        } finally {
+          setIsDetecting(false)
+        }
+      },
+      (error) => {
+        setHelperText('Location access was unavailable.')
+        setIsDetecting(false)
+        logFrontendEvent({
+          category: 'location.detect',
+          level: 'warn',
+          message: 'geolocation_denied',
+          data: { code: error?.code ?? null, message: error?.message ?? null },
+        })
+      },
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
+    )
+  }
 
   function selectLocation(next: SavedLocation) {
     onChange(next)
@@ -106,20 +163,20 @@ export default function LocationInput({ value, onChange }: Props) {
           placeholder="Start typing a city or state"
           autoComplete="off"
         />
-        <UseMyLocationButton
-          onResolved={(location) => {
-            onChange(location)
-            setQuery(location.label)
+        <button
+          type="button"
+          className="btn"
+          onClick={() => {
             setShowSuggestions(false)
-            setHelperText(`Location set to ${location.label}.`)
-            saveLocation(location)
+            detectNearestLocation()
           }}
-          onStatus={setHelperText}
-        />
+          disabled={isDetecting}
+        >
+          {isDetecting ? 'Detecting…' : 'Use my location'}
+        </button>
       </div>
       {showSuggestions ? (
         <div className="locationSuggestions">
-          {query.trim().length < 2 ? <div className="small" style={{ padding: 8 }}>Type at least 2 characters to search locations.</div> : null}
           {isLoadingSuggestions ? <div className="small" style={{ padding: 8 }}>Loading location suggestions…</div> : null}
           {!isLoadingSuggestions && suggestions.map((item) => (
             <button
@@ -136,7 +193,7 @@ export default function LocationInput({ value, onChange }: Props) {
         </div>
       ) : null}
       <div className="small" style={{ marginTop: 8 }}>
-        {helperText || 'Type ahead suggests matching US cities from the server. Use the location button to fill the field from your device location.'}
+        {helperText || 'Type at least 2 characters to search for a city or state, or use the button to detect the nearest city.'}
       </div>
     </div>
   )
