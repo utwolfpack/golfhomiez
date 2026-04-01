@@ -10,7 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
+import { accessLogMiddleware, correlationIdMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
 import { getNearestLocation, searchLocations } from './lib/location-service.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -35,8 +35,10 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id'],
+  exposedHeaders: ['X-Correlation-Id'],
 }))
 app.options('*', cors())
+app.use(correlationIdMiddleware)
 app.use(accessLogMiddleware)
 
 const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
@@ -60,18 +62,25 @@ app.get('/diag/pixel.gif', (req, res) => {
 })
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
+app.get('/api/locations/search', (req, res) => {
+  const query = String(req.query.q || '').trim()
+  const limit = Math.max(1, Math.min(20, Number(req.query.limit || 8) || 8))
+  const results = searchLocations(query, limit)
+  logApi('location_search_completed', { ...requestContext(req), resultCount: results.length })
+  res.json(results)
+})
 
-let storageReady = false
-let storageInitError = null
+app.get('/api/locations/nearest', (req, res) => {
+  const latitude = Number(req.query.latitude)
+  const longitude = Number(req.query.longitude)
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+    return res.status(400).json({ message: 'latitude and longitude required' })
+  }
 
-function requireStorage(req, res, next) {
-  if (storageReady) return next()
-  return res.status(503).json({
-    message: 'Service temporarily unavailable',
-    correlationId: req.correlationId || null,
-    detail: storageInitError?.message || null,
-  })
-}
+  const location = getNearestLocation(latitude, longitude)
+  logApi('location_nearest_completed', { ...requestContext(req), found: Boolean(location) })
+  res.json(location)
+})
 
 
 function logRouteError(message, req, error, extra = {}) {
@@ -109,38 +118,9 @@ async function isUserOnTeam(teamName, userEmail) {
   return (team.members || []).some((m) => normalizeEmail(m.email) === e)
 }
 
-app.get('/api/locations/search', (req, res) => {
-  try {
-    const query = String(req.query.q || '').trim()
-    const limit = Math.max(1, Math.min(20, Number(req.query.limit || 8) || 8))
-    const locations = query ? searchLocations(query, limit) : []
-    logApi('location_search_completed', { correlationId: req.correlationId, query, count: locations.length })
-    res.json({ locations })
-  } catch (error) {
-    logRouteError('Location search error', req, error)
-    res.status(500).json({ message: 'Could not search locations' })
-  }
-})
-
-app.get('/api/locations/nearest', (req, res) => {
-  try {
-    const latitude = Number(req.query.latitude)
-    const longitude = Number(req.query.longitude)
-    if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-      return res.status(400).json({ message: 'latitude and longitude are required' })
-    }
-    const location = getNearestLocation(latitude, longitude)
-    logApi('location_nearest_completed', { correlationId: req.correlationId, latitude, longitude, found: Boolean(location) })
-    res.json({ location })
-  } catch (error) {
-    logRouteError('Nearest location error', req, error)
-    res.status(500).json({ message: 'Could not resolve nearest location' })
-  }
-})
-
 app.get('/api/health', async (req, res) => {
-  const backend = storageReady ? await storage.getBackendName() : 'unavailable'
-  res.json({ ok: storageReady, storage: backend, storageReady, storageInitError: storageInitError?.message || null })
+  const backend = await storage.getBackendName()
+  res.json({ ok: true, storage: backend })
 })
 
 app.get('/api/auth-debug/latest-reset', (req, res) => {
@@ -150,7 +130,7 @@ app.get('/api/auth-debug/latest-reset', (req, res) => {
   res.json(latest || null)
 })
 
-app.get('/api/teams', requireStorage, authMiddleware, async (req, res) => {
+app.get('/api/teams', authMiddleware, async (req, res) => {
   try {
     const teams = await storage.listTeams()
     res.json(teams)
@@ -160,7 +140,7 @@ app.get('/api/teams', requireStorage, authMiddleware, async (req, res) => {
   }
 })
 
-app.post('/api/teams', requireStorage, authMiddleware, async (req, res) => {
+app.post('/api/teams', authMiddleware, async (req, res) => {
   try {
     const { name, members } = req.body || {}
     const trimmed = String(name || '').trim()
@@ -195,7 +175,7 @@ app.post('/api/teams', requireStorage, authMiddleware, async (req, res) => {
   }
 })
 
-app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
+app.put('/api/teams/:id', authMiddleware, async (req, res) => {
   try {
     const id = String(req.params.id || '').trim()
     if (!id) return res.status(400).json({ message: 'Team id required' })
@@ -240,7 +220,7 @@ app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
   }
 })
 
-app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
+app.get('/api/scores', authMiddleware, async (req, res) => {
   try {
     const scores = await storage.listScores()
     res.json(scores)
@@ -250,7 +230,7 @@ app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
   }
 })
 
-app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
+app.post('/api/scores', authMiddleware, async (req, res) => {
   try {
     const body = req.body || {}
     const mode = body.mode === 'solo' ? 'solo' : 'team'
@@ -321,7 +301,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
   }
 })
 
-app.delete('/api/scores/:id', requireStorage, authMiddleware, async (req, res) => {
+app.delete('/api/scores/:id', authMiddleware, async (req, res) => {
   try {
     const id = String(req.params.id || '').trim()
     const entry = await storage.getScoreById(id)
@@ -347,21 +327,13 @@ if (fs.existsSync(distDir)) {
 }
 
 async function bootstrap() {
+  await storage.initStorage()
+  const backend = await storage.getBackendName()
   const logPaths = getLogPaths()
+  logInfo('Storage backend initialized', { backend, ...logPaths })
 
-  app.listen(PORT, '0.0.0.0', async () => {
+  app.listen(PORT, '0.0.0.0', () => {
     logInfo('Server listening', { port: PORT, ...logPaths })
-    try {
-      await storage.initStorage()
-      storageReady = true
-      storageInitError = null
-      const backend = await storage.getBackendName()
-      logInfo('Storage backend initialized', { backend, ...logPaths })
-    } catch (error) {
-      storageReady = false
-      storageInitError = error
-      logError('Storage backend unavailable; location APIs remain online', { error, ...logPaths })
-    }
   })
 }
 
