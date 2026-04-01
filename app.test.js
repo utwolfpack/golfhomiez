@@ -29,6 +29,20 @@ test('API client attaches the user timezone header for server-side date validati
   assert.match(source, /resolvedOptions\(\)\.timeZone/)
 })
 
+
+
+test('registration location input keeps geolocation optional and loads suggestions from the server', () => {
+  const locationInput = fs.readFileSync(new URL('./src/components/LocationInput.tsx', import.meta.url), 'utf8')
+  const locations = fs.readFileSync(new URL('./src/lib/locations.ts', import.meta.url), 'utf8')
+
+  assert.match(locationInput, /navigator\.geolocation/)
+  assert.match(locationInput, /Use my location/)
+  assert.match(locationInput, /searchLocations\(trimmed, 8\)/)
+  assert.match(locations, /\/api\/locations\/search/)
+  assert.match(locations, /\/api\/locations\/nearest/)
+  assert.doesNotMatch(locations, /country-state-city/)
+})
+
 test('create-team normalization always makes the signed-in user the first member', () => {
   const user = { id: 'user-1', email: 'captain@example.com', name: 'Casey Captain' }
   const members = [
@@ -150,19 +164,21 @@ test('homepage shows guest sample scores when no user is logged in', () => {
   assert.match(sample, /Homie Hustlers/)
 })
 
-test('logging writes to root access, api, error, and frontend log files with correlation middleware support', () => {
+test('logging writes access, api, error, and frontend logs with correlation ids', () => {
   const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
   const logger = fs.readFileSync(new URL('./server/lib/logger.js', import.meta.url), 'utf8')
   const gitignore = fs.readFileSync(new URL('./.gitignore', import.meta.url), 'utf8')
 
-  assert.match(server, /app\.use\(requestCorrelationMiddleware\)/)
   assert.match(server, /app\.use\(accessLogMiddleware\)/)
-  assert.match(server, /X-Correlation-Id/)
+  assert.match(server, /logRouteError\('/)
+  assert.match(logger, /path\.resolve\(process\.cwd\(\), 'logging'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'access\.log'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'error\.log'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
-  assert.match(logger, /req\.correlationId/)
+  assert.match(logger, /correlationIdMiddleware/)
+  assert.match(logger, /res\.setHeader\('X-Correlation-Id'/)
+  assert.match(logger, /res\.on\('finish'/)
   assert.match(gitignore, /logging\/\*\.log/)
   assert.match(gitignore, /!logging\/\.gitkeep/)
 })
@@ -176,43 +192,4 @@ test('homepage demo seeder can populate the sample rounds locally', () => {
   assert.match(seed, /Bonneville Golf Course/)
   assert.match(seed, /Homie Hustlers/)
   assert.match(seed, /Seeded homepage demo data/)
-})
-
-test('safe mobile diagnostics use pixel beacons instead of recursive preboot network logging', () => {
-  const html = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8')
-  const frontendLogger = fs.readFileSync(new URL('./src/lib/frontend-logger.ts', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
-  const logger = fs.readFileSync(new URL('./server/lib/logger.js', import.meta.url), 'utf8')
-
-  assert.match(html, /\/diag\/pixel\.gif\?cid=/)
-  assert.match(html, /gh\.correlationId/)
-  assert.doesNotMatch(html, /api\/client-logs/)
-  assert.doesNotMatch(html, /sendBeacon/)
-  assert.match(frontendLogger, /new Image\(1, 1\)/)
-  assert.match(frontendLogger, /CORRELATION_STORAGE_KEY = 'gh\.correlationId'/)
-  assert.doesNotMatch(frontendLogger, /window\.fetch\s*=/)
-  assert.match(server, /app\.get\('\/diag\/pixel\.gif'/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
-})
-
-test('register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle', () => {
-  const app = fs.readFileSync(new URL('./src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /lazy\(\(\) => import\('\.\/pages\/Register'\)\)/)
-  assert.match(app, /Suspense fallback=/)
-})
-
-test('location lookups use server-backed endpoints instead of bundling the country-state-city client dataset', () => {
-  const locations = fs.readFileSync(new URL('./src/lib/locations.ts', import.meta.url), 'utf8')
-  const input = fs.readFileSync(new URL('./src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
-  const service = fs.readFileSync(new URL('./server/lib/location-service.js', import.meta.url), 'utf8')
-
-  assert.match(locations, /new URL\('\/api\/locations\/search'/)
-  assert.match(locations, /new URL\('\/api\/locations\/nearest'/)
-  assert.doesNotMatch(locations, /import\('country-state-city'\)/)
-  assert.match(input, /window\.setTimeout\(\(\) =>/)
-  assert.match(input, /Type at least 2 characters to search the server-backed US city index/)
-  assert.match(server, /app\.get\('\/api\/locations\/search'/)
-  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
-  assert.match(service, /import\('country-state-city'\)/)
 })

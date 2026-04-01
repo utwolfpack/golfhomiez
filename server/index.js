@@ -10,8 +10,8 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { getNearestLocation, searchLocations } from './lib/location-service.js'
-import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
+import { accessLogMiddleware, correlationIdMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
+import { findNearestUSLocation, searchUSLocations } from './lib/location-service.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -35,10 +35,9 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id'],
-  exposedHeaders: ['X-Correlation-Id'],
 }))
 app.options('*', cors())
-app.use(requestCorrelationMiddleware)
+app.use(correlationIdMiddleware)
 app.use(accessLogMiddleware)
 
 const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
@@ -103,47 +102,59 @@ app.get('/api/health', async (req, res) => {
   res.json({ ok: true, storage: backend })
 })
 
+app.get('/api/auth-debug/latest-reset', (req, res) => {
+  const email = String(req.query.email || '').trim()
+  if (!email) return res.status(400).json({ message: 'email query parameter required' })
+  const latest = getLatestPasswordReset(email)
+  res.json(latest || null)
+})
 
-app.get('/api/locations/search', async (req, res) => {
+app.get('/api/locations/search', (req, res) => {
   try {
-    const query = String(req.query.q || '').trim()
-    const limit = Math.max(1, Math.min(10, Number(req.query.limit || 8) || 8))
-    if (query.length < 2) {
-      logApi('location_search_skipped_short_query', { ...requestContext(req), limit, queryLength: query.length })
-      return res.json([])
-    }
+    const query = String(req.query.q || '')
+    const rawLimit = Number(req.query.limit || 8)
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 20) : 8
+    const results = searchUSLocations(query, limit)
 
-    const results = await searchLocations(query, limit)
-    logApi('location_search_completed', { ...requestContext(req), limit, query, resultCount: results.length })
-    res.json(results)
+    logApi('location_search_completed', {
+      correlationId: req.correlationId,
+      query: query.trim(),
+      limit,
+      resultCount: results.length,
+      ...requestContext(req),
+    })
+
+    res.json({ results })
   } catch (error) {
     logRouteError('Location search error', req, error)
     res.status(500).json({ message: 'Could not load location suggestions' })
   }
 })
 
-app.get('/api/locations/nearest', async (req, res) => {
+app.get('/api/locations/nearest', (req, res) => {
   try {
-    const latitude = Number(req.query.latitude)
-    const longitude = Number(req.query.longitude)
+    const latitude = Number(req.query.lat)
+    const longitude = Number(req.query.lng)
     if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-      return res.status(400).json({ message: 'latitude and longitude query parameters are required' })
+      return res.status(400).json({ message: 'lat and lng query parameters are required' })
     }
 
-    const result = await getNearestLocation(latitude, longitude)
-    logApi('location_nearest_completed', { ...requestContext(req), latitude, longitude, matched: Boolean(result) })
-    res.json(result)
+    const result = findNearestUSLocation(latitude, longitude)
+
+    logApi('location_nearest_completed', {
+      correlationId: req.correlationId,
+      latitude,
+      longitude,
+      matched: Boolean(result),
+      label: result?.label || null,
+      ...requestContext(req),
+    })
+
+    res.json({ result })
   } catch (error) {
     logRouteError('Nearest location error', req, error)
-    res.status(500).json({ message: 'Could not resolve nearest location' })
+    res.status(500).json({ message: 'Could not determine the nearest location' })
   }
-})
-
-app.get('/api/auth-debug/latest-reset', (req, res) => {
-  const email = String(req.query.email || '').trim()
-  if (!email) return res.status(400).json({ message: 'email query parameter required' })
-  const latest = getLatestPasswordReset(email)
-  res.json(latest || null)
 })
 
 app.get('/api/teams', authMiddleware, async (req, res) => {
