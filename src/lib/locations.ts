@@ -1,51 +1,47 @@
-import { api } from './api'
 import type { SavedLocation } from './location-store'
+import { attachRequestMetadata, logFrontendEvent } from './frontend-logger'
 
-type LocationOption = SavedLocation & { key?: string; distanceMiles?: number }
+type LocationOption = SavedLocation & { key?: string }
 
-type SearchResponse = { results: LocationOption[] }
-type ResolveResponse = { location: LocationOption }
+function buildUrl(path: string, params: Record<string, string | number>) {
+  const url = new URL(path, window.location.origin)
+  Object.entries(params).forEach(([key, value]) => {
+    url.searchParams.set(key, String(value))
+  })
+  return url.toString()
+}
 
-function getPageOrigin() {
-  if (typeof window === 'undefined') return 'http://localhost'
-  return window.location.origin
+async function requestJson<T>(url: string, requestName: string): Promise<T> {
+  const startedAt = Date.now()
+  const response = await fetch(url, {
+    ...attachRequestMetadata({ method: 'GET' }),
+    credentials: 'same-origin',
+  })
+
+  logFrontendEvent({
+    category: 'location.fetch',
+    level: response.ok ? 'info' : 'warn',
+    message: requestName,
+    data: { url, status: response.status, ok: response.ok, durationMs: Date.now() - startedAt },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Location request failed (${response.status})`)
+  }
+
+  return response.json() as Promise<T>
 }
 
 export async function searchLocations(query: string, limit = 8): Promise<LocationOption[]> {
-  const url = new URL('/api/locations/search', getPageOrigin())
-  url.searchParams.set('q', query)
-  url.searchParams.set('limit', String(limit))
-  const data = await api<SearchResponse>(url.toString(), { method: 'GET' })
-  return Array.isArray(data?.results) ? data.results : []
+  const trimmed = String(query || '').trim()
+  if (!trimmed) return []
+  const url = buildUrl('/api/locations/search', { q: trimmed, limit })
+  const payload = await requestJson<{ locations?: LocationOption[] }>(url, 'search_locations')
+  return Array.isArray(payload.locations) ? payload.locations : []
 }
 
 export async function getNearestLocation(latitude: number, longitude: number): Promise<LocationOption | null> {
-  const url = new URL('/api/locations/resolve', getPageOrigin())
-  url.searchParams.set('latitude', String(latitude))
-  url.searchParams.set('longitude', String(longitude))
-  try {
-    const data = await api<ResolveResponse>(url.toString(), { method: 'GET' })
-    return data?.location || null
-  } catch (error) {
-    if (error instanceof Error && /404/.test(error.message)) return null
-    throw error
-  }
-}
-
-export async function resolveMyLocationFromBrowser(): Promise<LocationOption> {
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    throw new Error('Location detection is not available in this browser.')
-  }
-
-  const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: false,
-      timeout: 10000,
-      maximumAge: 300000,
-    })
-  })
-
-  const location = await getNearestLocation(position.coords.latitude, position.coords.longitude)
-  if (!location) throw new Error('No nearby location match was found.')
-  return location
+  const url = buildUrl('/api/locations/nearest', { latitude, longitude })
+  const payload = await requestJson<{ location?: LocationOption | null }>(url, 'nearest_location')
+  return payload.location || null
 }
