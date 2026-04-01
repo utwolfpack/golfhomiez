@@ -1,8 +1,10 @@
 import fs from 'fs'
 import path from 'path'
+import crypto from 'crypto'
 
 const LOG_DIR = path.resolve(process.cwd(), 'logging')
 const ACCESS_LOG_PATH = path.join(LOG_DIR, 'access.log')
+const API_LOG_PATH = path.join(LOG_DIR, 'api.log')
 const ERROR_LOG_PATH = path.join(LOG_DIR, 'error.log')
 const FRONTEND_LOG_PATH = path.join(LOG_DIR, 'frontend.log')
 const REDACT_KEYS = new Set(['password', 'passwordhash', 'token', 'authorization', 'cookie', 'secret', 'smtp_pass', 'smtp_key'])
@@ -17,6 +19,7 @@ function createStream(filePath) {
 }
 
 const accessStream = createStream(ACCESS_LOG_PATH)
+const apiStream = createStream(API_LOG_PATH)
 const errorStream = createStream(ERROR_LOG_PATH)
 const frontendStream = createStream(FRONTEND_LOG_PATH)
 
@@ -52,7 +55,25 @@ function writeLine(stream, payload) {
 
 export function getLogPaths() {
   ensureLogDir()
-  return { logDir: LOG_DIR, accessLogPath: ACCESS_LOG_PATH, errorLogPath: ERROR_LOG_PATH, frontendLogPath: FRONTEND_LOG_PATH }
+  return {
+    logDir: LOG_DIR,
+    accessLogPath: ACCESS_LOG_PATH,
+    apiLogPath: API_LOG_PATH,
+    errorLogPath: ERROR_LOG_PATH,
+    frontendLogPath: FRONTEND_LOG_PATH,
+  }
+}
+
+function createCorrelationId() {
+  return crypto.randomUUID()
+}
+
+export function requestCorrelationMiddleware(req, res, next) {
+  const incoming = String(req.headers['x-correlation-id'] || '').trim()
+  const correlationId = incoming || createCorrelationId()
+  req.correlationId = correlationId
+  res.setHeader('X-Correlation-Id', correlationId)
+  next()
 }
 
 export function logAccess(entry) {
@@ -60,6 +81,17 @@ export function logAccess(entry) {
     timestamp: new Date().toISOString(),
     ...safeValue(entry),
   })
+}
+
+export function logApi(message, details = {}) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    message,
+    ...safeValue(details),
+  }
+  if (details.error) payload.error = serializeError(details.error)
+  writeLine(apiStream, payload)
 }
 
 export function logError(message, details = {}) {
@@ -73,7 +105,6 @@ export function logError(message, details = {}) {
   writeLine(errorStream, payload)
   console.error(message, payload.error || details)
 }
-
 
 export function logFrontend(message, details = {}) {
   const payload = {
@@ -98,6 +129,7 @@ export function logInfo(message, details = {}) {
 
 export function requestContext(req) {
   return safeValue({
+    correlationId: req.correlationId || null,
     method: req.method,
     path: req.originalUrl || req.url,
     ip: req.ip,
@@ -111,10 +143,23 @@ export function requestContext(req) {
 
 export function accessLogMiddleware(req, res, next) {
   const startedAt = process.hrtime.bigint()
+  const shouldWriteApiLog = req.path.startsWith('/api/') || req.path.startsWith('/diag/')
+
+  if (shouldWriteApiLog) {
+    logApi('api_request_started', {
+      correlationId: req.correlationId || null,
+      method: req.method,
+      path: req.originalUrl || req.url,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] || null,
+    })
+  }
+
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
-    logAccess({
+    const summary = {
       type: 'http_access',
+      correlationId: req.correlationId || null,
       method: req.method,
       path: req.originalUrl || req.url,
       statusCode: res.statusCode,
@@ -123,7 +168,14 @@ export function accessLogMiddleware(req, res, next) {
       userAgent: req.headers['user-agent'] || null,
       userId: req.user?.id || null,
       userEmail: req.user?.email || null,
-    })
+    }
+
+    logAccess(summary)
+
+    if (shouldWriteApiLog) {
+      logApi('api_request_completed', summary)
+    }
   })
+
   next()
 }
