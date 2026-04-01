@@ -1,0 +1,24 @@
+Replace the import line at the top of server/index.js with this block exactly:
+
+import * as logger from './lib/logger.js'
+
+const accessLogMiddleware = logger.accessLogMiddleware
+const getLogPaths = logger.getLogPaths
+const logApi = logger.logApi ?? logger.logInfo ?? (() => {})
+const logError = logger.logError ?? ((...args) => console.error(...args))
+const logFrontend = logger.logFrontend ?? logger.logApi ?? logger.logInfo ?? (() => {})
+const logInfo = logger.logInfo ?? (() => {})
+const requestContext = logger.requestContext ?? ((_req, _res, next) => next())
+const requestCorrelationMiddleware =
+  logger.requestCorrelationMiddleware ??
+  ((req, res, next) => {
+    const correlationId =
+      req.headers['x-correlation-id'] ||
+      req.headers['x-request-id'] ||
+      `cid-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    req.correlationId = correlationId
+    if (typeof res.setHeader === 'function') {
+      res.setHeader('X-Correlation-Id', correlationId)
+    }
+    next()
+  })

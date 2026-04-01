@@ -10,7 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
+import { accessLogMiddleware, getLogPaths, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,17 +34,15 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id', 'X-Request-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone'],
 }))
 app.options('*', cors())
-app.use(requestCorrelationMiddleware)
 app.use(accessLogMiddleware)
 
 const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
 
 app.get('/diag/pixel.gif', (req, res) => {
   logFrontend('frontend_stage', {
-
     correlationId: String(req.query.cid || '').trim() || null,
     stage: String(req.query.stage || '').trim() || 'unknown',
     detail: String(req.query.detail || '').trim() || null,
@@ -53,8 +51,6 @@ app.get('/diag/pixel.gif', (req, res) => {
     userAgent: req.headers['user-agent'] || null,
     referer: req.headers.referer || null,
   })
-
-  logApi('frontend_stage_pixel', { correlationId: req.correlationId || String(req.query.cid || '').trim() || null, path: String(req.query.path || req.path || '').trim() || null, detail: String(req.query.detail || '').trim() || null, stage: String(req.query.stage || '').trim() || 'unknown', ip: req.ip, userAgent: req.headers['user-agent'] || null })
 
   res.setHeader('Content-Type', 'image/gif')
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
