@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getNearestLocation, searchLocations } from '../lib/locations'
 import { loadSavedLocation, saveLocation, type SavedLocation } from '../lib/location-store'
-import { getCorrelationId, sendFrontendLog } from '../lib/frontend-logger'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 
 type Props = {
   value: SavedLocation | null
@@ -16,7 +16,9 @@ export default function LocationInput({ value, onChange }: Props) {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [helperText, setHelperText] = useState<string | null>(null)
   const blurTimer = useRef<number | null>(null)
+  const debounceTimer = useRef<number | null>(null)
   const searchRequestId = useRef(0)
+  const trimmedQuery = useMemo(() => query.trim(), [query])
 
   useEffect(() => {
     setQuery(value?.label || '')
@@ -35,19 +37,6 @@ export default function LocationInput({ value, onChange }: Props) {
     }
   }, [])
 
-  async function logLocationEvent(message: string, metadata: Record<string, unknown> = {}, level: 'info' | 'error' = 'info') {
-    await sendFrontendLog({
-      correlationId: getCorrelationId(),
-      level,
-      type: 'use_my_location',
-      message,
-      action: 'Use my location',
-      status: typeof metadata.status === 'string' ? metadata.status : null,
-      route: window.location.pathname,
-      metadata,
-    })
-  }
-
   useEffect(() => {
     if (!showSuggestions) {
       setSuggestions([])
@@ -55,73 +44,103 @@ export default function LocationInput({ value, onChange }: Props) {
       return
     }
 
-    const trimmedQuery = query.trim()
+    if (trimmedQuery.length < 2) {
+      setSuggestions([])
+      setIsLoadingSuggestions(false)
+      setHelperText('Type at least 2 characters to search for a city or state.')
+      return
+    }
+
+    if (debounceTimer.current) {
+      window.clearTimeout(debounceTimer.current)
+    }
+
     const requestId = ++searchRequestId.current
-    const startedAt = Date.now()
     setIsLoadingSuggestions(true)
-    void logLocationEvent('location_suggestions_requested', {
-      queryLength: trimmedQuery.length,
-      queryPreview: trimmedQuery.slice(0, 32),
-      status: 'started',
-    })
+    debounceTimer.current = window.setTimeout(() => {
+      logFrontendEvent({
+        category: 'location.lookup',
+        message: 'location_search_started',
+        data: { correlationId: getCorrelationId(), query: trimmedQuery },
+      })
 
-    searchLocations(query, 8)
-      .then((results) => {
-        if (requestId !== searchRequestId.current) return
-        setSuggestions(results)
-        void logLocationEvent('location_suggestions_completed', {
-          queryLength: trimmedQuery.length,
-          resultCount: results.length,
-          durationMs: Date.now() - startedAt,
-          status: 'completed',
+      searchLocations(trimmedQuery, 8)
+        .then((results) => {
+          if (requestId !== searchRequestId.current) return
+          setSuggestions(results)
+          setHelperText(results.length ? null : 'No matching cities were found yet. Keep typing.')
         })
-      })
-      .catch((error) => {
-        if (requestId !== searchRequestId.current) return
-        setSuggestions([])
-        setHelperText('Location suggestions are temporarily unavailable. You can keep typing.')
-        void logLocationEvent('location_suggestions_failed', {
-          queryLength: trimmedQuery.length,
-          durationMs: Date.now() - startedAt,
-          status: 'failed',
-          errorMessage: error instanceof Error ? error.message : String(error),
-          errorStack: error instanceof Error ? error.stack || null : null,
-        }, 'error')
-      })
-      .finally(() => {
-        if (requestId === searchRequestId.current) setIsLoadingSuggestions(false)
-      })
-  }, [query, showSuggestions])
+        .catch((error: unknown) => {
+          if (requestId !== searchRequestId.current) return
+          setSuggestions([])
+          setHelperText('Location suggestions are temporarily unavailable. You can keep typing.')
+          logFrontendEvent({
+            category: 'location.lookup',
+            level: 'error',
+            message: 'location_search_failed',
+            data: {
+              correlationId: getCorrelationId(),
+              query: trimmedQuery,
+              error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+            },
+          })
+        })
+        .finally(() => {
+          if (requestId === searchRequestId.current) setIsLoadingSuggestions(false)
+        })
+    }, 180)
 
-  function detectNearestLocation() {
+    return () => {
+      if (debounceTimer.current) {
+        window.clearTimeout(debounceTimer.current)
+        debounceTimer.current = null
+      }
+    }
+  }, [trimmedQuery, showSuggestions])
+
+  async function detectNearestLocation() {
     const startedAt = Date.now()
-    void logLocationEvent('use_my_location_clicked', {
-      status: 'started',
-      hasNavigator: typeof navigator !== 'undefined',
-      hasGeolocation: typeof navigator !== 'undefined' && Boolean(navigator.geolocation),
-      visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
-      isSecureContext: typeof window !== 'undefined' ? window.isSecureContext : null,
-      online: typeof navigator !== 'undefined' ? navigator.onLine : null,
-      language: typeof navigator !== 'undefined' ? navigator.language : null,
-      platform: typeof navigator !== 'undefined' ? navigator.platform : null,
-      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+    const correlationId = getCorrelationId()
+    const diagnosticBase = {
+      correlationId,
+      route: window.location.pathname,
+      href: window.location.href,
+      secureContext: window.isSecureContext,
+      online: navigator.onLine,
+      visibilityState: document.visibilityState,
+      geolocationAvailable: Boolean(typeof navigator !== 'undefined' && navigator.geolocation),
+    }
+
+    logFrontendEvent({
+      category: 'location.use_my_location',
+      message: 'use_my_location_clicked',
+      data: diagnosticBase,
     })
 
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setHelperText('Location detection is not available in this browser.')
-      void logLocationEvent('use_my_location_unsupported', {
-        status: 'unsupported',
-        durationMs: Date.now() - startedAt,
-      }, 'error')
+      logFrontendEvent({
+        category: 'location.use_my_location',
+        level: 'error',
+        message: 'use_my_location_unsupported',
+        data: diagnosticBase,
+      })
       return
     }
+
+    let permissionState: string | null = null
+    try {
+      const permissionsApi = (navigator as Navigator & { permissions?: { query?: (desc: { name: string }) => Promise<{ state: string }> } }).permissions
+      if (permissionsApi?.query) {
+        permissionState = (await permissionsApi.query({ name: 'geolocation' })).state
+      }
+    } catch {}
 
     setIsDetecting(true)
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        void logLocationEvent('use_my_location_geolocation_success', {
-          status: 'coords_received',
-          durationMs: Date.now() - startedAt,
+        const geolocationDurationMs = Date.now() - startedAt
+        const coords = {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           accuracy: position.coords.accuracy,
@@ -129,57 +148,93 @@ export default function LocationInput({ value, onChange }: Props) {
           altitudeAccuracy: position.coords.altitudeAccuracy,
           heading: position.coords.heading,
           speed: position.coords.speed,
-          positionTimestamp: position.timestamp,
+        }
+
+        logFrontendEvent({
+          category: 'location.use_my_location',
+          message: 'use_my_location_geolocation_success',
+          data: {
+            ...diagnosticBase,
+            permissionState,
+            geolocationDurationMs,
+            ...coords,
+          },
         })
 
-        const lookupStartedAt = Date.now()
         try {
+          const lookupStartedAt = Date.now()
           const nearest = await getNearestLocation(position.coords.latitude, position.coords.longitude)
+          const lookupDurationMs = Date.now() - lookupStartedAt
           if (nearest) {
             onChange(nearest)
             setQuery(nearest.label)
             setHelperText(`Nearest detected location selected: ${nearest.label}`)
             saveLocation(nearest)
-            await logLocationEvent('use_my_location_lookup_completed', {
-              status: 'selected',
-              durationMs: Date.now() - lookupStartedAt,
-              totalDurationMs: Date.now() - startedAt,
-              label: nearest.label,
-              city: nearest.city,
-              stateCode: nearest.stateCode,
-              stateName: nearest.stateName,
+            logFrontendEvent({
+              category: 'location.use_my_location',
+              message: 'use_my_location_lookup_completed',
+              data: {
+                ...diagnosticBase,
+                permissionState,
+                geolocationDurationMs,
+                lookupDurationMs,
+                totalDurationMs: Date.now() - startedAt,
+                ...coords,
+                selectedLabel: nearest.label,
+                city: nearest.city,
+                stateCode: nearest.stateCode,
+              },
             })
           } else {
             setHelperText('No nearby location match was found. You can still type to search.')
-            await logLocationEvent('use_my_location_lookup_completed', {
-              status: 'no_match',
-              durationMs: Date.now() - lookupStartedAt,
-              totalDurationMs: Date.now() - startedAt,
-            }, 'error')
+            logFrontendEvent({
+              category: 'location.use_my_location',
+              level: 'warn',
+              message: 'use_my_location_lookup_empty',
+              data: {
+                ...diagnosticBase,
+                permissionState,
+                geolocationDurationMs,
+                lookupDurationMs,
+                totalDurationMs: Date.now() - startedAt,
+                ...coords,
+              },
+            })
           }
         } catch (error) {
           setHelperText('Location lookup failed. You can still type to search.')
-          await logLocationEvent('use_my_location_lookup_failed', {
-            status: 'lookup_failed',
-            durationMs: Date.now() - lookupStartedAt,
-            totalDurationMs: Date.now() - startedAt,
-            errorMessage: error instanceof Error ? error.message : String(error),
-            errorStack: error instanceof Error ? error.stack || null : null,
-          }, 'error')
+          logFrontendEvent({
+            category: 'location.use_my_location',
+            level: 'error',
+            message: 'use_my_location_lookup_failed',
+            data: {
+              ...diagnosticBase,
+              permissionState,
+              geolocationDurationMs,
+              totalDurationMs: Date.now() - startedAt,
+              ...coords,
+              error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+            },
+          })
         } finally {
           setIsDetecting(false)
         }
       },
-      async (error) => {
+      (error) => {
         setHelperText('Location access was unavailable. You can still type to search.')
         setIsDetecting(false)
-        await logLocationEvent('use_my_location_geolocation_failed', {
-          status: 'geolocation_failed',
-          durationMs: Date.now() - startedAt,
-          code: error?.code ?? null,
-          message: error?.message || 'Unknown geolocation error',
-          permissionState: null,
-        }, 'error')
+        logFrontendEvent({
+          category: 'location.use_my_location',
+          level: 'error',
+          message: 'use_my_location_geolocation_failed',
+          data: {
+            ...diagnosticBase,
+            permissionState,
+            totalDurationMs: Date.now() - startedAt,
+            errorCode: error?.code ?? null,
+            errorMessage: error?.message ?? 'Unknown geolocation error',
+          },
+        })
       },
       { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
     )
@@ -191,11 +246,10 @@ export default function LocationInput({ value, onChange }: Props) {
     setShowSuggestions(false)
     setHelperText(`Selected ${next.label}`)
     saveLocation(next)
-    void logLocationEvent('location_suggestion_selected', {
-      status: 'selected',
-      label: next.label,
-      city: next.city,
-      stateCode: next.stateCode,
+    logFrontendEvent({
+      category: 'location.lookup',
+      message: 'location_selected',
+      data: { correlationId: getCorrelationId(), label: next.label },
     })
   }
 
@@ -256,7 +310,7 @@ export default function LocationInput({ value, onChange }: Props) {
         </div>
       ) : null}
       <div className="small" style={{ marginTop: 8 }}>
-        {helperText || 'Type ahead will suggest matching US cities. Use the location button any time if you want to detect the nearest city.'}
+        {helperText || 'Type at least 2 characters to search the server-backed US city index. Use the location button any time if you want to detect the nearest city.'}
       </div>
     </div>
   )
