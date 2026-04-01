@@ -5,6 +5,7 @@ import { US_STATES } from '../data/usStates'
 import { getCoursesForState } from '../data/coursesByState'
 import { useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
+import UseMyLocationButton from '../components/UseMyLocationButton'
 import { getUserTodayISO } from '../lib/date'
 
 const NUM_HOLES = 18
@@ -27,6 +28,7 @@ export default function SoloLogger() {
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [locationMessage, setLocationMessage] = useState<string | null>(null)
   const [showValidation, setShowValidation] = useState(false)
 
   const courses = useMemo(() => getCoursesForState(state), [state])
@@ -127,6 +129,18 @@ export default function SoloLogger() {
               <select className="input" value={course} onChange={e => setCourse(e.target.value)}>
                 {courses.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
+              <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <UseMyLocationButton
+                  onResolved={(location) => {
+                    setState(location.stateCode)
+                    const nextCourses = getCoursesForState(location.stateCode)
+                    setCourse(nextCourses[0] || '')
+                    setLocationMessage(`Location set to ${location.label}.`)
+                  }}
+                  onStatus={setLocationMessage}
+                />
+                {locationMessage ? <span className="small">{locationMessage}</span> : null}
+              </div>
             </div>
 
             <div>

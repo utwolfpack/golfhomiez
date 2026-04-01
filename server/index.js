@@ -11,7 +11,7 @@ import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 import { accessLogMiddleware, correlationIdMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
-import { findNearestUSLocation, searchUSLocations } from './lib/location-service.js'
+import { getNearestLocation, searchLocations } from './lib/location-service.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -110,50 +110,53 @@ app.get('/api/auth-debug/latest-reset', (req, res) => {
 })
 
 app.get('/api/locations/search', (req, res) => {
+  const query = String(req.query.q || '').trim()
+  const limit = Math.min(Math.max(Number(req.query.limit || 8) || 8, 1), 20)
+
   try {
-    const query = String(req.query.q || '')
-    const rawLimit = Number(req.query.limit || 8)
-    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 20) : 8
-    const results = searchUSLocations(query, limit)
-
+    const results = searchLocations(query, limit)
     logApi('location_search_completed', {
-      correlationId: req.correlationId,
-      query: query.trim(),
-      limit,
-      resultCount: results.length,
       ...requestContext(req),
+      queryText: query,
+      resultCount: results.length,
     })
-
     res.json({ results })
   } catch (error) {
-    logRouteError('Location search error', req, error)
-    res.status(500).json({ message: 'Could not load location suggestions' })
+    logError('Location search error', {
+      ...requestContext(req),
+      queryText: query,
+      error,
+    })
+    res.status(500).json({ message: 'Location suggestions are temporarily unavailable.' })
   }
 })
 
-app.get('/api/locations/nearest', (req, res) => {
+app.get('/api/locations/resolve', (req, res) => {
+  const latitude = Number(req.query.latitude)
+  const longitude = Number(req.query.longitude)
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+    return res.status(400).json({ message: 'Valid latitude and longitude are required.' })
+  }
+
   try {
-    const latitude = Number(req.query.lat)
-    const longitude = Number(req.query.lng)
-    if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-      return res.status(400).json({ message: 'lat and lng query parameters are required' })
-    }
-
-    const result = findNearestUSLocation(latitude, longitude)
-
-    logApi('location_nearest_completed', {
-      correlationId: req.correlationId,
+    const location = getNearestLocation(latitude, longitude)
+    logApi('location_resolve_completed', {
+      ...requestContext(req),
       latitude,
       longitude,
-      matched: Boolean(result),
-      label: result?.label || null,
-      ...requestContext(req),
+      matched: Boolean(location),
+      matchedLabel: location?.label || null,
     })
-
-    res.json({ result })
+    if (!location) return res.status(404).json({ message: 'No nearby location match was found.' })
+    res.json({ location })
   } catch (error) {
-    logRouteError('Nearest location error', req, error)
-    res.status(500).json({ message: 'Could not determine the nearest location' })
+    logError('Location resolve error', {
+      ...requestContext(req),
+      latitude,
+      longitude,
+      error,
+    })
+    res.status(500).json({ message: 'Location lookup failed.' })
   }
 })
 
