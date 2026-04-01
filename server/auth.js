@@ -11,6 +11,10 @@ export const auth = betterAuth({
   basePath: '/api/auth',
   database: getPool(),
   secret: authSecret,
+  session: {
+    expiresIn: 60 * 60 * 24,
+    updateAge: 60 * 60,
+  },
   trustedOrigins: [
     process.env.BETTER_AUTH_URL,
     process.env.CLIENT_ORIGIN,

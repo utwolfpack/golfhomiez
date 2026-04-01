@@ -9,7 +9,7 @@ type AuthState = {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
-  register: (firstName: string, lastName: string, email: string, password: string) => Promise<void>
+  register: (firstName: string, lastName: string, email: string, password: string) => Promise<{ email: string }>
   refreshSession: () => Promise<void>
 }
 
@@ -66,10 +66,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null)
     },
     async register(firstName, lastName, email, password) {
-      const fullName = `${firstName} ${lastName}`.replace(/\s+/g, ' ').trim() || email.split('@')[0]
-      const result = await signUpEmail(email, password, fullName)
+      const normalizedEmail = email.trim().toLowerCase()
+      const fullName = `${firstName} ${lastName}`.replace(/\s+/g, ' ').trim() || normalizedEmail.split('@')[0]
+      const result = await signUpEmail(normalizedEmail, password, fullName)
       if (result.error) throw new Error(result.error.message || 'Registration failed')
-      await refreshSession()
+      const signOutResult = await signOutAuth().catch((error) => ({ error: { message: error instanceof Error ? error.message : 'Sign out failed' } }))
+      if (signOutResult?.error) {
+        logFrontendEvent({ level: 'warn', category: 'auth.register', message: 'post_signup_signout_failed', data: { email: normalizedEmail, error: signOutResult.error.message || null } })
+      }
+      setUser(null)
+      return { email: normalizedEmail }
     },
     refreshSession,
   }), [user, loading])

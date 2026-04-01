@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import LocationInput from '../components/LocationInput'
 import type { SavedLocation } from '../lib/location-store'
-import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 
 export default function Register() {
   const [firstName, setFirstName] = useState('')
@@ -25,44 +24,14 @@ export default function Register() {
     try {
       const trimmedFirstName = firstName.trim()
       const trimmedLastName = lastName.trim()
-      const trimmedEmail = email.trim()
       if (!trimmedFirstName) throw new Error('First name is required')
       if (!trimmedLastName) throw new Error('Last name is required')
       if (!location) throw new Error('Location is required')
       if (password.length < 8) throw new Error('Password must be at least 8 characters')
       if (password !== confirmPassword) throw new Error('Passwords do not match')
-
-      logFrontendEvent({
-        category: 'auth.register',
-        message: 'register_submit_started',
-        data: {
-          correlationId: getCorrelationId(),
-          email: trimmedEmail,
-          locationLabel: location.label,
-        },
-      })
-
-      await register(trimmedFirstName, trimmedLastName, trimmedEmail, password)
-
-      logFrontendEvent({
-        category: 'auth.register',
-        message: 'register_submit_succeeded',
-        data: {
-          correlationId: getCorrelationId(),
-          email: trimmedEmail,
-        },
-      })
-      navigate('/')
+      const result = await register(trimmedFirstName, trimmedLastName, email.trim(), password)
+      navigate(`/verify-contact?email=${encodeURIComponent(result.email)}`)
     } catch (err: any) {
-      logFrontendEvent({
-        category: 'auth.register',
-        level: 'error',
-        message: 'register_submit_failed',
-        data: {
-          correlationId: getCorrelationId(),
-          error: err?.message || 'Registration failed',
-        },
-      })
       setError(err?.message || 'Registration failed')
     } finally {
       setBusy(false)

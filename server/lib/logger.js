@@ -1,12 +1,14 @@
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
+import { AsyncLocalStorage } from 'async_hooks'
 
 const LOG_DIR = path.resolve(process.cwd(), 'logging')
 const ACCESS_LOG_PATH = path.join(LOG_DIR, 'access.log')
 const ERROR_LOG_PATH = path.join(LOG_DIR, 'error.log')
 const FRONTEND_LOG_PATH = path.join(LOG_DIR, 'frontend.log')
 const API_LOG_PATH = path.join(LOG_DIR, 'api.log')
+const SMTP_LOG_PATH = path.join(LOG_DIR, 'smtp.log')
 const REDACT_KEYS = new Set(['password', 'passwordhash', 'token', 'authorization', 'cookie', 'secret', 'smtp_pass', 'smtp_key'])
 
 function ensureLogDir() {
@@ -22,6 +24,9 @@ const accessStream = createStream(ACCESS_LOG_PATH)
 const errorStream = createStream(ERROR_LOG_PATH)
 const frontendStream = createStream(FRONTEND_LOG_PATH)
 const apiStream = createStream(API_LOG_PATH)
+const smtpStream = createStream(SMTP_LOG_PATH)
+
+const requestStore = new AsyncLocalStorage()
 
 function safeValue(value, depth = 0) {
   if (value == null) return value
@@ -67,6 +72,7 @@ export function getLogPaths() {
     errorLogPath: ERROR_LOG_PATH,
     frontendLogPath: FRONTEND_LOG_PATH,
     apiLogPath: API_LOG_PATH,
+    smtpLogPath: SMTP_LOG_PATH,
   }
 }
 
@@ -108,6 +114,22 @@ export function logApi(message, details = {}) {
   writeLine(apiStream, payload)
 }
 
+
+export function logSmtp(message, details = {}) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    correlationId: details.correlationId || getCorrelationId(),
+    message,
+    ...normalizeDetails(details),
+  }
+  writeLine(smtpStream, payload)
+}
+
+export function getCorrelationId() {
+  return requestStore.getStore()?.correlationId || null
+}
+
 export function logInfo(message, details = {}) {
   const payload = {
     timestamp: new Date().toISOString(),
@@ -121,7 +143,7 @@ export function logInfo(message, details = {}) {
 
 export function requestContext(req) {
   return safeValue({
-    correlationId: req.correlationId || null,
+    correlationId: req?.correlationId || getCorrelationId() || null,
     method: req.method,
     path: req.originalUrl || req.url,
     ip: req.ip,
@@ -133,12 +155,13 @@ export function requestContext(req) {
   })
 }
 
+
 export function requestCorrelationMiddleware(req, res, next) {
   const incoming = req.headers['x-correlation-id'] || req.headers['x-request-id']
   const correlationId = typeof incoming === 'string' && incoming.trim() ? incoming.trim() : randomUUID()
   req.correlationId = correlationId
   res.setHeader('X-Correlation-Id', correlationId)
-  next()
+  requestStore.run({ correlationId }, () => next())
 }
 
 export function accessLogMiddleware(req, res, next) {
