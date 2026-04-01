@@ -227,3 +227,36 @@ test('mobile location lookup runs on the server and keeps browser datasets out o
   assert.match(locationInput, /use_my_location_lookup_completed/)
   assert.match(locationInput, /use_my_location_lookup_failed/)
 })
+
+
+test('root app.test.js is not needed because test/app.test.js is the active suite', () => {
+  assert.equal(fs.existsSync(new URL('../app.test.js', import.meta.url)), false)
+})
+
+test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
+  const authServer = fs.readFileSync(new URL('../server/auth.js', import.meta.url), 'utf8')
+  const authContext = fs.readFileSync(new URL('../src/context/AuthContext.tsx', import.meta.url), 'utf8')
+  const registerPage = fs.readFileSync(new URL('../src/pages/Register.tsx', import.meta.url), 'utf8')
+
+  assert.match(authServer, /session:\s*\{[\s\S]*expiresIn:\s*60 \* 60 \* 24/)
+  assert.match(authContext, /await signOutAuth\(\)/)
+  assert.match(authContext, /setUser\(null\)/)
+  assert.match(registerPage, /navigate\(`\/verify-contact\?email=\$\{encodeURIComponent\(result\.email\)\}`\)/)
+})
+
+test('smtp logging has a dedicated smtp log with shared correlation ids', () => {
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+  const mailer = fs.readFileSync(new URL('../server/mailer.js', import.meta.url), 'utf8')
+  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+  const cleanupScript = fs.readFileSync(new URL('../server/scripts/cleanup-logs.js', import.meta.url), 'utf8')
+
+  assert.match(logger, /path\.join\(LOG_DIR, 'smtp\.log'\)/)
+  assert.match(logger, /export function logSmtp/)
+  assert.match(logger, /export function getCorrelationId/)
+  assert.match(logger, /requestStore\.run\(\{ correlationId \}/)
+  assert.match(mailer, /logSmtp\('smtp_send_started'/)
+  assert.match(mailer, /logSmtp\('smtp_send_succeeded'/)
+  assert.match(mailer, /logSmtp\('smtp_send_failed'/)
+  assert.match(pkg, /"prebuild": "node server\/scripts\/cleanup-logs\.js"/)
+  assert.match(cleanupScript, /7 \* 24 \* 60 \* 60 \* 1000/)
+})
