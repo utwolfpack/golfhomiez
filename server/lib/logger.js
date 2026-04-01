@@ -1,12 +1,11 @@
 import fs from 'fs'
 import path from 'path'
-import crypto from 'crypto'
 
 const LOG_DIR = path.resolve(process.cwd(), 'logging')
 const ACCESS_LOG_PATH = path.join(LOG_DIR, 'access.log')
-const API_LOG_PATH = path.join(LOG_DIR, 'api.log')
 const ERROR_LOG_PATH = path.join(LOG_DIR, 'error.log')
 const FRONTEND_LOG_PATH = path.join(LOG_DIR, 'frontend.log')
+const API_LOG_PATH = path.join(LOG_DIR, 'api.log')
 const REDACT_KEYS = new Set(['password', 'passwordhash', 'token', 'authorization', 'cookie', 'secret', 'smtp_pass', 'smtp_key'])
 
 function ensureLogDir() {
@@ -19,9 +18,9 @@ function createStream(filePath) {
 }
 
 const accessStream = createStream(ACCESS_LOG_PATH)
-const apiStream = createStream(API_LOG_PATH)
 const errorStream = createStream(ERROR_LOG_PATH)
 const frontendStream = createStream(FRONTEND_LOG_PATH)
+const apiStream = createStream(API_LOG_PATH)
 
 function safeValue(value, depth = 0) {
   if (value == null) return value
@@ -55,46 +54,13 @@ function writeLine(stream, payload) {
 
 export function getLogPaths() {
   ensureLogDir()
-  return {
-    logDir: LOG_DIR,
-    accessLogPath: ACCESS_LOG_PATH,
-    apiLogPath: API_LOG_PATH,
-    errorLogPath: ERROR_LOG_PATH,
-    frontendLogPath: FRONTEND_LOG_PATH,
-  }
-}
-
-export function getCorrelationId(req) {
-  const headerValue = req?.headers?.['x-correlation-id']
-  if (typeof headerValue === 'string' && headerValue.trim()) return headerValue.trim()
-  if (Array.isArray(headerValue) && headerValue[0]) return String(headerValue[0]).trim()
-  return crypto.randomUUID()
-}
-
-export function requestContext(req) {
-  return safeValue({
-    correlationId: req?.correlationId || null,
-    method: req?.method,
-    path: req?.originalUrl || req?.url,
-    ip: req?.ip,
-    userAgent: req?.headers?.['user-agent'] || null,
-    user: req?.user ? { id: req.user.id, email: req.user.email } : null,
-    params: req?.params,
-    query: req?.query,
-    body: req?.body,
-  })
+  return { logDir: LOG_DIR, accessLogPath: ACCESS_LOG_PATH, errorLogPath: ERROR_LOG_PATH, frontendLogPath: FRONTEND_LOG_PATH, apiLogPath: API_LOG_PATH }
 }
 
 export function logAccess(entry) {
-  writeLine(accessStream, { timestamp: new Date().toISOString(), ...safeValue(entry) })
-}
-
-export function logApi(message, details = {}) {
-  writeLine(apiStream, {
+  writeLine(accessStream, {
     timestamp: new Date().toISOString(),
-    level: 'info',
-    message,
-    ...safeValue(details),
+    ...safeValue(entry),
   })
 }
 
@@ -110,36 +76,69 @@ export function logError(message, details = {}) {
   console.error(message, payload.error || details)
 }
 
-export function logFrontend(message, details = {}) {
-  writeLine(frontendStream, {
+
+
+export function logApi(message, details = {}) {
+  const payload = {
     timestamp: new Date().toISOString(),
     level: 'info',
     message,
     ...safeValue(details),
-  })
+  }
+  writeLine(apiStream, payload)
+}
+
+export function correlationIdMiddleware(req, res, next) {
+  const incoming = String(req.headers['x-correlation-id'] || '').trim()
+  const correlationId = incoming || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  req.correlationId = correlationId
+  res.setHeader('X-Correlation-Id', correlationId)
+  next()
+}
+
+export function logFrontend(message, details = {}) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    message,
+    ...safeValue(details),
+  }
+  writeLine(frontendStream, payload)
 }
 
 export function logInfo(message, details = {}) {
   const payload = {
     timestamp: new Date().toISOString(),
-    level: details.levelOverride || 'info',
+    level: 'info',
     message,
     ...safeValue(details),
   }
-  writeLine(apiStream, payload)
+  writeLine(accessStream, payload)
   console.log(message)
 }
 
+export function requestContext(req) {
+  return safeValue({
+    correlationId: req.correlationId || null,
+    method: req.method,
+    path: req.originalUrl || req.url,
+    ip: req.ip,
+    userAgent: req.headers['user-agent'] || null,
+    user: req.user ? { id: req.user.id, email: req.user.email } : null,
+    params: req.params,
+    query: req.query,
+    body: req.body,
+  })
+}
+
 export function accessLogMiddleware(req, res, next) {
-  req.correlationId = getCorrelationId(req)
-  res.setHeader('X-Correlation-Id', req.correlationId)
   const startedAt = process.hrtime.bigint()
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
     logAccess({
       type: 'http_access',
-      correlationId: req.correlationId,
-      method: req.method,
+      correlationId: req.correlationId || null,
+    method: req.method,
       path: req.originalUrl || req.url,
       statusCode: res.statusCode,
       durationMs: Number(durationMs.toFixed(2)),

@@ -13,7 +13,24 @@ function buildLabel(city, stateName, stateCode) {
   return `${city}, ${stateCode} · ${stateName}`
 }
 
-function getUSLocations() {
+function toLocation(city, stateName) {
+  if (city.countryCode !== 'US' || !city.stateCode || !city.name) return null
+  const latitude = Number(city.latitude)
+  const longitude = Number(city.longitude)
+  if (!stateName || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
+
+  return {
+    key: `${city.name}|${city.stateCode}|${latitude}|${longitude}`,
+    city: city.name,
+    stateCode: city.stateCode,
+    stateName,
+    label: buildLabel(city.name, stateName, city.stateCode),
+    latitude,
+    longitude,
+  }
+}
+
+export function getUSLocations() {
   if (usLocationsCache) return usLocationsCache
 
   const seen = new Set()
@@ -24,22 +41,7 @@ function getUSLocations() {
   )
 
   usLocationsCache = City.getCitiesOfCountry('US')
-    .map((city) => {
-      if (city.countryCode !== 'US' || !city.name || !city.stateCode) return null
-      const stateName = statesByCode.get(city.stateCode) || ''
-      const latitude = Number(city.latitude)
-      const longitude = Number(city.longitude)
-      if (!stateName || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
-      return {
-        key: `${city.name}|${city.stateCode}|${latitude}|${longitude}`,
-        city: city.name,
-        stateCode: city.stateCode,
-        stateName,
-        label: buildLabel(city.name, stateName, city.stateCode),
-        latitude,
-        longitude,
-      }
-    })
+    .map((city) => toLocation(city, statesByCode.get(city.stateCode) || ''))
     .filter(Boolean)
     .filter((item) => {
       if (seen.has(item.key)) return false
@@ -52,10 +54,10 @@ function getUSLocations() {
 
 export function searchLocations(query, limit = 8) {
   const q = normalize(query).trim()
-  const all = getUSLocations()
-  if (!q) return all.slice(0, limit)
+  if (q.length < 2) return []
 
-  const scored = all
+  const all = getUSLocations()
+  return all
     .map((location) => {
       const city = normalize(location.city)
       const stateCode = normalize(location.stateCode)
@@ -72,8 +74,8 @@ export function searchLocations(query, limit = 8) {
     })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.location.label.localeCompare(b.location.label))
-
-  return scored.slice(0, limit).map((entry) => entry.location)
+    .slice(0, limit)
+    .map((entry) => entry.location)
 }
 
 function toRadians(value) {
@@ -91,20 +93,16 @@ function haversineMiles(lat1, lon1, lat2, lon2) {
 
 export function getNearestLocation(latitude, longitude) {
   const all = getUSLocations()
-  const lat = Number(latitude)
-  const lon = Number(longitude)
-  if (!all.length || Number.isNaN(lat) || Number.isNaN(lon)) return null
+  if (!all.length || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
 
   let best = null
   let bestDistance = Number.POSITIVE_INFINITY
-
   for (const location of all) {
-    const distance = haversineMiles(lat, lon, location.latitude, location.longitude)
+    const distance = haversineMiles(latitude, longitude, location.latitude, location.longitude)
     if (distance < bestDistance) {
       best = location
       bestDistance = distance
     }
   }
-
   return best
 }
