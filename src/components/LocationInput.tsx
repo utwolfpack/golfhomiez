@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getNearestLocation, searchLocations } from '../lib/locations'
-import { loadSavedLocation, saveLocation, type SavedLocation } from '../lib/location-store'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import { loadSavedLocation, saveLocation, type SavedLocation } from '../lib/location-store'
 
 type Props = {
   value: SavedLocation | null
@@ -16,9 +16,7 @@ export default function LocationInput({ value, onChange }: Props) {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [helperText, setHelperText] = useState<string | null>(null)
   const blurTimer = useRef<number | null>(null)
-  const debounceTimer = useRef<number | null>(null)
   const searchRequestId = useRef(0)
-  const trimmedQuery = useMemo(() => query.trim(), [query])
 
   useEffect(() => {
     setQuery(value?.label || '')
@@ -44,127 +42,67 @@ export default function LocationInput({ value, onChange }: Props) {
       return
     }
 
-    if (trimmedQuery.length < 2) {
-      setSuggestions([])
-      setIsLoadingSuggestions(false)
-      setHelperText('Type at least 2 characters to search for a city or state.')
-      return
-    }
-
-    if (debounceTimer.current) {
-      window.clearTimeout(debounceTimer.current)
-    }
-
     const requestId = ++searchRequestId.current
     setIsLoadingSuggestions(true)
-    debounceTimer.current = window.setTimeout(() => {
-      logFrontendEvent({
-        category: 'location.lookup',
-        message: 'location_search_started',
-        data: { correlationId: getCorrelationId(), query: trimmedQuery },
+    logFrontendEvent({ category: 'location.search', level: 'info', message: 'location_suggestions_requested', data: { correlationId: getCorrelationId(), route: globalThis.location?.pathname || '/register', query } })
+    searchLocations(query, 8)
+      .then((results) => {
+        if (requestId !== searchRequestId.current) return
+        setSuggestions(results)
+        logFrontendEvent({ category: 'location.search', level: 'info', message: 'location_suggestions_completed', data: { correlationId: getCorrelationId(), route: globalThis.location?.pathname || '/register', query, resultCount: results.length } })
       })
+      .catch(() => {
+        if (requestId !== searchRequestId.current) return
+        setSuggestions([])
+        setHelperText('Location suggestions are temporarily unavailable. You can keep typing.')
+        logFrontendEvent({ category: 'location.search', level: 'error', message: 'location_suggestions_failed', data: { correlationId: getCorrelationId(), route: globalThis.location?.pathname || '/register', query } })
+      })
+      .finally(() => {
+        if (requestId === searchRequestId.current) setIsLoadingSuggestions(false)
+      })
+  }, [query, showSuggestions])
 
-      searchLocations(trimmedQuery, 8)
-        .then((results) => {
-          if (requestId !== searchRequestId.current) return
-          setSuggestions(results)
-          setHelperText(results.length ? null : 'No matching cities were found yet. Keep typing.')
-        })
-        .catch((error: unknown) => {
-          if (requestId !== searchRequestId.current) return
-          setSuggestions([])
-          setHelperText('Location suggestions are temporarily unavailable. You can keep typing.')
-          logFrontendEvent({
-            category: 'location.lookup',
-            level: 'error',
-            message: 'location_search_failed',
-            data: {
-              correlationId: getCorrelationId(),
-              query: trimmedQuery,
-              error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
-            },
-          })
-        })
-        .finally(() => {
-          if (requestId === searchRequestId.current) setIsLoadingSuggestions(false)
-        })
-    }, 180)
-
-    return () => {
-      if (debounceTimer.current) {
-        window.clearTimeout(debounceTimer.current)
-        debounceTimer.current = null
-      }
-    }
-  }, [trimmedQuery, showSuggestions])
-
-  async function detectNearestLocation() {
-    const startedAt = Date.now()
-    const correlationId = getCorrelationId()
-    const diagnosticBase = {
-      correlationId,
-      route: window.location.pathname,
-      href: window.location.href,
-      secureContext: window.isSecureContext,
-      online: navigator.onLine,
-      visibilityState: document.visibilityState,
-      geolocationAvailable: Boolean(typeof navigator !== 'undefined' && navigator.geolocation),
-    }
-
-    logFrontendEvent({
-      category: 'location.use_my_location',
-      message: 'use_my_location_clicked',
-      data: diagnosticBase,
-    })
-
+  function detectNearestLocation() {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setHelperText('Location detection is not available in this browser.')
       logFrontendEvent({
         category: 'location.use_my_location',
-        level: 'error',
+        level: 'warn',
         message: 'use_my_location_unsupported',
-        data: diagnosticBase,
+        data: { correlationId: getCorrelationId(), route: globalThis.location?.pathname || '/register' },
       })
       return
     }
 
-    let permissionState: string | null = null
-    try {
-      const permissionsApi = (navigator as Navigator & { permissions?: { query?: (desc: { name: string }) => Promise<{ state: string }> } }).permissions
-      if (permissionsApi?.query) {
-        permissionState = (await permissionsApi.query({ name: 'geolocation' })).state
-      }
-    } catch {}
+    const startedAt = Date.now()
+    const correlationId = getCorrelationId()
+    logFrontendEvent({
+      category: 'location.use_my_location',
+      level: 'info',
+      message: 'use_my_location_clicked',
+      data: { correlationId, route: globalThis.location?.pathname || '/register' },
+    })
 
     setIsDetecting(true)
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const geolocationDurationMs = Date.now() - startedAt
-        const coords = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          altitude: position.coords.altitude,
-          altitudeAccuracy: position.coords.altitudeAccuracy,
-          heading: position.coords.heading,
-          speed: position.coords.speed,
-        }
-
-        logFrontendEvent({
-          category: 'location.use_my_location',
-          message: 'use_my_location_geolocation_success',
-          data: {
-            ...diagnosticBase,
-            permissionState,
-            geolocationDurationMs,
-            ...coords,
-          },
-        })
-
+        const lookupStartedAt = Date.now()
         try {
-          const lookupStartedAt = Date.now()
+          logFrontendEvent({
+            category: 'location.use_my_location',
+            level: 'info',
+            message: 'use_my_location_geolocation_success',
+            data: {
+              correlationId,
+              route: globalThis.location?.pathname || '/register',
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+              durationMs: lookupStartedAt - startedAt,
+            },
+          })
+
           const nearest = await getNearestLocation(position.coords.latitude, position.coords.longitude)
-          const lookupDurationMs = Date.now() - lookupStartedAt
           if (nearest) {
             onChange(nearest)
             setQuery(nearest.label)
@@ -172,17 +110,14 @@ export default function LocationInput({ value, onChange }: Props) {
             saveLocation(nearest)
             logFrontendEvent({
               category: 'location.use_my_location',
+              level: 'info',
               message: 'use_my_location_lookup_completed',
               data: {
-                ...diagnosticBase,
-                permissionState,
-                geolocationDurationMs,
-                lookupDurationMs,
-                totalDurationMs: Date.now() - startedAt,
-                ...coords,
+                correlationId,
+                route: globalThis.location?.pathname || '/register',
                 selectedLabel: nearest.label,
-                city: nearest.city,
-                stateCode: nearest.stateCode,
+                lookupDurationMs: Date.now() - lookupStartedAt,
+                totalDurationMs: Date.now() - startedAt,
               },
             })
           } else {
@@ -191,14 +126,7 @@ export default function LocationInput({ value, onChange }: Props) {
               category: 'location.use_my_location',
               level: 'warn',
               message: 'use_my_location_lookup_empty',
-              data: {
-                ...diagnosticBase,
-                permissionState,
-                geolocationDurationMs,
-                lookupDurationMs,
-                totalDurationMs: Date.now() - startedAt,
-                ...coords,
-              },
+              data: { correlationId, route: globalThis.location?.pathname || '/register' },
             })
           }
         } catch (error) {
@@ -208,12 +136,11 @@ export default function LocationInput({ value, onChange }: Props) {
             level: 'error',
             message: 'use_my_location_lookup_failed',
             data: {
-              ...diagnosticBase,
-              permissionState,
-              geolocationDurationMs,
+              correlationId,
+              route: globalThis.location?.pathname || '/register',
+              durationMs: Date.now() - lookupStartedAt,
               totalDurationMs: Date.now() - startedAt,
-              ...coords,
-              error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+              errorMessage: error instanceof Error ? error.message : String(error),
             },
           })
         } finally {
@@ -228,11 +155,11 @@ export default function LocationInput({ value, onChange }: Props) {
           level: 'error',
           message: 'use_my_location_geolocation_failed',
           data: {
-            ...diagnosticBase,
-            permissionState,
+            correlationId,
+            route: globalThis.location?.pathname || '/register',
+            code: error?.code,
+            errorMessage: error?.message || 'Geolocation failed',
             totalDurationMs: Date.now() - startedAt,
-            errorCode: error?.code ?? null,
-            errorMessage: error?.message ?? 'Unknown geolocation error',
           },
         })
       },
@@ -246,11 +173,6 @@ export default function LocationInput({ value, onChange }: Props) {
     setShowSuggestions(false)
     setHelperText(`Selected ${next.label}`)
     saveLocation(next)
-    logFrontendEvent({
-      category: 'location.lookup',
-      message: 'location_selected',
-      data: { correlationId: getCorrelationId(), label: next.label },
-    })
   }
 
   function handleBlur() {
@@ -310,7 +232,7 @@ export default function LocationInput({ value, onChange }: Props) {
         </div>
       ) : null}
       <div className="small" style={{ marginTop: 8 }}>
-        {helperText || 'Type at least 2 characters to search the server-backed US city index. Use the location button any time if you want to detect the nearest city.'}
+        {helperText || 'Type ahead will suggest matching US cities. Use the location button any time if you want to detect the nearest city.'}
       </div>
     </div>
   )

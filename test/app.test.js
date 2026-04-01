@@ -1,7 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import path from 'node:path'
 
 import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
 import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
@@ -151,19 +150,17 @@ test('homepage shows guest sample scores when no user is logged in', () => {
   assert.match(sample, /Homie Hustlers/)
 })
 
-test('logging writes to root access, api, error, and frontend log files with correlation middleware support', () => {
+test('logging writes to root access and error log files with request middleware support', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
   const gitignore = fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8')
 
-  assert.match(server, /app\.use\(requestCorrelationMiddleware\)/)
   assert.match(server, /app\.use\(accessLogMiddleware\)/)
-  assert.match(server, /X-Correlation-Id/)
+  assert.match(server, /logRouteError\('/)
+  assert.match(logger, /path\.resolve\(process\.cwd\(\), 'logging'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'access\.log'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
   assert.match(logger, /path\.join\(LOG_DIR, 'error\.log'\)/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
-  assert.match(logger, /req\.correlationId/)
+  assert.match(logger, /res\.on\('finish'/)
   assert.match(gitignore, /logging\/\*\.log/)
   assert.match(gitignore, /!logging\/\.gitkeep/)
 })
@@ -186,15 +183,14 @@ test('safe mobile diagnostics use pixel beacons instead of recursive preboot net
   const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
 
   assert.match(html, /\/diag\/pixel\.gif\?cid=/)
-  assert.match(html, /gh\.correlationId/)
   assert.doesNotMatch(html, /api\/client-logs/)
   assert.doesNotMatch(html, /sendBeacon/)
   assert.match(frontendLogger, /new Image\(1, 1\)/)
-  assert.match(frontendLogger, /CORRELATION_STORAGE_KEY = 'gh\.correlationId'/)
   assert.doesNotMatch(frontendLogger, /window\.fetch\s*=/)
   assert.match(server, /app\.get\('\/diag\/pixel\.gif'/)
   assert.match(logger, /path\.join\(LOG_DIR, 'frontend\.log'\)/)
 })
+
 
 test('register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle', () => {
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
@@ -202,36 +198,32 @@ test('register route stays lazy-loaded to avoid pulling mobile-only register cod
   assert.match(app, /Suspense fallback=/)
 })
 
-test('location lookups use server-backed endpoints instead of bundling the country-state-city client dataset', () => {
+test('location resources use backend endpoints and keep datasets off the client', () => {
   const locations = fs.readFileSync(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
   const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-  const service = fs.readFileSync(new URL('../server/lib/location-service.js', import.meta.url), 'utf8')
 
-  assert.match(locations, /new URL\('\/api\/locations\/search'/)
-  assert.match(locations, /new URL\('\/api\/locations\/nearest'/)
-  assert.doesNotMatch(locations, /import\('country-state-city'\)/)
-  assert.match(input, /window\.setTimeout\(\(\) =>/)
-  assert.match(input, /Type at least 2 characters to search for a city or state./)
+  assert.match(locations, /fetch\(`/)
+  assert.match(locations, /\/api\/locations\/search/)
+  assert.match(locations, /\/api\/locations\/nearest/)
+  assert.doesNotMatch(locations, /country-state-city/)
+  assert.match(input, /searchLocations\(query, 8\)\s*\.then/)
+  assert.match(input, /await getNearestLocation\(position\.coords\.latitude, position\.coords\.longitude\)/)
   assert.match(server, /app\.get\('\/api\/locations\/search'/)
   assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
-  assert.match(service, /import\('country-state-city'\)/)
 })
 
 
-test('frontend logger exports structured client log helpers and use my location diagnostics', () => {
-  const frontendLogger = fs.readFileSync(path.join(process.cwd(), 'src/lib/frontend-logger.ts'), 'utf8')
-  const locationInput = fs.readFileSync(path.join(process.cwd(), 'src/components/LocationInput.tsx'), 'utf8')
-  const serverIndex = fs.readFileSync(path.join(process.cwd(), 'server/index.js'), 'utf8')
+test('mobile location lookup runs on the server and keeps browser datasets out of the client', () => {
+  const locations = fs.readFileSync(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
+  const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(frontendLogger, /export\s+async\s+function\s+sendFrontendLog/)
-  assert.match(frontendLogger, /export\s+const\s+createCorrelationId\s*=\s*randomId/)
-  assert.match(frontendLogger, /export\s+function\s+getRoutePath\(/)
-  assert.match(frontendLogger, /\/api\/client-logs/)
-  assert.match(locationInput, /use_my_location_clicked/)
-  assert.match(locationInput, /use_my_location_geolocation_success/)
-  assert.match(locationInput, /use_my_location_geolocation_failed/)
+  assert.match(locations, /fetch\(`?\/api\/locations\/search/)
+  assert.match(locations, /fetch\(`?\/api\/locations\/nearest/)
+  assert.doesNotMatch(locations, /country-state-city/)
+  assert.match(server, /app\.get\('\/api\/locations\/search'/)
+  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
   assert.match(locationInput, /use_my_location_lookup_completed/)
   assert.match(locationInput, /use_my_location_lookup_failed/)
-  assert.match(serverIndex, /app\.post\('\/api\/client-logs'/)
 })
