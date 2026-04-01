@@ -2,8 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-import { getTodayInTimeZone, isValidPastOrTodayDate } from './server/lib/date-utils.js'
-import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from './server/lib/team-utils.js'
+import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
+import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
 
 function addDays(isoDate, days) {
   const base = new Date(`${isoDate}T00:00:00Z`)
@@ -18,29 +18,25 @@ test('email helpers normalize and validate addresses', () => {
 })
 
 test('forgot password client points at the correct Better Auth endpoint', () => {
-  const source = fs.readFileSync(new URL('./src/lib/auth-api.ts', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
   assert.match(source, /\$\{AUTH_BASE\}\/request-password-reset/)
   assert.doesNotMatch(source, /\$\{AUTH_BASE\}\/forget-password/)
 })
 
 test('API client attaches the user timezone header for server-side date validation', () => {
-  const source = fs.readFileSync(new URL('./src/lib/api.ts', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
   assert.match(source, /X-User-Timezone/)
   assert.match(source, /resolvedOptions\(\)\.timeZone/)
 })
 
 
 
-test('registration location input uses backend APIs and still offers manual location detection', () => {
-  const locationInput = fs.readFileSync(new URL('./src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const locations = fs.readFileSync(new URL('./src/lib/locations.ts', import.meta.url), 'utf8')
+test('registration location input no longer uses browser geolocation', () => {
+  const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
 
-  assert.match(locationInput, /Use my location/)
-  assert.match(locationInput, /navigator\.geolocation/)
-  assert.match(locations, /requestJson/)
-  assert.match(locations, /\/api\/locations\/search/)
-  assert.match(locations, /\/api\/locations\/nearest/)
-  assert.doesNotMatch(locations, /country-state-city/)
+  assert.doesNotMatch(locationInput, /navigator\.geolocation/)
+  assert.doesNotMatch(locationInput, /Use my location/)
+  assert.match(locationInput, /Registration no longer detects your current location automatically\./)
 })
 
 test('create-team normalization always makes the signed-in user the first member', () => {
@@ -68,7 +64,7 @@ test('locked lead member falls back to the email local-part when the user name i
 })
 
 test('team creation UI keeps the first member read-only and explains why', () => {
-  const source = fs.readFileSync(new URL('./src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
   assert.match(source, /readOnly=\{idx === 0\}/)
   assert.match(source, /Member 1 is always the signed-in user and cannot be changed\./)
   assert.match(source, /disabled=\{newMembers.length === 1 \|\| idx === 0\}/)
@@ -86,8 +82,8 @@ test('date helpers reject future dates in the supplied local timezone', () => {
 })
 
 test('score logger pages use the user-local date helper for date picker limits', () => {
-  const golfLogger = fs.readFileSync(new URL('./src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
-  const soloLogger = fs.readFileSync(new URL('./src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
+  const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
+  const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
 
   assert.match(golfLogger, /getUserTodayISO\(\)/)
   assert.match(golfLogger, /type="date" max=\{today\}/)
@@ -96,7 +92,7 @@ test('score logger pages use the user-local date helper for date picker limits',
 })
 
 test('solo logger supports optional 18-hole entry like the team logger', () => {
-  const soloLogger = fs.readFileSync(new URL('./src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
+  const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
 
   assert.match(soloLogger, /Enable 18-hole inputs \(optional\)/)
   assert.match(soloLogger, /const \[useHoles, setUseHoles\] = useState\(false\)/)
@@ -105,8 +101,8 @@ test('solo logger supports optional 18-hole entry like the team logger', () => {
 })
 
 test('logged event rows remain clickable buttons for round detail access', () => {
-  const home = fs.readFileSync(new URL('./src/pages/Home.tsx', import.meta.url), 'utf8')
-  const scoresPage = fs.readFileSync(new URL('./src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
+  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
 
   assert.match(home, /function RoundRow\({ round, onClick }/)
   assert.match(home, /<button type="button" className=\{roundRowClass\(round\)\} onClick=\{onClick\}>/)
@@ -118,11 +114,11 @@ test('logged event rows remain clickable buttons for round detail access', () =>
 })
 
 test('handicap UI is clickable, filter-relative, and shows a breakdown modal', () => {
-  const home = fs.readFileSync(new URL('./src/pages/Home.tsx', import.meta.url), 'utf8')
-  const scoresPage = fs.readFileSync(new URL('./src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
-  const summaryCard = fs.readFileSync(new URL('./src/components/HandicapSummaryCard.tsx', import.meta.url), 'utf8')
-  const modal = fs.readFileSync(new URL('./src/components/HandicapBreakdownModal.tsx', import.meta.url), 'utf8')
-  const handicapLib = fs.readFileSync(new URL('./src/lib/handicap.ts', import.meta.url), 'utf8')
+  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
+  const summaryCard = fs.readFileSync(new URL('../src/components/HandicapSummaryCard.tsx', import.meta.url), 'utf8')
+  const modal = fs.readFileSync(new URL('../src/components/HandicapBreakdownModal.tsx', import.meta.url), 'utf8')
+  const handicapLib = fs.readFileSync(new URL('../src/lib/handicap.ts', import.meta.url), 'utf8')
 
   assert.match(home, /calculateHandicapFromScores\(filteredScores\)/)
   assert.match(scoresPage, /calculateHandicapFromScores\(filteredScores\)/)
@@ -138,8 +134,8 @@ test('handicap UI is clickable, filter-relative, and shows a breakdown modal', (
 })
 
 test('validation warnings stay hidden until save is attempted', () => {
-  const golfLogger = fs.readFileSync(new URL('./src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
-  const soloLogger = fs.readFileSync(new URL('./src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
+  const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
+  const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
 
   assert.match(soloLogger, /const \[showValidation, setShowValidation\] = useState\(false\)/)
   assert.match(soloLogger, /setShowValidation\(true\)/)
@@ -154,8 +150,8 @@ test('validation warnings stay hidden until save is attempted', () => {
 })
 
 test('homepage shows guest sample scores when no user is logged in', () => {
-  const home = fs.readFileSync(new URL('./src/pages/Home.tsx', import.meta.url), 'utf8')
-  const sample = fs.readFileSync(new URL('./src/lib/dashboardSample.ts', import.meta.url), 'utf8')
+  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const sample = fs.readFileSync(new URL('../src/lib/dashboardSample.ts', import.meta.url), 'utf8')
 
   assert.match(home, /setScores\(GUEST_HOME_SCORES\)/)
   assert.match(home, /user\?\.email \|\| GUEST_HOME_EMAIL/)
@@ -165,9 +161,9 @@ test('homepage shows guest sample scores when no user is logged in', () => {
 })
 
 test('logging writes to root access and error log files with request middleware support', () => {
-  const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
-  const logger = fs.readFileSync(new URL('./server/lib/logger.js', import.meta.url), 'utf8')
-  const gitignore = fs.readFileSync(new URL('./.gitignore', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+  const gitignore = fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8')
 
   assert.match(server, /app\.use\(accessLogMiddleware\)/)
   assert.match(server, /logRouteError\('/)
@@ -180,12 +176,31 @@ test('logging writes to root access and error log files with request middleware 
 })
 
 test('homepage demo seeder can populate the sample rounds locally', () => {
-  const pkg = fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')
-  const seed = fs.readFileSync(new URL('./server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
+  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+  const seed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
 
   assert.match(pkg, /"seed:homepage-demo"/)
   assert.match(seed, /const DEMO_EMAIL = 'thegolfhomie@example\.com'/)
   assert.match(seed, /Bonneville Golf Course/)
   assert.match(seed, /Homie Hustlers/)
   assert.match(seed, /Seeded homepage demo data/)
+})
+
+
+test('use my location emits detailed frontend diagnostics and ships them to the server log endpoint', () => {
+  const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
+  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+
+  assert.match(locationInput, /use_my_location_clicked/)
+  assert.match(locationInput, /use_my_location_geolocation_success/)
+  assert.match(locationInput, /use_my_location_geolocation_failed/)
+  assert.match(locationInput, /use_my_location_lookup_completed/)
+  assert.match(locationInput, /accuracy: position\.coords\.accuracy/)
+  assert.match(frontendLogger, /fetch\('\/api\/client-logs'/)
+  assert.match(frontendLogger, /'X-Log-Source': 'frontend-logger'/)
+  assert.match(server, /app\.post\('\/api\/client-logs'/)
+  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
+  assert.match(logger, /correlationId: getRequestCorrelationId\(req\)/)
 })

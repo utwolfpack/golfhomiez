@@ -198,16 +198,32 @@ test('register route stays lazy-loaded to avoid pulling mobile-only register cod
   assert.match(app, /Suspense fallback=/)
 })
 
-test('location APIs are served by the backend with correlation-aware logging', () => {
+test('location resources load on demand instead of on initial render', () => {
+  const locations = fs.readFileSync(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
+  const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
+
+  assert.match(locations, /import\('country-state-city'\)/)
+  assert.doesNotMatch(locations, /import \{[^}]*City[^}]*\} from 'country-state-city'/)
+  assert.doesNotMatch(input, /didAutoDetect/)
+  assert.match(input, /searchLocations\(query, 8\)\s*\.then/)
+  assert.match(input, /await getNearestLocation\(position\.coords\.latitude, position\.coords\.longitude\)/)
+})
+
+
+test('use my location emits detailed frontend diagnostics and ships them to the server log endpoint', () => {
+  const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
+  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
-  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
-  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
 
-  assert.match(server, /app\.get\('\/api\/locations\/search'/)
-  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
+  assert.match(locationInput, /use_my_location_clicked/)
+  assert.match(locationInput, /use_my_location_geolocation_success/)
+  assert.match(locationInput, /use_my_location_geolocation_failed/)
+  assert.match(locationInput, /use_my_location_lookup_completed/)
+  assert.match(locationInput, /accuracy: position\.coords\.accuracy/)
+  assert.match(frontendLogger, /fetch\('\/api\/client-logs'/)
+  assert.match(frontendLogger, /'X-Log-Source': 'frontend-logger'/)
+  assert.match(server, /app\.post\('\/api\/client-logs'/)
   assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
-  assert.match(logger, /X-Correlation-Id/)
-  assert.match(html, /gh_correlation_id/)
-  assert.match(frontendLogger, /X-Correlation-Id/)
+  assert.match(logger, /correlationId: getRequestCorrelationId\(req\)/)
 })
