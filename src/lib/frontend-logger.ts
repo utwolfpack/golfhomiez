@@ -1,6 +1,8 @@
-const CORRELATION_STORAGE_KEY = 'gh.correlationId'
+export const CORRELATION_STORAGE_KEY = 'gh.correlationId'
+const CORRELATION_WINDOW_KEY = '__GH_CORRELATION_ID'
 const MAX_BEACONS_PER_PAGE = 50
 const MAX_DETAIL_LENGTH = 180
+const FRONTEND_LOG_ENDPOINT = '/api/client-logs'
 
 const sentStages = new Set<string>()
 let sentCount = 0
@@ -18,33 +20,31 @@ function randomId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+export const createCorrelationId = randomId
+
 export function getCorrelationId(): string {
-  const fromWindow = (globalThis as any).__GH_CORRELATION_ID
+  const fromWindow = (globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY]
   if (typeof fromWindow === 'string' && fromWindow) return fromWindow
 
   try {
     const stored = globalThis.sessionStorage?.getItem(CORRELATION_STORAGE_KEY)
     if (stored) {
-      ;(globalThis as any).__GH_CORRELATION_ID = stored
+      ;(globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY] = stored
       return stored
     }
   } catch {}
 
   const next = randomId()
-  ;(globalThis as any).__GH_CORRELATION_ID = next
+  ;(globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY] = next
   try {
     globalThis.sessionStorage?.setItem(CORRELATION_STORAGE_KEY, next)
   } catch {}
   return next
 }
 
-export function createCorrelationId(): string {
-  return getCorrelationId()
-}
-
 export function setCorrelationId(correlationId: string): string {
   const next = correlationId || randomId()
-  ;(globalThis as any).__GH_CORRELATION_ID = next
+  ;(globalThis as Record<string, unknown>)[CORRELATION_WINDOW_KEY] = next
   try {
     globalThis.sessionStorage?.setItem(CORRELATION_STORAGE_KEY, next)
   } catch {}
@@ -86,13 +86,32 @@ function stringifyDetail(value: unknown): string {
   }
 }
 
+function safeJson(value: unknown, depth = 0): unknown {
+  if (value == null) return value
+  if (depth > 5) return '[truncated]'
+  if (typeof value === 'string') return value.length > 2000 ? `${value.slice(0, 1997)}...` : value
+  if (typeof value === 'number' || typeof value === 'boolean') return value
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    }
+  }
+  if (Array.isArray(value)) return value.map((item) => safeJson(item, depth + 1))
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, val]) => [key, safeJson(val, depth + 1)]))
+  }
+  return String(value)
+}
+
 function buildBeaconUrl(stage: string, detail?: string): string {
   const currentUrl = globalThis.location?.href || '/'
   const origin = globalThis.location?.origin || currentUrl
   const url = new URL('/diag/pixel.gif', origin)
   url.searchParams.set('cid', getCorrelationId())
   url.searchParams.set('stage', stage)
-  url.searchParams.set('path', getRoutePath())
+  url.searchParams.set('path', globalThis.location?.pathname || '/')
   if (detail) url.searchParams.set('detail', truncate(detail))
   url.searchParams.set('ts', String(Date.now()))
   return url.toString()
@@ -122,7 +141,7 @@ type StructuredArgs = {
   data?: Record<string, unknown>
 }
 
-type ClientLogPayload = {
+export type FrontendLogPayload = {
   correlationId?: string
   level?: string
   type?: string
@@ -131,6 +150,62 @@ type ClientLogPayload = {
   status?: string | null
   route?: string | null
   metadata?: Record<string, unknown> | null
+  userAgent?: string | null
+}
+
+function buildFrontendPayload(message: string, level: string, category: string, data?: Record<string, unknown>): FrontendLogPayload {
+  const metadata = safeJson(data || {}) as Record<string, unknown>
+  return {
+    correlationId: typeof metadata.correlationId === 'string' ? metadata.correlationId : getCorrelationId(),
+    level,
+    type: category || 'frontend_event',
+    message,
+    action: typeof metadata.action === 'string' ? metadata.action : null,
+    status: typeof metadata.status === 'string' ? metadata.status : null,
+    route: getRoutePath(),
+    metadata,
+    userAgent: globalThis.navigator?.userAgent || null,
+  }
+}
+
+export async function sendFrontendLog(payload: FrontendLogPayload): Promise<void> {
+  const enriched = {
+    correlationId: payload.correlationId || getCorrelationId(),
+    level: payload.level || 'info',
+    type: payload.type || 'frontend_event',
+    message: payload.message,
+    action: payload.action ?? null,
+    status: payload.status ?? null,
+    route: payload.route ?? getRoutePath(),
+    metadata: safeJson(payload.metadata || null),
+    userAgent: payload.userAgent || globalThis.navigator?.userAgent || null,
+  }
+
+  const body = JSON.stringify(enriched)
+
+  try {
+    if (typeof globalThis.navigator?.sendBeacon === 'function') {
+      const blob = new Blob([body], { type: 'application/json' })
+      const accepted = globalThis.navigator.sendBeacon(FRONTEND_LOG_ENDPOINT, blob)
+      if (accepted) return
+    }
+  } catch {}
+
+  try {
+    await fetch(FRONTEND_LOG_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Correlation-Id': enriched.correlationId,
+        'X-Log-Source': 'frontend-logger',
+      },
+      body,
+      credentials: 'include',
+      keepalive: true,
+    })
+  } catch {
+    // swallow logger transport errors to avoid recursive failures
+  }
 }
 
 export function logFrontendEvent(message: string, data?: Record<string, unknown>): void
@@ -155,50 +230,17 @@ export function logFrontendEvent(
   }
 
   const stage = category ? `${category}:${message}` : message
-  const detail = stringifyDetail({ level, ...(data || {}) })
+  const detail = stringifyDetail({ correlationId: getCorrelationId(), level, ...(data || {}) })
   emitPixelBeacon(stage, detail)
-}
-
-export async function sendFrontendLog(payload: ClientLogPayload): Promise<void> {
-  const correlationId = payload.correlationId || getCorrelationId()
-  const route = payload.route || getRoutePath()
-  const body = {
-    correlationId,
-    level: payload.level || 'info',
-    type: payload.type || 'frontend_event',
-    message: payload.message,
-    action: payload.action || null,
-    status: payload.status || null,
-    route,
-    metadata: payload.metadata || null,
-    pageUrl: globalThis.location?.href || null,
-    userAgent: globalThis.navigator?.userAgent || null,
-    clientTimestamp: new Date().toISOString(),
-  }
-
-  try {
-    await fetch('/api/client-logs', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Correlation-Id': correlationId,
-        'X-Log-Source': 'frontend-logger',
-      },
-      body: JSON.stringify(body),
-      keepalive: true,
-    })
-  } catch (error) {
-    emitPixelBeacon('frontend_log_delivery_failed', stringifyDetail(error))
-  }
+  void sendFrontendLog(buildFrontendPayload(message, level, category, data))
 }
 
 export function markBootStage(stage: string, data?: Record<string, unknown>): void {
-  emitPixelBeacon(stage, stringifyDetail(data), true)
+  emitPixelBeacon(stage, stringifyDetail({ correlationId: getCorrelationId(), ...(data || {}) }), true)
 }
 
 export function emitFrontendStage(stage: string, detail?: string): void {
-  emitPixelBeacon(stage, detail, true)
+  emitPixelBeacon(stage, detail ? stringifyDetail({ correlationId: getCorrelationId(), detail }) : stringifyDetail({ correlationId: getCorrelationId() }), true)
 }
 
 export function installFrontendDiagnostics(): void {
@@ -211,13 +253,15 @@ export function installFrontendDiagnostics(): void {
       if (handlingRuntimeError) return
       handlingRuntimeError = true
       try {
-        const detail = stringifyDetail({
+        const detail = {
+          correlationId: getCorrelationId(),
           message: event?.message || event?.error?.message || 'window error',
           filename: event?.filename || '',
           lineno: typeof event?.lineno === 'number' ? event.lineno : 0,
           colno: typeof event?.colno === 'number' ? event.colno : 0,
-        })
-        emitPixelBeacon('runtime_window_error', detail)
+        }
+        emitPixelBeacon('runtime_window_error', stringifyDetail(detail))
+        void sendFrontendLog(buildFrontendPayload('runtime_window_error', 'error', 'runtime', detail))
       } finally {
         handlingRuntimeError = false
       }
@@ -230,8 +274,12 @@ export function installFrontendDiagnostics(): void {
     handlingRuntimeError = true
     try {
       const reason = event?.reason
-      const detail = stringifyDetail(reason?.message || reason || 'unhandled rejection')
-      emitPixelBeacon('runtime_unhandled_rejection', detail)
+      const detail = {
+        correlationId: getCorrelationId(),
+        reason: reason?.message || reason || 'unhandled rejection',
+      }
+      emitPixelBeacon('runtime_unhandled_rejection', stringifyDetail(detail))
+      void sendFrontendLog(buildFrontendPayload('runtime_unhandled_rejection', 'error', 'runtime', detail))
     } finally {
       handlingRuntimeError = false
     }
