@@ -10,8 +10,7 @@ import { getLatestPasswordReset } from './auth-debug.js'
 import storage from './storage/index.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, correlationIdMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
-import { getNearestLocation, searchLocations } from './lib/location-service.js'
+import { accessLogMiddleware, getLogPaths, getRequestCorrelationId, logApi, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,11 +33,16 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id'],
-  exposedHeaders: ['X-Correlation-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id', 'X-Log-Source'],
 }))
 app.options('*', cors())
-app.use(correlationIdMiddleware)
+
+app.use((req, res, next) => {
+  const inboundCorrelationId = String(req.headers['x-correlation-id'] || '').trim()
+  req.correlationId = inboundCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  res.setHeader('X-Correlation-Id', req.correlationId)
+  next()
+})
 app.use(accessLogMiddleware)
 
 const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
@@ -60,28 +64,41 @@ app.get('/diag/pixel.gif', (req, res) => {
   res.setHeader('Expires', '0')
   res.send(TRANSPARENT_GIF)
 })
+
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
-app.get('/api/locations/search', (req, res) => {
-  const query = String(req.query.q || '').trim()
-  const limit = Math.max(1, Math.min(20, Number(req.query.limit || 8) || 8))
-  const results = searchLocations(query, limit)
-  logApi('location_search_completed', { ...requestContext(req), resultCount: results.length })
-  res.json(results)
-})
 
-app.get('/api/locations/nearest', (req, res) => {
-  const latitude = Number(req.query.latitude)
-  const longitude = Number(req.query.longitude)
-  if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-    return res.status(400).json({ message: 'latitude and longitude required' })
+app.post('/api/client-logs', (req, res) => {
+  const body = req.body || {}
+  const correlationId = String(body.correlationId || req.correlationId || '').trim() || req.correlationId || null
+  const payload = {
+    correlationId,
+    level: String(body.level || 'info'),
+    type: String(body.type || 'frontend_event'),
+    message: String(body.message || 'frontend event'),
+    action: body.action == null ? null : String(body.action),
+    status: body.status == null ? null : String(body.status),
+    route: body.route == null ? null : String(body.route),
+    pageUrl: body.pageUrl == null ? null : String(body.pageUrl),
+    userAgent: body.userAgent == null ? req.headers['user-agent'] || null : String(body.userAgent),
+    receivedAt: new Date().toISOString(),
+    clientTimestamp: body.clientTimestamp == null ? null : String(body.clientTimestamp),
+    data: body.metadata && typeof body.metadata === 'object' ? body.metadata : null,
   }
 
-  const location = getNearestLocation(latitude, longitude)
-  logApi('location_nearest_completed', { ...requestContext(req), found: Boolean(location) })
-  res.json(location)
-})
+  logFrontend(payload.message, payload)
+  logApi('frontend_client_log_received', {
+    correlationId,
+    path: req.originalUrl || req.url,
+    route: payload.route,
+    frontendType: payload.type,
+    frontendMessage: payload.message,
+    status: payload.status,
+    action: payload.action,
+  })
 
+  res.status(202).json({ ok: true, correlationId })
+})
 
 function logRouteError(message, req, error, extra = {}) {
   logError(message, {
