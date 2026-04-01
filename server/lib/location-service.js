@@ -1,5 +1,11 @@
 import { City, State } from 'country-state-city'
 
+const stateNameByCode = new Map(
+  State.getStatesOfCountry('US')
+    .filter((state) => state.isoCode && state.name)
+    .map((state) => [state.isoCode, state.name]),
+)
+
 let usLocationsCache = null
 
 function normalize(value) {
@@ -13,10 +19,11 @@ function buildLabel(city, stateName, stateCode) {
   return `${city}, ${stateCode} · ${stateName}`
 }
 
-function toLocation(city, stateName) {
+function toLocation(city) {
   if (city.countryCode !== 'US' || !city.stateCode || !city.name) return null
   const latitude = Number(city.latitude)
   const longitude = Number(city.longitude)
+  const stateName = stateNameByCode.get(city.stateCode) || ''
   if (!stateName || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
 
   return {
@@ -34,14 +41,8 @@ export function getUSLocations() {
   if (usLocationsCache) return usLocationsCache
 
   const seen = new Set()
-  const statesByCode = new Map(
-    State.getStatesOfCountry('US')
-      .filter((state) => state.isoCode && state.name)
-      .map((state) => [state.isoCode, state.name]),
-  )
-
   usLocationsCache = City.getCitiesOfCountry('US')
-    .map((city) => toLocation(city, statesByCode.get(city.stateCode) || ''))
+    .map(toLocation)
     .filter(Boolean)
     .filter((item) => {
       if (seen.has(item.key)) return false
@@ -54,10 +55,10 @@ export function getUSLocations() {
 
 export function searchLocations(query, limit = 8) {
   const q = normalize(query).trim()
-  if (q.length < 2) return []
-
   const all = getUSLocations()
-  return all
+  if (!q) return all.slice(0, limit)
+
+  const scored = all
     .map((location) => {
       const city = normalize(location.city)
       const stateCode = normalize(location.stateCode)
@@ -74,8 +75,8 @@ export function searchLocations(query, limit = 8) {
     })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.location.label.localeCompare(b.location.label))
-    .slice(0, limit)
-    .map((entry) => entry.location)
+
+  return scored.slice(0, limit).map((entry) => entry.location)
 }
 
 function toRadians(value) {
@@ -97,6 +98,7 @@ export function getNearestLocation(latitude, longitude) {
 
   let best = null
   let bestDistance = Number.POSITIVE_INFINITY
+
   for (const location of all) {
     const distance = haversineMiles(latitude, longitude, location.latitude, location.longitude)
     if (distance < bestDistance) {
@@ -104,5 +106,6 @@ export function getNearestLocation(latitude, longitude) {
       bestDistance = distance
     }
   }
+
   return best
 }
