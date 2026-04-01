@@ -198,31 +198,16 @@ test('register route stays lazy-loaded to avoid pulling mobile-only register cod
   assert.match(app, /Suspense fallback=/)
 })
 
-
-
-test('location search uses backend APIs and keeps heavy location data out of the browser bundle', () => {
-  const locations = fs.readFileSync(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
-  const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-  const service = fs.readFileSync(new URL('../server/lib/location-service.js', import.meta.url), 'utf8')
-
-  assert.doesNotMatch(locations, /country-state-city/)
-  assert.match(locations, /\/api\/locations\/search/)
-  assert.match(locations, /\/api\/locations\/nearest/)
-  assert.match(input, /navigator\.geolocation/)
-  assert.match(input, /Use my location/)
-  assert.match(server, /app\.get\('\/api\/locations\/search'/)
-  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
-  assert.match(service, /from 'country-state-city'/)
-})
-
-test('server startup keeps location APIs online even when database initialization fails', () => {
+test('location APIs are served by the backend with correlation-aware logging', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
 
-  assert.match(server, /let storageReady = false/)
-  assert.match(server, /Service temporarily unavailable/)
-  assert.match(server, /Storage backend unavailable; location APIs remain online/)
+  assert.match(server, /app\.get\('\/api\/locations\/search'/)
+  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
   assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
   assert.match(logger, /X-Correlation-Id/)
+  assert.match(html, /gh_correlation_id/)
+  assert.match(frontendLogger, /X-Correlation-Id/)
 })

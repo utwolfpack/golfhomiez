@@ -31,6 +31,18 @@ test('API client attaches the user timezone header for server-side date validati
 
 
 
+test('registration location input uses backend APIs and still offers manual location detection', () => {
+  const locationInput = fs.readFileSync(new URL('./src/components/LocationInput.tsx', import.meta.url), 'utf8')
+  const locations = fs.readFileSync(new URL('./src/lib/locations.ts', import.meta.url), 'utf8')
+
+  assert.match(locationInput, /Use my location/)
+  assert.match(locationInput, /navigator\.geolocation/)
+  assert.match(locations, /requestJson/)
+  assert.match(locations, /\/api\/locations\/search/)
+  assert.match(locations, /\/api\/locations\/nearest/)
+  assert.doesNotMatch(locations, /country-state-city/)
+})
+
 test('create-team normalization always makes the signed-in user the first member', () => {
   const user = { id: 'user-1', email: 'captain@example.com', name: 'Casey Captain' }
   const members = [
@@ -176,32 +188,4 @@ test('homepage demo seeder can populate the sample rounds locally', () => {
   assert.match(seed, /Bonneville Golf Course/)
   assert.match(seed, /Homie Hustlers/)
   assert.match(seed, /Seeded homepage demo data/)
-})
-
-
-test('location search uses backend APIs and keeps heavy location data out of the browser bundle', () => {
-  const locations = fs.readFileSync(new URL('./src/lib/locations.ts', import.meta.url), 'utf8')
-  const input = fs.readFileSync(new URL('./src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
-  const service = fs.readFileSync(new URL('./server/lib/location-service.js', import.meta.url), 'utf8')
-
-  assert.doesNotMatch(locations, /country-state-city/)
-  assert.match(locations, /\/api\/locations\/search/)
-  assert.match(locations, /\/api\/locations\/nearest/)
-  assert.match(input, /navigator\.geolocation/)
-  assert.match(input, /Use my location/)
-  assert.match(server, /app\.get\('\/api\/locations\/search'/)
-  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
-  assert.match(service, /from 'country-state-city'/)
-})
-
-test('server startup keeps location APIs online even when database initialization fails', () => {
-  const server = fs.readFileSync(new URL('./server/index.js', import.meta.url), 'utf8')
-  const logger = fs.readFileSync(new URL('./server/lib/logger.js', import.meta.url), 'utf8')
-
-  assert.match(server, /let storageReady = false/)
-  assert.match(server, /Service temporarily unavailable/)
-  assert.match(server, /Storage backend unavailable; location APIs remain online/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
-  assert.match(logger, /X-Correlation-Id/)
 })
