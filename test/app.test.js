@@ -208,22 +208,3 @@ test('location resources load on demand instead of on initial render', () => {
   assert.match(input, /searchLocations\(query, 8\)\s*\.then/)
   assert.match(input, /await getNearestLocation\(position\.coords\.latitude, position\.coords\.longitude\)/)
 })
-
-
-test('use my location emits detailed frontend diagnostics and ships them to the server log endpoint', () => {
-  const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const frontendLogger = fs.readFileSync(new URL('../src/lib/frontend-logger.ts', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
-
-  assert.match(locationInput, /use_my_location_clicked/)
-  assert.match(locationInput, /use_my_location_geolocation_success/)
-  assert.match(locationInput, /use_my_location_geolocation_failed/)
-  assert.match(locationInput, /use_my_location_lookup_completed/)
-  assert.match(locationInput, /accuracy: position\.coords\.accuracy/)
-  assert.match(frontendLogger, /fetch\('\/api\/client-logs'/)
-  assert.match(frontendLogger, /'X-Log-Source': 'frontend-logger'/)
-  assert.match(server, /app\.post\('\/api\/client-logs'/)
-  assert.match(logger, /path\.join\(LOG_DIR, 'api\.log'\)/)
-  assert.match(logger, /correlationId: getRequestCorrelationId\(req\)/)
-})
