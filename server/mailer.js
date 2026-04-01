@@ -1,3 +1,4 @@
+import { logSmtp, getCorrelationId } from './lib/logger.js'
 import net from 'net'
 import tls from 'tls'
 
@@ -130,10 +131,7 @@ async function sendWithBrevoApi({ from, to, subject, text, html }) {
     htmlContent: html || `<pre>${text || ''}</pre>`,
   }
 
-  console.log('[mailer] attempting Brevo API send', {
-    sender: sender.email,
-    to,
-  })
+  logSmtp('smtp_api_send_started', { provider: 'brevo-api', correlationId: getCorrelationId(), sender: sender.email, to, subject })
 
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
@@ -145,12 +143,15 @@ async function sendWithBrevoApi({ from, to, subject, text, html }) {
     body: JSON.stringify(payload),
   })
 
+
   if (!response.ok) {
     const body = await response.text()
+    logSmtp('smtp_api_send_failed', { provider: 'brevo-api', correlationId: getCorrelationId(), to, subject, status: response.status, responseBody: body })
     throw new Error(`Brevo API send failed: ${response.status} ${body}`)
   }
 
   const body = await response.json().catch(() => ({}))
+  logSmtp('smtp_api_send_succeeded', { provider: 'brevo-api', correlationId: getCorrelationId(), to, subject, messageId: body?.messageId || null })
   return {
     accepted: [to],
     provider: 'brevo-api',
@@ -158,19 +159,12 @@ async function sendWithBrevoApi({ from, to, subject, text, html }) {
   }
 }
 
+
 async function sendWithSmtp({ to, subject, text, html }) {
   const config = getSmtpConfig()
   const { host, port, secure, user, pass, from, clientName } = config
 
-  console.log('[mailer] attempting SMTP send', {
-    host,
-    port,
-    secure,
-    from,
-    to,
-    hasUser: Boolean(user),
-    hasPass: Boolean(pass),
-  })
+  logSmtp('smtp_send_started', { provider: 'smtp', correlationId: getCorrelationId(), host, port, secure, from, to, subject, hasUser: Boolean(user), hasPass: Boolean(pass) })
 
   let socket = await new Promise((resolve, reject) => {
     const conn = secure
@@ -213,9 +207,11 @@ async function sendWithSmtp({ to, subject, text, html }) {
     if (getCode(accepted) !== 250) throw new Error(`SMTP DATA failed: ${accepted.join(' | ')}`)
     await sendCommand(socket, 'QUIT', [221])
     socket.end()
+
+    logSmtp('smtp_send_succeeded', { provider: 'smtp', correlationId: getCorrelationId(), host, port, secure, from, to, subject })
     return { accepted: [to], provider: 'smtp' }
   } catch (error) {
-    console.error('[mailer] SMTP send failed:', error)
+    logSmtp('smtp_send_failed', { provider: 'smtp', correlationId: getCorrelationId(), host, port, secure, from, to, subject, error })
     socket.destroy()
     throw error
   }
@@ -231,7 +227,7 @@ export async function sendMail({ to, subject, text, html }) {
   }
 
   if (!hasSmtpConfig(smtpConfig)) {
-    console.log(`[mail:dev-fallback] to=${to} subject=${subject}\n${text}\n`)
+    logSmtp('smtp_dev_fallback', { provider: 'dev-fallback', correlationId: getCorrelationId(), to, subject })
     return { accepted: [to], fallback: true }
   }
 
