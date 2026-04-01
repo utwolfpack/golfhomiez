@@ -1,17 +1,15 @@
-This fixes the exact npm run dev crash you posted.
+This patch fixes the build error by restoring the named export expected by:
+- src/components/UseMyLocationButton.tsx
 
-Cause
-- server/index.js still contains this named import:
-  import { ... requestCorrelationMiddleware } from './lib/logger.js'
-- Your current server/lib/logger.js does not export requestCorrelationMiddleware.
-- ESM aborts before startup.
+Changed file:
+- src/lib/locations.ts
 
-Fix
-- Use a namespace import instead.
-- Read logger functions off the namespace.
-- Provide safe fallbacks for missing exports.
+What changed:
+- added export async function resolveMyLocationFromBrowser()
+- kept backend-only location lookup flow
+- preserved searchLocations() and getNearestLocation()
 
-Files
-- server/index.js
-
-If the error still shows the old import line after applying this patch, the file was not actually replaced.
+Why build failed:
+- UseMyLocationButton imports resolveMyLocationFromBrowser
+- src/lib/locations.ts no longer exported it
+- Rollup/Vite failed during production build
