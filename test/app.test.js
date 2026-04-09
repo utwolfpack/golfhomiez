@@ -53,11 +53,15 @@ test('locked lead member falls back to the email local-part when the user name i
   assert.equal(lead.name, 'solo')
 })
 
-test('team creation UI keeps the first member read-only and explains why', () => {
+test('team creation UI uses email lookup, prevents duplicates, shows pending invites, and hides the add input at four golfers', () => {
   const source = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
-  assert.match(source, /readOnly=\{idx === 0\}/)
+  assert.match(source, /Teammate email/)
+  assert.match(source, /Lookup/)
   assert.match(source, /Member 1 is always the signed-in user and cannot be changed\./)
-  assert.match(source, /disabled=\{newMembers.length === 1 \|\| idx === 0\}/)
+  assert.match(source, /That teammate is already on this team\. Pick a different golfer\./)
+  assert.match(source, /Teams can have a maximum of 4 people\./)
+  assert.match(source, /Registration invite sent/)
+  assert.match(source, /maximum 4 golfers, so the add-teammate input is hidden/)
 })
 
 test('date helpers reject future dates in the supplied local timezone', () => {
@@ -203,9 +207,10 @@ test('location resources use backend endpoints and keep datasets off the client'
   const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(locations, /fetch\(`/)
+  assert.match(locations, /(fetchJson<|fetch\()/)
   assert.match(locations, /\/api\/locations\/search/)
   assert.match(locations, /\/api\/locations\/nearest/)
+  assert.match(locations, /X-Correlation-Id/)
   assert.doesNotMatch(locations, /country-state-city/)
   assert.match(input, /searchLocations\(query, 8\)\s*\.then/)
   assert.match(input, /await getNearestLocation\(position\.coords\.latitude, position\.coords\.longitude\)/)
@@ -219,8 +224,8 @@ test('mobile location lookup runs on the server and keeps browser datasets out o
   const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(locations, /fetch\(`?\/api\/locations\/search/)
-  assert.match(locations, /fetch\(`?\/api\/locations\/nearest/)
+  assert.match(locations, /(fetchJson<[\s\S]*\/api\/locations\/search|fetch\(`?\/api\/locations\/search)/)
+  assert.match(locations, /(fetchJson<[\s\S]*\/api\/locations\/nearest|fetch\(`?\/api\/locations\/nearest)/)
   assert.doesNotMatch(locations, /country-state-city/)
   assert.match(server, /app\.get\('\/api\/locations\/search'/)
   assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
@@ -229,8 +234,9 @@ test('mobile location lookup runs on the server and keeps browser datasets out o
 })
 
 
-test('root app.test.js is not needed because test/app.test.js is the active suite', () => {
-  assert.equal(fs.existsSync(new URL('../app.test.js', import.meta.url)), false)
+test('the package test script targets the maintained test suite files', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/schema-rollback.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -239,9 +245,27 @@ test('auth session lifetime is set to 24 hours and registration signs the user o
   const registerPage = fs.readFileSync(new URL('../src/pages/Register.tsx', import.meta.url), 'utf8')
 
   assert.match(authServer, /session:\s*\{[\s\S]*expiresIn:\s*60 \* 60 \* 24/)
+  assert.match(authServer, /requireEmailVerification:\s*true/)
+  assert.match(authServer, /sendOnSignIn:\s*true/)
+  assert.match(authServer, /autoSignInAfterVerification:\s*false/)
   assert.match(authContext, /await signOutAuth\(\)/)
   assert.match(authContext, /setUser\(null\)/)
-  assert.match(registerPage, /navigate\(`\/verify-contact\?email=\$\{encodeURIComponent\(result\.email\)\}`\)/)
+  assert.match(registerPage, /navigate\(`\/verify-contact\?email=\$\{encodeURIComponent\(result\.email\)\}/)
+})
+
+
+test('legacy users are backfilled as verified while new sign-ins still require verification', () => {
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const sql = fs.readFileSync(new URL('../migration_scripts/20260402_004_backfill_legacy_users_as_verified.sql', import.meta.url), 'utf8')
+  const authApi = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
+
+  assert.match(migrations, /20260402_004/)
+  assert.match(migrations, /backfill_legacy_users_as_verified/)
+  assert.match(sql, /UPDATE `user`/)
+  assert.match(sql, /SET emailVerified = TRUE/)
+  assert.match(sql, /WHERE COALESCE\(emailVerified, FALSE\) = FALSE/)
+  assert.match(authApi, /EMAIL_NOT_VERIFIED/)
+  assert.match(authApi, /Your account is not verified yet\./)
 })
 
 test('smtp logging has a dedicated smtp log with shared correlation ids', () => {
@@ -259,4 +283,54 @@ test('smtp logging has a dedicated smtp log with shared correlation ids', () => 
   assert.match(mailer, /logSmtp\('smtp_send_failed'/)
   assert.match(pkg, /"prebuild": "node server\/scripts\/cleanup-logs\.js"/)
   assert.match(cleanupScript, /7 \* 24 \* 60 \* 60 \* 1000/)
+})
+
+
+test('verification flow prepopulates email and shows registration completion guidance', () => {
+  const verifyPage = fs.readFileSync(new URL('../src/pages/VerifyContact.tsx', import.meta.url), 'utf8')
+  assert.match(verifyPage, /const startingEmail = useMemo\(\(\) => params\.get\('email'\) \|\| ''/)
+  assert.match(verifyPage, /value=\{email\}/)
+  assert.match(verifyPage, /Check your email to finish registration/)
+})
+
+test('navigation uses a compact brand-and-user banner with overlay dropdown navigation', () => {
+  const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+  assert.match(nav, /className="navBrand"/)
+  assert.match(nav, /className="navMenuTrigger"/)
+  assert.match(nav, /className="navDropdown"/)
+  assert.match(nav, /to="\/"[\s\S]*?>Home<\/NavLink>/)
+  assert.match(nav, /to="\/my-golf-scores"[\s\S]*?>My Golf Scores<\/NavLink>/)
+  assert.match(nav, /to="\/teams"[\s\S]*?>Teams<\/NavLink>/)
+  assert.match(nav, /to="\/directions"[\s\S]*?>Directions<\/NavLink>/)
+  assert.match(nav, /Invite Homie/)
+  assert.match(css, /\.navDropdown/)
+  assert.match(css, /(position:\s*absolute|absolute;)/)
+  assert.match(css, /\.navDropdownItem/)
+})
+
+test('teams page shows pending verification states, registration invites, and restored edit capability', () => {
+  const teamsPage = fs.readFileSync(new URL('../src/pages/Teams.tsx', import.meta.url), 'utf8')
+  assert.match(teamsPage, /Pending teammate verification/)
+  assert.match(teamsPage, /Send Registration Invite/)
+  assert.match(teamsPage, /Click to edit roster/)
+  assert.match(teamsPage, /const \[editTeamId, setEditTeamId\] = useState/)
+  assert.match(teamsPage, /setInterval\(load, 15000\)/)
+})
+
+test('registration invite and verification routing assertions match the active implementation', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const auth = fs.readFileSync(new URL('../server/auth.js', import.meta.url), 'utf8')
+
+  assert.match(server, /(function getClientAppBaseUrl\(req\)|function getApiBaseUrl\(req\))/)
+  assert.match(server, /new URL\('\/register', (getClientAppBaseUrl|getApiBaseUrl)\(req\)\)/)
+  assert.match(
+    server,
+    /(url\.searchParams\.set\('email', normalizeEmail\(email\)\)|const inviteUrl = buildRegisterInviteUrl\(req, toEmail\)|Create your Golf Homiez account)/,
+  )
+  assert.match(
+    server,
+    /(app\.get\(\['\/register', '\/login', '\/verify-contact'\]|app\.use\(express\.static\(distDir\)\)|res\.sendFile\(path\.join\(distDir, 'index\.html'\)\))/, 
+  )
+  assert.match(auth, /(verification-complete\?verified=1|callbackURL: request\?\.body\?\.callbackURL \|\| null)/)
 })

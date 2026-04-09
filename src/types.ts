@@ -31,10 +31,14 @@ export type SoloScoreEntry = {
 
 export type ScoreEntry = TeamScoreEntry | SoloScoreEntry
 
+export type TeamMemberStatus = 'active' | 'pending_verification' | 'invited'
+
 export type TeamMember = {
   id: string
   name: string
   email: string
+  status?: TeamMemberStatus
+  verified?: boolean
 }
 
 export type Team = {
@@ -42,4 +46,5 @@ export type Team = {
   name: string
   members: TeamMember[]
   createdAt: string
-}
+  hasPendingMembers?: boolean
+} 

@@ -1,0 +1,611 @@
+
+> golf-scramble-app@1.0.0 test
+> node --test test/app.test.js test/schema-rollback.test.js
+
+TAP version 13
+# Subtest: email helpers normalize and validate addresses
+ok 1 - email helpers normalize and validate addresses
+  ---
+  duration_ms: 3.1617
+  ...
+# Subtest: forgot password client points at the correct Better Auth endpoint
+ok 2 - forgot password client points at the correct Better Auth endpoint
+  ---
+  duration_ms: 0.9528
+  ...
+# Subtest: API client attaches the user timezone header for server-side date validation
+ok 3 - API client attaches the user timezone header for server-side date validation
+  ---
+  duration_ms: 0.4563
+  ...
+# Subtest: create-team normalization always makes the signed-in user the first member
+ok 4 - create-team normalization always makes the signed-in user the first member
+  ---
+  duration_ms: 1.9803
+  ...
+# Subtest: locked lead member falls back to the email local-part when the user name is unavailable
+ok 5 - locked lead member falls back to the email local-part when the user name is unavailable
+  ---
+  duration_ms: 0.2921
+  ...
+# Subtest: team creation UI uses email lookup, prevents duplicates, shows pending invites, and hides the add input at four golfers
+ok 6 - team creation UI uses email lookup, prevents duplicates, shows pending invites, and hides the add input at four golfers
+  ---
+  duration_ms: 0.5716
+  ...
+# Subtest: date helpers reject future dates in the supplied local timezone
+ok 7 - date helpers reject future dates in the supplied local timezone
+  ---
+  duration_ms: 25.5902
+  ...
+# Subtest: score logger pages use the user-local date helper for date picker limits
+ok 8 - score logger pages use the user-local date helper for date picker limits
+  ---
+  duration_ms: 0.9955
+  ...
+# Subtest: solo logger supports optional 18-hole entry like the team logger
+ok 9 - solo logger supports optional 18-hole entry like the team logger
+  ---
+  duration_ms: 0.5891
+  ...
+# Subtest: logged event rows remain clickable buttons for round detail access
+ok 10 - logged event rows remain clickable buttons for round detail access
+  ---
+  duration_ms: 1.8796
+  ...
+# Subtest: handicap UI is clickable, filter-relative, and shows a breakdown modal
+ok 11 - handicap UI is clickable, filter-relative, and shows a breakdown modal
+  ---
+  duration_ms: 1.3392
+  ...
+# Subtest: validation warnings stay hidden until save is attempted
+ok 12 - validation warnings stay hidden until save is attempted
+  ---
+  duration_ms: 1.0537
+  ...
+# Subtest: homepage shows guest sample scores when no user is logged in
+ok 13 - homepage shows guest sample scores when no user is logged in
+  ---
+  duration_ms: 0.692
+  ...
+# Subtest: logging writes to root access and error log files with request middleware support
+ok 14 - logging writes to root access and error log files with request middleware support
+  ---
+  duration_ms: 0.9837
+  ...
+# Subtest: homepage demo seeder can populate the sample rounds locally
+ok 15 - homepage demo seeder can populate the sample rounds locally
+  ---
+  duration_ms: 0.5481
+  ...
+# Subtest: safe mobile diagnostics use pixel beacons instead of recursive preboot network logging
+ok 16 - safe mobile diagnostics use pixel beacons instead of recursive preboot network logging
+  ---
+  duration_ms: 1.1496
+  ...
+# Subtest: register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle
+ok 17 - register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle
+  ---
+  duration_ms: 0.497
+  ...
+# Subtest: location resources use backend endpoints and keep datasets off the client
+not ok 18 - location resources use backend endpoints and keep datasets off the client
+  ---
+  duration_ms: 4.2039
+  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:205:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /fetch\(`/. Input:
+    
+    "import { createCorrelationId, logFrontendEvent } from './frontend-logger'\n" +
+      '\n' +
+      'export type ResolvedLocation = {\n' +
+      '  city?: string\n' +
+      '  state?: string\n' +
+      '  stateCode?: string\n' +
+      '  label: string\n' +
+      '  latitude?: number\n' +
+      '  longitude?: number\n' +
+      '  accuracy?: number\n' +
+      '}\n' +
+      '\n' +
+      'async function fetchJson<T>(url: string, action: string): Promise<T> {\n' +
+      '  const correlationId = createCorrelationId()\n' +
+      '  const startedAt = Date.now()\n' +
+      '\n' +
+      '  logFrontendEvent({\n' +
+      "    category: 'location.fetch',\n" +
+      '    message: `${action}_started`,\n' +
+      '    data: { correlationId, url },\n' +
+      '  })\n' +
+      '\n' +
+      '  const response = await fetch(url, {\n' +
+      '    headers: {\n' +
+      "      'X-Correlation-Id': correlationId,\n" +
+      '    },\n' +
+      '  })\n' +
+      '\n' +
+      '  logFrontendEvent({\n' +
+      "    category: 'location.fetch',\n" +
+      "    level: response.ok ? 'info' : 'warn',\n" +
+      '    message: `${action}_completed`,\n' +
+      '    data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },\n' +
+      '  })\n' +
+      '\n' +
+      '  if (!response.ok) {\n' +
+      '    throw new Error(`Request failed with status ${response.status}`)\n' +
+      '  }\n' +
+      '\n' +
+      '  return response.json() as Promise<T>\n' +
+      '}\n' +
+      '\n' +
+      'export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {\n' +
+      '  const trimmed = query.trim()\n' +
+      '  if (trimmed.length < 2) return []\n' +
+      '\n' +
+      '  const params = new URLSearchParams({ q: trimmed, limit: String(limit) })\n' +
+      "  const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')\n" +
+      '  if (Array.isArray(data)) return data\n' +
+      '  return Array.isArray(data.locations) ? data.locations : []\n' +
+      '}\n' +
+      '\n' +
+      'export async function getNearestLocation(\n' +
+      '  latitude: number,\n' +
+      '  longitude: number,\n' +
+      '): Promise<ResolvedLocation | null> {\n' +
+      '  const params = new URLSearchParams({\n' +
+      '    lat: String(latitude),\n' +
+      '    lng: String(longitude),\n' +
+      '  })\n' +
+      '\n' +
+      "  const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')\n" +
+      '\n' +
+      "  if ('location' in data && data.location) {\n" +
+      '    return data.location\n' +
+      '  }\n' +
+      '\n' +
+      "  if ('label' in data && typeof data.label === 'string') {\n" +
+      '    return data as ResolvedLocation\n' +
+      '  }\n' +
+      '\n' +
+      '  return null\n' +
+      '}\n' +
+      '\n' +
+      'export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {\n' +
+      "  if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {\n" +
+      "    throw new Error('Geolocation is not supported on this device')\n" +
+      '  }\n' +
+      '\n' +
+      '  const position = await new Promise<GeolocationPosition>((resolve, reject) => {\n' +
+      '    navigator.geolocation.getCurrentPosition(resolve, reject, {\n' +
+      '      enableHighAccuracy: true,\n' +
+      '      timeout: 15000,\n' +
+      '      maximumAge: 60000,\n' +
+      '    })\n' +
+      '  })\n' +
+      '\n' +
+      '  const latitude = position.coords.latitude\n' +
+      '  const longitude = position.coords.longitude\n' +
+      '  const accuracy = position.coords.accuracy\n' +
+      '\n' +
+      '  const nearest = await getNearestLocation(latitude, longitude)\n' +
+      '  if (!nearest) {\n' +
+      "    throw new Error('Unable to resolve location from coordinates')\n" +
+      '  }\n' +
+      '\n' +
+      '  return {\n' +
+      '    ...nearest,\n' +
+      '    latitude,\n' +
+      '    longitude,\n' +
+      '    accuracy,\n' +
+      '  }\n' +
+      '}\n'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: |-
+    import { createCorrelationId, logFrontendEvent } from './frontend-logger'
+    
+    export type ResolvedLocation = {
+      city?: string
+      state?: string
+      stateCode?: string
+      label: string
+      latitude?: number
+      longitude?: number
+      accuracy?: number
+    }
+    
+    async function fetchJson<T>(url: string, action: string): Promise<T> {
+      const correlationId = createCorrelationId()
+      const startedAt = Date.now()
+    
+      logFrontendEvent({
+        category: 'location.fetch',
+        message: `${action}_started`,
+        data: { correlationId, url },
+      })
+    
+      const response = await fetch(url, {
+        headers: {
+          'X-Correlation-Id': correlationId,
+        },
+      })
+    
+      logFrontendEvent({
+        category: 'location.fetch',
+        level: response.ok ? 'info' : 'warn',
+        message: `${action}_completed`,
+        data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },
+      })
+    
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`)
+      }
+    
+      return response.json() as Promise<T>
+    }
+    
+    export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {
+      const trimmed = query.trim()
+      if (trimmed.length < 2) return []
+    
+      const params = new URLSearchParams({ q: trimmed, limit: String(limit) })
+      const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')
+      if (Array.isArray(data)) return data
+      return Array.isArray(data.locations) ? data.locations : []
+    }
+    
+    export async function getNearestLocation(
+      latitude: number,
+      longitude: number,
+    ): Promise<ResolvedLocation | null> {
+      const params = new URLSearchParams({
+        lat: String(latitude),
+        lng: String(longitude),
+      })
+    
+      const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')
+    
+      if ('location' in data && data.location) {
+        return data.location
+      }
+    
+      if ('label' in data && typeof data.label === 'string') {
+        return data as ResolvedLocation
+      }
+    
+      return null
+    }
+    
+    export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {
+      if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {
+        throw new Error('Geolocation is not supported on this device')
+      }
+    
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 60000,
+        })
+      })
+    
+      const latitude = position.coords.latitude
+      const longitude = position.coords.longitude
+      const accuracy = position.coords.accuracy
+    
+      const nearest = await getNearestLocation(latitude, longitude)
+      if (!nearest) {
+        throw new Error('Unable to resolve location from coordinates')
+      }
+    
+      return {
+        ...nearest,
+        latitude,
+        longitude,
+        accuracy,
+      }
+    }
+    
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:210:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:631:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:374:18)
+    Test.postRun (node:internal/test_runner/test:715:19)
+    Test.run (node:internal/test_runner/test:673:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:374:7)
+  ...
+# Subtest: mobile location lookup runs on the server and keeps browser datasets out of the client
+not ok 19 - mobile location lookup runs on the server and keeps browser datasets out of the client
+  ---
+  duration_ms: 1.5872
+  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:221:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /fetch\(`?\/api\/locations\/search/. Input:
+    
+    "import { createCorrelationId, logFrontendEvent } from './frontend-logger'\n" +
+      '\n' +
+      'export type ResolvedLocation = {\n' +
+      '  city?: string\n' +
+      '  state?: string\n' +
+      '  stateCode?: string\n' +
+      '  label: string\n' +
+      '  latitude?: number\n' +
+      '  longitude?: number\n' +
+      '  accuracy?: number\n' +
+      '}\n' +
+      '\n' +
+      'async function fetchJson<T>(url: string, action: string): Promise<T> {\n' +
+      '  const correlationId = createCorrelationId()\n' +
+      '  const startedAt = Date.now()\n' +
+      '\n' +
+      '  logFrontendEvent({\n' +
+      "    category: 'location.fetch',\n" +
+      '    message: `${action}_started`,\n' +
+      '    data: { correlationId, url },\n' +
+      '  })\n' +
+      '\n' +
+      '  const response = await fetch(url, {\n' +
+      '    headers: {\n' +
+      "      'X-Correlation-Id': correlationId,\n" +
+      '    },\n' +
+      '  })\n' +
+      '\n' +
+      '  logFrontendEvent({\n' +
+      "    category: 'location.fetch',\n" +
+      "    level: response.ok ? 'info' : 'warn',\n" +
+      '    message: `${action}_completed`,\n' +
+      '    data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },\n' +
+      '  })\n' +
+      '\n' +
+      '  if (!response.ok) {\n' +
+      '    throw new Error(`Request failed with status ${response.status}`)\n' +
+      '  }\n' +
+      '\n' +
+      '  return response.json() as Promise<T>\n' +
+      '}\n' +
+      '\n' +
+      'export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {\n' +
+      '  const trimmed = query.trim()\n' +
+      '  if (trimmed.length < 2) return []\n' +
+      '\n' +
+      '  const params = new URLSearchParams({ q: trimmed, limit: String(limit) })\n' +
+      "  const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')\n" +
+      '  if (Array.isArray(data)) return data\n' +
+      '  return Array.isArray(data.locations) ? data.locations : []\n' +
+      '}\n' +
+      '\n' +
+      'export async function getNearestLocation(\n' +
+      '  latitude: number,\n' +
+      '  longitude: number,\n' +
+      '): Promise<ResolvedLocation | null> {\n' +
+      '  const params = new URLSearchParams({\n' +
+      '    lat: String(latitude),\n' +
+      '    lng: String(longitude),\n' +
+      '  })\n' +
+      '\n' +
+      "  const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')\n" +
+      '\n' +
+      "  if ('location' in data && data.location) {\n" +
+      '    return data.location\n' +
+      '  }\n' +
+      '\n' +
+      "  if ('label' in data && typeof data.label === 'string') {\n" +
+      '    return data as ResolvedLocation\n' +
+      '  }\n' +
+      '\n' +
+      '  return null\n' +
+      '}\n' +
+      '\n' +
+      'export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {\n' +
+      "  if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {\n" +
+      "    throw new Error('Geolocation is not supported on this device')\n" +
+      '  }\n' +
+      '\n' +
+      '  const position = await new Promise<GeolocationPosition>((resolve, reject) => {\n' +
+      '    navigator.geolocation.getCurrentPosition(resolve, reject, {\n' +
+      '      enableHighAccuracy: true,\n' +
+      '      timeout: 15000,\n' +
+      '      maximumAge: 60000,\n' +
+      '    })\n' +
+      '  })\n' +
+      '\n' +
+      '  const latitude = position.coords.latitude\n' +
+      '  const longitude = position.coords.longitude\n' +
+      '  const accuracy = position.coords.accuracy\n' +
+      '\n' +
+      '  const nearest = await getNearestLocation(latitude, longitude)\n' +
+      '  if (!nearest) {\n' +
+      "    throw new Error('Unable to resolve location from coordinates')\n" +
+      '  }\n' +
+      '\n' +
+      '  return {\n' +
+      '    ...nearest,\n' +
+      '    latitude,\n' +
+      '    longitude,\n' +
+      '    accuracy,\n' +
+      '  }\n' +
+      '}\n'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: |-
+    import { createCorrelationId, logFrontendEvent } from './frontend-logger'
+    
+    export type ResolvedLocation = {
+      city?: string
+      state?: string
+      stateCode?: string
+      label: string
+      latitude?: number
+      longitude?: number
+      accuracy?: number
+    }
+    
+    async function fetchJson<T>(url: string, action: string): Promise<T> {
+      const correlationId = createCorrelationId()
+      const startedAt = Date.now()
+    
+      logFrontendEvent({
+        category: 'location.fetch',
+        message: `${action}_started`,
+        data: { correlationId, url },
+      })
+    
+      const response = await fetch(url, {
+        headers: {
+          'X-Correlation-Id': correlationId,
+        },
+      })
+    
+      logFrontendEvent({
+        category: 'location.fetch',
+        level: response.ok ? 'info' : 'warn',
+        message: `${action}_completed`,
+        data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },
+      })
+    
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`)
+      }
+    
+      return response.json() as Promise<T>
+    }
+    
+    export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {
+      const trimmed = query.trim()
+      if (trimmed.length < 2) return []
+    
+      const params = new URLSearchParams({ q: trimmed, limit: String(limit) })
+      const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')
+      if (Array.isArray(data)) return data
+      return Array.isArray(data.locations) ? data.locations : []
+    }
+    
+    export async function getNearestLocation(
+      latitude: number,
+      longitude: number,
+    ): Promise<ResolvedLocation | null> {
+      const params = new URLSearchParams({
+        lat: String(latitude),
+        lng: String(longitude),
+      })
+    
+      const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')
+    
+      if ('location' in data && data.location) {
+        return data.location
+      }
+    
+      if ('label' in data && typeof data.label === 'string') {
+        return data as ResolvedLocation
+      }
+    
+      return null
+    }
+    
+    export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {
+      if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {
+        throw new Error('Geolocation is not supported on this device')
+      }
+    
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 60000,
+        })
+      })
+    
+      const latitude = position.coords.latitude
+      const longitude = position.coords.longitude
+      const accuracy = position.coords.accuracy
+    
+      const nearest = await getNearestLocation(latitude, longitude)
+      if (!nearest) {
+        throw new Error('Unable to resolve location from coordinates')
+      }
+    
+      return {
+        ...nearest,
+        latitude,
+        longitude,
+        accuracy,
+      }
+    }
+    
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:226:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:631:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:374:18)
+    Test.postRun (node:internal/test_runner/test:715:19)
+    Test.run (node:internal/test_runner/test:673:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:374:7)
+  ...
+# Subtest: the package test script targets the maintained test suite files
+ok 20 - the package test script targets the maintained test suite files
+  ---
+  duration_ms: 0.4698
+  ...
+# Subtest: auth session lifetime is set to 24 hours and registration signs the user out until verification
+ok 21 - auth session lifetime is set to 24 hours and registration signs the user out until verification
+  ---
+  duration_ms: 0.8962
+  ...
+# Subtest: legacy users are backfilled as verified while new sign-ins still require verification
+ok 22 - legacy users are backfilled as verified while new sign-ins still require verification
+  ---
+  duration_ms: 0.7804
+  ...
+# Subtest: smtp logging has a dedicated smtp log with shared correlation ids
+ok 23 - smtp logging has a dedicated smtp log with shared correlation ids
+  ---
+  duration_ms: 0.8607
+  ...
+# Subtest: verification flow prepopulates email and shows registration completion guidance
+ok 24 - verification flow prepopulates email and shows registration completion guidance
+  ---
+  duration_ms: 0.4265
+  ...
+# Subtest: navigation uses a compact brand-and-user banner with overlay dropdown navigation
+ok 25 - navigation uses a compact brand-and-user banner with overlay dropdown navigation
+  ---
+  duration_ms: 0.7047
+  ...
+# Subtest: teams page shows pending verification states, registration invites, and restored edit capability
+ok 26 - teams page shows pending verification states, registration invites, and restored edit capability
+  ---
+  duration_ms: 0.5184
+  ...
+# Subtest: registration invites land on the register page without email query params and local verification stays on 5001
+ok 27 - registration invites land on the register page without email query params and local verification stays on 5001
+  ---
+  duration_ms: 0.9657
+  ...
+# Subtest: one-time schema rollback is wired into postinstall and removes itself afterward
+ok 28 - one-time schema rollback is wired into postinstall and removes itself afterward
+  ---
+  duration_ms: 4.9687
+  ...
+# Subtest: rollback migration removes chat-added schema tables and migration records
+ok 29 - rollback migration removes chat-added schema tables and migration records
+  ---
+  duration_ms: 1.0887
+  ...
+1..29
+# tests 29
+# suites 0
+# pass 27
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 283.5837

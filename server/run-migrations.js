@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { runAuthMigrations } from './auth-migrations.js'
 import { getPool, closeDb } from './db.js'
 import { runAppMigrations } from './migrations/runner.js'
+import { createSchemaBackup } from './scripts/mysql-schema-backup.js'
 
 function shouldRequireDatabase() {
   return String(process.env.REQUIRE_DB_MIGRATIONS || '').toLowerCase() === 'true'
@@ -19,7 +20,7 @@ async function main() {
   }
 
   await runAuthMigrations()
-  await runAppMigrations(db)
+  await runAppMigrations(db, console, { createBackup: createSchemaBackup })
 }
 
 main()

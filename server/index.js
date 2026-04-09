@@ -6,12 +6,15 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { auth } from './auth.js'
-import { getLatestPasswordReset } from './auth-debug.js'
+import { getLatestPasswordReset, getLatestVerificationLink } from './auth-debug.js'
 import storage from './storage/index.js'
+import { getPool } from './db.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
+import { sendMail } from './mailer.js'
+import { v4 as uuidv4 } from 'uuid'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -108,6 +111,43 @@ app.get('/api/locations/nearest', (req, res) => {
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
 
+app.post('/api/client-logs', express.json({ limit: '64kb' }), (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const correlationId = String(body.correlationId || req.correlationId || '').trim() || req.correlationId || null
+    const entry = {
+      correlationId,
+      level: String(body.level || 'info').trim() || 'info',
+      type: String(body.type || 'frontend_event').trim() || 'frontend_event',
+      message: String(body.message || 'frontend_event').trim() || 'frontend_event',
+      action: body.action == null ? null : String(body.action),
+      status: body.status == null ? null : String(body.status),
+      route: body.route == null ? (req.headers.referer || null) : String(body.route),
+      metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : null,
+      userAgent: body.userAgent == null ? (req.headers['user-agent'] || null) : String(body.userAgent),
+      source: req.headers['x-log-source'] || 'client',
+      ip: req.ip,
+    }
+
+    logFrontend(entry.message, entry)
+    logApi('client_log_ingested', {
+      correlationId: entry.correlationId,
+      type: entry.type,
+      level: entry.level,
+      route: entry.route,
+      source: entry.source,
+      path: req.originalUrl || req.url,
+      ip: req.ip,
+      userAgent: entry.userAgent,
+    })
+
+    return res.status(204).end()
+  } catch (error) {
+    logRouteError('Client log ingestion error', req, error, { body: req.body })
+    return res.status(204).end()
+  }
+})
+
 function logRouteError(message, req, error, extra = {}) {
   logError(message, {
     ...requestContext(req),
@@ -131,6 +171,126 @@ async function authMiddleware(req, res, next) {
     res.status(500).json({ message: 'Authentication failed' })
   }
 }
+
+
+
+function getApiBaseUrl(req) {
+  return process.env.BETTER_AUTH_URL || `${req.protocol}://${req.get('host')}`
+}
+
+function getClientAppBaseUrl(req) {
+  const requestOrigin = String(req.headers.origin || '').trim()
+  if (requestOrigin && allowedOrigins.has(requestOrigin) && !/:(5001)$/.test(requestOrigin)) return requestOrigin
+  return clientOrigin || getApiBaseUrl(req)
+}
+
+function buildRegisterInviteUrl(req, _email) {
+  return new URL('/register', getClientAppBaseUrl(req)).toString()
+}
+
+function splitName(name = '', email = '') {
+  const trimmed = String(name || '').trim()
+  if (!trimmed) return { firstName: String(email || '').split('@')[0] || '', lastName: '' }
+  const [firstName = '', ...rest] = trimmed.split(/\s+/)
+  return { firstName, lastName: rest.join(' ') }
+}
+
+async function sendRegistrationInviteEmail(req, { toEmail, customMessage, invitedBy, teamId = null, purpose = 'registration_invite' }) {
+  const inviteUrl = buildRegisterInviteUrl(req, toEmail)
+  const inviterLabel = invitedBy?.name || invitedBy?.email || 'Your Golf Homie'
+  const messageText = String(customMessage || '').trim()
+  const subject = 'You are invited to join Golf Homiez'
+  const text = [
+    messageText,
+    '',
+    `${inviterLabel} invited you to join Golf Homiez.`,
+    'Track rounds, build teams, log scores, and keep your golf crew together in one place.',
+    `Register here: ${inviteUrl}`,
+  ].filter(Boolean).join('\n')
+  const html = `
+    <p>${messageText || `${inviterLabel} wants you on Golf Homiez.`}</p>
+    <p><strong>${inviterLabel}</strong> invited you to join Golf Homiez.</p>
+    <p>Keep your rounds, teams, and golf score history together in one place.</p>
+    <p><a href="${inviteUrl}">Create your Golf Homiez account</a></p>
+  `
+
+  await sendMail({ to: toEmail, subject, text, html })
+
+  try {
+    const pool = getPool()
+    await pool.execute(
+      'INSERT INTO invitations (id, email, invited_by_user_id, invited_by_email, team_id, purpose, custom_message, invite_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+      [uuidv4(), normalizeEmail(toEmail), invitedBy?.id || null, invitedBy?.email || null, teamId, purpose, messageText || null, inviteUrl],
+    )
+  } catch (error) {
+    logError('Invitation persistence failed', { error, email: toEmail, invitedByEmail: invitedBy?.email || null, teamId, purpose })
+  }
+
+  logApi('registration_invite_sent', { ...requestContext(req), email: normalizeEmail(toEmail), invitedByEmail: invitedBy?.email || null, teamId, purpose, inviteUrl })
+  return { ok: true, inviteUrl }
+}
+
+
+function redirectToClientApp(req, res) {
+  const target = new URL(req.originalUrl || req.url || '/', getClientAppBaseUrl(req))
+  return res.redirect(302, target.toString())
+}
+
+app.get('/verification-complete', (req, res) => {
+  const verified = String(req.query.verified || '').trim() === '1'
+  logApi('verification_complete_page_rendered', { ...requestContext(req), verified })
+  res.type('html').send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Golf Homiez Verification</title>
+    <style>
+      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f5fff7;color:#0b2b16;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
+      .card{max-width:560px;width:100%;background:#fff;border:1px solid #d7eadc;border-radius:18px;padding:24px;box-shadow:0 18px 48px rgba(0,0,0,.12)}
+      h1{margin:0 0 10px;font-size:28px;}
+      p{line-height:1.45;color:#2f5a3d;}
+      a{display:inline-block;margin-top:16px;padding:10px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:700;}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${verified ? 'Email verified' : 'Verification complete'}</h1>
+      <p>${verified ? 'Your Golf Homiez account is verified. You can return to the app and sign in.' : 'The verification request finished. Return to the app and sign in.'}</p>
+      <a href="/login${verified ? '?verified=1' : ''}">Go to login</a>
+    </div>
+  </body>
+</html>`)
+})
+
+app.get(['/register', '/login', '/verify-contact'], (req, res, next) => {
+  const distDir = path.join(__dirname, '..', 'dist')
+  if (fs.existsSync(distDir)) return next()
+  logApi('local_dev_auth_route_served_without_client_redirect', { ...requestContext(req), route: req.path })
+  res.type('html').send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Golf Homiez Local Dev</title>
+    <style>
+      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f5fff7;color:#0b2b16;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
+      .card{max-width:640px;width:100%;background:#fff;border:1px solid #d7eadc;border-radius:18px;padding:24px;box-shadow:0 18px 48px rgba(0,0,0,.12)}
+      h1{margin:0 0 10px;font-size:28px;}
+      p{line-height:1.45;color:#2f5a3d;}
+      a{display:inline-block;margin-top:16px;padding:10px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:700;}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Golf Homiez local development</h1>
+      <p>This backend route stays on port 5001 so local verification links do not bounce to the Vite dev server.</p>
+      <p>Open the frontend app directly when you need the full UI.</p>
+      <a href="${new URL(req.originalUrl || req.url || '/', clientOrigin).toString()}">Open frontend on 5174</a>
+    </div>
+  </body>
+</html>`)
+})
 
 async function findTeamByName(name) {
   return storage.getTeamByName(name)
@@ -158,6 +318,55 @@ app.get('/api/auth-debug/latest-reset', (req, res) => {
   if (!email) return res.status(400).json({ message: 'email query parameter required' })
   const latest = getLatestPasswordReset(email)
   res.json(latest || null)
+})
+
+app.get('/api/auth-debug/latest-verification', (req, res) => {
+  const email = String(req.query.email || '').trim()
+  if (!email) return res.status(400).json({ message: 'email query parameter required' })
+  const latest = getLatestVerificationLink(email)
+  res.json(latest || null)
+})
+
+
+app.get('/api/users/lookup', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.query.email || '').trim()
+    if (!email) return res.status(400).json({ message: 'email query parameter required' })
+    const found = await storage.findUserByEmail(email)
+    if (!found) return res.json({ found: false, email: normalizeEmail(email) })
+    const parts = splitName(found.name, found.email)
+    res.json({ found: true, email: found.email, firstName: parts.firstName, name: found.name, verified: Boolean(found.emailVerified) })
+  } catch (error) {
+    logRouteError('User lookup error', req, error)
+    res.status(500).json({ message: 'Could not look up user' })
+  }
+})
+
+app.post('/api/invitations', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim()
+    const message = String(req.body?.message || '').trim()
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const result = await sendRegistrationInviteEmail(req, { toEmail: email, customMessage: message, invitedBy: req.user })
+    res.status(201).json(result)
+  } catch (error) {
+    logRouteError('Invitation send error', req, error)
+    res.status(500).json({ message: 'Could not send invitation' })
+  }
+})
+
+app.post('/api/invitations/resend-registration', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim()
+    const message = String(req.body?.message || '').trim()
+    const teamId = req.body?.teamId ? String(req.body.teamId) : null
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const result = await sendRegistrationInviteEmail(req, { toEmail: email, customMessage: message, invitedBy: req.user, teamId, purpose: 'team_registration_invite' })
+    res.status(201).json(result)
+  } catch (error) {
+    logRouteError('Resend registration invite error', req, error)
+    res.status(500).json({ message: 'Could not send registration invite' })
+  }
 })
 
 app.get('/api/teams', requireStorage, authMiddleware, async (req, res) => {

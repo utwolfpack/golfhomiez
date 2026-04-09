@@ -38,9 +38,9 @@ services:
       SMTP_HOST: smtp-relay.brevo.com
       SMTP_PORT: 465
       SMTP_SECURE: "true"
-      SMTP_USER: utwolfpack@yahoo.com
+      SMTP_USER: no-reply@golfhomiez.com
       SMTP_PASS: placeholder
-      SMTP_FROM: utwolfpack@yahoo.com
+      SMTP_FROM: no-reply@golfhomiez.com
     ports:
       - "5001:5001"
     command: sh -c "npm run build && npm start"

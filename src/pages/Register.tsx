@@ -1,21 +1,26 @@
-import { FormEvent, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { FormEvent, useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import LocationInput from '../components/LocationInput'
 import type { SavedLocation } from '../lib/location-store'
 
 export default function Register() {
+  const [params] = useSearchParams()
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [location, setLocation] = useState<SavedLocation | null>(null)
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(params.get('email') || '')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const { register } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    setEmail(params.get('email') || '')
+  }, [params])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -30,7 +35,7 @@ export default function Register() {
       if (password.length < 8) throw new Error('Password must be at least 8 characters')
       if (password !== confirmPassword) throw new Error('Passwords do not match')
       const result = await register(trimmedFirstName, trimmedLastName, email.trim(), password)
-      navigate(`/verify-contact?email=${encodeURIComponent(result.email)}`)
+      navigate(`/verify-contact?email=${encodeURIComponent(result.email)}&welcome=1`)
     } catch (err: any) {
       setError(err?.message || 'Registration failed')
     } finally {
