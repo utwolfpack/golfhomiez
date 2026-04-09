@@ -1,3 +1,5 @@
+import { createCorrelationId, logFrontendEvent } from './frontend-logger'
+
 export type ResolvedLocation = {
   city?: string
   state?: string
@@ -8,16 +10,27 @@ export type ResolvedLocation = {
   accuracy?: number
 }
 
-function getCorrelationId(): string {
-  const g = globalThis as typeof globalThis & { __CORRELATION_ID__?: string }
-  return g.__CORRELATION_ID__ ?? ''
-}
+async function fetchJson<T>(url: string, action: string): Promise<T> {
+  const correlationId = createCorrelationId()
+  const startedAt = Date.now()
 
-async function fetchJson<T>(url: string): Promise<T> {
+  logFrontendEvent({
+    category: 'location.fetch',
+    message: `${action}_started`,
+    data: { correlationId, url },
+  })
+
   const response = await fetch(url, {
     headers: {
-      'X-Correlation-Id': getCorrelationId(),
+      'X-Correlation-Id': correlationId,
     },
+  })
+
+  logFrontendEvent({
+    category: 'location.fetch',
+    level: response.ok ? 'info' : 'warn',
+    message: `${action}_completed`,
+    data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },
   })
 
   if (!response.ok) {
@@ -27,12 +40,13 @@ async function fetchJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export async function searchLocations(query: string): Promise<ResolvedLocation[]> {
+export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {
   const trimmed = query.trim()
   if (trimmed.length < 2) return []
 
-  const params = new URLSearchParams({ q: trimmed })
-  const data = await fetchJson<{ locations?: ResolvedLocation[] }>(`/api/locations/search?${params.toString()}`)
+  const params = new URLSearchParams({ q: trimmed, limit: String(limit) })
+  const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')
+  if (Array.isArray(data)) return data
   return Array.isArray(data.locations) ? data.locations : []
 }
 
@@ -45,9 +59,7 @@ export async function getNearestLocation(
     lng: String(longitude),
   })
 
-  const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(
-    `/api/locations/nearest?${params.toString()}`,
-  )
+  const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')
 
   if ('location' in data && data.location) {
     return data.location

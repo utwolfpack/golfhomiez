@@ -13,8 +13,9 @@
     "postinstall": "npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "node --test",
-    "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js"
+    "test": "node --test test/app.test.js test/schema-rollback.test.js",
+    "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js",
+    "db:rollback:chat": "node server/scripts/run-one-time-chat-schema-rollback.js"
   },
   "engines": {
     "node": ">=18"
