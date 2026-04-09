@@ -4,3 +4,5 @@ dist
 .DS_Store
 logging/*.log
 !logging/.gitkeep
+mysql_dumps/*.sql
+!mysql_dumps/.gitkeep

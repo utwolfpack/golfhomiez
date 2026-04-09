@@ -13,15 +13,32 @@ function toIso(value) {
   return dt.toISOString()
 }
 
-function mapTeam(rows, memberRows) {
-  return rows.map((row) => ({
+function mapMember(row) {
+  const verified = row.user_email_verified == null ? null : Boolean(row.user_email_verified)
+  const status = verified === true ? 'active' : 'pending_verification'
+  return {
     id: row.id,
     name: row.name,
-    createdAt: toIso(row.created_at),
-    members: memberRows
+    email: row.email,
+    status,
+    verified: verified === true,
+  }
+}
+
+function mapTeam(rows, memberRows) {
+  return rows.map((row) => {
+    const members = memberRows
       .filter((m) => m.team_id === row.id)
-      .map((m) => ({ id: m.id, name: m.name, email: m.email })),
-  }))
+      .map(mapMember)
+
+    return {
+      id: row.id,
+      name: row.name,
+      createdAt: toIso(row.created_at),
+      members,
+      hasPendingMembers: members.some((member) => member.status !== 'active'),
+    }
+  })
 }
 
 function mapScore(row) {
@@ -54,10 +71,32 @@ export async function getBackendName() {
   return 'mysql'
 }
 
+async function fetchTeamMembers(db, teamId) {
+  if (teamId) {
+    const [rows] = await db.execute(
+      `SELECT tm.*, u.emailVerified AS user_email_verified
+         FROM team_members tm
+         LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
+        WHERE tm.team_id = ?
+        ORDER BY tm.name ASC`,
+      [teamId],
+    )
+    return rows
+  }
+
+  const [rows] = await db.query(
+    `SELECT tm.*, u.emailVerified AS user_email_verified
+       FROM team_members tm
+       LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
+      ORDER BY tm.name ASC`,
+  )
+  return rows
+}
+
 export async function listTeams() {
   const db = getPool()
   const [teamRows] = await db.query('SELECT * FROM teams ORDER BY name ASC')
-  const [memberRows] = await db.query('SELECT * FROM team_members ORDER BY name ASC')
+  const memberRows = await fetchTeamMembers(db)
   return mapTeam(teamRows, memberRows)
 }
 
@@ -71,7 +110,7 @@ export async function getTeamByName(name) {
   const [rows] = await db.execute('SELECT * FROM teams WHERE LOWER(name) = LOWER(?) LIMIT 1', [String(name || '').trim()])
   const row = rows[0]
   if (!row) return null
-  const [memberRows] = await db.execute('SELECT * FROM team_members WHERE team_id = ? ORDER BY name ASC', [row.id])
+  const memberRows = await fetchTeamMembers(db, row.id)
   return mapTeam([row], memberRows)[0] || null
 }
 
@@ -85,12 +124,12 @@ export async function createTeam({ name, members }) {
     for (const member of members) {
       await conn.execute(
         'INSERT INTO team_members (id, team_id, name, email) VALUES (?, ?, ?, ?)',
-        [member.id, team.id, member.name, normalizeEmail(member.email)]
+        [member.id, team.id, member.name, normalizeEmail(member.email)],
       )
     }
     await conn.commit()
     logInfo('Created team', { teamId: team.id, teamName: team.name, memberCount: members.length })
-    return team
+    return getTeamById(team.id)
   } catch (error) {
     await conn.rollback()
     logError('Failed to create team in MySQL storage', { error, teamName: team.name })
@@ -113,7 +152,7 @@ export async function updateTeam(id, { name, members }) {
     for (const member of members) {
       await conn.execute(
         'INSERT INTO team_members (id, team_id, name, email) VALUES (?, ?, ?, ?)',
-        [member.id, id, member.name, normalizeEmail(member.email)]
+        [member.id, id, member.name, normalizeEmail(member.email)],
       )
     }
     if (existing.name !== String(name).trim()) {
@@ -129,6 +168,23 @@ export async function updateTeam(id, { name, members }) {
     throw error
   } finally {
     conn.release()
+  }
+}
+
+export async function findUserByEmail(email) {
+  const db = getPool()
+  const normalized = normalizeEmail(email)
+  const [rows] = await db.execute(
+    'SELECT id, email, name, emailVerified FROM `user` WHERE LOWER(email) = ? LIMIT 1',
+    [normalized],
+  )
+  const row = rows[0]
+  if (!row) return null
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    emailVerified: Boolean(row.emailVerified),
   }
 }
 
@@ -174,7 +230,7 @@ export async function createScore(entry) {
         score.holes ? JSON.stringify(score.holes) : null,
         score.createdByUserId,
         score.createdByEmail,
-      ]
+      ],
     )
     logInfo('Created score', { scoreId: score.id, mode: score.mode, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
     return score

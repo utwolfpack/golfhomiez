@@ -12,6 +12,7 @@ import Teams from './pages/Teams'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
+import VerifyContact from './pages/VerifyContact'
 import ProtectedRoute from './components/ProtectedRoute'
 import { emitFrontendStage } from './lib/frontend-logger'
 
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/directions" element={<Directions />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading…</div></div>}><Register /></Suspense>} />
+        <Route path="/verify-contact" element={<VerifyContact />} />
         <Route path="/request-password-reset" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />

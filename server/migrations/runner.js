@@ -44,7 +44,7 @@ export async function recordAppliedMigration(db, migration, checksum, executionM
 }
 
 export async function applyMigration(db, migration) {
-  const sql = await migration.getSql()
+  const sql = await migration.getSql(db)
   const checksum = checksumSql(sql)
 
   if (await migration.isSatisfied(db)) {

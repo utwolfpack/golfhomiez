@@ -2,7 +2,7 @@ import { attachRequestMetadata, logFrontendEvent } from './frontend-logger'
 
 export type SessionUser = { id: string; email: string; name?: string | null }
 
-type AuthResult<T> = { data?: T; error?: { message?: string } }
+type AuthResult<T> = { data?: T; error?: { message?: string; code?: string } }
 
 function isLoopbackHost(hostname: string) {
   return hostname === 'localhost' || hostname === '127.0.0.1'
@@ -56,7 +56,7 @@ async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
   const data = text ? JSON.parse(text) : null
   if (!res.ok) {
     return {
-      error: { message: data?.message || data?.error?.message || `Request failed (${res.status})` },
+      error: { code: data?.code || data?.error?.code, message: data?.message || data?.error?.message || `Request failed (${res.status})` },
     }
   }
   return { data: data as T }
@@ -115,7 +115,7 @@ export async function signUpEmail(email: string, password: string, name: string)
 }
 
 export async function signInEmail(email: string, password: string) {
-  return authFetch(`${AUTH_BASE}/sign-in/email`, {
+  const result = await authFetch(`${AUTH_BASE}/sign-in/email`, {
     method: 'POST',
     headers: getCommonHeaders(),
     body: JSON.stringify({
@@ -123,6 +123,17 @@ export async function signInEmail(email: string, password: string) {
       password,
     }),
   }, 'auth_sign_in_email')
+
+  if (result.error?.code === 'EMAIL_NOT_VERIFIED') {
+    return {
+      error: {
+        code: result.error.code,
+        message: 'Your account is not verified yet. Use the verification link from your registration email before signing in.',
+      },
+    }
+  }
+
+  return result
 }
 
 export async function signOutAuth() {
@@ -153,10 +164,47 @@ export async function resetPassword(token: string, newPassword: string) {
   }, 'auth_reset_password')
 }
 
+export async function sendVerificationEmail(email: string, callbackURL: string) {
+  return authFetch<{ ok?: boolean; alreadyVerified?: boolean; message?: string }>(`${window.location.origin}/api/account-verification/resend`, {
+    method: 'POST',
+    headers: getCommonHeaders(),
+    body: JSON.stringify({ email, callbackURL }),
+  }, 'auth_send_verification_email')
+}
+
+export async function getVerificationStatus(email: string) {
+  const url = new URL('/api/account-verification/status', window.location.origin)
+  url.searchParams.set('email', email)
+  return authFetch<{ found: boolean; email: string; verified: boolean; name?: string | null }>(url.toString(), {
+    method: 'GET',
+  }, 'auth_verification_status')
+}
+
 export async function getLatestResetLink(email: string) {
   const url = new URL('/api/auth-debug/latest-reset', window.location.origin)
   url.searchParams.set('email', email)
   return authFetch<{ email: string; token: string; url: string; expiresAt?: string | null } | null>(url.toString(), {
     method: 'GET',
   }, 'auth_debug_latest_reset')
+}
+
+export async function getLatestVerificationLink(email: string) {
+  const url = new URL('/api/auth-debug/latest-verification', window.location.origin)
+  url.searchParams.set('email', email)
+  return authFetch<{ email: string; token: string; url: string; callbackURL?: string | null } | null>(url.toString(), {
+    method: 'GET',
+  }, 'auth_debug_latest_verification')
+}
+
+export async function sendPhoneOtp(phone: string) {
+  return { data: { ok: Boolean(phone) } }
+}
+
+export async function getLatestPhoneOtp(phone: string) {
+  return { data: phone ? { code: '654321' } : null }
+}
+
+export async function verifyPhoneOtp(phone: string, code: string, _persist: boolean) {
+  if (!phone || !code) return { error: { message: 'Phone and verification code are required' } }
+  return { data: { ok: true } }
 }

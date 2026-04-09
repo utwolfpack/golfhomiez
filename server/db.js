@@ -48,11 +48,13 @@ async function ensureAppTables(db) {
     );
 
     CREATE TABLE IF NOT EXISTS team_members (
-      id VARCHAR(191) PRIMARY KEY,
+      id VARCHAR(191) NOT NULL,
       team_id VARCHAR(191) NOT NULL,
       name VARCHAR(191) NOT NULL,
       email VARCHAR(191) NOT NULL,
+      PRIMARY KEY (team_id, id),
       INDEX idx_team_members_team_id (team_id),
+      INDEX idx_team_members_member_id (id),
       CONSTRAINT fk_team_members_team FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
     );
 
