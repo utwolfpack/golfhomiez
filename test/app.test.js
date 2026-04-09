@@ -321,7 +321,21 @@ test('teams page shows pending verification states, registration invites, and re
 test('registration routes stay same-origin and client log ingestion supports both legacy and current endpoints', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const authClient = fs.readFileSync(new URL('../src/lib/auth-client.ts', import.meta.url), 'utf8')
-  assert.match(server, /app\.post\(\['\/api\/client-logs', '\/api\/client-log'\]/)
+  assert.match(server, /app\.(post|all)\(\['\/api\/client-logs', '\/api\/client-log'/)
   assert.match(server, /return process\.env\.BETTER_AUTH_URL \|\| `\$\{req\.protocol\}:\/\/\$\{req\.get\('host'\)\}`/)
   assert.match(authClient, /const sameOriginDefault = '\/api\/auth'/)
+})
+
+
+test('client log ingestion endpoints support singular and plural routes', async () => {
+  const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(serverIndex, /api\/client-logs/)
+  assert.match(serverIndex, /api\/client-log/)
+  assert.match(serverIndex, /status\(202\)\.end\(\)/)
+})
+
+test('auth API defaults to same-origin auth in deployed environments when override origin mismatches', async () => {
+  const authApi = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
+  assert.match(authApi, /pageUrl\.origin !== targetUrl\.origin/)
+  assert.match(authApi, /new URL\(sameOriginDefault, pageUrl\)\.toString\(\)/)
 })
