@@ -22,13 +22,15 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const PORT = Number(process.env.PORT || 5001)
 let storageReady = false
-const clientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+const clientOrigin = process.env.CLIENT_ORIGIN || null
+const devClientOrigin = process.env.DEV_CLIENT_ORIGIN || clientOrigin || null
 const allowedOrigins = new Set([
+  process.env.BETTER_AUTH_URL || null,
+  process.env.PUBLIC_SERVER_ORIGIN || null,
   clientOrigin,
-  'http://127.0.0.1:5174',
-  'http://localhost:5174',
-  'http://127.0.0.1:5001',
-  'http://localhost:5001',
+  devClientOrigin,
+  `http://127.0.0.1:${PORT}`,
+  `http://localhost:${PORT}`,
 ].filter(Boolean))
 
 app.use(cors({
@@ -175,17 +177,17 @@ async function authMiddleware(req, res, next) {
 
 
 function getApiBaseUrl(req) {
-  return process.env.BETTER_AUTH_URL || `${req.protocol}://${req.get('host')}`
+  return process.env.BETTER_AUTH_URL || process.env.PUBLIC_SERVER_ORIGIN || `${req.protocol}://${req.get('host')}`
 }
 
-function getClientAppBaseUrl(req) {
-  const requestOrigin = String(req.headers.origin || '').trim()
-  if (requestOrigin && allowedOrigins.has(requestOrigin) && !/:(5001)$/.test(requestOrigin)) return requestOrigin
-  return clientOrigin || getApiBaseUrl(req)
+function getPublicAppBaseUrl(req) {
+  return process.env.PUBLIC_SERVER_ORIGIN || process.env.BETTER_AUTH_URL || `${req.protocol}://${req.get('host')}`
 }
 
-function buildRegisterInviteUrl(req, _email) {
-  return new URL('/register', getClientAppBaseUrl(req)).toString()
+function buildRegisterInviteUrl(req, email) {
+  const url = new URL('/register', getPublicAppBaseUrl(req))
+  url.searchParams.set('email', normalizeEmail(email))
+  return url.toString()
 }
 
 function splitName(name = '', email = '') {
@@ -231,66 +233,52 @@ async function sendRegistrationInviteEmail(req, { toEmail, customMessage, invite
 }
 
 
-function redirectToClientApp(req, res) {
-  const target = new URL(req.originalUrl || req.url || '/', getClientAppBaseUrl(req))
-  return res.redirect(302, target.toString())
+async function proxyToDevClient(req, res, next) {
+  if (!devClientOrigin) return next()
+
+  let upstreamBase
+  try {
+    upstreamBase = new URL(devClientOrigin)
+  } catch {
+    return next()
+  }
+
+  if (upstreamBase.host === String(req.get('host') || '').trim()) return next()
+
+  const upstreamUrl = new URL(req.originalUrl || req.url || '/', upstreamBase)
+
+  try {
+    const upstreamResponse = await fetch(upstreamUrl, {
+      method: req.method,
+      headers: {
+        accept: req.headers.accept || '*/*',
+        'user-agent': req.headers['user-agent'] || 'GolfHomiezDevProxy/1.0',
+      },
+      redirect: 'manual',
+    })
+
+    res.status(upstreamResponse.status)
+    for (const [key, value] of upstreamResponse.headers.entries()) {
+      if (['connection', 'content-length', 'content-encoding', 'transfer-encoding', 'keep-alive'].includes(key.toLowerCase())) continue
+      res.setHeader(key, value)
+    }
+    const body = Buffer.from(await upstreamResponse.arrayBuffer())
+    return res.send(body)
+  } catch (error) {
+    logRouteError('Dev client proxy error', req, error, { upstreamUrl: upstreamUrl.toString(), devClientOrigin })
+    return next()
+  }
 }
 
-app.get('/verification-complete', (req, res) => {
-  const verified = String(req.query.verified || '').trim() === '1'
-  logApi('verification_complete_page_rendered', { ...requestContext(req), verified })
-  res.type('html').send(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Golf Homiez Verification</title>
-    <style>
-      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f5fff7;color:#0b2b16;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
-      .card{max-width:560px;width:100%;background:#fff;border:1px solid #d7eadc;border-radius:18px;padding:24px;box-shadow:0 18px 48px rgba(0,0,0,.12)}
-      h1{margin:0 0 10px;font-size:28px;}
-      p{line-height:1.45;color:#2f5a3d;}
-      a{display:inline-block;margin-top:16px;padding:10px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:700;}
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>${verified ? 'Email verified' : 'Verification complete'}</h1>
-      <p>${verified ? 'Your Golf Homiez account is verified. You can return to the app and sign in.' : 'The verification request finished. Return to the app and sign in.'}</p>
-      <a href="/login${verified ? '?verified=1' : ''}">Go to login</a>
-    </div>
-  </body>
-</html>`)
-})
-
-app.get(['/register', '/login', '/verify-contact'], (req, res, next) => {
+function shouldProxyToDevClient(req) {
   const distDir = path.join(__dirname, '..', 'dist')
-  if (fs.existsSync(distDir)) return next()
-  logApi('local_dev_auth_route_served_without_client_redirect', { ...requestContext(req), route: req.path })
-  res.type('html').send(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Golf Homiez Local Dev</title>
-    <style>
-      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f5fff7;color:#0b2b16;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
-      .card{max-width:640px;width:100%;background:#fff;border:1px solid #d7eadc;border-radius:18px;padding:24px;box-shadow:0 18px 48px rgba(0,0,0,.12)}
-      h1{margin:0 0 10px;font-size:28px;}
-      p{line-height:1.45;color:#2f5a3d;}
-      a{display:inline-block;margin-top:16px;padding:10px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:700;}
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>Golf Homiez local development</h1>
-      <p>This backend route stays on port 5001 so local verification links do not bounce to the Vite dev server.</p>
-      <p>Open the frontend app directly when you need the full UI.</p>
-      <a href="${new URL(req.originalUrl || req.url || '/', clientOrigin).toString()}">Open frontend on 5174</a>
-    </div>
-  </body>
-</html>`)
-})
+  if (fs.existsSync(distDir)) return false
+  if (!devClientOrigin) return false
+  if (!['GET', 'HEAD'].includes(req.method)) return false
+  const requestPath = String(req.path || req.url || '')
+  if (requestPath.startsWith('/api/') || requestPath.startsWith('/diag/')) return false
+  return true
+}
 
 async function findTeamByName(name) {
   return storage.getTeamByName(name)
@@ -562,6 +550,11 @@ if (fs.existsSync(distDir)) {
   app.use(express.static(distDir))
   app.get('*', (req, res) => {
     res.sendFile(path.join(distDir, 'index.html'))
+  })
+} else {
+  app.use((req, res, next) => {
+    if (!shouldProxyToDevClient(req)) return next()
+    return proxyToDevClient(req, res, next)
   })
 }
 

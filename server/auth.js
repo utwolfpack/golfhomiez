@@ -5,33 +5,11 @@ import { sendMail } from './mailer.js'
 import { logApi, logError } from './lib/logger.js'
 
 const authSecret = process.env.BETTER_AUTH_SECRET || 'dev-only-secret-change-me-1234567890123456'
-
-function isLoopbackHost(hostname) {
-  return hostname === '127.0.0.1' || hostname === 'localhost'
-}
-
-function rewriteVerificationUrlForLocal(url, request) {
-  try {
-    const baseURL = process.env.BETTER_AUTH_URL || 'http://127.0.0.1:5001'
-    const parsed = new URL(url)
-    const callbackRaw = request?.body?.callbackURL || parsed.searchParams.get('callbackURL') || ''
-    if (!callbackRaw) return url
-    const callbackUrl = new URL(callbackRaw, baseURL)
-    const backendUrl = new URL(baseURL)
-    if (isLoopbackHost(callbackUrl.hostname) && isLoopbackHost(backendUrl.hostname)) {
-      callbackUrl.protocol = backendUrl.protocol
-      callbackUrl.hostname = backendUrl.hostname
-      callbackUrl.port = backendUrl.port
-      callbackUrl.pathname = '/verification-complete'
-      callbackUrl.search = '?verified=1'
-      parsed.searchParams.set('callbackURL', callbackUrl.toString())
-      return parsed.toString()
-    }
-    return url
-  } catch {
-    return url
-  }
-}
+const trustedOrigins = [
+  process.env.BETTER_AUTH_URL,
+  process.env.CLIENT_ORIGIN,
+  process.env.PUBLIC_SERVER_ORIGIN,
+].filter(Boolean)
 
 export const auth = betterAuth({
   appName: 'Golf Homiez',
@@ -43,14 +21,7 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24,
     updateAge: 60 * 60,
   },
-  trustedOrigins: [
-    process.env.BETTER_AUTH_URL,
-    process.env.CLIENT_ORIGIN,
-    'http://localhost:5174',
-    'http://127.0.0.1:5174',
-    'http://localhost:5001',
-    'http://127.0.0.1:5001',
-  ].filter(Boolean),
+  trustedOrigins,
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
@@ -86,32 +57,29 @@ export const auth = betterAuth({
     autoSignInAfterVerification: false,
     sendVerificationEmail: async ({ user, url, token }, request) => {
       try {
-        const deliveredUrl = rewriteVerificationUrlForLocal(url, request)
-
         setLatestVerificationLink({
           email: user.email,
           token,
-          url: deliveredUrl,
+          url,
           callbackURL: request?.body?.callbackURL || null,
         })
 
         await sendMail({
           to: user.email,
           subject: 'Verify your Golf Homiez email',
-          text: `Verify your Golf Homiez email by opening this link: ${deliveredUrl}` ,
+          text: `Verify your Golf Homiez email by opening this link: ${url}`,
           html: `
             <p>Welcome to Golf Homiez.</p>
             <p>Verify your email by clicking the link below:</p>
-            <p><a href="${deliveredUrl}">${deliveredUrl}</a></p>
+            <p><a href="${url}">${url}</a></p>
           `,
         })
 
         logApi('auth_verification_email_sent', {
           email: user.email,
           callbackURL: request?.body?.callbackURL || null,
-          verificationPath: (() => { try { return new URL(deliveredUrl).pathname } catch { return null } })(),
+          verificationPath: (() => { try { return new URL(url).pathname } catch { return null } })(),
           tokenPresent: Boolean(token),
-          callbackRewritten: deliveredUrl !== url,
         })
 
         console.log(`[better-auth] verification email sent to ${user.email}`)
