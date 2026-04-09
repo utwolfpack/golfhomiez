@@ -35,6 +35,10 @@ function getAuthBase() {
     return normalizeUrl(new URL(sameOriginDefault, pageUrl).toString())
   }
 
+  if (!pageIsLoopback && !targetIsLoopback && pageUrl.origin !== targetUrl.origin) {
+    return normalizeUrl(new URL(sameOriginDefault, pageUrl).toString())
+  }
+
   return normalizeUrl(targetUrl.toString())
 }
 
@@ -165,19 +169,11 @@ export async function resetPassword(token: string, newPassword: string) {
 }
 
 export async function sendVerificationEmail(email: string, callbackURL: string) {
-  return authFetch<{ ok?: boolean; alreadyVerified?: boolean; message?: string }>(`${window.location.origin}/api/account-verification/resend`, {
+  return authFetch<{ ok?: boolean }>(`${AUTH_BASE}/send-verification-email`, {
     method: 'POST',
     headers: getCommonHeaders(),
     body: JSON.stringify({ email, callbackURL }),
   }, 'auth_send_verification_email')
-}
-
-export async function getVerificationStatus(email: string) {
-  const url = new URL('/api/account-verification/status', window.location.origin)
-  url.searchParams.set('email', email)
-  return authFetch<{ found: boolean; email: string; verified: boolean; name?: string | null }>(url.toString(), {
-    method: 'GET',
-  }, 'auth_verification_status')
 }
 
 export async function getLatestResetLink(email: string) {
