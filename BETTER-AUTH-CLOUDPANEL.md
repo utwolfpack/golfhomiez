@@ -15,6 +15,7 @@ DB_NAME=your_cloudpanel_database
 DB_USER=your_cloudpanel_database_user
 DB_PASSWORD=your_cloudpanel_database_password
 PORT=5001
+# Or APP_PORT if your panel injects the runtime port under that name
 BETTER_AUTH_SECRET=replace-with-a-long-random-secret-at-least-32-characters
 BETTER_AUTH_URL=https://your-domain.example
 ```
@@ -29,7 +30,7 @@ npm start
 
 ## 4. Reverse proxy
 
-Point the CloudPanel site to the Node app port you chose, usually `5001`.
+Point the CloudPanel site to the same Node app port your process resolves at runtime. This app binds to the `PORT` environment variable. Set CloudPanel and the Node process to the same `PORT` value and avoid hardcoded port overrides in app code.
 
 ## 5. HTTPS
 

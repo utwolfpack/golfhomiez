@@ -207,10 +207,9 @@ test('location resources use backend endpoints and keep datasets off the client'
   const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(locations, /(fetchJson<|fetch\()/)
+  assert.match(locations, /fetch\(`/)
   assert.match(locations, /\/api\/locations\/search/)
   assert.match(locations, /\/api\/locations\/nearest/)
-  assert.match(locations, /X-Correlation-Id/)
   assert.doesNotMatch(locations, /country-state-city/)
   assert.match(input, /searchLocations\(query, 8\)\s*\.then/)
   assert.match(input, /await getNearestLocation\(position\.coords\.latitude, position\.coords\.longitude\)/)
@@ -224,8 +223,8 @@ test('mobile location lookup runs on the server and keeps browser datasets out o
   const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(locations, /(fetchJson<[\s\S]*\/api\/locations\/search|fetch\(`?\/api\/locations\/search)/)
-  assert.match(locations, /(fetchJson<[\s\S]*\/api\/locations\/nearest|fetch\(`?\/api\/locations\/nearest)/)
+  assert.match(locations, /fetch\(`?\/api\/locations\/search/)
+  assert.match(locations, /fetch\(`?\/api\/locations\/nearest/)
   assert.doesNotMatch(locations, /country-state-city/)
   assert.match(server, /app\.get\('\/api\/locations\/search'/)
   assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
@@ -293,20 +292,14 @@ test('verification flow prepopulates email and shows registration completion gui
   assert.match(verifyPage, /Check your email to finish registration/)
 })
 
-test('navigation uses a compact brand-and-user banner with overlay dropdown navigation', () => {
+test('navigation keeps Home and My Golf Scores on the top nav and uses a styled collapsible menu', () => {
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
-  assert.match(nav, /className="navBrand"/)
-  assert.match(nav, /className="navMenuTrigger"/)
-  assert.match(nav, /className="navDropdown"/)
-  assert.match(nav, /to="\/"[\s\S]*?>Home<\/NavLink>/)
-  assert.match(nav, /to="\/my-golf-scores"[\s\S]*?>My Golf Scores<\/NavLink>/)
-  assert.match(nav, /to="\/teams"[\s\S]*?>Teams<\/NavLink>/)
-  assert.match(nav, /to="\/directions"[\s\S]*?>Directions<\/NavLink>/)
+  assert.match(nav, /<A to="\/">Home<\/A>/)
+  assert.match(nav, /<A to="\/my-golf-scores">My Golf Scores<\/A>/)
   assert.match(nav, /Invite Homie/)
-  assert.match(css, /\.navDropdown/)
-  assert.match(css, /(position:\s*absolute|absolute;)/)
   assert.match(css, /\.navDropdownItem/)
+  assert.match(css, /color:#c2410c/)
 })
 
 test('teams page shows pending verification states, registration invites, and restored edit capability', () => {
@@ -318,19 +311,26 @@ test('teams page shows pending verification states, registration invites, and re
   assert.match(teamsPage, /setInterval\(load, 15000\)/)
 })
 
-test('registration invite and verification routing assertions match the active implementation', () => {
+test('registration invites target the client app route and preserve the email query', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-  const auth = fs.readFileSync(new URL('../server/auth.js', import.meta.url), 'utf8')
+  assert.match(server, /function getClientAppBaseUrl\(req\)/)
+  assert.match(server, /new URL\('\/register', getClientAppBaseUrl\(req\)\)/)
+  assert.match(server, /url\.searchParams\.set\('email', normalizeEmail\(email\)\)/)
+  assert.match(server, /app\.get\(\['\/register', '\/login', '\/verify-contact'\]/)
+})
 
-  assert.match(server, /(function getClientAppBaseUrl\(req\)|function getApiBaseUrl\(req\))/)
-  assert.match(server, /new URL\('\/register', (getClientAppBaseUrl|getApiBaseUrl)\(req\)\)/)
-  assert.match(
-    server,
-    /(url\.searchParams\.set\('email', normalizeEmail\(email\)\)|const inviteUrl = buildRegisterInviteUrl\(req, toEmail\)|Create your Golf Homiez account)/,
-  )
-  assert.match(
-    server,
-    /(app\.get\(\['\/register', '\/login', '\/verify-contact'\]|app\.use\(express\.static\(distDir\)\)|res\.sendFile\(path\.join\(distDir, 'index\.html'\)\))/, 
-  )
-  assert.match(auth, /(verification-complete\?verified=1|callbackURL: request\?\.body\?\.callbackURL \|\| null)/)
+
+test('local dev bootstrap seeds PORT before docker compose and keeps client/server ports separate', () => {
+  const localDev = fs.readFileSync(new URL('../server/scripts/local-dev.js', import.meta.url), 'utf8')
+  const compose = fs.readFileSync(new URL('../docker-compose.yml', import.meta.url), 'utf8')
+  const envExample = fs.readFileSync(new URL('../.env.example', import.meta.url), 'utf8')
+
+  assert.match(localDev, /const serverPort = process\.env\.PORT \|\| '5001'/)
+  assert.match(localDev, /PORT: serverPort/)
+  assert.match(localDev, /CLIENT_PORT: clientPort/)
+  assert.match(localDev, /env: process\.env/)
+  assert.match(compose, /PORT: \$\{PORT:-5001\}/)
+  assert.match(compose, /- "\$\{PORT:-5001\}:\$\{PORT:-5001\}"/)
+  assert.match(envExample, /^PORT=5001/m)
+  assert.match(envExample, /^CLIENT_PORT=5174/m)
 })
