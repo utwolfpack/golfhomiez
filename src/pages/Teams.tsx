@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import ProtectedRoute from '../components/ProtectedRoute'
-import { fetchTeams, updateTeam } from '../lib/teams'
+import { fetchTeams, sendRegistrationInvite, updateTeam } from '../lib/teams'
 import type { ScoreEntry, Team } from '../types'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
+import InviteHomieModal from '../components/InviteHomieModal'
+
+type DraftMember = { id: string; firstName: string; lastName: string; email: string }
 
 export default function TeamsPage() {
   return (
@@ -19,22 +22,33 @@ function TeamsInner() {
   const [teams, setTeams] = useState<Team[]>([])
   const [scores, setScores] = useState<ScoreEntry[]>([])
   const [err, setErr] = useState<string | null>(null)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteTarget, setInviteTarget] = useState<{ teamId: string; email: string } | null>(null)
   const [editTeamId, setEditTeamId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
-  const [draftMembers, setDraftMembers] = useState<{ id: string; firstName: string; lastName: string; email: string }[]>([])
+  const [draftMembers, setDraftMembers] = useState<DraftMember[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  async function load() {
+    try {
+      const [t, s] = await Promise.all([fetchTeams(), api<ScoreEntry[]>('/api/scores')])
+      setTeams(t)
+      setScores(s)
+    } catch (e: any) {
+      setErr(e.message || 'Failed to load teams')
+    }
+  }
+
   useEffect(() => {
-    ;(async () => {
-      try {
-        const [t, s] = await Promise.all([fetchTeams(), api<ScoreEntry[]>('/api/scores')])
-        setTeams(t)
-        setScores(s)
-      } catch (e: any) {
-        setErr(e.message || 'Failed to load teams')
-      }
-    })()
+    load()
+    const interval = window.setInterval(load, 15000)
+    const onFocus = () => { void load() }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   const sorted = useMemo(() => [...teams].sort((a, b) => a.name.localeCompare(b.name)), [teams])
@@ -109,13 +123,24 @@ function TeamsInner() {
     setSaving(true)
     setSaveError(null)
     try {
+      const normalizedEmails = new Set<string>()
       const members = draftMembers
         .map(m => ({
           id: m.id,
           name: `${m.firstName} ${m.lastName}`.replace(/\s+/g, ' ').trim(),
-          email: String(m.email || '').trim(),
+          email: String(m.email || '').trim().toLowerCase(),
         }))
         .filter(m => m.name || m.email)
+
+      if (members.length < 2) throw new Error('Teams must have at least 2 players.')
+      if (members.length > 4) throw new Error('Teams can have a maximum of 4 people.')
+
+      for (const member of members) {
+        if (!member.email) throw new Error('Each team member needs an email address.')
+        if (normalizedEmails.has(member.email)) throw new Error('You cannot add the same team member twice.')
+        normalizedEmails.add(member.email)
+      }
+
       const updated = await updateTeam(editTeam.id, draftName.trim(), members)
       setTeams(prev => prev.map(t => (t.id === updated.id ? updated : t)).sort((a, b) => a.name.localeCompare(b.name)))
       closeModal()
@@ -132,7 +157,7 @@ function TeamsInner() {
         <PageHero
           eyebrow="Rosters and records"
           title="Your teams at a glance"
-          subtitle="Tap a tile to edit the team roster and see the overall record. New teams are created from the Team Logger page so score entry stays in one place."
+          subtitle="See team status, pending registrations, roster details, and click a team to edit it."
         />
 
         {err ? <div className="small" style={{ color: '#b91c1c' }}>{err}</div> : null}
@@ -145,6 +170,7 @@ function TeamsInner() {
           <div className="grid grid3" style={{ marginTop: 14 }}>
             {myTeams.map(t => {
               const r = recordByTeam.get(t.name) || { wins: 0, losses: 0, ties: 0 }
+              const pendingMembers = (t.members || []).filter(member => member.status !== 'active')
               return (
                 <button
                   key={t.id}
@@ -159,6 +185,24 @@ function TeamsInner() {
                     Record: <strong>{r.wins}-{r.losses}</strong>{r.ties ? <span> (T{r.ties})</span> : null}
                   </div>
                   <div className="small" style={{ marginTop: 4 }}>{(t.members?.length || 0)} member(s)</div>
+                  {t.hasPendingMembers ? <div className="pill" style={{ marginTop: 10 }}>Pending teammate verification</div> : <div className="pill" style={{ marginTop: 10 }}>Ready to play</div>}
+                  <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                    {(t.members || []).map(member => (
+                      <div key={member.id} className="card" style={{ padding: 10, background: 'rgba(255,255,255,.72)' }}>
+                        <div style={{ fontWeight: 700 }}>{member.name}</div>
+                        <div className="small">{member.email}</div>
+                        <div className="small" style={{ marginTop: 4 }}>
+                          {member.status === 'active' ? 'Verified and active' : 'Pending registration or email verification'}
+                        </div>
+                        {member.status !== 'active' ? (
+                          <button type="button" className="btn" style={{ marginTop: 8 }} onClick={(e) => { e.stopPropagation(); setInviteTarget({ teamId: t.id, email: member.email }); setInviteOpen(true) }}>
+                            Send Registration Invite
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                  {pendingMembers.length ? <div className="small" style={{ marginTop: 10 }}>This team stays pending until every teammate completes app verification.</div> : null}
                   <div className="small" style={{ marginTop: 10, opacity: 0.8 }}>Click to edit roster</div>
                 </button>
               )
@@ -191,7 +235,7 @@ function TeamsInner() {
 
             <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <label className="label" style={{ margin: 0 }}>Members</label>
-              <button type="button" className="btn" disabled={draftMembers.length >= 4} onClick={addMember}>+ Add member</button>
+              {draftMembers.length < 4 ? <button type="button" className="btn" onClick={addMember}>+ Add member</button> : null}
             </div>
 
             <div className="small" style={{ marginTop: 6 }}>Teams must have between 2 and 4 players.</div>
@@ -227,6 +271,19 @@ function TeamsInner() {
           </div>
         </div>
       ) : null}
+
+      <InviteHomieModal
+        open={inviteOpen}
+        defaultEmail={inviteTarget?.email || ''}
+        title="Send Registration Invite"
+        submitLabel="Send Registration Invite"
+        onClose={() => setInviteOpen(false)}
+        onSubmit={async ({ email, message }) => {
+          await sendRegistrationInvite(email, message, inviteTarget?.teamId)
+          setInviteOpen(false)
+          await load()
+        }}
+      />
     </div>
   )
 }

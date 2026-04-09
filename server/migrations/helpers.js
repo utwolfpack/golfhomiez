@@ -54,3 +54,18 @@ export async function foreignKeyExists(db, tableName, constraintName) {
 export async function loadSqlFile(filePath) {
   return fs.readFile(filePath, 'utf8')
 }
+
+
+export async function primaryKeyMatches(db, tableName, expectedColumns = []) {
+  const [rows] = await db.execute(
+    `SELECT column_name
+       FROM information_schema.key_column_usage
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND constraint_name = 'PRIMARY'
+      ORDER BY ordinal_position ASC`,
+    [tableName]
+  )
+  const actual = rows.map((row) => row.column_name)
+  return actual.length === expectedColumns.length && actual.every((name, index) => name === expectedColumns[index])
+}

@@ -4,14 +4,15 @@ import ProtectedRoute from '../components/ProtectedRoute'
 import type { ScoreEntry, TeamMember } from '../types'
 import { US_STATES } from '../data/usStates'
 import { getCoursesForState } from '../data/coursesByState'
-import { createTeam, fetchTeams } from '../lib/teams'
+import { createTeam, fetchTeams, lookupUserByEmail, sendHomieInvite } from '../lib/teams'
 import { getUserTodayISO } from '../lib/date'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import UseMyLocationButton from '../components/UseMyLocationButton'
+import InviteHomieModal from '../components/InviteHomieModal'
 
 const NUM_HOLES = 18
-type DraftMember = { firstName: string; lastName: string; email: string }
+type DraftMember = { firstName: string; lastName: string; email: string; invited?: boolean }
 
 function splitUserName(name: string | null | undefined, email: string | null | undefined) {
   const trimmed = String(name || '').trim()
@@ -56,6 +57,11 @@ function GolfLoggerInner() {
     return { firstName: names.firstName, lastName: names.lastName, email: user?.email || '' }
   }, [user?.email, user?.name])
   const [newMembers, setNewMembers] = useState<DraftMember[]>([leadMember])
+  const [lookupEmail, setLookupEmail] = useState('')
+  const [lookupBusy, setLookupBusy] = useState(false)
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteMessage, setInviteMessage] = useState<string | null>(null)
 
   async function loadTeams() {
     try {
@@ -134,14 +140,46 @@ function GolfLoggerInner() {
   const createMissing = useMemo(() => {
     const missing: string[] = []
     if (!newTeamName.trim()) missing.push('Team name')
-    if (!cleanedNewMembers.length) missing.push('At least one team member')
-    cleanedNewMembers.forEach((member, idx) => {
-      if (!member.name) missing.push(`Member ${idx + 1} full name`)
-      if (!member.email) missing.push(`Member ${idx + 1} email`)
-    })
+    if (cleanedNewMembers.length < 2) missing.push('At least one teammate')
     if (cleanedNewMembers.length > 4) missing.push('Only four team members are allowed')
     return missing
   }, [newTeamName, cleanedNewMembers])
+
+
+  async function handleLookupMember() {
+    const email = lookupEmail.trim().toLowerCase()
+    if (!email) {
+      setErr('Enter an email to look up.')
+      return
+    }
+    if (newMembers.some(member => member.email.trim().toLowerCase() === email)) {
+      setErr('That teammate is already on this team. Pick a different golfer.')
+      return
+    }
+    if (newMembers.length >= 4) {
+      setErr('Teams can have a maximum of 4 people.')
+      return
+    }
+
+    setLookupBusy(true)
+    setErr(null)
+    try {
+      const result = await lookupUserByEmail(email)
+      if (!result.found) {
+        setInviteEmail(email)
+        setShowInviteModal(true)
+        return
+      }
+      const split = splitUserName(result.name, result.email)
+      setNewMembers(prev => [...prev, { firstName: result.firstName || split.firstName, lastName: split.lastName, email: result.email, invited: false }])
+      setLookupEmail('')
+      setMsg(`${result.firstName || 'Teammate'} added to the team roster.`)
+    } catch (e: any) {
+      setErr(e.message || 'Could not look up teammate')
+    } finally {
+      setLookupBusy(false)
+    }
+  }
 
   return (
     <div className="container pageStack">
@@ -168,28 +206,41 @@ function GolfLoggerInner() {
               </div>
               <div>
                 <div className="label" style={{ marginBottom: 6 }}>Team members (max 4)</div>
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {newMembers.map((m, idx) => (
-                    <div key={idx} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'end' }}>
-                      <div style={{ minWidth: 170, flex: 1 }}>
-                        <label className="label">First name</label>
-                        <input className="input" value={m.firstName} readOnly={idx === 0} aria-readonly={idx === 0} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, firstName: e.target.value } : x))} />
+                <div className="card" style={{ padding: 12, background: 'rgba(255,255,255,.72)' }}>
+                  <div className="small">Signed-in golfer</div>
+                  <div style={{ fontWeight: 800, marginTop: 4 }}>{leadMember.firstName} {leadMember.lastName}</div>
+                  <div className="small">{leadMember.email}</div>
+                </div>
+                <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                  {newMembers.slice(1).map((m, idx) => (
+                    <div key={`${m.email}-${idx}`} className="card" style={{ padding: 12, background: 'rgba(255,255,255,.72)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 800 }}>{m.firstName} {m.lastName}</div>
+                          <div className="small">{m.email}</div>
+                          <div className="small" style={{ marginTop: 4 }}>{m.invited ? 'Registration invite sent' : 'Ready to add to team'}</div>
+                        </div>
+                        <button type="button" className="btn" onClick={() => setNewMembers(prev => prev.filter(member => member.email !== m.email))}>Remove</button>
                       </div>
-                      <div style={{ minWidth: 170, flex: 1 }}>
-                        <label className="label">Last name</label>
-                        <input className="input" value={m.lastName} readOnly={idx === 0} aria-readonly={idx === 0} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, lastName: e.target.value } : x))} />
-                      </div>
-                      <div style={{ minWidth: 250, flex: 1.2 }}>
-                        <label className="label">Email</label>
-                        <input className="input" type="email" value={m.email} readOnly={idx === 0} aria-readonly={idx === 0} onChange={e => setNewMembers(prev => prev.map((x, i) => i === idx ? { ...x, email: e.target.value } : x))} />
-                      </div>
-                      <button type="button" className="btn" disabled={newMembers.length === 1 || idx === 0} onClick={() => setNewMembers(prev => prev.filter((_, i) => i !== idx))}>Remove</button>
                     </div>
                   ))}
                 </div>
                 <div className="small" style={{ marginTop: 6 }}>Member 1 is always the signed-in user and cannot be changed.</div>
+                {newMembers.length < 4 ? (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, marginTop: 10, maxWidth: 620 }}>
+                      <div>
+                        <label className="label">Teammate email</label>
+                        <input className="input" type="email" value={lookupEmail} onChange={e => setLookupEmail(e.target.value)} placeholder="Find teammate by email" />
+                      </div>
+                      <button type="button" className="btn" style={{ alignSelf: 'end' }} disabled={lookupBusy} onClick={handleLookupMember}>Lookup</button>
+                    </div>
+                    <div className="small" style={{ marginTop: 6 }}>If the email is not found, an invite will open so you can send a registration invite and then come right back here.</div>
+                  </>
+                ) : (
+                  <div className="small" style={{ marginTop: 10 }}>This team already has the maximum 4 golfers, so the add-teammate input is hidden.</div>
+                )}
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-                  <button type="button" className="btn" disabled={newMembers.length >= 4} onClick={() => setNewMembers(prev => [...prev, { firstName: '', lastName: '', email: '' }])}>+ Add member</button>
                   <button
                     type="button"
                     className="btn btnSmall btnLightBlue"
@@ -210,6 +261,7 @@ function GolfLoggerInner() {
                         setShowCreateTeamValidation(false)
                         setNewTeamName('')
                         setNewMembers([leadMember])
+                        setLookupEmail('')
                         await loadTeams()
                         setTeam(created.name)
                       } catch (e: any) {
@@ -227,6 +279,25 @@ function GolfLoggerInner() {
             </div>
           </div>
         ) : null}
+
+        <InviteHomieModal
+          open={showInviteModal}
+          defaultEmail={inviteEmail}
+          onClose={() => setShowInviteModal(false)}
+          onSubmit={async ({ email, message }) => {
+            await sendHomieInvite(email, message)
+            const normalizedEmail = email.trim().toLowerCase()
+            const alreadyAdded = newMembers.some(member => member.email.trim().toLowerCase() === normalizedEmail)
+            if (!alreadyAdded && newMembers.length < 4) {
+              const [firstName = 'Invited golfer'] = normalizedEmail.split('@')
+              setNewMembers(prev => [...prev, { firstName, lastName: '', email: normalizedEmail, invited: true }])
+            }
+            setInviteMessage(`Invite sent to ${normalizedEmail}. They will show as pending until they register and verify.`)
+            setLookupEmail('')
+            setShowInviteModal(false)
+            setMsg(`Invite sent. ${normalizedEmail} was added to the team list as pending.`)
+          }}
+        />
 
         <div className="grid grid2" style={{ marginTop: 14 }}>
           <div>
@@ -334,6 +405,7 @@ function GolfLoggerInner() {
           </div>
         ) : null}
 
+        {inviteMessage ? <div className="small" style={{ color: '#166534', marginTop: 12 }}>{inviteMessage}</div> : null}
         {msg ? <div className="small" style={{ color: '#166534', marginTop: 12 }}>{msg}</div> : null}
         {showRoundValidation && missingFields.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 12 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
         {err ? <div className="small" style={{ color: '#b91c1c', marginTop: 8 }}>{err}</div> : null}

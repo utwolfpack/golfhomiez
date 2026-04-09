@@ -254,7 +254,6 @@ export default function Home() {
 
         {view !== 'team' ? (
           <div className="small" style={{ marginTop: 10 }}>
-            Handicap is calculated from the current filtered solo rounds shown on this page.
           </div>
         ) : null}
 

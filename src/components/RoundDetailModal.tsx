@@ -18,7 +18,6 @@ export default function RoundDetailModal({ round, allScores, onClose }: { round:
       <div className="modalCard" role="dialog" aria-modal="true" aria-labelledby="round-detail-title" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div>
-            <div className="small">Logged event details</div>
             <h3 id="round-detail-title" style={{ margin: '4px 0 0' }}>{round.course}</h3>
             <div className="small" style={{ marginTop: 4 }}>
               {round.date} • {String((round as any).state || '').toUpperCase()} • {round.mode === 'solo' ? 'Solo round' : 'Team round'}
@@ -29,7 +28,7 @@ export default function RoundDetailModal({ round, allScores, onClose }: { round:
 
         <div className="detailGrid" style={{ marginTop: 14 }}>
           <div className="card detailPanel">
-            <div className="small">Round metadata</div>
+            <div className="small">Round Details</div>
             <div className="detailList" style={{ marginTop: 10 }}>
               {round.mode === 'solo' ? (
                 <>
