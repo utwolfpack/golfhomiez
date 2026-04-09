@@ -20,17 +20,18 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
+app.set('trust proxy', 1)
 const PORT = Number(process.env.PORT || 5001)
 let storageReady = false
-const clientOrigin = process.env.CLIENT_ORIGIN || null
-const devClientOrigin = process.env.DEV_CLIENT_ORIGIN || clientOrigin || null
+const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()
+const publicServerOrigin = String(process.env.BETTER_AUTH_URL || '').trim()
 const allowedOrigins = new Set([
-  process.env.BETTER_AUTH_URL || null,
-  process.env.PUBLIC_SERVER_ORIGIN || null,
   clientOrigin,
-  devClientOrigin,
-  `http://127.0.0.1:${PORT}`,
-  `http://localhost:${PORT}`,
+  publicServerOrigin,
+  'http://127.0.0.1:5174',
+  'http://localhost:5174',
+  'http://127.0.0.1:5001',
+  'http://localhost:5001',
 ].filter(Boolean))
 
 app.use(cors({
@@ -113,7 +114,7 @@ app.get('/api/locations/nearest', (req, res) => {
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
 
-app.post('/api/client-logs', express.json({ limit: '64kb' }), (req, res) => {
+app.post(['/api/client-logs', '/api/client-log'], express.json({ limit: '64kb' }), (req, res) => {
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const correlationId = String(body.correlationId || req.correlationId || '').trim() || req.correlationId || null
@@ -177,15 +178,17 @@ async function authMiddleware(req, res, next) {
 
 
 function getApiBaseUrl(req) {
-  return process.env.BETTER_AUTH_URL || process.env.PUBLIC_SERVER_ORIGIN || `${req.protocol}://${req.get('host')}`
+  return process.env.BETTER_AUTH_URL || `${req.protocol}://${req.get('host')}`
 }
 
-function getPublicAppBaseUrl(req) {
-  return process.env.PUBLIC_SERVER_ORIGIN || process.env.BETTER_AUTH_URL || `${req.protocol}://${req.get('host')}`
+function getClientAppBaseUrl(req) {
+  const requestOrigin = String(req.headers.origin || '').trim()
+  if (requestOrigin && allowedOrigins.has(requestOrigin) && !/:(5001)$/.test(requestOrigin)) return requestOrigin
+  return clientOrigin || getApiBaseUrl(req)
 }
 
 function buildRegisterInviteUrl(req, email) {
-  const url = new URL('/register', getPublicAppBaseUrl(req))
+  const url = new URL('/register', getClientAppBaseUrl(req))
   url.searchParams.set('email', normalizeEmail(email))
   return url.toString()
 }
@@ -233,52 +236,19 @@ async function sendRegistrationInviteEmail(req, { toEmail, customMessage, invite
 }
 
 
-async function proxyToDevClient(req, res, next) {
-  if (!devClientOrigin) return next()
-
-  let upstreamBase
-  try {
-    upstreamBase = new URL(devClientOrigin)
-  } catch {
-    return next()
-  }
-
-  if (upstreamBase.host === String(req.get('host') || '').trim()) return next()
-
-  const upstreamUrl = new URL(req.originalUrl || req.url || '/', upstreamBase)
-
-  try {
-    const upstreamResponse = await fetch(upstreamUrl, {
-      method: req.method,
-      headers: {
-        accept: req.headers.accept || '*/*',
-        'user-agent': req.headers['user-agent'] || 'GolfHomiezDevProxy/1.0',
-      },
-      redirect: 'manual',
-    })
-
-    res.status(upstreamResponse.status)
-    for (const [key, value] of upstreamResponse.headers.entries()) {
-      if (['connection', 'content-length', 'content-encoding', 'transfer-encoding', 'keep-alive'].includes(key.toLowerCase())) continue
-      res.setHeader(key, value)
-    }
-    const body = Buffer.from(await upstreamResponse.arrayBuffer())
-    return res.send(body)
-  } catch (error) {
-    logRouteError('Dev client proxy error', req, error, { upstreamUrl: upstreamUrl.toString(), devClientOrigin })
-    return next()
-  }
+function redirectToClientApp(req, res) {
+  const target = new URL(req.originalUrl || req.url || '/', getClientAppBaseUrl(req))
+  return res.redirect(302, target.toString())
 }
 
-function shouldProxyToDevClient(req) {
+app.get(['/register', '/login', '/verify-contact'], (req, res, next) => {
+  const host = String(req.get('host') || '')
+  const shouldRedirectToClient = clientOrigin && !host.includes(new URL(clientOrigin).host)
+  if (shouldRedirectToClient) return redirectToClientApp(req, res)
   const distDir = path.join(__dirname, '..', 'dist')
-  if (fs.existsSync(distDir)) return false
-  if (!devClientOrigin) return false
-  if (!['GET', 'HEAD'].includes(req.method)) return false
-  const requestPath = String(req.path || req.url || '')
-  if (requestPath.startsWith('/api/') || requestPath.startsWith('/diag/')) return false
-  return true
-}
+  if (fs.existsSync(distDir)) return next()
+  return redirectToClientApp(req, res)
+})
 
 async function findTeamByName(name) {
   return storage.getTeamByName(name)
@@ -550,11 +520,6 @@ if (fs.existsSync(distDir)) {
   app.use(express.static(distDir))
   app.get('*', (req, res) => {
     res.sendFile(path.join(distDir, 'index.html'))
-  })
-} else {
-  app.use((req, res, next) => {
-    if (!shouldProxyToDevClient(req)) return next()
-    return proxyToDevClient(req, res, next)
   })
 }
 

@@ -5,11 +5,6 @@ import { sendMail } from './mailer.js'
 import { logApi, logError } from './lib/logger.js'
 
 const authSecret = process.env.BETTER_AUTH_SECRET || 'dev-only-secret-change-me-1234567890123456'
-const trustedOrigins = [
-  process.env.BETTER_AUTH_URL,
-  process.env.CLIENT_ORIGIN,
-  process.env.PUBLIC_SERVER_ORIGIN,
-].filter(Boolean)
 
 export const auth = betterAuth({
   appName: 'Golf Homiez',
@@ -21,7 +16,14 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24,
     updateAge: 60 * 60,
   },
-  trustedOrigins,
+  trustedOrigins: Array.from(new Set([
+    process.env.BETTER_AUTH_URL,
+    process.env.CLIENT_ORIGIN,
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
+    'http://localhost:5001',
+    'http://127.0.0.1:5001',
+  ].filter(Boolean))),
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
