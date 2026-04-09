@@ -6,21 +6,28 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { auth } from './auth.js'
-import { getLatestPasswordReset } from './auth-debug.js'
+import { getLatestPasswordReset, getLatestVerificationLink } from './auth-debug.js'
 import storage from './storage/index.js'
+import { getPool } from './db.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, getLogPaths, logError, logFrontend, logInfo, requestContext } from './lib/logger.js'
+import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
+import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
+import { sendMail } from './mailer.js'
+import { v4 as uuidv4 } from 'uuid'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
+app.set('trust proxy', 1)
 const PORT = Number(process.env.PORT || 5001)
 let storageReady = false
-const clientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()
+const publicServerOrigin = String(process.env.BETTER_AUTH_URL || '').trim()
 const allowedOrigins = new Set([
   clientOrigin,
+  publicServerOrigin,
   'http://127.0.0.1:5174',
   'http://localhost:5174',
   'http://127.0.0.1:5001',
@@ -34,15 +41,17 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id', 'X-Request-Id'],
 }))
 app.options('*', cors())
+app.use(requestCorrelationMiddleware)
 app.use(accessLogMiddleware)
 
 const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
 
 app.get('/diag/pixel.gif', (req, res) => {
   logFrontend('frontend_stage', {
+
     correlationId: String(req.query.cid || '').trim() || null,
     stage: String(req.query.stage || '').trim() || 'unknown',
     detail: String(req.query.detail || '').trim() || null,
@@ -52,14 +61,95 @@ app.get('/diag/pixel.gif', (req, res) => {
     referer: req.headers.referer || null,
   })
 
+  logApi('frontend_stage_pixel', { correlationId: req.correlationId || String(req.query.cid || '').trim() || null, path: String(req.query.path || req.path || '').trim() || null, detail: String(req.query.detail || '').trim() || null, stage: String(req.query.stage || '').trim() || 'unknown', ip: req.ip, userAgent: req.headers['user-agent'] || null })
+
   res.setHeader('Content-Type', 'image/gif')
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   res.setHeader('Pragma', 'no-cache')
   res.setHeader('Expires', '0')
   res.send(TRANSPARENT_GIF)
 })
+
+app.get('/api/locations/search', (req, res) => {
+  try {
+    const query = String(req.query.q || '').trim()
+    const limit = Math.min(Math.max(Number(req.query.limit) || 8, 1), 20)
+    const results = searchServerLocations(query, limit)
+    logApi('location_search_completed', {
+      ...requestContext(req),
+      query,
+      limit,
+      resultCount: results.length,
+    })
+    res.json(results)
+  } catch (error) {
+    logRouteError('Location search error', req, error)
+    res.status(500).json({ message: 'Location suggestions are temporarily unavailable.' })
+  }
+})
+
+app.get('/api/locations/nearest', (req, res) => {
+  try {
+    const latitude = Number(req.query.lat)
+    const longitude = Number(req.query.lng)
+    if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+      return res.status(400).json({ message: 'lat and lng query parameters are required' })
+    }
+
+    const nearest = getNearestServerLocation(latitude, longitude)
+    logApi('location_nearest_completed', {
+      ...requestContext(req),
+      latitude,
+      longitude,
+      found: Boolean(nearest),
+      selectedLabel: nearest?.label || null,
+    })
+    res.json(nearest || null)
+  } catch (error) {
+    logRouteError('Nearest location error', req, error)
+    res.status(500).json({ message: 'Location lookup failed.' })
+  }
+})
+
 app.all('/api/auth/*', toNodeHandler(auth))
 app.use(express.json())
+
+app.all(['/api/client-logs', '/api/client-log', '/api/client-logs/', '/api/client-log/'], express.json({ limit: '64kb' }), (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const correlationId = String(body.correlationId || req.correlationId || '').trim() || req.correlationId || null
+    const entry = {
+      correlationId,
+      level: String(body.level || 'info').trim() || 'info',
+      type: String(body.type || 'frontend_event').trim() || 'frontend_event',
+      message: String(body.message || 'frontend_event').trim() || 'frontend_event',
+      action: body.action == null ? null : String(body.action),
+      status: body.status == null ? null : String(body.status),
+      route: body.route == null ? (req.headers.referer || null) : String(body.route),
+      metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : null,
+      userAgent: body.userAgent == null ? (req.headers['user-agent'] || null) : String(body.userAgent),
+      source: req.headers['x-log-source'] || 'client',
+      ip: req.ip,
+    }
+
+    logFrontend(entry.message, entry)
+    logApi('client_log_ingested', {
+      correlationId: entry.correlationId,
+      type: entry.type,
+      level: entry.level,
+      route: entry.route,
+      source: entry.source,
+      path: req.originalUrl || req.url,
+      ip: req.ip,
+      userAgent: entry.userAgent,
+    })
+
+    return res.status(202).end()
+  } catch (error) {
+    logRouteError('Client log ingestion error', req, error, { body: req.body })
+    return res.status(202).end()
+  }
+})
 
 function logRouteError(message, req, error, extra = {}) {
   logError(message, {
@@ -84,6 +174,81 @@ async function authMiddleware(req, res, next) {
     res.status(500).json({ message: 'Authentication failed' })
   }
 }
+
+
+
+function getApiBaseUrl(req) {
+  return process.env.BETTER_AUTH_URL || `${req.protocol}://${req.get('host')}`
+}
+
+function getClientAppBaseUrl(req) {
+  const requestOrigin = String(req.headers.origin || '').trim()
+  if (requestOrigin && allowedOrigins.has(requestOrigin) && !/:(5001)$/.test(requestOrigin)) return requestOrigin
+  return clientOrigin || getApiBaseUrl(req)
+}
+
+function buildRegisterInviteUrl(req, email) {
+  const url = new URL('/register', getClientAppBaseUrl(req))
+  url.searchParams.set('email', normalizeEmail(email))
+  return url.toString()
+}
+
+function splitName(name = '', email = '') {
+  const trimmed = String(name || '').trim()
+  if (!trimmed) return { firstName: String(email || '').split('@')[0] || '', lastName: '' }
+  const [firstName = '', ...rest] = trimmed.split(/\s+/)
+  return { firstName, lastName: rest.join(' ') }
+}
+
+async function sendRegistrationInviteEmail(req, { toEmail, customMessage, invitedBy, teamId = null, purpose = 'registration_invite' }) {
+  const inviteUrl = buildRegisterInviteUrl(req, toEmail)
+  const inviterLabel = invitedBy?.name || invitedBy?.email || 'Your Golf Homie'
+  const messageText = String(customMessage || '').trim()
+  const subject = 'You are invited to join Golf Homiez'
+  const text = [
+    messageText,
+    '',
+    `${inviterLabel} invited you to join Golf Homiez.`,
+    'Track rounds, build teams, log scores, and keep your golf crew together in one place.',
+    `Register here: ${inviteUrl}`,
+  ].filter(Boolean).join('\n')
+  const html = `
+    <p>${messageText || `${inviterLabel} wants you on Golf Homiez.`}</p>
+    <p><strong>${inviterLabel}</strong> invited you to join Golf Homiez.</p>
+    <p>Keep your rounds, teams, and golf score history together in one place.</p>
+    <p><a href="${inviteUrl}">Create your Golf Homiez account</a></p>
+  `
+
+  await sendMail({ to: toEmail, subject, text, html })
+
+  try {
+    const pool = getPool()
+    await pool.execute(
+      'INSERT INTO invitations (id, email, invited_by_user_id, invited_by_email, team_id, purpose, custom_message, invite_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+      [uuidv4(), normalizeEmail(toEmail), invitedBy?.id || null, invitedBy?.email || null, teamId, purpose, messageText || null, inviteUrl],
+    )
+  } catch (error) {
+    logError('Invitation persistence failed', { error, email: toEmail, invitedByEmail: invitedBy?.email || null, teamId, purpose })
+  }
+
+  logApi('registration_invite_sent', { ...requestContext(req), email: normalizeEmail(toEmail), invitedByEmail: invitedBy?.email || null, teamId, purpose, inviteUrl })
+  return { ok: true, inviteUrl }
+}
+
+
+function redirectToClientApp(req, res) {
+  const target = new URL(req.originalUrl || req.url || '/', getClientAppBaseUrl(req))
+  return res.redirect(302, target.toString())
+}
+
+app.get(['/register', '/login', '/verify-contact'], (req, res, next) => {
+  const host = String(req.get('host') || '')
+  const shouldRedirectToClient = clientOrigin && !host.includes(new URL(clientOrigin).host)
+  if (shouldRedirectToClient) return redirectToClientApp(req, res)
+  const distDir = path.join(__dirname, '..', 'dist')
+  if (fs.existsSync(distDir)) return next()
+  return redirectToClientApp(req, res)
+})
 
 async function findTeamByName(name) {
   return storage.getTeamByName(name)
@@ -111,6 +276,55 @@ app.get('/api/auth-debug/latest-reset', (req, res) => {
   if (!email) return res.status(400).json({ message: 'email query parameter required' })
   const latest = getLatestPasswordReset(email)
   res.json(latest || null)
+})
+
+app.get('/api/auth-debug/latest-verification', (req, res) => {
+  const email = String(req.query.email || '').trim()
+  if (!email) return res.status(400).json({ message: 'email query parameter required' })
+  const latest = getLatestVerificationLink(email)
+  res.json(latest || null)
+})
+
+
+app.get('/api/users/lookup', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.query.email || '').trim()
+    if (!email) return res.status(400).json({ message: 'email query parameter required' })
+    const found = await storage.findUserByEmail(email)
+    if (!found) return res.json({ found: false, email: normalizeEmail(email) })
+    const parts = splitName(found.name, found.email)
+    res.json({ found: true, email: found.email, firstName: parts.firstName, name: found.name, verified: Boolean(found.emailVerified) })
+  } catch (error) {
+    logRouteError('User lookup error', req, error)
+    res.status(500).json({ message: 'Could not look up user' })
+  }
+})
+
+app.post('/api/invitations', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim()
+    const message = String(req.body?.message || '').trim()
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const result = await sendRegistrationInviteEmail(req, { toEmail: email, customMessage: message, invitedBy: req.user })
+    res.status(201).json(result)
+  } catch (error) {
+    logRouteError('Invitation send error', req, error)
+    res.status(500).json({ message: 'Could not send invitation' })
+  }
+})
+
+app.post('/api/invitations/resend-registration', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim()
+    const message = String(req.body?.message || '').trim()
+    const teamId = req.body?.teamId ? String(req.body.teamId) : null
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const result = await sendRegistrationInviteEmail(req, { toEmail: email, customMessage: message, invitedBy: req.user, teamId, purpose: 'team_registration_invite' })
+    res.status(201).json(result)
+  } catch (error) {
+    logRouteError('Resend registration invite error', req, error)
+    res.status(500).json({ message: 'Could not send registration invite' })
+  }
 })
 
 app.get('/api/teams', requireStorage, authMiddleware, async (req, res) => {
