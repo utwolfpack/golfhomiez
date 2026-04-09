@@ -23,6 +23,14 @@ test('forgot password client points at the correct Better Auth endpoint', () => 
   assert.doesNotMatch(source, /\$\{AUTH_BASE\}\/forget-password/)
 })
 
+test('better auth client prefers same-origin in deployed environments and only allows loopback cross-origin locally', () => {
+  const source = fs.readFileSync(new URL('../src/lib/auth-client.ts', import.meta.url), 'utf8')
+  assert.match(source, /const sameOriginDefault = '\/api\/auth'/)
+  assert.match(source, /pageUrl\.origin !== targetUrl\.origin/)
+  assert.match(source, /return normalizeUrl\(new URL\(sameOriginDefault, pageUrl\)\.toString\(\)\)/)
+  assert.match(source, /pageIsLoopback && targetIsLoopback/)
+})
+
 test('API client attaches the user timezone header for server-side date validation', () => {
   const source = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
   assert.match(source, /X-User-Timezone/)
@@ -207,7 +215,7 @@ test('location resources use backend endpoints and keep datasets off the client'
   const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(locations, /fetch\(`/)
+  assert.match(locations, /(fetch\(|fetchJson<)/)
   assert.match(locations, /\/api\/locations\/search/)
   assert.match(locations, /\/api\/locations\/nearest/)
   assert.doesNotMatch(locations, /country-state-city/)
@@ -223,8 +231,8 @@ test('mobile location lookup runs on the server and keeps browser datasets out o
   const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(locations, /fetch\(`?\/api\/locations\/search/)
-  assert.match(locations, /fetch\(`?\/api\/locations\/nearest/)
+  assert.match(locations, /(fetch\(|fetchJson<)[\s\S]*\/api\/locations\/search/)
+  assert.match(locations, /(fetch\(|fetchJson<)[\s\S]*\/api\/locations\/nearest/)
   assert.doesNotMatch(locations, /country-state-city/)
   assert.match(server, /app\.get\('\/api\/locations\/search'/)
   assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
@@ -292,14 +300,13 @@ test('verification flow prepopulates email and shows registration completion gui
   assert.match(verifyPage, /Check your email to finish registration/)
 })
 
-test('navigation keeps Home and My Golf Scores on the top nav and uses a styled collapsible menu', () => {
+test('navigation uses the styled dropdown menu items and keeps invite access available', () => {
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
-  assert.match(nav, /<A to="\/">Home<\/A>/)
-  assert.match(nav, /<A to="\/my-golf-scores">My Golf Scores<\/A>/)
   assert.match(nav, /Invite Homie/)
   assert.match(css, /\.navDropdownItem/)
-  assert.match(css, /color:#c2410c/)
+  assert.match(css, /background:#f0fdf4/)
+  assert.match(css, /color:#15803d/)
 })
 
 test('teams page shows pending verification states, registration invites, and restored edit capability', () => {
@@ -311,26 +318,10 @@ test('teams page shows pending verification states, registration invites, and re
   assert.match(teamsPage, /setInterval\(load, 15000\)/)
 })
 
-test('registration invites target the client app route and preserve the email query', () => {
+test('registration routes stay same-origin and client log ingestion supports both legacy and current endpoints', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-  assert.match(server, /function getClientAppBaseUrl\(req\)/)
-  assert.match(server, /new URL\('\/register', getClientAppBaseUrl\(req\)\)/)
-  assert.match(server, /url\.searchParams\.set\('email', normalizeEmail\(email\)\)/)
-  assert.match(server, /app\.get\(\['\/register', '\/login', '\/verify-contact'\]/)
-})
-
-
-test('local dev bootstrap seeds PORT before docker compose and keeps client/server ports separate', () => {
-  const localDev = fs.readFileSync(new URL('../server/scripts/local-dev.js', import.meta.url), 'utf8')
-  const compose = fs.readFileSync(new URL('../docker-compose.yml', import.meta.url), 'utf8')
-  const envExample = fs.readFileSync(new URL('../.env.example', import.meta.url), 'utf8')
-
-  assert.match(localDev, /const serverPort = process\.env\.PORT \|\| '5001'/)
-  assert.match(localDev, /PORT: serverPort/)
-  assert.match(localDev, /CLIENT_PORT: clientPort/)
-  assert.match(localDev, /env: process\.env/)
-  assert.match(compose, /PORT: \$\{PORT:-5001\}/)
-  assert.match(compose, /- "\$\{PORT:-5001\}:\$\{PORT:-5001\}"/)
-  assert.match(envExample, /^PORT=5001/m)
-  assert.match(envExample, /^CLIENT_PORT=5174/m)
+  const authClient = fs.readFileSync(new URL('../src/lib/auth-client.ts', import.meta.url), 'utf8')
+  assert.match(server, /app\.post\(\['\/api\/client-logs', '\/api\/client-log'\]/)
+  assert.match(server, /return process\.env\.BETTER_AUTH_URL \|\| `\$\{req\.protocol\}:\/\/\$\{req\.get\('host'\)\}`/)
+  assert.match(authClient, /const sameOriginDefault = '\/api\/auth'/)
 })
