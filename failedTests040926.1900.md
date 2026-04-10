@@ -6,312 +6,104 @@ TAP version 13
 # Subtest: email helpers normalize and validate addresses
 ok 1 - email helpers normalize and validate addresses
   ---
-  duration_ms: 2.9756
+  duration_ms: 2.7524
   ...
 # Subtest: forgot password client points at the correct Better Auth endpoint
 ok 2 - forgot password client points at the correct Better Auth endpoint
   ---
-  duration_ms: 0.9917
+  duration_ms: 0.9099
+  ...
+# Subtest: better auth client prefers same-origin in deployed environments and only allows loopback cross-origin locally
+ok 3 - better auth client prefers same-origin in deployed environments and only allows loopback cross-origin locally
+  ---
+  duration_ms: 0.3994
   ...
 # Subtest: API client attaches the user timezone header for server-side date validation
-ok 3 - API client attaches the user timezone header for server-side date validation
+ok 4 - API client attaches the user timezone header for server-side date validation
   ---
-  duration_ms: 0.3472
+  duration_ms: 0.3632
   ...
 # Subtest: create-team normalization always makes the signed-in user the first member
-ok 4 - create-team normalization always makes the signed-in user the first member
+ok 5 - create-team normalization always makes the signed-in user the first member
   ---
-  duration_ms: 1.6103
+  duration_ms: 2.1832
   ...
 # Subtest: locked lead member falls back to the email local-part when the user name is unavailable
-ok 5 - locked lead member falls back to the email local-part when the user name is unavailable
+ok 6 - locked lead member falls back to the email local-part when the user name is unavailable
   ---
-  duration_ms: 0.253
+  duration_ms: 0.2155
   ...
 # Subtest: team creation UI uses email lookup, prevents duplicates, shows pending invites, and hides the add input at four golfers
-ok 6 - team creation UI uses email lookup, prevents duplicates, shows pending invites, and hides the add input at four golfers
+ok 7 - team creation UI uses email lookup, prevents duplicates, shows pending invites, and hides the add input at four golfers
   ---
-  duration_ms: 0.3978
+  duration_ms: 0.5571
   ...
 # Subtest: date helpers reject future dates in the supplied local timezone
-ok 7 - date helpers reject future dates in the supplied local timezone
+ok 8 - date helpers reject future dates in the supplied local timezone
   ---
-  duration_ms: 23.1178
+  duration_ms: 24.8887
   ...
 # Subtest: score logger pages use the user-local date helper for date picker limits
-ok 8 - score logger pages use the user-local date helper for date picker limits
+ok 9 - score logger pages use the user-local date helper for date picker limits
   ---
-  duration_ms: 1.1223
+  duration_ms: 1.6408
   ...
 # Subtest: solo logger supports optional 18-hole entry like the team logger
-ok 9 - solo logger supports optional 18-hole entry like the team logger
+ok 10 - solo logger supports optional 18-hole entry like the team logger
   ---
-  duration_ms: 0.4226
+  duration_ms: 0.5753
   ...
 # Subtest: logged event rows remain clickable buttons for round detail access
-ok 10 - logged event rows remain clickable buttons for round detail access
+ok 11 - logged event rows remain clickable buttons for round detail access
   ---
-  duration_ms: 1.778
+  duration_ms: 0.6024
   ...
 # Subtest: handicap UI is clickable, filter-relative, and shows a breakdown modal
-ok 11 - handicap UI is clickable, filter-relative, and shows a breakdown modal
+ok 12 - handicap UI is clickable, filter-relative, and shows a breakdown modal
   ---
-  duration_ms: 1.5805
+  duration_ms: 0.9376
   ...
 # Subtest: validation warnings stay hidden until save is attempted
-ok 12 - validation warnings stay hidden until save is attempted
+ok 13 - validation warnings stay hidden until save is attempted
   ---
-  duration_ms: 1.095
+  duration_ms: 0.6157
   ...
 # Subtest: homepage shows guest sample scores when no user is logged in
-ok 13 - homepage shows guest sample scores when no user is logged in
+ok 14 - homepage shows guest sample scores when no user is logged in
   ---
-  duration_ms: 0.7622
+  duration_ms: 0.5666
   ...
 # Subtest: logging writes to root access and error log files with request middleware support
-ok 14 - logging writes to root access and error log files with request middleware support
+ok 15 - logging writes to root access and error log files with request middleware support
   ---
-  duration_ms: 1.0138
+  duration_ms: 0.5955
   ...
 # Subtest: homepage demo seeder can populate the sample rounds locally
-ok 15 - homepage demo seeder can populate the sample rounds locally
+ok 16 - homepage demo seeder can populate the sample rounds locally
   ---
-  duration_ms: 0.6059
+  duration_ms: 0.4645
   ...
 # Subtest: safe mobile diagnostics use pixel beacons instead of recursive preboot network logging
-ok 16 - safe mobile diagnostics use pixel beacons instead of recursive preboot network logging
+ok 17 - safe mobile diagnostics use pixel beacons instead of recursive preboot network logging
   ---
-  duration_ms: 1.1388
+  duration_ms: 0.8255
   ...
 # Subtest: register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle
-ok 17 - register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle
+ok 18 - register route stays lazy-loaded to avoid pulling mobile-only register code into the initial bundle
   ---
-  duration_ms: 0.5538
+  duration_ms: 0.763
   ...
 # Subtest: location resources use backend endpoints and keep datasets off the client
-not ok 18 - location resources use backend endpoints and keep datasets off the client
+not ok 19 - location resources use backend endpoints and keep datasets off the client
   ---
-  duration_ms: 7.9989
-  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:205:1'
+  duration_ms: 0.9483
+  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:213:1'
   failureType: 'testCodeFailure'
-  error: |-
-    The input did not match the regular expression /(fetchJson|fetch)\(`/. Input:
-    
-    "import { createCorrelationId, logFrontendEvent } from './frontend-logger'\n" +
-      '\n' +
-      'export type ResolvedLocation = {\n' +
-      '  city?: string\n' +
-      '  state?: string\n' +
-      '  stateCode?: string\n' +
-      '  label: string\n' +
-      '  latitude?: number\n' +
-      '  longitude?: number\n' +
-      '  accuracy?: number\n' +
-      '}\n' +
-      '\n' +
-      'async function fetchJson<T>(url: string, action: string): Promise<T> {\n' +
-      '  const correlationId = createCorrelationId()\n' +
-      '  const startedAt = Date.now()\n' +
-      '\n' +
-      '  logFrontendEvent({\n' +
-      "    category: 'location.fetch',\n" +
-      '    message: `${action}_started`,\n' +
-      '    data: { correlationId, url },\n' +
-      '  })\n' +
-      '\n' +
-      '  const response = await fetch(url, {\n' +
-      '    headers: {\n' +
-      "      'X-Correlation-Id': correlationId,\n" +
-      '    },\n' +
-      '  })\n' +
-      '\n' +
-      '  logFrontendEvent({\n' +
-      "    category: 'location.fetch',\n" +
-      "    level: response.ok ? 'info' : 'warn',\n" +
-      '    message: `${action}_completed`,\n' +
-      '    data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },\n' +
-      '  })\n' +
-      '\n' +
-      '  if (!response.ok) {\n' +
-      '    throw new Error(`Request failed with status ${response.status}`)\n' +
-      '  }\n' +
-      '\n' +
-      '  return response.json() as Promise<T>\n' +
-      '}\n' +
-      '\n' +
-      'export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {\n' +
-      '  const trimmed = query.trim()\n' +
-      '  if (trimmed.length < 2) return []\n' +
-      '\n' +
-      '  const params = new URLSearchParams({ q: trimmed, limit: String(limit) })\n' +
-      "  const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')\n" +
-      '  if (Array.isArray(data)) return data\n' +
-      '  return Array.isArray(data.locations) ? data.locations : []\n' +
-      '}\n' +
-      '\n' +
-      'export async function getNearestLocation(\n' +
-      '  latitude: number,\n' +
-      '  longitude: number,\n' +
-      '): Promise<ResolvedLocation | null> {\n' +
-      '  const params = new URLSearchParams({\n' +
-      '    lat: String(latitude),\n' +
-      '    lng: String(longitude),\n' +
-      '  })\n' +
-      '\n' +
-      "  const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')\n" +
-      '\n' +
-      "  if ('location' in data && data.location) {\n" +
-      '    return data.location\n' +
-      '  }\n' +
-      '\n' +
-      "  if ('label' in data && typeof data.label === 'string') {\n" +
-      '    return data as ResolvedLocation\n' +
-      '  }\n' +
-      '\n' +
-      '  return null\n' +
-      '}\n' +
-      '\n' +
-      'export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {\n' +
-      "  if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {\n" +
-      "    throw new Error('Geolocation is not supported on this device')\n" +
-      '  }\n' +
-      '\n' +
-      '  const position = await new Promise<GeolocationPosition>((resolve, reject) => {\n' +
-      '    navigator.geolocation.getCurrentPosition(resolve, reject, {\n' +
-      '      enableHighAccuracy: true,\n' +
-      '      timeout: 15000,\n' +
-      '      maximumAge: 60000,\n' +
-      '    })\n' +
-      '  })\n' +
-      '\n' +
-      '  const latitude = position.coords.latitude\n' +
-      '  const longitude = position.coords.longitude\n' +
-      '  const accuracy = position.coords.accuracy\n' +
-      '\n' +
-      '  const nearest = await getNearestLocation(latitude, longitude)\n' +
-      '  if (!nearest) {\n' +
-      "    throw new Error('Unable to resolve location from coordinates')\n" +
-      '  }\n' +
-      '\n' +
-      '  return {\n' +
-      '    ...nearest,\n' +
-      '    latitude,\n' +
-      '    longitude,\n' +
-      '    accuracy,\n' +
-      '  }\n' +
-      '}\n'
-    
-  code: 'ERR_ASSERTION'
-  name: 'AssertionError'
-  expected:
-  actual: |-
-    import { createCorrelationId, logFrontendEvent } from './frontend-logger'
-    
-    export type ResolvedLocation = {
-      city?: string
-      state?: string
-      stateCode?: string
-      label: string
-      latitude?: number
-      longitude?: number
-      accuracy?: number
-    }
-    
-    async function fetchJson<T>(url: string, action: string): Promise<T> {
-      const correlationId = createCorrelationId()
-      const startedAt = Date.now()
-    
-      logFrontendEvent({
-        category: 'location.fetch',
-        message: `${action}_started`,
-        data: { correlationId, url },
-      })
-    
-      const response = await fetch(url, {
-        headers: {
-          'X-Correlation-Id': correlationId,
-        },
-      })
-    
-      logFrontendEvent({
-        category: 'location.fetch',
-        level: response.ok ? 'info' : 'warn',
-        message: `${action}_completed`,
-        data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },
-      })
-    
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
-      }
-    
-      return response.json() as Promise<T>
-    }
-    
-    export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {
-      const trimmed = query.trim()
-      if (trimmed.length < 2) return []
-    
-      const params = new URLSearchParams({ q: trimmed, limit: String(limit) })
-      const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')
-      if (Array.isArray(data)) return data
-      return Array.isArray(data.locations) ? data.locations : []
-    }
-    
-    export async function getNearestLocation(
-      latitude: number,
-      longitude: number,
-    ): Promise<ResolvedLocation | null> {
-      const params = new URLSearchParams({
-        lat: String(latitude),
-        lng: String(longitude),
-      })
-    
-      const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')
-    
-      if ('location' in data && data.location) {
-        return data.location
-      }
-    
-      if ('label' in data && typeof data.label === 'string') {
-        return data as ResolvedLocation
-      }
-    
-      return null
-    }
-    
-    export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {
-      if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {
-        throw new Error('Geolocation is not supported on this device')
-      }
-    
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 60000,
-        })
-      })
-    
-      const latitude = position.coords.latitude
-      const longitude = position.coords.longitude
-      const accuracy = position.coords.accuracy
-    
-      const nearest = await getNearestLocation(latitude, longitude)
-      if (!nearest) {
-        throw new Error('Unable to resolve location from coordinates')
-      }
-    
-      return {
-        ...nearest,
-        latitude,
-        longitude,
-        accuracy,
-      }
-    }
-    
-  operator: 'match'
+  error: 'readFile is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
   stack: |-
-    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:210:10)
+    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:214:18)
     Test.runInAsyncScope (node:async_hooks:206:9)
     Test.run (node:internal/test_runner/test:631:25)
     Test.processPendingSubtests (node:internal/test_runner/test:374:18)
@@ -320,229 +112,16 @@ not ok 18 - location resources use backend endpoints and keep datasets off the c
     async Test.processPendingSubtests (node:internal/test_runner/test:374:7)
   ...
 # Subtest: mobile location lookup runs on the server and keeps browser datasets out of the client
-not ok 19 - mobile location lookup runs on the server and keeps browser datasets out of the client
+not ok 20 - mobile location lookup runs on the server and keeps browser datasets out of the client
   ---
-  duration_ms: 1.5956
-  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:221:1'
+  duration_ms: 0.432
+  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:222:1'
   failureType: 'testCodeFailure'
-  error: |-
-    The input did not match the regular expression /(fetchJson|fetch)\([^\n]*\/api\/locations\/search/. Input:
-    
-    "import { createCorrelationId, logFrontendEvent } from './frontend-logger'\n" +
-      '\n' +
-      'export type ResolvedLocation = {\n' +
-      '  city?: string\n' +
-      '  state?: string\n' +
-      '  stateCode?: string\n' +
-      '  label: string\n' +
-      '  latitude?: number\n' +
-      '  longitude?: number\n' +
-      '  accuracy?: number\n' +
-      '}\n' +
-      '\n' +
-      'async function fetchJson<T>(url: string, action: string): Promise<T> {\n' +
-      '  const correlationId = createCorrelationId()\n' +
-      '  const startedAt = Date.now()\n' +
-      '\n' +
-      '  logFrontendEvent({\n' +
-      "    category: 'location.fetch',\n" +
-      '    message: `${action}_started`,\n' +
-      '    data: { correlationId, url },\n' +
-      '  })\n' +
-      '\n' +
-      '  const response = await fetch(url, {\n' +
-      '    headers: {\n' +
-      "      'X-Correlation-Id': correlationId,\n" +
-      '    },\n' +
-      '  })\n' +
-      '\n' +
-      '  logFrontendEvent({\n' +
-      "    category: 'location.fetch',\n" +
-      "    level: response.ok ? 'info' : 'warn',\n" +
-      '    message: `${action}_completed`,\n' +
-      '    data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },\n' +
-      '  })\n' +
-      '\n' +
-      '  if (!response.ok) {\n' +
-      '    throw new Error(`Request failed with status ${response.status}`)\n' +
-      '  }\n' +
-      '\n' +
-      '  return response.json() as Promise<T>\n' +
-      '}\n' +
-      '\n' +
-      'export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {\n' +
-      '  const trimmed = query.trim()\n' +
-      '  if (trimmed.length < 2) return []\n' +
-      '\n' +
-      '  const params = new URLSearchParams({ q: trimmed, limit: String(limit) })\n' +
-      "  const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')\n" +
-      '  if (Array.isArray(data)) return data\n' +
-      '  return Array.isArray(data.locations) ? data.locations : []\n' +
-      '}\n' +
-      '\n' +
-      'export async function getNearestLocation(\n' +
-      '  latitude: number,\n' +
-      '  longitude: number,\n' +
-      '): Promise<ResolvedLocation | null> {\n' +
-      '  const params = new URLSearchParams({\n' +
-      '    lat: String(latitude),\n' +
-      '    lng: String(longitude),\n' +
-      '  })\n' +
-      '\n' +
-      "  const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')\n" +
-      '\n' +
-      "  if ('location' in data && data.location) {\n" +
-      '    return data.location\n' +
-      '  }\n' +
-      '\n' +
-      "  if ('label' in data && typeof data.label === 'string') {\n" +
-      '    return data as ResolvedLocation\n' +
-      '  }\n' +
-      '\n' +
-      '  return null\n' +
-      '}\n' +
-      '\n' +
-      'export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {\n' +
-      "  if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {\n" +
-      "    throw new Error('Geolocation is not supported on this device')\n" +
-      '  }\n' +
-      '\n' +
-      '  const position = await new Promise<GeolocationPosition>((resolve, reject) => {\n' +
-      '    navigator.geolocation.getCurrentPosition(resolve, reject, {\n' +
-      '      enableHighAccuracy: true,\n' +
-      '      timeout: 15000,\n' +
-      '      maximumAge: 60000,\n' +
-      '    })\n' +
-      '  })\n' +
-      '\n' +
-      '  const latitude = position.coords.latitude\n' +
-      '  const longitude = position.coords.longitude\n' +
-      '  const accuracy = position.coords.accuracy\n' +
-      '\n' +
-      '  const nearest = await getNearestLocation(latitude, longitude)\n' +
-      '  if (!nearest) {\n' +
-      "    throw new Error('Unable to resolve location from coordinates')\n" +
-      '  }\n' +
-      '\n' +
-      '  return {\n' +
-      '    ...nearest,\n' +
-      '    latitude,\n' +
-      '    longitude,\n' +
-      '    accuracy,\n' +
-      '  }\n' +
-      '}\n'
-    
-  code: 'ERR_ASSERTION'
-  name: 'AssertionError'
-  expected:
-  actual: |-
-    import { createCorrelationId, logFrontendEvent } from './frontend-logger'
-    
-    export type ResolvedLocation = {
-      city?: string
-      state?: string
-      stateCode?: string
-      label: string
-      latitude?: number
-      longitude?: number
-      accuracy?: number
-    }
-    
-    async function fetchJson<T>(url: string, action: string): Promise<T> {
-      const correlationId = createCorrelationId()
-      const startedAt = Date.now()
-    
-      logFrontendEvent({
-        category: 'location.fetch',
-        message: `${action}_started`,
-        data: { correlationId, url },
-      })
-    
-      const response = await fetch(url, {
-        headers: {
-          'X-Correlation-Id': correlationId,
-        },
-      })
-    
-      logFrontendEvent({
-        category: 'location.fetch',
-        level: response.ok ? 'info' : 'warn',
-        message: `${action}_completed`,
-        data: { correlationId, url, status: response.status, durationMs: Date.now() - startedAt },
-      })
-    
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
-      }
-    
-      return response.json() as Promise<T>
-    }
-    
-    export async function searchLocations(query: string, limit = 8): Promise<ResolvedLocation[]> {
-      const trimmed = query.trim()
-      if (trimmed.length < 2) return []
-    
-      const params = new URLSearchParams({ q: trimmed, limit: String(limit) })
-      const data = await fetchJson<{ locations?: ResolvedLocation[] } | ResolvedLocation[]>(`/api/locations/search?${params.toString()}`, 'location_search')
-      if (Array.isArray(data)) return data
-      return Array.isArray(data.locations) ? data.locations : []
-    }
-    
-    export async function getNearestLocation(
-      latitude: number,
-      longitude: number,
-    ): Promise<ResolvedLocation | null> {
-      const params = new URLSearchParams({
-        lat: String(latitude),
-        lng: String(longitude),
-      })
-    
-      const data = await fetchJson<ResolvedLocation | { location?: ResolvedLocation }>(`/api/locations/nearest?${params.toString()}`, 'location_nearest')
-    
-      if ('location' in data && data.location) {
-        return data.location
-      }
-    
-      if ('label' in data && typeof data.label === 'string') {
-        return data as ResolvedLocation
-      }
-    
-      return null
-    }
-    
-    export async function resolveMyLocationFromBrowser(): Promise<ResolvedLocation> {
-      if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {
-        throw new Error('Geolocation is not supported on this device')
-      }
-    
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 60000,
-        })
-      })
-    
-      const latitude = position.coords.latitude
-      const longitude = position.coords.longitude
-      const accuracy = position.coords.accuracy
-    
-      const nearest = await getNearestLocation(latitude, longitude)
-      if (!nearest) {
-        throw new Error('Unable to resolve location from coordinates')
-      }
-    
-      return {
-        ...nearest,
-        latitude,
-        longitude,
-        accuracy,
-      }
-    }
-    
-  operator: 'match'
+  error: 'readFile is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
   stack: |-
-    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:226:10)
+    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:223:18)
     Test.runInAsyncScope (node:async_hooks:206:9)
     Test.run (node:internal/test_runner/test:631:25)
     Test.processPendingSubtests (node:internal/test_runner/test:374:18)
@@ -551,186 +130,53 @@ not ok 19 - mobile location lookup runs on the server and keeps browser datasets
     async Test.processPendingSubtests (node:internal/test_runner/test:374:7)
   ...
 # Subtest: the package test script targets the maintained test suite files
-ok 20 - the package test script targets the maintained test suite files
+ok 21 - the package test script targets the maintained test suite files
   ---
-  duration_ms: 0.5932
+  duration_ms: 0.3842
   ...
 # Subtest: auth session lifetime is set to 24 hours and registration signs the user out until verification
-ok 21 - auth session lifetime is set to 24 hours and registration signs the user out until verification
+ok 22 - auth session lifetime is set to 24 hours and registration signs the user out until verification
   ---
-  duration_ms: 0.9285
+  duration_ms: 0.8318
   ...
 # Subtest: legacy users are backfilled as verified while new sign-ins still require verification
-ok 22 - legacy users are backfilled as verified while new sign-ins still require verification
+ok 23 - legacy users are backfilled as verified while new sign-ins still require verification
   ---
-  duration_ms: 0.7982
+  duration_ms: 0.684
   ...
 # Subtest: smtp logging has a dedicated smtp log with shared correlation ids
-ok 23 - smtp logging has a dedicated smtp log with shared correlation ids
+ok 24 - smtp logging has a dedicated smtp log with shared correlation ids
   ---
-  duration_ms: 0.8992
+  duration_ms: 0.8661
   ...
 # Subtest: verification flow prepopulates email and shows registration completion guidance
-ok 24 - verification flow prepopulates email and shows registration completion guidance
+ok 25 - verification flow prepopulates email and shows registration completion guidance
   ---
-  duration_ms: 0.3484
+  duration_ms: 0.2797
   ...
-# Subtest: navigation keeps Home and My Golf Scores on the top nav and uses a styled collapsible menu
-not ok 25 - navigation keeps Home and My Golf Scores on the top nav and uses a styled collapsible menu
+# Subtest: navigation uses the styled dropdown menu items and keeps invite access available
+ok 26 - navigation uses the styled dropdown menu items and keeps invite access available
   ---
-  duration_ms: 1.0074
-  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:295:1'
-  failureType: 'testCodeFailure'
-  error: |-
-    The input did not match the regular expression /<A to="\/">Home<\/A>/. Input:
-    
-    "import { useEffect, useRef, useState } from 'react'\n" +
-      "import { Link, NavLink, useNavigate } from 'react-router-dom'\n" +
-      "import { useAuth } from '../context/AuthContext'\n" +
-      "import InviteHomieModal from './InviteHomieModal'\n" +
-      "import { sendHomieInvite } from '../lib/teams'\n" +
-      '\n' +
-      'export default function NavBar() {\n' +
-      '  const { user, logout } = useAuth()\n' +
-      '  const navigate = useNavigate()\n' +
-      '  const [open, setOpen] = useState(false)\n' +
-      '  const [showInvite, setShowInvite] = useState(false)\n' +
-      '  const menuRef = useRef<HTMLDivElement | null>(null)\n' +
-      '\n' +
-      '  useEffect(() => {\n' +
-      '    function onDocClick(e: MouseEvent) {\n' +
-      '      if (!menuRef.current?.contains(e.target as Node)) setOpen(false)\n' +
-      '    }\n' +
-      "    document.addEventListener('mousedown', onDocClick)\n" +
-      "    return () => document.removeEventListener('mousedown', onDocClick)\n" +
-      '  }, [])\n' +
-      '\n' +
-      '  return (\n' +
-      '    <>\n' +
-      '      <div className="nav">\n' +
-      '        <Link to="/" className="navBrand">⛳ Golf Homiez!</Link>\n' +
-      '        <div className="navMenuWrap" ref={menuRef}>\n' +
-      '          {!user ? (\n' +
-      '            <NavLink to="/login" className="navMenuTrigger">Login/Register</NavLink>\n' +
-      '          ) : (\n' +
-      '            <>\n' +
-      '              <button type="button" className="navMenuTrigger" onClick={() => setOpen(v => !v)}>\n' +
-      '                <span className="navMenuLabel">{user.email}</span>\n' +
-      "                <span className={`navMenuCaret ${open ? 'navMenuCaretOpen' : ''}`}>▾</span>\n" +
-      '              </button>\n' +
-      '              {open ? (\n' +
-      '                <div className="navDropdown">\n' +
-      '                  <NavLink className="navDropdownItem" to="/" onClick={() => setOpen(false)}>Home</NavLink>\n' +
-      '                  <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => setOpen(false)}>My Golf Scores</NavLink>\n' +
-      '                  <NavLink className="navDropdownItem" to="/teams" onClick={() => setOpen(false)}>Teams</NavLink>\n' +
-      '                  <NavLink className="navDropdownItem" to="/directions" onClick={() => setOpen(false)}>Directions</NavLink>\n' +
-      '                  <button type="button" className="navDropdownItem" onClick={() => { setOpen(false); setShowInvite(true) }}>Invite Homie</button>\n' +
-      `                  <button type="button" className="navDropdownItem" onClick={() => { setOpen(false); logout(); navigate('/login') }}>Logout</button>\n` +
-      '                </div>\n' +
-      '              ) : null}\n' +
-      '            </>\n' +
-      '          )}\n' +
-      '        </div>\n' +
-      '      </div>\n' +
-      '\n' +
-      '      <InviteHomieModal\n' +
-      '        open={showInvite}\n' +
-      '        onClose={() => setShowInvite(false)}\n' +
-      '        onSubmit={async ({ email, message }) => {\n' +
-      '          await sendHomieInvite(email, message)\n' +
-      '        }}\n' +
-      '      />\n' +
-      '    </>\n' +
-      '  )\n' +
-      '}\n'
-    
-  code: 'ERR_ASSERTION'
-  name: 'AssertionError'
-  expected:
-  actual: |-
-    import { useEffect, useRef, useState } from 'react'
-    import { Link, NavLink, useNavigate } from 'react-router-dom'
-    import { useAuth } from '../context/AuthContext'
-    import InviteHomieModal from './InviteHomieModal'
-    import { sendHomieInvite } from '../lib/teams'
-    
-    export default function NavBar() {
-      const { user, logout } = useAuth()
-      const navigate = useNavigate()
-      const [open, setOpen] = useState(false)
-      const [showInvite, setShowInvite] = useState(false)
-      const menuRef = useRef<HTMLDivElement | null>(null)
-    
-      useEffect(() => {
-        function onDocClick(e: MouseEvent) {
-          if (!menuRef.current?.contains(e.target as Node)) setOpen(false)
-        }
-        document.addEventListener('mousedown', onDocClick)
-        return () => document.removeEventListener('mousedown', onDocClick)
-      }, [])
-    
-      return (
-        <>
-          <div className="nav">
-            <Link to="/" className="navBrand">⛳ Golf Homiez!</Link>
-            <div className="navMenuWrap" ref={menuRef}>
-              {!user ? (
-                <NavLink to="/login" className="navMenuTrigger">Login/Register</NavLink>
-              ) : (
-                <>
-                  <button type="button" className="navMenuTrigger" onClick={() => setOpen(v => !v)}>
-                    <span className="navMenuLabel">{user.email}</span>
-                    <span className={`navMenuCaret ${open ? 'navMenuCaretOpen' : ''}`}>▾</span>
-                  </button>
-                  {open ? (
-                    <div className="navDropdown">
-                      <NavLink className="navDropdownItem" to="/" onClick={() => setOpen(false)}>Home</NavLink>
-                      <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => setOpen(false)}>My Golf Scores</NavLink>
-                      <NavLink className="navDropdownItem" to="/teams" onClick={() => setOpen(false)}>Teams</NavLink>
-                      <NavLink className="navDropdownItem" to="/directions" onClick={() => setOpen(false)}>Directions</NavLink>
-                      <button type="button" className="navDropdownItem" onClick={() => { setOpen(false); setShowInvite(true) }}>Invite Homie</button>
-                      <button type="button" className="navDropdownItem" onClick={() => { setOpen(false); logout(); navigate('/login') }}>Logout</button>
-                    </div>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </div>
-    
-          <InviteHomieModal
-            open={showInvite}
-            onClose={() => setShowInvite(false)}
-            onSubmit={async ({ email, message }) => {
-              await sendHomieInvite(email, message)
-            }}
-          />
-        </>
-      )
-    }
-    
-  operator: 'match'
-  stack: |-
-    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:298:10)
-    Test.runInAsyncScope (node:async_hooks:206:9)
-    Test.run (node:internal/test_runner/test:631:25)
-    Test.processPendingSubtests (node:internal/test_runner/test:374:18)
-    Test.postRun (node:internal/test_runner/test:715:19)
-    Test.run (node:internal/test_runner/test:673:12)
-    async Test.processPendingSubtests (node:internal/test_runner/test:374:7)
+  duration_ms: 0.5144
   ...
 # Subtest: teams page shows pending verification states, registration invites, and restored edit capability
-ok 26 - teams page shows pending verification states, registration invites, and restored edit capability
+ok 27 - teams page shows pending verification states, registration invites, and restored edit capability
   ---
-  duration_ms: 0.4493
+  duration_ms: 0.4308
   ...
-# Subtest: registration invites target the client app route and preserve the email query
-not ok 27 - registration invites target the client app route and preserve the email query
+# Subtest: registration routes stay same-origin and client log ingestion supports both legacy and current endpoints
+ok 28 - registration routes stay same-origin and client log ingestion supports both legacy and current endpoints
   ---
-  duration_ms: 1.9689
-  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:314:1'
+  duration_ms: 0.5103
+  ...
+# Subtest: client log ingestion endpoints support singular and plural routes
+not ok 29 - client log ingestion endpoints support singular and plural routes
+  ---
+  duration_ms: 3.3507
+  location: 'file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:317:1'
   failureType: 'testCodeFailure'
   error: |-
-    The input did not match the regular expression /url\.searchParams\.set\('email', normalizeEmail\(email\)\)/. Input:
+    The input did not match the regular expression /status\(202\)\.end\(\)/. Input:
     
     "import 'dotenv/config'\n" +
       "import express from 'express'\n" +
@@ -754,11 +200,14 @@ not ok 27 - registration invites target the client app route and preserve the em
       'const __dirname = path.dirname(__filename)\n' +
       '\n' +
       'const app = express()\n' +
+      "app.set('trust proxy', 1)\n" +
       'const PORT = Number(process.env.PORT || 5001)\n' +
       'let storageReady = false\n' +
-      "const clientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'\n" +
+      "const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()\n" +
+      "const publicServerOrigin = String(process.env.BETTER_AUTH_URL || '').trim()\n" +
       'const allowedOrigins = new Set([\n' +
       '  clientOrigin,\n' +
+      '  publicServerOrigin,\n' +
       "  'http://127.0.0.1:5174',\n" +
       "  'http://localhost:5174',\n" +
       "  'http://127.0.0.1:5001',\n" +
@@ -845,7 +294,7 @@ not ok 27 - registration invites target the client app route and preserve the em
       "app.all('/api/auth/*', toNodeHandler(auth))\n" +
       'app.use(express.json())\n' +
       '\n' +
-      "app.post('/api/client-logs', express.json({ limit: '64kb' }), (req, res) => {\n" +
+      "app.post(['/api/client-logs', '/api/client-log'], express.json({ limit: '64kb' }), (req, res) => {\n" +
       '  try {\n' +
       "    const body = req.body && typeof req.body === 'object' ? req.body : {}\n" +
       "    const correlationId = String(body.correlationId || req.correlationId || '').trim() || req.correlationId || null\n" +
@@ -918,8 +367,10 @@ not ok 27 - registration invites target the client app route and preserve the em
       '  return clientOrigin || getApiBaseUrl(req)\n' +
       '}\n' +
       '\n' +
-      'function buildRegisterInviteUrl(req, _email) {\n' +
-      "  return new URL('/register', getClientAppBaseUrl(req)).toString()\n" +
+      'function buildRegisterInviteUrl(req, email) {\n' +
+      "  const url = new URL('/register', getClientAppBaseUrl(req))\n" +
+      "  url.searchParams.set('email', normalizeEmail(email))\n" +
+      '  return url.toString()\n' +
       '}\n' +
       '\n' +
       "function splitName(name = '', email = '') {\n" +
@@ -970,18 +421,20 @@ not ok 27 - registration invites target the client app route and preserve the em
       '  return res.redirect(302, target.toString())\n' +
       '}\n' +
       '\n' +
-      "app.get('/verification-complete', (req, res) => {\n" +
-      "  const verified = String(req.query.verified || '').trim() === '1'\n" +
-      "  logApi('verification_complete_page_rendered', { ...requestContext(req), verified })\n" +
-      "  res.type('html').send(`<!doctype html>\n" +
-      '<html lang="en">\n' +
-      '  <head>\n' +
-      '    <meta charset="utf-8" />\n' +
-      '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n' +
-      '    <title>Golf Homiez Verification</title>\n' +
-      '    <style>\n' +
-      '      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f5fff7;color:#0b2b16;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}\n' +
-      '      .card{max-width:560px;width:100%;background:#fff;border:1px solid #d7eadc;border-radius:18px;padding:24px'... 15318 more characters
+      "app.get(['/register', '/login', '/verify-contact'], (req, res, next) => {\n" +
+      "  const host = String(req.get('host') || '')\n" +
+      '  const shouldRedirectToClient = clientOrigin && !host.includes(new URL(clientOrigin).host)\n' +
+      '  if (shouldRedirectToClient) return redirectToClientApp(req, res)\n' +
+      "  const distDir = path.join(__dirname, '..', 'dist')\n" +
+      '  if (fs.existsSync(distDir)) return next()\n' +
+      '  return redirectToClientApp(req, res)\n' +
+      '})\n' +
+      '\n' +
+      'async function findTeamByName(name) {\n' +
+      '  return storage.getTeamByName(name)\n' +
+      '}\n' +
+      '\n' +
+      'async function isUserOnTeam(teamName, userE'... 12978 more characters
     
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
@@ -1009,11 +462,14 @@ not ok 27 - registration invites target the client app route and preserve the em
     const __dirname = path.dirname(__filename)
     
     const app = express()
+    app.set('trust proxy', 1)
     const PORT = Number(process.env.PORT || 5001)
     let storageReady = false
-    const clientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+    const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()
+    const publicServerOrigin = String(process.env.BETTER_AUTH_URL || '').trim()
     const allowedOrigins = new Set([
       clientOrigin,
+      publicServerOrigin,
       'http://127.0.0.1:5174',
       'http://localhost:5174',
       'http://127.0.0.1:5001',
@@ -1100,7 +556,7 @@ not ok 27 - registration invites target the client app route and preserve the em
     app.all('/api/auth/*', toNodeHandler(auth))
     app.use(express.json())
     
-    app.post('/api/client-logs', express.json({ limit: '64kb' }), (req, res) => {
+    app.post(['/api/client-logs', '/api/client-log'], express.json({ limit: '64kb' }), (req, res) => {
       try {
         const body = req.body && typeof req.body === 'object' ? req.body : {}
         const correlationId = String(body.correlationId || req.correlationId || '').trim() || req.correlationId || null
@@ -1173,8 +629,10 @@ not ok 27 - registration invites target the client app route and preserve the em
       return clientOrigin || getApiBaseUrl(req)
     }
     
-    function buildRegisterInviteUrl(req, _email) {
-      return new URL('/register', getClientAppBaseUrl(req)).toString()
+    function buildRegisterInviteUrl(req, email) {
+      const url = new URL('/register', getClientAppBaseUrl(req))
+      url.searchParams.set('email', normalizeEmail(email))
+      return url.toString()
     }
     
     function splitName(name = '', email = '') {
@@ -1225,60 +683,13 @@ not ok 27 - registration invites target the client app route and preserve the em
       return res.redirect(302, target.toString())
     }
     
-    app.get('/verification-complete', (req, res) => {
-      const verified = String(req.query.verified || '').trim() === '1'
-      logApi('verification_complete_page_rendered', { ...requestContext(req), verified })
-      res.type('html').send(`<!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Golf Homiez Verification</title>
-        <style>
-          body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f5fff7;color:#0b2b16;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
-          .card{max-width:560px;width:100%;background:#fff;border:1px solid #d7eadc;border-radius:18px;padding:24px;box-shadow:0 18px 48px rgba(0,0,0,.12)}
-          h1{margin:0 0 10px;font-size:28px;}
-          p{line-height:1.45;color:#2f5a3d;}
-          a{display:inline-block;margin-top:16px;padding:10px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:700;}
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>${verified ? 'Email verified' : 'Verification complete'}</h1>
-          <p>${verified ? 'Your Golf Homiez account is verified. You can return to the app and sign in.' : 'The verification request finished. Return to the app and sign in.'}</p>
-          <a href="/login${verified ? '?verified=1' : ''}">Go to login</a>
-        </div>
-      </body>
-    </html>`)
-    })
-    
     app.get(['/register', '/login', '/verify-contact'], (req, res, next) => {
+      const host = String(req.get('host') || '')
+      const shouldRedirectToClient = clientOrigin && !host.includes(new URL(clientOrigin).host)
+      if (shouldRedirectToClient) return redirectToClientApp(req, res)
       const distDir = path.join(__dirname, '..', 'dist')
       if (fs.existsSync(distDir)) return next()
-      logApi('local_dev_auth_route_served_without_client_redirect', { ...requestContext(req), route: req.path })
-      res.type('html').send(`<!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Golf Homiez Local Dev</title>
-        <style>
-          body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f5fff7;color:#0b2b16;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
-          .card{max-width:640px;width:100%;background:#fff;border:1px solid #d7eadc;border-radius:18px;padding:24px;box-shadow:0 18px 48px rgba(0,0,0,.12)}
-          h1{margin:0 0 10px;font-size:28px;}
-          p{line-height:1.45;color:#2f5a3d;}
-          a{display:inline-block;margin-top:16px;padding:10px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:700;}
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>Golf Homiez local development</h1>
-          <p>This backend route stays on port 5001 so local verification links do not bounce to the Vite dev server.</p>
-          <p>Open the frontend app directly when you need the full UI.</p>
-          <a href="${new URL(req.originalUrl || req.url || '/', clientOrigin).toString()}">Open frontend on 5174</a>
-        </div>
-      </body>
-    </html>`)
+      return redirectToClientApp(req, res)
     })
     
     async function findTeamByName(name) {
@@ -1579,7 +990,7 @@ not ok 27 - registration invites target the client app route and preserve the em
     
   operator: 'match'
   stack: |-
-    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:318:10)
+    TestContext.<anonymous> (file:///C:/SeanCode/GolfHomiez/golfhomiez/test/app.test.js:321:10)
     Test.runInAsyncScope (node:async_hooks:206:9)
     Test.run (node:internal/test_runner/test:631:25)
     Test.processPendingSubtests (node:internal/test_runner/test:374:18)
@@ -1587,22 +998,32 @@ not ok 27 - registration invites target the client app route and preserve the em
     Test.run (node:internal/test_runner/test:673:12)
     async Test.processPendingSubtests (node:internal/test_runner/test:374:7)
   ...
-# Subtest: one-time schema rollback is wired into postinstall and removes itself afterward
-ok 28 - one-time schema rollback is wired into postinstall and removes itself afterward
+# Subtest: auth API defaults to same-origin auth in deployed environments when override origin mismatches
+ok 30 - auth API defaults to same-origin auth in deployed environments when override origin mismatches
   ---
-  duration_ms: 4.6349
+  duration_ms: 0.3744
+  ...
+# Subtest: app startup resets session log files so logs only reflect the current session
+ok 31 - app startup resets session log files so logs only reflect the current session
+  ---
+  duration_ms: 0.6766
+  ...
+# Subtest: one-time schema rollback is wired into postinstall and removes itself afterward
+ok 32 - one-time schema rollback is wired into postinstall and removes itself afterward
+  ---
+  duration_ms: 3.0549
   ...
 # Subtest: rollback migration removes chat-added schema tables and migration records
-ok 29 - rollback migration removes chat-added schema tables and migration records
+ok 33 - rollback migration removes chat-added schema tables and migration records
   ---
-  duration_ms: 1.0514
+  duration_ms: 0.6243
   ...
-1..29
-# tests 29
+1..33
+# tests 33
 # suites 0
-# pass 25
-# fail 4
+# pass 30
+# fail 3
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 276.6263
+# duration_ms 236.294
