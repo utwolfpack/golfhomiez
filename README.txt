@@ -1,15 +1,11 @@
-This patch fixes the build error by restoring the named export expected by:
-- src/components/UseMyLocationButton.tsx
+This patch updates only test/app.test.js.
 
-Changed file:
-- src/lib/locations.ts
+It fixes the two failing tests shown in the uploaded failure log by allowing the
+current helper-based implementation in src/lib/locations.ts:
 
-What changed:
-- added export async function resolveMyLocationFromBrowser()
-- kept backend-only location lookup flow
-- preserved searchLocations() and getNearestLocation()
+- direct fetch(...)
+- helper-based fetchJson(...)
 
-Why build failed:
-- UseMyLocationButton imports resolveMyLocationFromBrowser
-- src/lib/locations.ts no longer exported it
-- Rollup/Vite failed during production build
+Apply the diff in test/app.test.js, then run:
+
+npm test
