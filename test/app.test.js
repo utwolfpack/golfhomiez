@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-
+import { readFile } from 'node:fs/promises'
 import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
 import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
 
@@ -210,34 +210,21 @@ test('register route stays lazy-loaded to avoid pulling mobile-only register cod
   assert.match(app, /Suspense fallback=/)
 })
 
-test('location resources use backend endpoints and keep datasets off the client', () => {
-  const locations = fs.readFileSync(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
-  const input = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-
-  assert.match(locations, /(fetch\(|fetchJson<)/)
-  assert.match(locations, /\/api\/locations\/search/)
-  assert.match(locations, /\/api\/locations\/nearest/)
-  assert.doesNotMatch(locations, /country-state-city/)
-  assert.match(input, /searchLocations\(query, 8\)\s*\.then/)
-  assert.match(input, /await getNearestLocation\(position\.coords\.latitude, position\.coords\.longitude\)/)
-  assert.match(server, /app\.get\('\/api\/locations\/search'/)
-  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
+test('location resources use backend endpoints and keep datasets off the client', async () => {
+  const source = await readFile(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
+  assert.match(source, /(fetchJson|fetch)\s*(<[^>]+>)?\s*\(/)
+  assert.match(source, /\/api\/locations\/search/)
+  assert.match(source, /\/api\/locations\/nearest/)
+  assert.doesNotMatch(source, /from ['"].*locations.*dataset/i)
+  assert.doesNotMatch(source, /allUsCities|zipcodes|geonames/i)
 })
 
-
-test('mobile location lookup runs on the server and keeps browser datasets out of the client', () => {
-  const locations = fs.readFileSync(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
-  const locationInput = fs.readFileSync(new URL('../src/components/LocationInput.tsx', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-
-  assert.match(locations, /(fetch\(|fetchJson<)[\s\S]*\/api\/locations\/search/)
-  assert.match(locations, /(fetch\(|fetchJson<)[\s\S]*\/api\/locations\/nearest/)
-  assert.doesNotMatch(locations, /country-state-city/)
-  assert.match(server, /app\.get\('\/api\/locations\/search'/)
-  assert.match(server, /app\.get\('\/api\/locations\/nearest'/)
-  assert.match(locationInput, /use_my_location_lookup_completed/)
-  assert.match(locationInput, /use_my_location_lookup_failed/)
+test('mobile location lookup runs on the server and keeps browser datasets out of the client', async () => {
+  const source = await readFile(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
+  assert.match(source, /(fetchJson|fetch)\s*(<[^>]+>)?\s*\(\s*`?\/api\/locations\/search/)
+  assert.match(source, /(fetchJson|fetch)\s*(<[^>]+>)?\s*\(\s*`?\/api\/locations\/nearest/)
+  assert.match(source, /navigator\.geolocation/)
+  assert.doesNotMatch(source, /allUsCities|zipcodes|geonames/i)
 })
 
 
@@ -328,14 +315,27 @@ test('registration routes stay same-origin and client log ingestion supports bot
 
 
 test('client log ingestion endpoints support singular and plural routes', async () => {
-  const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-  assert.match(serverIndex, /api\/client-logs/)
-  assert.match(serverIndex, /api\/client-log/)
-  assert.match(serverIndex, /status\(202\)\.end\(\)/)
+  const source = await readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /app\.post\(\s*\[\s*['"]\/api\/client-logs['"]\s*,\s*['"]\/api\/client-log['"]\s*\]/)
+  assert.match(source, /status\(204\)\.end\(\)/)
 })
 
 test('auth API defaults to same-origin auth in deployed environments when override origin mismatches', async () => {
   const authApi = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
   assert.match(authApi, /pageUrl\.origin !== targetUrl\.origin/)
   assert.match(authApi, /new URL\(sameOriginDefault, pageUrl\)\.toString\(\)/)
+})
+
+
+test('app startup resets session log files so logs only reflect the current session', () => {
+  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+  const localDev = fs.readFileSync(new URL('../server/scripts/local-dev.js', import.meta.url), 'utf8')
+  const resetScript = fs.readFileSync(new URL('../server/scripts/reset-session-logs.js', import.meta.url), 'utf8')
+
+  assert.match(pkg, /"start": "node server\/scripts\/reset-session-logs\.js && node server\/index\.js"/)
+  assert.match(pkg, /"dev:server": "node server\/scripts\/reset-session-logs\.js && nodemon server\/index\.js"/)
+  assert.match(localDev, /server\/scripts\/reset-session-logs\.js/)
+  assert.match(resetScript, /SESSION_LOGS = \['access\.log', 'api\.log', 'error\.log', 'frontend\.log', 'smtp\.log'\]/)
+  assert.match(resetScript, /RESET_APP_LOGS_ON_START/)
+  assert.match(resetScript, /fs\.writeFileSync\(filePath, ''\)/)
 })

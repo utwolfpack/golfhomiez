@@ -1,0 +1,34 @@
+--- a/test/app.test.js
++++ b/test/app.test.js
+@@
+-test('location resources use backend endpoints and keep datasets off the client', async () => {
+-  const source = await readFile(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
+-  assert.match(source, /fetch\(`/)
+-  assert.match(source, /\/api\/locations\/search/)
+-  assert.match(source, /\/api\/locations\/nearest/)
+-  assert.doesNotMatch(source, /from ['\"].*locations.*dataset/i)
+-  assert.doesNotMatch(source, /allUsCities|zipcodes|geonames/i)
+-})
++test('location resources use backend endpoints and keep datasets off the client', async () => {
++  const source = await readFile(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
++  assert.match(source, /(fetchJson|fetch)\s*(<[^>]+>)?\s*\(/)
++  assert.match(source, /\/api\/locations\/search/)
++  assert.match(source, /\/api\/locations\/nearest/)
++  assert.doesNotMatch(source, /from ['\"].*locations.*dataset/i)
++  assert.doesNotMatch(source, /allUsCities|zipcodes|geonames/i)
++})
+@@
+-test('mobile location lookup runs on the server and keeps browser datasets out of the client', async () => {
+-  const source = await readFile(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
+-  assert.match(source, /fetch\(`?\/api\/locations\/search/)
+-  assert.match(source, /fetch\(`?\/api\/locations\/nearest/)
+-  assert.match(source, /navigator\.geolocation/)
+-  assert.doesNotMatch(source, /allUsCities|zipcodes|geonames/i)
+-})
++test('mobile location lookup runs on the server and keeps browser datasets out of the client', async () => {
++  const source = await readFile(new URL('../src/lib/locations.ts', import.meta.url), 'utf8')
++  assert.match(source, /(fetchJson|fetch)\s*(<[^>]+>)?\s*\(\s*`?\/api\/locations\/search/)
++  assert.match(source, /(fetchJson|fetch)\s*(<[^>]+>)?\s*\(\s*`?\/api\/locations\/nearest/)
++  assert.match(source, /navigator\.geolocation/)
++  assert.doesNotMatch(source, /allUsCities|zipcodes|geonames/i)
++})
