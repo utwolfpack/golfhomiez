@@ -10,6 +10,8 @@ import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import UseMyLocationButton from '../components/UseMyLocationButton'
 import InviteHomieModal from '../components/InviteHomieModal'
+import { useNavigate } from 'react-router-dom'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 
 const NUM_HOLES = 18
 type DraftMember = { firstName: string; lastName: string; email: string; invited?: boolean }
@@ -31,6 +33,7 @@ export default function GolfLoggerPage() {
 
 function GolfLoggerInner() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const today = getUserTodayISO()
   const [date, setDate] = useState(() => getUserTodayISO())
   const [stateAbbr, setStateAbbr] = useState('UT')
@@ -186,8 +189,7 @@ function GolfLoggerInner() {
       <div className="card pageCardShell">
         <PageHero
           eyebrow="Team scramble"
-          title="Log a team round fast"
-          subtitle="Keep the roster-aware workflow, get the result auto-calculated, and save without extra clicks."
+          title="Log a Team Round"
         />
 
         <div style={{ marginTop: 10 }}>
@@ -207,7 +209,6 @@ function GolfLoggerInner() {
               <div>
                 <div className="label" style={{ marginBottom: 6 }}>Team members (max 4)</div>
                 <div className="card" style={{ padding: 12, background: 'rgba(255,255,255,.72)' }}>
-                  <div className="small">Signed-in golfer</div>
                   <div style={{ fontWeight: 800, marginTop: 4 }}>{leadMember.firstName} {leadMember.lastName}</div>
                   <div className="small">{leadMember.email}</div>
                 </div>
@@ -225,7 +226,6 @@ function GolfLoggerInner() {
                     </div>
                   ))}
                 </div>
-                <div className="small" style={{ marginTop: 6 }}>Member 1 is always the signed-in user and cannot be changed.</div>
                 {newMembers.length < 4 ? (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, marginTop: 10, maxWidth: 620 }}>
@@ -238,7 +238,8 @@ function GolfLoggerInner() {
                     <div className="small" style={{ marginTop: 6 }}>If the email is not found, an invite will open so you can send a registration invite and then come right back here.</div>
                   </>
                 ) : (
-                  <div className="small" style={{ marginTop: 10 }}>This team already has the maximum 4 golfers, so the add-teammate input is hidden.</div>
+                  <div className="small" style={{ marginTop: 10 }}>This team already has the maximum 4 golfers, so the add-teammate input is hidden.
+                  Member 1 is always the signed-in user and cannot be changed.</div>
                 )}
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
                   <button
@@ -246,26 +247,34 @@ function GolfLoggerInner() {
                     className="btn btnSmall btnLightBlue"
                     disabled={busy}
                     onClick={async () => {
+                      const correlationId = getCorrelationId()
                       setShowCreateTeamValidation(true)
                       if (createMissing.length) {
-                        setErr(`Please complete: ${createMissing.join(', ')}`)
+                        const message = `Please complete: ${createMissing.join(', ')}`
+                        setErr(message)
+                        logFrontendEvent({ category: 'team.create', level: 'warn', message: 'validation_failed', data: { correlationId, createMissing, teamName: newTeamName.trim() } })
                         return
                       }
                       setBusy(true)
                       setErr(null)
                       setMsg(null)
+                      logFrontendEvent({ category: 'team.create', message: 'started', data: { correlationId, teamName: newTeamName.trim(), memberCount: cleanedNewMembers.length } })
                       try {
                         const created = await createTeam(newTeamName.trim(), cleanedNewMembers as Omit<TeamMember, 'id'>[])
+                        logFrontendEvent({ category: 'team.create', message: 'succeeded', data: { correlationId, teamName: created.name, memberCount: cleanedNewMembers.length } })
                         setMsg(`Team ${created.name} created.`)
                         setShowCreateTeam(false)
                         setShowCreateTeamValidation(false)
                         setNewTeamName('')
                         setNewMembers([leadMember])
                         setLookupEmail('')
+                        setInviteMessage(null)
                         await loadTeams()
                         setTeam(created.name)
                       } catch (e: any) {
-                        setErr(e.message || 'Failed to create team')
+                        const message = e.message || 'Failed to create team'
+                        logFrontendEvent({ category: 'team.create', level: 'error', message: 'failed', data: { correlationId, teamName: newTeamName.trim(), error: message } })
+                        setErr(message)
                       } finally {
                         setBusy(false)
                       }
@@ -273,8 +282,9 @@ function GolfLoggerInner() {
                   >
                     {busy ? 'Creating…' : 'Save Team'}
                   </button>
+                  {showCreateTeamValidation && createMissing.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 10 }}>Missing or invalid: {createMissing.join(', ')}</div> : null}
+                  {err && showCreateTeam ? <div className="small" style={{ color: '#b91c1c', marginTop: 8 }}>{err}</div> : null}
                 </div>
-                {showCreateTeamValidation && createMissing.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 10 }}>Missing or invalid: {createMissing.join(', ')}</div> : null}
               </div>
             </div>
           </div>
@@ -379,7 +389,6 @@ function GolfLoggerInner() {
           <div>
             <label className="label">Result</label>
             <input className={`input inputReadOnly ${resultClass}`} readOnly value={totals.result} />
-            <div className="small" style={{ marginTop: 6 }}>Read-only and computed from the two round scores.</div>
           </div>
           <div>
             <label className="label">Per-hole entry (future-friendly)</label>
@@ -408,7 +417,7 @@ function GolfLoggerInner() {
         {inviteMessage ? <div className="small" style={{ color: '#166534', marginTop: 12 }}>{inviteMessage}</div> : null}
         {msg ? <div className="small" style={{ color: '#166534', marginTop: 12 }}>{msg}</div> : null}
         {showRoundValidation && missingFields.length ? <div className="small" style={{ color: '#b91c1c', marginTop: 12 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
-        {err ? <div className="small" style={{ color: '#b91c1c', marginTop: 8 }}>{err}</div> : null}
+        {err && !showCreateTeam ? <div className="small" style={{ color: '#b91c1c', marginTop: 8 }}>{err}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
           <button
@@ -416,14 +425,18 @@ function GolfLoggerInner() {
             className="btn btnSmall btnLightBlue"
             disabled={busy}
             onClick={async () => {
+              const correlationId = getCorrelationId()
               setShowRoundValidation(true)
               if (missingFields.length) {
-                setErr(`Please complete: ${missingFields.join(', ')}`)
+                const message = `Please complete: ${missingFields.join(', ')}`
+                setErr(message)
+                logFrontendEvent({ category: 'team.round.save', level: 'warn', message: 'validation_failed', data: { correlationId, missingFields } })
                 return
               }
               setBusy(true)
               setErr(null)
               setMsg(null)
+              logFrontendEvent({ category: 'team.round.save', message: 'started', data: { correlationId, date, stateAbbr, course, team, opponentTeam, useHoles } })
               try {
                 const trimmedTeam = String(team || '').trim()
                 const trimmedOpp = String(opponentTeam || '').trim()
@@ -447,7 +460,8 @@ function GolfLoggerInner() {
                   holes: useHoles ? holes : null
                 }
                 await api<ScoreEntry>('/api/scores', { method: 'POST', body: JSON.stringify(body) })
-                setMsg('Saved! Go to Home to see updated dashboard.')
+                logFrontendEvent({ category: 'team.round.save', message: 'succeeded', data: { correlationId, team: trimmedTeam, opponentTeam: trimmedOpp, course, result: totals.result } })
+                setMsg('Round saved.')
                 setCourse('')
                 setTeam(myTeams[0] || '')
                 setOpponentTeam('')
@@ -455,8 +469,11 @@ function GolfLoggerInner() {
                 setOpponentTotal('')
                 setHoles(Array(NUM_HOLES).fill(0))
                 setShowRoundValidation(false)
+                navigate('/')
               } catch (e: any) {
-                setErr(e.message || 'Failed to save')
+                const message = e.message || 'Failed to save'
+                logFrontendEvent({ category: 'team.round.save', level: 'error', message: 'failed', data: { correlationId, error: message, team, opponentTeam, course } })
+                setErr(message)
               } finally {
                 setBusy(false)
               }

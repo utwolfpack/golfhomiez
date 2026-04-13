@@ -100,9 +100,64 @@ export const APP_MIGRATIONS = [
     async getSql() {
       return loadMigrationSql('20260409_009_team_member_primary_key_scope.sql')
     },
+  },
+  {
+    version: '20260411_010',
+    name: 'app_user_profiles',
+    filename: '20260411_010_app_user_profiles.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'app_users') &&
+        await columnExists(db, 'app_users', 'primary_city') &&
+        await columnExists(db, 'app_users', 'primary_state') &&
+        await columnExists(db, 'app_users', 'primary_zip_code') &&
+        await columnExists(db, 'app_users', 'alcohol_preference') &&
+        await columnExists(db, 'app_users', 'cannabis_preference') &&
+        await columnExists(db, 'app_users', 'sobriety_preference') &&
+        await columnExists(db, 'app_users', 'profile_enriched_at') &&
+        await indexExists(db, 'app_users', 'idx_app_users_enriched')
+      )
+    },
+    async getSql(db) {
+      const hasTable = await tableExists(db, 'app_users')
+      if (!hasTable) {
+        return loadMigrationSql('20260411_010_app_user_profiles.sql')
+      }
+
+      const statements = []
+      const columns = [
+        ['primary_city', 'ALTER TABLE app_users ADD COLUMN primary_city VARCHAR(191) NULL AFTER name'],
+        ['primary_state', 'ALTER TABLE app_users ADD COLUMN primary_state VARCHAR(64) NULL AFTER primary_city'],
+        ['primary_zip_code', 'ALTER TABLE app_users ADD COLUMN primary_zip_code VARCHAR(16) NULL AFTER primary_state'],
+        ['alcohol_preference', 'ALTER TABLE app_users ADD COLUMN alcohol_preference VARCHAR(64) NULL AFTER primary_zip_code'],
+        ['cannabis_preference', 'ALTER TABLE app_users ADD COLUMN cannabis_preference VARCHAR(64) NULL AFTER alcohol_preference'],
+        ['sobriety_preference', 'ALTER TABLE app_users ADD COLUMN sobriety_preference VARCHAR(64) NULL AFTER cannabis_preference'],
+        ['profile_enriched_at', 'ALTER TABLE app_users ADD COLUMN profile_enriched_at DATETIME NULL AFTER sobriety_preference'],
+      ]
+
+      for (const [columnName, sql] of columns) {
+        if (!(await columnExists(db, 'app_users', columnName))) statements.push(sql)
+      }
+
+      if (!(await indexExists(db, 'app_users', 'idx_app_users_enriched'))) {
+        statements.push('ALTER TABLE app_users ADD INDEX idx_app_users_enriched (profile_enriched_at)')
+      }
+
+      return statements.join(';\n')
+    },
+  },
+  {
+    version: '20260413_011',
+    name: 'remove_profile_state_code',
+    filename: '20260413_011_remove_profile_state_code.sql',
+    async isSatisfied(db) {
+      return !(await columnExists(db, 'app_users', 'primary_state_code'))
+    },
+    async getSql() {
+      return loadMigrationSql('20260413_011_remove_profile_state_code.sql')
+    },
   }
 ]
-
 export function sortMigrations(migrations) {
   return [...migrations].sort((a, b) => a.version.localeCompare(b.version))
 }

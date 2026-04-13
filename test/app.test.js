@@ -177,6 +177,44 @@ test('logging writes to root access and error log files with request middleware 
   assert.match(gitignore, /!logging\/\.gitkeep/)
 })
 
+
+
+test('profile page removes state code, uses smiley selection, and redirects home after save', () => {
+  const profile = fs.readFileSync(new URL('../src/pages/Profile.tsx', import.meta.url), 'utf8')
+  const profileLib = fs.readFileSync(new URL('../src/lib/profile.ts', import.meta.url), 'utf8')
+  const locationButton = fs.readFileSync(new URL('../src/components/UseMyLocationButton.tsx', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(profile, /Primary location/)
+  assert.doesNotMatch(profile, /Edit profile/)
+  assert.doesNotMatch(profile, /Update where you play and what kind of golf company you are looking for\./)
+  assert.doesNotMatch(profile, /State code/)
+  assert.match(profile, /saving \? 'Saving…' : 'Save'/)
+  assert.match(profile, /You are alcohol freindly/)
+  assert.match(profile, /You are 420 freindly/)
+  assert.match(profile, /Prefer to golf with other sober golfers/)
+  assert.match(profile, /Selected preference/)
+  assert.match(profile, /navigate\('\/', \{ replace: true \}\)/)
+  assert.match(profile, /if \(prev\.sobrietyPreference === 'sober_only'\) return prev/)
+  assert.match(profile, /if \(prev\.alcoholPreference === 'alcohol_friendly' \|\| prev\.cannabisPreference === 'weed_friendly'\) return prev/)
+  assert.doesNotMatch(profileLib, /primaryStateCode/)
+  assert.doesNotMatch(locationButton, /Location set to/)
+})
+
+test('profile server schema and migration remove primary_state_code and reject conflicting preferences', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260413_011_remove_profile_state_code.sql', import.meta.url), 'utf8')
+  const initialSql = fs.readFileSync(new URL('../migration_scripts/20260411_010_app_user_profiles.sql', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(server, /primary_state_code/)
+  assert.match(server, /City, state, and zip code are required\./)
+  assert.match(server, /Sober golf cannot be combined with alcohol or 420 preferences\./)
+  assert.match(server, /profile_save_started/)
+  assert.match(migrations, /20260413_011/)
+  assert.match(migrations, /remove_profile_state_code/)
+  assert.match(migrationSql, /DROP COLUMN primary_state_code/)
+  assert.doesNotMatch(initialSql, /primary_state_code/)
+})
 test('homepage demo seeder can populate the sample rounds locally', () => {
   const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
   const seed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
@@ -338,4 +376,42 @@ test('app startup resets session log files so logs only reflect the current sess
   assert.match(resetScript, /SESSION_LOGS = \['access\.log', 'api\.log', 'error\.log', 'frontend\.log', 'smtp\.log'\]/)
   assert.match(resetScript, /RESET_APP_LOGS_ON_START/)
   assert.match(resetScript, /fs\.writeFileSync\(filePath, ''\)/)
+})
+
+
+test('profile enrichment runs on first sign-in and adds editable profile fields with location prefill', () => {
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const authContext = fs.readFileSync(new URL('../src/context/AuthContext.tsx', import.meta.url), 'utf8')
+  const profilePage = fs.readFileSync(new URL('../src/pages/Profile.tsx', import.meta.url), 'utf8')
+  const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
+
+  assert.match(app, /ProfileEnrichmentGate/)
+  assert.match(app, /navigate\('\/profile\?enrich=1'/)
+  assert.match(app, /path="\/profile"/)
+  assert.match(authContext, /needsProfileEnrichment/)
+  assert.match(profilePage, /UseMyLocationButton/)
+  assert.match(profilePage, /We only ask this once on your first sign-in/)
+  assert.match(profilePage, /Alcohol-friendly/)
+  assert.match(profilePage, /420 friendly/)
+  assert.match(profilePage, /Prefer to golf with other sober golfers/)
+  assert.match(profilePage, /🙂/)
+  assert.match(nav, /to="\/profile"/)
+})
+
+test('profile API and migration support one-time enrichment and stored location preferences', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const sql = fs.readFileSync(new URL('../migration_scripts/20260411_010_app_user_profiles.sql', import.meta.url), 'utf8')
+  const locationService = fs.readFileSync(new URL('../server/lib/location-service.js', import.meta.url), 'utf8')
+
+  assert.match(server, /app\.get\('\/api\/profile'/)
+  assert.match(server, /app\.put\('\/api\/profile'/)
+  assert.match(server, /profile_enriched_at = COALESCE\(profile_enriched_at, NOW\(\)\)/)
+  assert.match(server, /primary_zip_code/)
+  assert.match(migrations, /20260411_010/)
+  assert.match(migrations, /app_user_profiles/)
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS app_users/)
+  assert.match(sql, /primary_zip_code/)
+  assert.match(sql, /profile_enriched_at/)
+  assert.match(locationService, /postcode/)
 })
