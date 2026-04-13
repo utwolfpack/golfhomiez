@@ -4,10 +4,12 @@ export type ResolvedLocation = {
   city?: string
   state?: string
   stateCode?: string
+  stateName?: string
   label: string
   latitude?: number
   longitude?: number
   accuracy?: number
+  postalCode?: string
 }
 
 async function fetchJson<T>(url: string, action: string): Promise<T> {

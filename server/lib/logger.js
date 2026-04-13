@@ -87,6 +87,7 @@ export function logError(message, details = {}) {
   const payload = {
     timestamp: new Date().toISOString(),
     level: 'error',
+    correlationId: details.correlationId || getCorrelationId() || null,
     message,
     ...normalizeDetails(details),
   }
@@ -98,6 +99,7 @@ export function logFrontend(message, details = {}) {
   const payload = {
     timestamp: new Date().toISOString(),
     level: 'info',
+    correlationId: details.correlationId || getCorrelationId() || null,
     message,
     ...normalizeDetails(details),
   }
@@ -108,6 +110,7 @@ export function logApi(message, details = {}) {
   const payload = {
     timestamp: new Date().toISOString(),
     level: 'info',
+    correlationId: details.correlationId || getCorrelationId() || null,
     message,
     ...normalizeDetails(details),
   }
@@ -134,6 +137,7 @@ export function logInfo(message, details = {}) {
   const payload = {
     timestamp: new Date().toISOString(),
     level: 'info',
+    correlationId: details.correlationId || getCorrelationId() || null,
     message,
     ...normalizeDetails(details),
   }

@@ -88,7 +88,7 @@ app.get('/api/locations/search', (req, res) => {
   }
 })
 
-app.get('/api/locations/nearest', (req, res) => {
+app.get('/api/locations/nearest', async (req, res) => {
   try {
     const latitude = Number(req.query.lat)
     const longitude = Number(req.query.lng)
@@ -96,7 +96,7 @@ app.get('/api/locations/nearest', (req, res) => {
       return res.status(400).json({ message: 'lat and lng query parameters are required' })
     }
 
-    const nearest = getNearestServerLocation(latitude, longitude)
+    const nearest = await getNearestServerLocation(latitude, longitude)
     logApi('location_nearest_completed', {
       ...requestContext(req),
       latitude,
@@ -200,6 +200,86 @@ function splitName(name = '', email = '') {
   return { firstName, lastName: rest.join(' ') }
 }
 
+const ALCOHOL_PREFERENCES = new Set(['', 'alcohol_friendly'])
+const CANNABIS_PREFERENCES = new Set(['', 'weed_friendly'])
+const SOBRIETY_PREFERENCES = new Set(['', 'sober_only'])
+
+function normalizeProfileValue(value) {
+  const trimmed = String(value || '').trim()
+  return trimmed || null
+}
+
+function sanitizeProfilePayload(body = {}) {
+  const primaryCity = normalizeProfileValue(body.primaryCity)
+  const primaryState = normalizeProfileValue(body.primaryState)
+  const primaryZipCode = normalizeProfileValue(body.primaryZipCode)
+  const alcoholPreference = normalizeProfileValue(body.alcoholPreference) || ''
+  const cannabisPreference = normalizeProfileValue(body.cannabisPreference) || ''
+  const sobrietyPreference = normalizeProfileValue(body.sobrietyPreference) || ''
+
+  if (!primaryCity || !primaryState || !primaryZipCode) {
+    throw new Error('City, state, and zip code are required.')
+  }
+  if (!ALCOHOL_PREFERENCES.has(alcoholPreference)) throw new Error('Select a valid alcohol preference.')
+  if (!CANNABIS_PREFERENCES.has(cannabisPreference)) throw new Error('Select a valid weed preference.')
+  if (!SOBRIETY_PREFERENCES.has(sobrietyPreference)) throw new Error('Select a valid sobriety preference.')
+  if (sobrietyPreference === 'sober_only' && (alcoholPreference === 'alcohol_friendly' || cannabisPreference === 'weed_friendly')) {
+    throw new Error('Sober golf cannot be combined with alcohol or 420 preferences.')
+  }
+
+  return {
+    primaryCity,
+    primaryState,
+    primaryZipCode,
+    alcoholPreference,
+    cannabisPreference,
+    sobrietyPreference,
+  }
+}
+
+async function ensureAppUserProfileRow(user) {
+  const pool = getPool()
+  await pool.execute(
+    `INSERT INTO app_users (id, auth_user_id, email, name)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       email = VALUES(email),
+       name = VALUES(name)`,
+    [user.id, user.id, normalizeEmail(user.email), user.name || null],
+  )
+
+  const [rows] = await pool.execute(
+    `SELECT id, auth_user_id, email, name,
+            primary_city, primary_state, primary_zip_code,
+            alcohol_preference, cannabis_preference, sobriety_preference,
+            profile_enriched_at, created_at, updated_at
+       FROM app_users
+      WHERE auth_user_id = ?
+      LIMIT 1`,
+    [user.id],
+  )
+  return rows[0] || null
+}
+
+function mapProfileRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    primaryCity: row.primary_city || '',
+    primaryState: row.primary_state || '',
+    primaryZipCode: row.primary_zip_code || '',
+    alcoholPreference: row.alcohol_preference || '',
+    cannabisPreference: row.cannabis_preference || '',
+    sobrietyPreference: row.sobriety_preference || '',
+    profileEnrichedAt: row.profile_enriched_at || null,
+    needsEnrichment: !row.profile_enriched_at,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  }
+}
+
 async function sendRegistrationInviteEmail(req, { toEmail, customMessage, invitedBy, teamId = null, purpose = 'registration_invite' }) {
   const inviteUrl = buildRegisterInviteUrl(req, toEmail)
   const inviterLabel = invitedBy?.name || invitedBy?.email || 'Your Golf Homie'
@@ -285,6 +365,60 @@ app.get('/api/auth-debug/latest-verification', (req, res) => {
   res.json(latest || null)
 })
 
+
+app.get('/api/profile', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const row = await ensureAppUserProfileRow(req.user)
+    logApi('profile_fetch_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at })
+    res.json(mapProfileRow(row))
+  } catch (error) {
+    logRouteError('Profile fetch error', req, error)
+    res.status(500).json({ message: 'Could not load profile' })
+  }
+})
+
+app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const profile = sanitizeProfilePayload(req.body || {})
+    logApi('profile_save_started', { ...requestContext(req), profile })
+    await ensureAppUserProfileRow(req.user)
+    const pool = getPool()
+    await pool.execute(
+      `UPDATE app_users
+          SET email = ?,
+              name = ?,
+              primary_city = ?,
+              primary_state = ?,
+              primary_zip_code = ?,
+              alcohol_preference = ?,
+              cannabis_preference = ?,
+              sobriety_preference = ?,
+              profile_enriched_at = COALESCE(profile_enriched_at, NOW())
+        WHERE auth_user_id = ?`,
+      [
+        normalizeEmail(req.user.email),
+        req.user.name || null,
+        profile.primaryCity,
+        profile.primaryState,
+        profile.primaryZipCode,
+        profile.alcoholPreference,
+        profile.cannabisPreference,
+        profile.sobrietyPreference,
+        req.user.id,
+      ],
+    )
+    const row = await ensureAppUserProfileRow(req.user)
+    logApi('profile_save_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at, profile: mapProfileRow(row) })
+    res.json(mapProfileRow(row))
+  } catch (error) {
+    if (error instanceof Error && /required|Select|Sober golf/.test(error.message)) {
+      logApi('profile_save_validation_failed', { ...requestContext(req), validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Profile save error', req, error)
+    res.status(500).json({ message: 'Could not save profile' })
+  }
+})
 
 app.get('/api/users/lookup', requireStorage, authMiddleware, async (req, res) => {
   try {

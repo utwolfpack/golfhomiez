@@ -21,7 +21,7 @@ export default function UseMyLocationButton({ className = 'btn', label = 'Use my
     try {
       const location = await resolveMyLocationFromBrowser()
       await onResolved(location)
-      onStatus?.(`Location set to ${location.label}.`)
+      onStatus?.(null)
       logFrontendEvent({ category: 'location.resolve', message: 'succeeded', data: { label: location.label, stateCode: location.stateCode } })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Location lookup failed.'
