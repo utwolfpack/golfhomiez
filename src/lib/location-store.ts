@@ -5,6 +5,7 @@ export type SavedLocation = {
   label: string
   latitude: number
   longitude: number
+  postalCode?: string
 }
 
 const STORAGE_KEY = 'golf-homiez:selected-location'

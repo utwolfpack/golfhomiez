@@ -15,8 +15,9 @@ function normalize(value) {
     .replace(/[\u0300-\u036f]/g, '')
 }
 
-function buildLabel(city, stateName, stateCode) {
-  return `${city}, ${stateCode} · ${stateName}`
+function buildLabel(city, stateName, stateCode, postalCode = '') {
+  const zipText = String(postalCode || '').trim()
+  return zipText ? `${city}, ${stateCode} ${zipText} · ${stateName}` : `${city}, ${stateCode} · ${stateName}`
 }
 
 function toLocation(city) {
@@ -31,6 +32,7 @@ function toLocation(city) {
     city: city.name,
     stateCode: city.stateCode,
     stateName,
+    postalCode: '',
     label: buildLabel(city.name, stateName, city.stateCode),
     latitude,
     longitude,
@@ -92,7 +94,36 @@ function haversineMiles(lat1, lon1, lat2, lon2) {
   return R * c
 }
 
-export function getNearestLocation(latitude, longitude) {
+async function reverseGeocodePostalCode(latitude, longitude) {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 5000)
+    const url = new URL('https://nominatim.openstreetmap.org/reverse')
+    url.searchParams.set('format', 'jsonv2')
+    url.searchParams.set('lat', String(latitude))
+    url.searchParams.set('lon', String(longitude))
+    url.searchParams.set('zoom', '18')
+    url.searchParams.set('addressdetails', '1')
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Golf Homiez location lookup',
+        'Accept-Language': 'en-US,en;q=0.8',
+      },
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+    if (!response.ok) return null
+    const data = await response.json()
+    const address = data && typeof data === 'object' ? data.address : null
+    const postalCode = address && typeof address.postcode === 'string' ? address.postcode.trim() : ''
+    return postalCode || null
+  } catch {
+    return null
+  }
+}
+
+export async function getNearestLocation(latitude, longitude) {
   const all = getUSLocations()
   if (!all.length || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
 
@@ -107,5 +138,12 @@ export function getNearestLocation(latitude, longitude) {
     }
   }
 
-  return best
+  if (!best) return null
+
+  const postalCode = await reverseGeocodePostalCode(latitude, longitude)
+  return {
+    ...best,
+    postalCode: postalCode || best.postalCode || '',
+    label: buildLabel(best.city, best.stateName, best.stateCode, postalCode || best.postalCode || ''),
+  }
 }
