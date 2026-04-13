@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react'
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import NavBar from './components/NavBar'
-import { AuthProvider } from './context/AuthContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Home from './pages/Home'
 import Login from './pages/Login'
 const Register = lazy(() => import('./pages/Register'))
@@ -13,6 +13,7 @@ import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import VerifyContact from './pages/VerifyContact'
+import Profile from './pages/Profile'
 import ProtectedRoute from './components/ProtectedRoute'
 import { emitFrontendStage } from './lib/frontend-logger'
 
@@ -26,6 +27,20 @@ function RouteDiagnostics() {
   return null
 }
 
+function ProfileEnrichmentGate() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { user, loading, needsProfileEnrichment, profileStatusLoading } = useAuth()
+
+  useEffect(() => {
+    if (loading || profileStatusLoading || !user || !needsProfileEnrichment) return
+    if (location.pathname === '/profile') return
+    navigate('/profile?enrich=1', { replace: true })
+  }, [loading, profileStatusLoading, user, needsProfileEnrichment, location.pathname, navigate])
+
+  return null
+}
+
 export default function App() {
   useEffect(() => {
     emitFrontendStage('app_mounted')
@@ -34,12 +49,14 @@ export default function App() {
   return (
     <AuthProvider>
       <RouteDiagnostics />
+      <ProfileEnrichmentGate />
       <NavBar />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/golf-logger" element={<ProtectedRoute><GolfLogger /></ProtectedRoute>} />
         <Route path="/solo-logger" element={<ProtectedRoute><SoloLogger /></ProtectedRoute>} />
         <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
         <Route path="/directions" element={<Directions />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading…</div></div>}><Register /></Suspense>} />

@@ -37,6 +37,7 @@ export default function NavBar() {
                   <NavLink className="navDropdownItem" to="/" onClick={() => setOpen(false)}>Home</NavLink>
                   <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => setOpen(false)}>My Golf Scores</NavLink>
                   <NavLink className="navDropdownItem" to="/teams" onClick={() => setOpen(false)}>Teams</NavLink>
+                  <NavLink className="navDropdownItem" to="/profile" onClick={() => setOpen(false)}>Profile</NavLink>
                   <NavLink className="navDropdownItem" to="/directions" onClick={() => setOpen(false)}>Directions</NavLink>
                   <button type="button" className="navDropdownItem" onClick={() => { setOpen(false); setShowInvite(true) }}>Invite Homie</button>
                   <button type="button" className="navDropdownItem" onClick={() => { setOpen(false); logout(); navigate('/login') }}>Logout</button>
