@@ -15,6 +15,8 @@ import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInf
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
 import { sendMail } from './mailer.js'
 import { v4 as uuidv4 } from 'uuid'
+import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, redeemHostInvite, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
+import { authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, createAdminUser, createHostInvite, consumeAdminResetToken, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -175,7 +177,17 @@ async function authMiddleware(req, res, next) {
   }
 }
 
-
+async function adminMiddleware(req, res, next) {
+  try {
+    const adminUser = await authenticateAdminRequest(req)
+    if (!adminUser) return res.status(401).json({ message: 'Admin authentication required' })
+    req.adminUser = adminUser
+    next()
+  } catch (error) {
+    logRouteError('Admin middleware error', req, error)
+    res.status(500).json({ message: 'Admin authentication failed' })
+  }
+}
 
 function getApiBaseUrl(req) {
   return process.env.BETTER_AUTH_URL || `${req.protocol}://${req.get('host')}`
@@ -321,13 +333,307 @@ function redirectToClientApp(req, res) {
   return res.redirect(302, target.toString())
 }
 
-app.get(['/register', '/login', '/verify-contact'], (req, res, next) => {
-  const host = String(req.get('host') || '')
-  const shouldRedirectToClient = clientOrigin && !host.includes(new URL(clientOrigin).host)
-  if (shouldRedirectToClient) return redirectToClientApp(req, res)
+async function proxyClientApp(req, res, next) {
+  try {
+    const target = new URL(req.originalUrl || req.url || '/', getClientAppBaseUrl(req))
+    const upstream = await fetch(target, {
+      method: 'GET',
+      headers: {
+        accept: req.get('accept') || 'text/html,*/*',
+        'user-agent': req.get('user-agent') || 'GolfHomiezProxy/1.0',
+      },
+    })
+
+    const contentType = upstream.headers.get('content-type')
+    if (contentType) res.setHeader('Content-Type', contentType)
+    const cacheControl = upstream.headers.get('cache-control')
+    if (cacheControl) res.setHeader('Cache-Control', cacheControl)
+    const location = upstream.headers.get('location')
+    if (location) {
+      const rewritten = new URL(location, target)
+      rewritten.protocol = `${req.protocol}:`
+      rewritten.host = req.get('host')
+      res.setHeader('Location', rewritten.toString())
+    }
+
+    res.status(upstream.status)
+    const body = Buffer.from(await upstream.arrayBuffer())
+    return res.send(body)
+  } catch (error) {
+    logRouteError('Client app proxy error', req, error)
+    return next()
+  }
+}
+
+app.get(['/register', '/login', '/verify-contact', '/golfadmin', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
-  return redirectToClientApp(req, res)
+
+  const host = String(req.get('host') || '')
+  let clientHost = ''
+  try {
+    clientHost = clientOrigin ? new URL(clientOrigin).host : ''
+  } catch {
+    clientHost = ''
+  }
+
+  const shouldProxyToClient = Boolean(clientOrigin) && Boolean(clientHost) && !host.includes(clientHost)
+  if (shouldProxyToClient) return proxyClientApp(req, res, next)
+
+  return next()
+})
+
+app.post('/api/admin/auth/login', async (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim()
+    const password = String(req.body?.password || '')
+    if (!username) return res.status(400).json({ message: 'Username is required' })
+    if (!password) return res.status(400).json({ message: 'Password is required' })
+
+    const adminUser = await getAdminUserByUsername(username)
+    if (!adminUser || !adminUser.is_active) {
+      return res.status(401).json({ message: 'Invalid username or password' })
+    }
+
+    const verified = verifyPassword(password, adminUser.password_salt, adminUser.password_hash)
+    if (!verified) return res.status(401).json({ message: 'Invalid username or password' })
+
+    res.setHeader('Set-Cookie', createAdminSessionCookie(adminUser))
+    logApi('admin_login_completed', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username })
+    res.json({ adminUser: { id: adminUser.id, username: adminUser.username, email: adminUser.email, isActive: !!adminUser.is_active } })
+  } catch (error) {
+    logRouteError('Admin login error', req, error)
+    res.status(500).json({ message: 'Could not sign in to admin portal' })
+  }
+})
+
+app.post('/api/admin/auth/logout', async (req, res) => {
+  try {
+    res.setHeader('Set-Cookie', clearAdminSessionCookie())
+    res.status(204).end()
+  } catch (error) {
+    logRouteError('Admin logout error', req, error)
+    res.status(500).json({ message: 'Could not sign out of admin portal' })
+  }
+})
+
+app.get('/api/admin/session', async (req, res) => {
+  try {
+    const adminUser = await authenticateAdminRequest(req)
+    res.json({ adminUser: adminUser ? { id: adminUser.id, username: adminUser.username, email: adminUser.email, isActive: !!adminUser.is_active } : null })
+  } catch (error) {
+    logRouteError('Admin session fetch error', req, error)
+    res.status(500).json({ message: 'Could not load admin session' })
+  }
+})
+
+app.post('/api/admin/request-password-reset', async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier || req.body?.username || '').trim()
+    if (!identifier) return res.status(400).json({ message: 'Username is required' })
+
+    const adminUser = await getAdminUserByUsername(identifier)
+    if (!adminUser) return res.json({ ok: true })
+
+    await createAdminResetToken(adminUser.id)
+    logApi('admin_password_reset_requested', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username })
+    res.json({ ok: true })
+  } catch (error) {
+    logRouteError('Admin password reset request error', req, error)
+    res.status(500).json({ message: 'Could not start admin password reset' })
+  }
+})
+
+app.post('/api/admin/reset-password', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim()
+    const password = String(req.body?.password || '')
+    if (!token) return res.status(400).json({ message: 'Reset token required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+
+    await consumeAdminResetToken(token, password)
+    logApi('admin_password_reset_completed', { ...requestContext(req) })
+    res.json({ ok: true })
+  } catch (error) {
+    if (error instanceof Error && /invalid or expired/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Admin password reset error', req, error)
+    res.status(500).json({ message: 'Could not reset admin password' })
+  }
+})
+
+app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
+  try {
+    const data = await listPortalData()
+    res.json({ ...data, adminUser: { id: req.adminUser.id, username: req.adminUser.username, email: req.adminUser.email, isActive: !!req.adminUser.is_active } })
+  } catch (error) {
+    logRouteError('Admin portal load error', req, error)
+    res.status(500).json({ message: 'Could not load admin portal' })
+  }
+})
+
+app.post('/api/admin/admin-users', adminMiddleware, async (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim()
+    const email = normalizeEmail(req.body?.email)
+    const password = String(req.body?.password || '')
+    if (!username) return res.status(400).json({ message: 'Username is required' })
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+
+    const adminUser = await createAdminUser({ username, email, password })
+    const adminUsers = await listAdminUsers()
+    logApi('admin_user_created', { ...requestContext(req), createdAdminUserId: adminUser.id, adminUserId: req.adminUser.id })
+    res.status(201).json({ adminUser, adminUsers })
+  } catch (error) {
+    logRouteError('Create admin user error', req, error)
+    res.status(500).json({ message: 'Could not create admin user' })
+  }
+})
+
+app.post('/api/admin/host-invites', adminMiddleware, async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const inviteeName = String(req.body?.inviteeName || '').trim()
+    const golfCourseName = String(req.body?.golfCourseName || '').trim()
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    if (!inviteeName) return res.status(400).json({ message: 'Invitee name is required' })
+    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
+
+    const invite = await createHostInvite({ email, inviteeName, golfCourseName, adminUserId: req.adminUser.id })
+    logApi('host_invite_created', { ...requestContext(req), adminUserId: req.adminUser.id, email, golfCourseName, inviteId: invite.id })
+    res.status(201).json({ invite })
+  } catch (error) {
+    logRouteError('Create host invite error', req, error)
+    res.status(500).json({ message: 'Could not create host invite' })
+  }
+})
+
+app.get('/api/host/session', async (req, res) => {
+  try {
+    const db = getPool()
+    await ensureHostAuthSchema(db)
+    const cookies = Object.fromEntries(
+      String(req.headers.cookie || '')
+        .split(';')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => {
+          const idx = part.indexOf('=')
+          return idx >= 0 ? [part.slice(0, idx), decodeURIComponent(part.slice(idx + 1))] : [part, '']
+        }),
+    )
+    const hostAccount = await getHostAccountBySession(req, cookies.golfhomiez_host_session || '')
+    res.json({ hostAccount })
+  } catch (error) {
+    logRouteError('Host session fetch error', req, error)
+    res.status(500).json({ message: 'Could not load host session' })
+  }
+})
+
+app.post('/api/host/register', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const golfCourseName = String(req.body?.golfCourseName || '').trim()
+    const securityKey = String(req.body?.securityKey || '').trim()
+    const password = String(req.body?.password || '')
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid invite email is required' })
+    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
+    if (!securityKey) return res.status(400).json({ message: 'Security key is required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+
+    const db = getPool()
+    const hostAccount = await redeemHostInvite(db, { email, golfCourseName, securityKey, password })
+    const session = await createHostSession(db, hostAccount.id)
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    logApi('host_register_completed', { ...requestContext(req), email, golfCourseName, hostAccountId: hostAccount.id })
+    res.status(201).json({ hostAccount })
+  } catch (error) {
+    if (error instanceof Error && /invite email and security key/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host register error', req, error)
+    res.status(500).json({ message: 'Could not create golf-course account' })
+  }
+})
+
+app.post('/api/host/login', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const password = String(req.body?.password || '')
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    if (!password) return res.status(400).json({ message: 'Password is required' })
+    const db = getPool()
+    const hostAccount = await authenticateHostLogin(db, { email, password })
+    const session = await createHostSession(db, hostAccount.id)
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    logApi('host_login_completed', { ...requestContext(req), email, hostAccountId: hostAccount.id })
+    res.json({ hostAccount })
+  } catch (error) {
+    if (error instanceof Error && /Invalid email or password/i.test(error.message)) {
+      return res.status(401).json({ message: error.message })
+    }
+    logRouteError('Host login error', req, error)
+    res.status(500).json({ message: 'Could not sign in to golf-course account' })
+  }
+})
+
+app.post('/api/host/logout', async (req, res) => {
+  try {
+    const db = getPool()
+    await destroyHostSession(db, req)
+    res.setHeader('Set-Cookie', clearHostSessionCookie())
+    res.status(204).end()
+  } catch (error) {
+    logRouteError('Host logout error', req, error)
+    res.status(500).json({ message: 'Could not sign out of golf-course account' })
+  }
+})
+
+app.post('/api/host/request-password-reset', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const db = getPool()
+    await createHostPasswordReset(db, { email, resetUrlBase: getHostAppBaseUrl(req) })
+    logApi('host_password_reset_requested', { ...requestContext(req), email })
+    res.json({ ok: true })
+  } catch (error) {
+    logRouteError('Host password reset request error', req, error)
+    res.status(500).json({ message: 'Could not start golf-course password reset' })
+  }
+})
+
+app.post('/api/host/reset-password', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim()
+    const password = String(req.body?.password || '')
+    if (!token) return res.status(400).json({ message: 'Reset token required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    const db = getPool()
+    await resetHostPassword(db, { token, password })
+    logApi('host_password_reset_completed', { ...requestContext(req) })
+    res.json({ ok: true })
+  } catch (error) {
+    if (error instanceof Error && /invalid or expired/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host password reset error', req, error)
+    res.status(500).json({ message: 'Could not reset golf-course password' })
+  }
+})
+
+app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const data = await getHostPortalData(db, req.hostAccount.id)
+    if (!data) return res.status(404).json({ message: 'Golf-course account not found' })
+    res.json(data)
+  } catch (error) {
+    logRouteError('Host portal load error', req, error)
+    res.status(500).json({ message: 'Could not load golf-course portal' })
+  }
 })
 
 async function findTeamByName(name) {
@@ -646,6 +952,261 @@ app.delete('/api/scores/:id', requireStorage, authMiddleware, async (req, res) =
   } catch (error) {
     logRouteError('Delete score error', req, error)
     res.status(500).json({ message: 'Could not delete score' })
+  }
+})
+
+
+
+app.post('/api/admin/auth/login', async (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim()
+    const password = String(req.body?.password || '')
+    if (!username) return res.status(400).json({ message: 'Username is required' })
+    if (!password) return res.status(400).json({ message: 'Password is required' })
+
+    const adminUser = await getAdminUserByUsername(username)
+    if (!adminUser || !adminUser.is_active) {
+      return res.status(401).json({ message: 'Invalid username or password' })
+    }
+
+    const verified = verifyPassword(password, adminUser.password_salt, adminUser.password_hash)
+    if (!verified) return res.status(401).json({ message: 'Invalid username or password' })
+
+    res.setHeader('Set-Cookie', createAdminSessionCookie(adminUser))
+    logApi('admin_login_completed', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username })
+    res.json({ adminUser: { id: adminUser.id, username: adminUser.username, email: adminUser.email, isActive: !!adminUser.is_active } })
+  } catch (error) {
+    logRouteError('Admin login error', req, error)
+    res.status(500).json({ message: 'Could not sign in to admin portal' })
+  }
+})
+
+app.post('/api/admin/auth/logout', async (req, res) => {
+  try {
+    res.setHeader('Set-Cookie', clearAdminSessionCookie())
+    res.status(204).end()
+  } catch (error) {
+    logRouteError('Admin logout error', req, error)
+    res.status(500).json({ message: 'Could not sign out of admin portal' })
+  }
+})
+
+app.get('/api/admin/session', async (req, res) => {
+  try {
+    const adminUser = await authenticateAdminRequest(req)
+    res.json({ adminUser: adminUser ? { id: adminUser.id, username: adminUser.username, email: adminUser.email, isActive: !!adminUser.is_active } : null })
+  } catch (error) {
+    logRouteError('Admin session fetch error', req, error)
+    res.status(500).json({ message: 'Could not load admin session' })
+  }
+})
+
+app.post('/api/admin/request-password-reset', async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier || req.body?.username || '').trim()
+    if (!identifier) return res.status(400).json({ message: 'Username is required' })
+
+    const adminUser = await getAdminUserByUsername(identifier)
+    if (!adminUser) return res.json({ ok: true })
+
+    await createAdminResetToken(adminUser.id)
+    logApi('admin_password_reset_requested', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username })
+    res.json({ ok: true })
+  } catch (error) {
+    logRouteError('Admin password reset request error', req, error)
+    res.status(500).json({ message: 'Could not start admin password reset' })
+  }
+})
+
+app.post('/api/admin/reset-password', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim()
+    const password = String(req.body?.password || '')
+    if (!token) return res.status(400).json({ message: 'Reset token required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+
+    await consumeAdminResetToken(token, password)
+    logApi('admin_password_reset_completed', { ...requestContext(req) })
+    res.json({ ok: true })
+  } catch (error) {
+    if (error instanceof Error && /invalid or expired/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Admin password reset error', req, error)
+    res.status(500).json({ message: 'Could not reset admin password' })
+  }
+})
+
+app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
+  try {
+    const data = await listPortalData()
+    res.json({ ...data, adminUser: { id: req.adminUser.id, username: req.adminUser.username, email: req.adminUser.email, isActive: !!req.adminUser.is_active } })
+  } catch (error) {
+    logRouteError('Admin portal load error', req, error)
+    res.status(500).json({ message: 'Could not load admin portal' })
+  }
+})
+
+app.post('/api/admin/admin-users', adminMiddleware, async (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim()
+    const email = normalizeEmail(req.body?.email)
+    const password = String(req.body?.password || '')
+    if (!username) return res.status(400).json({ message: 'Username is required' })
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+
+    const adminUser = await createAdminUser({ username, email, password })
+    const adminUsers = await listAdminUsers()
+    logApi('admin_user_created', { ...requestContext(req), createdAdminUserId: adminUser.id, adminUserId: req.adminUser.id })
+    res.status(201).json({ adminUser, adminUsers })
+  } catch (error) {
+    logRouteError('Create admin user error', req, error)
+    res.status(500).json({ message: 'Could not create admin user' })
+  }
+})
+
+app.post('/api/admin/host-invites', adminMiddleware, async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const inviteeName = String(req.body?.inviteeName || '').trim()
+    const golfCourseName = String(req.body?.golfCourseName || '').trim()
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    if (!inviteeName) return res.status(400).json({ message: 'Invitee name is required' })
+    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
+
+    const invite = await createHostInvite({ email, inviteeName, golfCourseName, adminUserId: req.adminUser.id })
+    logApi('host_invite_created', { ...requestContext(req), adminUserId: req.adminUser.id, email, golfCourseName, inviteId: invite.id })
+    res.status(201).json({ invite })
+  } catch (error) {
+    logRouteError('Create host invite error', req, error)
+    res.status(500).json({ message: 'Could not create host invite' })
+  }
+})
+
+app.get('/api/host/session', async (req, res) => {
+  try {
+    const db = getPool()
+    await ensureHostAuthSchema(db)
+    const cookies = Object.fromEntries(
+      String(req.headers.cookie || '')
+        .split(';')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => {
+          const idx = part.indexOf('=')
+          return idx >= 0 ? [part.slice(0, idx), decodeURIComponent(part.slice(idx + 1))] : [part, '']
+        }),
+    )
+    const hostAccount = await getHostAccountBySession(req, cookies.golfhomiez_host_session || '')
+    res.json({ hostAccount })
+  } catch (error) {
+    logRouteError('Host session fetch error', req, error)
+    res.status(500).json({ message: 'Could not load host session' })
+  }
+})
+
+app.post('/api/host/register', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const golfCourseName = String(req.body?.golfCourseName || '').trim()
+    const securityKey = String(req.body?.securityKey || '').trim()
+    const password = String(req.body?.password || '')
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid invite email is required' })
+    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
+    if (!securityKey) return res.status(400).json({ message: 'Security key is required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+
+    const db = getPool()
+    const hostAccount = await redeemHostInvite(db, { email, golfCourseName, securityKey, password })
+    const session = await createHostSession(db, hostAccount.id)
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    logApi('host_register_completed', { ...requestContext(req), email, golfCourseName, hostAccountId: hostAccount.id })
+    res.status(201).json({ hostAccount })
+  } catch (error) {
+    if (error instanceof Error && /invite email and security key/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host register error', req, error)
+    res.status(500).json({ message: 'Could not create golf-course account' })
+  }
+})
+
+app.post('/api/host/login', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const password = String(req.body?.password || '')
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    if (!password) return res.status(400).json({ message: 'Password is required' })
+    const db = getPool()
+    const hostAccount = await authenticateHostLogin(db, { email, password })
+    const session = await createHostSession(db, hostAccount.id)
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    logApi('host_login_completed', { ...requestContext(req), email, hostAccountId: hostAccount.id })
+    res.json({ hostAccount })
+  } catch (error) {
+    if (error instanceof Error && /Invalid email or password/i.test(error.message)) {
+      return res.status(401).json({ message: error.message })
+    }
+    logRouteError('Host login error', req, error)
+    res.status(500).json({ message: 'Could not sign in to golf-course account' })
+  }
+})
+
+app.post('/api/host/logout', async (req, res) => {
+  try {
+    const db = getPool()
+    await destroyHostSession(db, req)
+    res.setHeader('Set-Cookie', clearHostSessionCookie())
+    res.status(204).end()
+  } catch (error) {
+    logRouteError('Host logout error', req, error)
+    res.status(500).json({ message: 'Could not sign out of golf-course account' })
+  }
+})
+
+app.post('/api/host/request-password-reset', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const db = getPool()
+    await createHostPasswordReset(db, { email, resetUrlBase: getHostAppBaseUrl(req) })
+    logApi('host_password_reset_requested', { ...requestContext(req), email })
+    res.json({ ok: true })
+  } catch (error) {
+    logRouteError('Host password reset request error', req, error)
+    res.status(500).json({ message: 'Could not start golf-course password reset' })
+  }
+})
+
+app.post('/api/host/reset-password', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim()
+    const password = String(req.body?.password || '')
+    if (!token) return res.status(400).json({ message: 'Reset token required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    const db = getPool()
+    await resetHostPassword(db, { token, password })
+    logApi('host_password_reset_completed', { ...requestContext(req) })
+    res.json({ ok: true })
+  } catch (error) {
+    if (error instanceof Error && /invalid or expired/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host password reset error', req, error)
+    res.status(500).json({ message: 'Could not reset golf-course password' })
+  }
+})
+
+app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const data = await getHostPortalData(db, req.hostAccount.id)
+    if (!data) return res.status(404).json({ message: 'Golf-course account not found' })
+    res.json(data)
+  } catch (error) {
+    logRouteError('Host portal load error', req, error)
+    res.status(500).json({ message: 'Could not load golf-course portal' })
   }
 })
 

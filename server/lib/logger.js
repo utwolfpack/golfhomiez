@@ -95,6 +95,19 @@ export function logError(message, details = {}) {
   console.error(message, payload.error || details)
 }
 
+
+export function logWarn(message, details = {}) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level: 'warn',
+    correlationId: details.correlationId || getCorrelationId() || null,
+    message,
+    ...normalizeDetails(details),
+  }
+  writeLine(errorStream, payload)
+  console.warn(message)
+}
+
 export function logFrontend(message, details = {}) {
   const payload = {
     timestamp: new Date().toISOString(),

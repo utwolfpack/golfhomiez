@@ -13,6 +13,126 @@ async function loadMigrationSql(filename) {
 }
 
 export const APP_MIGRATIONS = [
+
+  {
+    version: '20260417_012',
+    name: 'host_auth_portal',
+    filename: '20260417_012_host_auth_portal.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'host_account_invites') &&
+        await tableExists(db, 'host_accounts') &&
+        await tableExists(db, 'host_sessions') &&
+        await tableExists(db, 'host_password_reset_tokens') &&
+        await columnExists(db, 'host_accounts', 'password_hash') &&
+        await columnExists(db, 'host_accounts', 'is_validated')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+
+      if (!(await tableExists(db, 'host_account_invites'))) {
+        statements.push(`CREATE TABLE IF NOT EXISTS host_account_invites (
+  id VARCHAR(191) NOT NULL PRIMARY KEY,
+  email VARCHAR(191) NOT NULL,
+  invitee_name VARCHAR(191) NULL,
+  golf_course_name VARCHAR(191) NULL,
+  security_key_hash VARCHAR(255) NULL,
+  security_key VARCHAR(191) NULL,
+  register_url VARCHAR(1024) NULL,
+  invited_by_admin_id VARCHAR(191) NULL,
+  expires_at DATETIME NULL,
+  consumed_at DATETIME NULL,
+  revoked_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_host_invites_email (email),
+  INDEX idx_host_invites_active (email, consumed_at, revoked_at, expires_at, created_at)
+)`)
+      } else {
+        const inviteColumns = [
+          ['invitee_name', 'ALTER TABLE host_account_invites ADD COLUMN invitee_name VARCHAR(191) NULL'],
+          ['golf_course_name', 'ALTER TABLE host_account_invites ADD COLUMN golf_course_name VARCHAR(191) NULL'],
+          ['security_key_hash', 'ALTER TABLE host_account_invites ADD COLUMN security_key_hash VARCHAR(255) NULL'],
+          ['security_key', 'ALTER TABLE host_account_invites ADD COLUMN security_key VARCHAR(191) NULL'],
+          ['register_url', 'ALTER TABLE host_account_invites ADD COLUMN register_url VARCHAR(1024) NULL'],
+          ['invited_by_admin_id', 'ALTER TABLE host_account_invites ADD COLUMN invited_by_admin_id VARCHAR(191) NULL'],
+          ['expires_at', 'ALTER TABLE host_account_invites ADD COLUMN expires_at DATETIME NULL'],
+          ['consumed_at', 'ALTER TABLE host_account_invites ADD COLUMN consumed_at DATETIME NULL'],
+          ['revoked_at', 'ALTER TABLE host_account_invites ADD COLUMN revoked_at DATETIME NULL'],
+        ]
+        for (const [columnName, sql] of inviteColumns) {
+          if (!(await columnExists(db, 'host_account_invites', columnName))) statements.push(sql)
+        }
+        if (!(await indexExists(db, 'host_account_invites', 'idx_host_invites_email'))) {
+          statements.push('ALTER TABLE host_account_invites ADD INDEX idx_host_invites_email (email)')
+        }
+        if (!(await indexExists(db, 'host_account_invites', 'idx_host_invites_active'))) {
+          statements.push('ALTER TABLE host_account_invites ADD INDEX idx_host_invites_active (email, consumed_at, revoked_at, expires_at, created_at)')
+        }
+      }
+
+      if (!(await tableExists(db, 'host_accounts'))) {
+        statements.push(`CREATE TABLE IF NOT EXISTS host_accounts (
+  id VARCHAR(191) NOT NULL PRIMARY KEY,
+  email VARCHAR(191) NOT NULL,
+  golf_course_name VARCHAR(191) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  is_validated TINYINT(1) NOT NULL DEFAULT 1,
+  validated_at DATETIME NULL,
+  invite_id VARCHAR(191) NULL,
+  reset_email VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_host_accounts_email (email)
+)`)
+      } else {
+        const hostAccountColumns = [
+          ['password_hash', 'ALTER TABLE host_accounts ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ""'],
+          ['is_validated', 'ALTER TABLE host_accounts ADD COLUMN is_validated TINYINT(1) NOT NULL DEFAULT 1'],
+          ['validated_at', 'ALTER TABLE host_accounts ADD COLUMN validated_at DATETIME NULL'],
+          ['invite_id', 'ALTER TABLE host_accounts ADD COLUMN invite_id VARCHAR(191) NULL'],
+          ['reset_email', 'ALTER TABLE host_accounts ADD COLUMN reset_email VARCHAR(191) NULL'],
+        ]
+        for (const [columnName, sql] of hostAccountColumns) {
+          if (!(await columnExists(db, 'host_accounts', columnName))) statements.push(sql)
+        }
+        if (!(await indexExists(db, 'host_accounts', 'uq_host_accounts_email'))) {
+          statements.push('ALTER TABLE host_accounts ADD UNIQUE INDEX uq_host_accounts_email (email)')
+        }
+      }
+
+      if (!(await tableExists(db, 'host_sessions'))) {
+        statements.push(`CREATE TABLE IF NOT EXISTS host_sessions (
+  id VARCHAR(191) NOT NULL PRIMARY KEY,
+  host_account_id VARCHAR(191) NOT NULL,
+  token_hash VARCHAR(64) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_host_sessions_token_hash (token_hash),
+  KEY idx_host_sessions_account (host_account_id),
+  KEY idx_host_sessions_expires (expires_at)
+)`)
+      }
+
+      if (!(await tableExists(db, 'host_password_reset_tokens'))) {
+        statements.push(`CREATE TABLE IF NOT EXISTS host_password_reset_tokens (
+  id VARCHAR(191) NOT NULL PRIMARY KEY,
+  host_account_id VARCHAR(191) NOT NULL,
+  email VARCHAR(191) NOT NULL,
+  token_hash VARCHAR(64) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_host_reset_token_hash (token_hash),
+  KEY idx_host_reset_email (email),
+  KEY idx_host_reset_host (host_account_id)
+)`)
+      }
+
+      return statements.join(';\n')
+    },
+  },
   {
     version: '20260326_001',
     name: 'baseline_app_schema',
