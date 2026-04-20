@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Golf Homiez! Tracker</title>
+    <script>
+      (function () {
+        try {
+          var existing = null
+          try { existing = window.sessionStorage.getItem('gh.correlationId') } catch (_) {}
+          var correlationId = existing || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10))
+          window.__GH_CORRELATION_ID = correlationId
+          try { window.sessionStorage.setItem('gh.correlationId', correlationId) } catch (_) {}
+
+          function sendStage(stage) {
+            try {
+              var img = new Image(1, 1)
+              img.src = '/diag/pixel.gif?cid=' + encodeURIComponent(correlationId)
+                + '&stage=' + encodeURIComponent(stage)
+                + '&path=' + encodeURIComponent(window.location.pathname)
+                + '&ts=' + Date.now()
+            } catch (_) {}
+          }
+
+          console.log('[GH preboot] script_started')
+          sendStage('html_script_started')
+
+          document.addEventListener('readystatechange', function () {
+            if (document.readyState === 'interactive') sendStage('document_interactive')
+            if (document.readyState === 'complete') sendStage('document_complete')
+          })
+
+          window.addEventListener('load', function () {
+            console.log('[GH preboot] window_load')
+            sendStage('window_load')
+          })
+        } catch (_) {}
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

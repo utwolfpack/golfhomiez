@@ -1,0 +1,49 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: golf-homiez-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: golf_homiez
+      MYSQL_USER: golf_homiez_user
+      MYSQL_PASSWORD: change_me
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: golf-homiez-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: golf_homiez
+      DB_USER: golf_homiez_user
+      DB_PASSWORD: change_me
+      PORT: ${PORT:-5001}
+      NODE_ENV: production
+      SMTP_HOST: smtp-relay.brevo.com
+      SMTP_PORT: 465
+      SMTP_SECURE: "true"
+      SMTP_USER: no-reply@golfhomiez.com
+      SMTP_PASS: placeholder
+      SMTP_FROM: no-reply@golfhomiez.com
+    ports:
+      - "${PORT:-5001}:${PORT:-5001}"
+    command: sh -c "npm run build && npm start"
+
+volumes:
+  mysql_data:
