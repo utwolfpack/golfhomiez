@@ -1,50 +1,27 @@
-# Admin and Host auth migrations
+# RBAC and Admin Portal migrations
 
-This patch adds two production-safe app migrations:
+`npm run build` already runs `npm run db:migrate`, so these schema changes are applied once per database environment through the migration runner.
 
-- `20260416_012_admin_portal_direct_auth.sql`
-- `20260417_013_host_auth_portal.sql`
+## New migration
 
-## What they create
+- `migration_scripts/20260420_014_rbac_admin_portal_reconcile.sql`
 
-### 20260416_012
+## What it covers
 
-- `admin_users`
-- `admin_password_reset_tokens`
-- `host_account_invites`
+- RBAC base tables
+  - `role_definitions`
+  - `user_role_assignments`
+  - `host_role_accounts`
+  - `organizer_role_accounts`
+  - `tournaments`
+- Admin portal compatibility fields
+  - `host_accounts.account_name`
+  - `host_account_invites.account_name`
+- Existing admin and host auth tables continue to be reconciled by `server/migrations/index.js` for mixed local, stage, and production schemas.
 
-### 20260417_013
+## How to run
 
-- `host_accounts`
-- `host_sessions`
-- `host_password_reset_tokens`
-
-## How they run
-
-Migrations are tracked in `app_schema_migrations`, so each migration runs once per database environment.
-
-The build now includes:
-
-```bash
-npm run build
-```
-
-That does:
-
-```bash
-npm run build:app
-npm run db:migrate
-```
-
-The migration runner is also available directly:
-
-```bash
-npm run db:migrate
-```
-
-## Production deployment
-
-Recommended order:
+Normal deploy:
 
 ```bash
 npm ci
@@ -52,17 +29,16 @@ npm run build
 npm start
 ```
 
-If the build environment does not have database access, the migration runner safely skips execution unless:
+Manual schema-only run:
 
 ```bash
-REQUIRE_DB_MIGRATIONS=true
+npm run db:migrate
 ```
 
-is set.
+## Run once per environment
 
-## Notes
+Migrations are tracked in `app_schema_migrations`. Each environment applies each migration once for its own database.
 
-- The migration runner is idempotent.
-- New tables are created when missing.
-- Existing partial tables are reconciled by adding only missing columns and indexes.
-- This makes the migrations safe for local, stage, and production environments that may not be perfectly aligned.
+## Production notes
+
+The dynamic migration logic in `server/migrations/index.js` checks `information_schema` and only adds missing tables, columns, and indexes. This makes the migration safe for databases that already have part of the admin or host schema in place.
