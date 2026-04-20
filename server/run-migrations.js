@@ -1,4 +1,9 @@
-import 'dotenv/config'
+let dotenvLoaded = false
+try {
+  await import('dotenv/config')
+  dotenvLoaded = true
+} catch {}
+
 import { runAuthMigrations } from './auth-migrations.js'
 import { getPool, closeDb } from './db.js'
 import { runAppMigrations } from './migrations/runner.js'
@@ -17,6 +22,10 @@ async function main() {
     if (shouldRequireDatabase()) throw error
     console.warn('[db:migrate] database unavailable; skipping migrations during build/startup')
     return
+  }
+
+  if (!dotenvLoaded) {
+    console.warn('[db:migrate] dotenv package unavailable; using existing process environment only')
   }
 
   await runAuthMigrations()
