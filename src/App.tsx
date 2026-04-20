@@ -2,6 +2,8 @@ import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import NavBar from './components/NavBar'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { HostAuthProvider } from './context/HostAuthContext'
+import AdminPortal from './pages/AdminPortal'
 import Home from './pages/Home'
 import Login from './pages/Login'
 const Register = lazy(() => import('./pages/Register'))
@@ -14,7 +16,13 @@ import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import VerifyContact from './pages/VerifyContact'
 import Profile from './pages/Profile'
+import CreateHostAccount from './pages/CreateHostAccount'
+import HostLogin from './pages/HostLogin'
+import HostForgotPassword from './pages/HostForgotPassword'
+import HostResetPassword from './pages/HostResetPassword'
+import HostPortal from './pages/HostPortal'
 import ProtectedRoute from './components/ProtectedRoute'
+import HostProtectedRoute from './components/HostProtectedRoute'
 import { emitFrontendStage } from './lib/frontend-logger'
 
 function RouteDiagnostics() {
@@ -48,6 +56,7 @@ export default function App() {
 
   return (
     <AuthProvider>
+      <HostAuthProvider>
       <RouteDiagnostics />
       <ProfileEnrichmentGate />
       <NavBar />
@@ -64,8 +73,15 @@ export default function App() {
         <Route path="/request-password-reset" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
+        <Route path="/host/register" element={<CreateHostAccount />} />
+        <Route path="/host/login" element={<HostLogin />} />
+        <Route path="/host/request-password-reset" element={<HostForgotPassword />} />
+        <Route path="/host/reset-password" element={<HostResetPassword />} />
+        <Route path="/host/portal" element={<HostProtectedRoute><HostPortal /></HostProtectedRoute>} />
+        <Route path="/golfadmin" element={<AdminPortal />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </HostAuthProvider>
     </AuthProvider>
   )
 }
