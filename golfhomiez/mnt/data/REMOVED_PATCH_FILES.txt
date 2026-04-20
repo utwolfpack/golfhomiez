@@ -1,5 +1,0 @@
-Delete these files from the application root because they are no longer needed:
-- 502_fix.patch
-- 502_npm_install_source_fix.patch
-- server_index_import_fix.patch
-- startup_fix.patch
