@@ -1,5 +1,0 @@
-Delete these obsolete patch files from the repository root if they are still present:
-- 502_fix.patch
-- 502_npm_install_source_fix.patch
-- server_index_import_fix.patch
-- startup_fix.patch
