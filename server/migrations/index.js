@@ -200,6 +200,219 @@ async function buildHostAuthPortalSql(db) {
   return joinStatements(statements)
 }
 
+
+
+async function buildRbacAdminPortalReconcileSql(db) {
+  const statements = []
+
+  if (!(await tableExists(db, 'role_definitions'))) {
+    statements.push(`CREATE TABLE role_definitions (
+      role_key VARCHAR(64) NOT NULL PRIMARY KEY,
+      display_name VARCHAR(191) NOT NULL,
+      description TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`)
+  } else {
+    const roleColumns = [
+      ['display_name', 'ALTER TABLE role_definitions ADD COLUMN display_name VARCHAR(191) NOT NULL DEFAULT "" AFTER role_key'],
+      ['description', 'ALTER TABLE role_definitions ADD COLUMN description TEXT NULL AFTER display_name'],
+      ['created_at', 'ALTER TABLE role_definitions ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER description'],
+      ['updated_at', 'ALTER TABLE role_definitions ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at'],
+    ]
+    for (const [name, sql] of roleColumns) {
+      if (!(await columnExists(db, 'role_definitions', name))) statements.push(sql)
+    }
+  }
+
+  statements.push(`INSERT INTO role_definitions (role_key, display_name, description) VALUES
+    ('user', 'User', 'Access to publicly available information and the logged in user profile'),
+    ('host', 'Host – Golf Course', 'Access to all golf course information'),
+    ('organizer', 'Organizer', 'Access to tournament information for tournaments organized by the logged in user'),
+    ('admin', 'Admin', 'Full access to admin portal and application information')
+    ON DUPLICATE KEY UPDATE
+      display_name = VALUES(display_name),
+      description = VALUES(description)`)
+
+  if (!(await tableExists(db, 'user_role_assignments'))) {
+    statements.push(`CREATE TABLE user_role_assignments (
+      id VARCHAR(191) NOT NULL PRIMARY KEY,
+      auth_user_id VARCHAR(191) NULL,
+      email VARCHAR(191) NULL,
+      role_key VARCHAR(64) NOT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'active',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_user_role_assignments_auth_user (auth_user_id),
+      KEY idx_user_role_assignments_email (email),
+      KEY idx_user_role_assignments_role_status (role_key, status),
+      UNIQUE KEY uq_user_role_assignments_auth_role (auth_user_id, role_key)
+    )`)
+  } else {
+    const assignmentColumns = [
+      ['auth_user_id', 'ALTER TABLE user_role_assignments ADD COLUMN auth_user_id VARCHAR(191) NULL AFTER id'],
+      ['email', 'ALTER TABLE user_role_assignments ADD COLUMN email VARCHAR(191) NULL AFTER auth_user_id'],
+      ['role_key', 'ALTER TABLE user_role_assignments ADD COLUMN role_key VARCHAR(64) NOT NULL DEFAULT "user" AFTER email'],
+      ['status', 'ALTER TABLE user_role_assignments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT "active" AFTER role_key'],
+      ['created_at', 'ALTER TABLE user_role_assignments ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER status'],
+      ['updated_at', 'ALTER TABLE user_role_assignments ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at'],
+    ]
+    for (const [name, sql] of assignmentColumns) {
+      if (!(await columnExists(db, 'user_role_assignments', name))) statements.push(sql)
+    }
+    if (!(await indexExists(db, 'user_role_assignments', 'idx_user_role_assignments_auth_user'))) statements.push('ALTER TABLE user_role_assignments ADD KEY idx_user_role_assignments_auth_user (auth_user_id)')
+    if (!(await indexExists(db, 'user_role_assignments', 'idx_user_role_assignments_email'))) statements.push('ALTER TABLE user_role_assignments ADD KEY idx_user_role_assignments_email (email)')
+    if (!(await indexExists(db, 'user_role_assignments', 'idx_user_role_assignments_role_status'))) statements.push('ALTER TABLE user_role_assignments ADD KEY idx_user_role_assignments_role_status (role_key, status)')
+    if (!(await indexExists(db, 'user_role_assignments', 'uq_user_role_assignments_auth_role'))) statements.push('ALTER TABLE user_role_assignments ADD UNIQUE KEY uq_user_role_assignments_auth_role (auth_user_id, role_key)')
+  }
+
+  if (await tableExists(db, 'app_users') && await columnExists(db, 'app_users', 'id') && await columnExists(db, 'app_users', 'email')) {
+    statements.push(`INSERT INTO user_role_assignments (id, auth_user_id, email, role_key, status)
+      SELECT REPLACE(UUID(), '-', ''), au.id, au.email, 'user', 'active'
+      FROM app_users au
+      LEFT JOIN user_role_assignments ura
+        ON ura.auth_user_id = au.id
+       AND ura.role_key = 'user'
+      WHERE ura.id IS NULL`)
+  }
+
+  if (!(await tableExists(db, 'host_role_accounts'))) {
+    statements.push(`CREATE TABLE host_role_accounts (
+      id VARCHAR(191) NOT NULL PRIMARY KEY,
+      auth_user_id VARCHAR(191) NULL,
+      email VARCHAR(191) NOT NULL,
+      golf_course_name VARCHAR(191) NULL,
+      account_name VARCHAR(191) NULL,
+      is_validated TINYINT(1) NOT NULL DEFAULT 0,
+      validated_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_host_role_accounts_auth_user (auth_user_id),
+      KEY idx_host_role_accounts_email (email)
+    )`)
+  } else {
+    const hostRoleColumns = [
+      ['auth_user_id', 'ALTER TABLE host_role_accounts ADD COLUMN auth_user_id VARCHAR(191) NULL AFTER id'],
+      ['email', 'ALTER TABLE host_role_accounts ADD COLUMN email VARCHAR(191) NOT NULL DEFAULT "" AFTER auth_user_id'],
+      ['golf_course_name', 'ALTER TABLE host_role_accounts ADD COLUMN golf_course_name VARCHAR(191) NULL AFTER email'],
+      ['account_name', 'ALTER TABLE host_role_accounts ADD COLUMN account_name VARCHAR(191) NULL AFTER golf_course_name'],
+      ['is_validated', 'ALTER TABLE host_role_accounts ADD COLUMN is_validated TINYINT(1) NOT NULL DEFAULT 0 AFTER account_name'],
+      ['validated_at', 'ALTER TABLE host_role_accounts ADD COLUMN validated_at DATETIME NULL AFTER is_validated'],
+      ['created_at', 'ALTER TABLE host_role_accounts ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER validated_at'],
+      ['updated_at', 'ALTER TABLE host_role_accounts ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at'],
+    ]
+    for (const [name, sql] of hostRoleColumns) {
+      if (!(await columnExists(db, 'host_role_accounts', name))) statements.push(sql)
+    }
+    if (!(await indexExists(db, 'host_role_accounts', 'idx_host_role_accounts_auth_user'))) statements.push('ALTER TABLE host_role_accounts ADD KEY idx_host_role_accounts_auth_user (auth_user_id)')
+    if (!(await indexExists(db, 'host_role_accounts', 'idx_host_role_accounts_email'))) statements.push('ALTER TABLE host_role_accounts ADD KEY idx_host_role_accounts_email (email)')
+  }
+
+  if (!(await tableExists(db, 'organizer_role_accounts'))) {
+    statements.push(`CREATE TABLE organizer_role_accounts (
+      id VARCHAR(191) NOT NULL PRIMARY KEY,
+      auth_user_id VARCHAR(191) NULL,
+      email VARCHAR(191) NOT NULL,
+      display_name VARCHAR(191) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_organizer_role_accounts_auth_user (auth_user_id),
+      KEY idx_organizer_role_accounts_email (email)
+    )`)
+  } else {
+    const organizerColumns = [
+      ['auth_user_id', 'ALTER TABLE organizer_role_accounts ADD COLUMN auth_user_id VARCHAR(191) NULL AFTER id'],
+      ['email', 'ALTER TABLE organizer_role_accounts ADD COLUMN email VARCHAR(191) NOT NULL DEFAULT "" AFTER auth_user_id'],
+      ['display_name', 'ALTER TABLE organizer_role_accounts ADD COLUMN display_name VARCHAR(191) NULL AFTER email'],
+      ['created_at', 'ALTER TABLE organizer_role_accounts ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER display_name'],
+      ['updated_at', 'ALTER TABLE organizer_role_accounts ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at'],
+    ]
+    for (const [name, sql] of organizerColumns) {
+      if (!(await columnExists(db, 'organizer_role_accounts', name))) statements.push(sql)
+    }
+    if (!(await indexExists(db, 'organizer_role_accounts', 'idx_organizer_role_accounts_auth_user'))) statements.push('ALTER TABLE organizer_role_accounts ADD KEY idx_organizer_role_accounts_auth_user (auth_user_id)')
+    if (!(await indexExists(db, 'organizer_role_accounts', 'idx_organizer_role_accounts_email'))) statements.push('ALTER TABLE organizer_role_accounts ADD KEY idx_organizer_role_accounts_email (email)')
+  }
+
+  if (!(await tableExists(db, 'tournaments'))) {
+    statements.push(`CREATE TABLE tournaments (
+      id VARCHAR(191) NOT NULL PRIMARY KEY,
+      organizer_account_id VARCHAR(191) NULL,
+      host_account_id VARCHAR(191) NULL,
+      name VARCHAR(191) NOT NULL,
+      description TEXT NULL,
+      course_name VARCHAR(191) NULL,
+      start_date DATETIME NULL,
+      end_date DATETIME NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'draft',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_tournaments_organizer (organizer_account_id),
+      KEY idx_tournaments_host (host_account_id),
+      KEY idx_tournaments_status (status)
+    )`)
+  } else {
+    const tournamentColumns = [
+      ['organizer_account_id', 'ALTER TABLE tournaments ADD COLUMN organizer_account_id VARCHAR(191) NULL AFTER id'],
+      ['host_account_id', 'ALTER TABLE tournaments ADD COLUMN host_account_id VARCHAR(191) NULL AFTER organizer_account_id'],
+      ['name', 'ALTER TABLE tournaments ADD COLUMN name VARCHAR(191) NOT NULL DEFAULT "Untitled tournament" AFTER host_account_id'],
+      ['description', 'ALTER TABLE tournaments ADD COLUMN description TEXT NULL AFTER name'],
+      ['course_name', 'ALTER TABLE tournaments ADD COLUMN course_name VARCHAR(191) NULL AFTER description'],
+      ['start_date', 'ALTER TABLE tournaments ADD COLUMN start_date DATETIME NULL AFTER course_name'],
+      ['end_date', 'ALTER TABLE tournaments ADD COLUMN end_date DATETIME NULL AFTER start_date'],
+      ['status', 'ALTER TABLE tournaments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT "draft" AFTER end_date'],
+      ['created_at', 'ALTER TABLE tournaments ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER status'],
+      ['updated_at', 'ALTER TABLE tournaments ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at'],
+    ]
+    for (const [name, sql] of tournamentColumns) {
+      if (!(await columnExists(db, 'tournaments', name))) statements.push(sql)
+    }
+    if (!(await indexExists(db, 'tournaments', 'idx_tournaments_organizer'))) statements.push('ALTER TABLE tournaments ADD KEY idx_tournaments_organizer (organizer_account_id)')
+    if (!(await indexExists(db, 'tournaments', 'idx_tournaments_host'))) statements.push('ALTER TABLE tournaments ADD KEY idx_tournaments_host (host_account_id)')
+    if (!(await indexExists(db, 'tournaments', 'idx_tournaments_status'))) statements.push('ALTER TABLE tournaments ADD KEY idx_tournaments_status (status)')
+  }
+
+  if (await tableExists(db, 'host_accounts')) {
+    const hostCompatColumns = [
+      ['auth_user_id', 'ALTER TABLE host_accounts ADD COLUMN auth_user_id VARCHAR(191) NULL AFTER id'],
+      ['email', 'ALTER TABLE host_accounts ADD COLUMN email VARCHAR(191) NOT NULL DEFAULT "" AFTER auth_user_id'],
+      ['account_name', 'ALTER TABLE host_accounts ADD COLUMN account_name VARCHAR(191) NOT NULL DEFAULT "" AFTER email'],
+      ['golf_course_name', 'ALTER TABLE host_accounts ADD COLUMN golf_course_name VARCHAR(191) NULL AFTER account_name'],
+      ['password_hash', 'ALTER TABLE host_accounts ADD COLUMN password_hash TEXT NOT NULL AFTER golf_course_name'],
+      ['invite_id', 'ALTER TABLE host_accounts ADD COLUMN invite_id VARCHAR(191) NULL AFTER password_hash'],
+      ['reset_email', 'ALTER TABLE host_accounts ADD COLUMN reset_email VARCHAR(191) NULL AFTER invite_id'],
+      ['is_validated', 'ALTER TABLE host_accounts ADD COLUMN is_validated TINYINT(1) NOT NULL DEFAULT 0 AFTER reset_email'],
+      ['validated_at', 'ALTER TABLE host_accounts ADD COLUMN validated_at DATETIME NULL AFTER is_validated'],
+      ['created_at', 'ALTER TABLE host_accounts ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER validated_at'],
+      ['updated_at', 'ALTER TABLE host_accounts ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at'],
+    ]
+    for (const [name, sql] of hostCompatColumns) {
+      if (!(await columnExists(db, 'host_accounts', name))) statements.push(sql)
+    }
+  }
+
+  if (await tableExists(db, 'host_account_invites')) {
+    const inviteCompatColumns = [
+      ['email', 'ALTER TABLE host_account_invites ADD COLUMN email VARCHAR(191) NOT NULL DEFAULT "" AFTER id'],
+      ['invitee_name', 'ALTER TABLE host_account_invites ADD COLUMN invitee_name VARCHAR(191) NULL AFTER email'],
+      ['golf_course_name', 'ALTER TABLE host_account_invites ADD COLUMN golf_course_name VARCHAR(191) NULL AFTER invitee_name'],
+      ['account_name', 'ALTER TABLE host_account_invites ADD COLUMN account_name VARCHAR(191) NULL AFTER golf_course_name'],
+      ['security_key_hash', 'ALTER TABLE host_account_invites ADD COLUMN security_key_hash VARCHAR(255) NOT NULL DEFAULT "" AFTER account_name'],
+      ['invited_by_admin_id', 'ALTER TABLE host_account_invites ADD COLUMN invited_by_admin_id VARCHAR(191) NULL AFTER security_key_hash'],
+      ['expires_at', 'ALTER TABLE host_account_invites ADD COLUMN expires_at DATETIME NULL AFTER invited_by_admin_id'],
+      ['consumed_at', 'ALTER TABLE host_account_invites ADD COLUMN consumed_at DATETIME NULL AFTER expires_at'],
+      ['revoked_at', 'ALTER TABLE host_account_invites ADD COLUMN revoked_at DATETIME NULL AFTER consumed_at'],
+      ['created_at', 'ALTER TABLE host_account_invites ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER revoked_at'],
+      ['updated_at', 'ALTER TABLE host_account_invites ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at'],
+    ]
+    for (const [name, sql] of inviteCompatColumns) {
+      if (!(await columnExists(db, 'host_account_invites', name))) statements.push(sql)
+    }
+  }
+
+  return joinStatements(statements)
+}
+
 export const APP_MIGRATIONS = [
   {
     version: '20260326_001',
@@ -381,6 +594,25 @@ export const APP_MIGRATIONS = [
     },
     async getSql(db) {
       return buildHostAuthPortalSql(db)
+    },
+  },
+  {
+    version: '20260420_014',
+    name: 'rbac_admin_portal_reconcile',
+    filename: '20260420_014_rbac_admin_portal_reconcile.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'role_definitions') &&
+        await tableExists(db, 'user_role_assignments') &&
+        await tableExists(db, 'host_role_accounts') &&
+        await tableExists(db, 'organizer_role_accounts') &&
+        await tableExists(db, 'tournaments') &&
+        await columnExists(db, 'host_accounts', 'account_name') &&
+        await columnExists(db, 'host_account_invites', 'account_name')
+      )
+    },
+    async getSql(db) {
+      return buildRbacAdminPortalReconcileSql(db)
     },
   }
 ]
