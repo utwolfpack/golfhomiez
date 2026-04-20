@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { getSessionAuth, signInEmail, signOutAuth, signUpEmail } from '../lib/auth-api'
 import { fetchProfile } from '../lib/profile'
+import { fetchRbacSummary } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
 
 export type User = { id: string; email: string; name?: string | null }
@@ -10,11 +11,14 @@ type AuthState = {
   loading: boolean
   needsProfileEnrichment: boolean
   profileStatusLoading: boolean
+  roles: string[]
+  hasRole: (role: string) => boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   register: (firstName: string, lastName: string, email: string, password: string) => Promise<{ email: string }>
   refreshSession: () => Promise<void>
   refreshProfileStatus: () => Promise<void>
+  refreshRoles: () => Promise<void>
 }
 
 const Ctx = createContext<AuthState | null>(null)
@@ -28,6 +32,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [needsProfileEnrichment, setNeedsProfileEnrichment] = useState(false)
   const [profileStatusLoading, setProfileStatusLoading] = useState(false)
+  const [roles, setRoles] = useState<string[]>([])
+
+  async function refreshRoles(nextUser?: User | null) {
+    const activeUser = nextUser ?? user
+    if (!activeUser) {
+      setRoles([])
+      return
+    }
+
+    try {
+      const summary = await fetchRbacSummary()
+      const nextRoles = Array.isArray(summary.roles) ? summary.roles : []
+      setRoles(nextRoles)
+      logFrontendEvent({ category: 'auth.roles', message: 'roles_refreshed', data: { roles: nextRoles } })
+    } catch (error) {
+      setRoles([])
+      logFrontendEvent({ level: 'warn', category: 'auth.roles', message: 'roles_refresh_failed', data: { error: error instanceof Error ? error.message : String(error) } })
+    }
+  }
 
   async function refreshProfileStatus(nextUser?: User | null) {
     const activeUser = nextUser ?? user
@@ -55,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (result.error) {
       logFrontendEvent({ level: 'warn', category: 'auth.session', message: 'refresh_session_failed', data: { error: result.error.message || null } })
       setUser(null)
+      setRoles([])
       setNeedsProfileEnrichment(false)
       setProfileStatusLoading(false)
       return
@@ -62,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const nextUser = toUser(result.data)
     setUser(nextUser)
     logFrontendEvent({ category: 'auth.session', message: 'refresh_session_succeeded', data: { hasUser: Boolean(result.data?.user) } })
-    await refreshProfileStatus(nextUser)
+    await Promise.all([refreshProfileStatus(nextUser), refreshRoles(nextUser)])
   }
 
   useEffect(() => {
@@ -77,7 +101,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const nextUser = toUser(result.data)
         setUser(nextUser)
         logFrontendEvent({ category: 'auth.session', message: 'initial_session_checked', data: { hasUser: Boolean(result.data?.user) } })
-        if (nextUser) await refreshProfileStatus(nextUser)
+        if (nextUser) {
+          await Promise.all([refreshProfileStatus(nextUser), refreshRoles(nextUser)])
+        }
       } finally {
         if (active) setLoading(false)
       }
@@ -90,6 +116,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     needsProfileEnrichment,
     profileStatusLoading,
+    roles,
+    hasRole(role: string) {
+      return roles.includes(role)
+    },
     async login(email, password) {
       const result = await signInEmail(email, password)
       if (result.error) throw new Error(result.error.message || 'Login failed')
@@ -99,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const result = await signOutAuth()
       if (result.error) throw new Error(result.error.message || 'Logout failed')
       setUser(null)
+      setRoles([])
       setNeedsProfileEnrichment(false)
     },
     async register(firstName, lastName, email, password) {
@@ -111,12 +142,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logFrontendEvent({ level: 'warn', category: 'auth.register', message: 'post_signup_signout_failed', data: { email: normalizedEmail, error: signOutResult.error.message || null } })
       }
       setUser(null)
+      setRoles([])
       setNeedsProfileEnrichment(false)
       return { email: normalizedEmail }
     },
     refreshSession,
     refreshProfileStatus,
-  }), [user, loading, needsProfileEnrichment, profileStatusLoading])
+    refreshRoles,
+  }), [user, loading, needsProfileEnrichment, profileStatusLoading, roles])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

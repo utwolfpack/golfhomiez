@@ -160,9 +160,10 @@ async function sendWithBrevoApi({ from, to, subject, text, html }) {
 }
 
 
-async function sendWithSmtp({ to, subject, text, html }) {
+async function sendWithSmtp({ from: overrideFrom, to, subject, text, html }) {
   const config = getSmtpConfig()
-  const { host, port, secure, user, pass, from, clientName } = config
+  const { host, port, secure, user, pass, from: configFrom, clientName } = config
+  const from = overrideFrom || configFrom
 
   logSmtp('smtp_send_started', { provider: 'smtp', correlationId: getCorrelationId(), host, port, secure, from, to, subject, hasUser: Boolean(user), hasPass: Boolean(pass) })
 
@@ -217,9 +218,9 @@ async function sendWithSmtp({ to, subject, text, html }) {
   }
 }
 
-export async function sendMail({ to, subject, text, html }) {
+export async function sendMail({ to, subject, text, html, from: fromOverride }) {
   const smtpConfig = getSmtpConfig()
-  const from = smtpConfig.from || 'Golf Homiez <no-reply@example.local>'
+  const from = fromOverride || smtpConfig.from || 'Golf Homiez <no-reply@example.local>'
   const apiKey = getBrevoApiKey()
 
   if (apiKey) {
@@ -232,7 +233,7 @@ export async function sendMail({ to, subject, text, html }) {
   }
 
   try {
-    return await sendWithSmtp({ to, subject, text, html })
+    return await sendWithSmtp({ from, to, subject, text, html })
   } catch (error) {
     if (/535\s+5\.7\.8/i.test(String(error?.message || ''))) {
       throw new Error(
