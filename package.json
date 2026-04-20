@@ -9,13 +9,15 @@
     "dev:server": "node server/scripts/reset-session-logs.js && nodemon server/index.js",
     "start": "node server/scripts/reset-session-logs.js && node server/index.js",
     "prebuild": "node server/scripts/cleanup-logs.js",
-    "build": "vite build",
+    "build": "npm run build:app && npm run db:migrate",
     "postinstall": "npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "node --test test/app.test.js test/schema-rollback.test.js",
     "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js",
-    "db:rollback:chat": "node server/scripts/run-one-time-chat-schema-rollback.js"
+    "db:rollback:chat": "node server/scripts/run-one-time-chat-schema-rollback.js",
+    "db:migrate": "node server/run-migrations.js",
+    "build:app": "vite build"
   },
   "engines": {
     "node": ">=18"
