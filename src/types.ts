@@ -11,6 +11,10 @@ export type TeamScoreEntry = {
   money: number // + won, - lost
   won: true | false | null // null = tie
   holes: number[] | null
+  golfCourseId?: string | null
+  courseRating?: number | null
+  slopeRating?: number | null
+  coursePar?: number | null
   createdByUserId?: string
   createdByEmail?: string
   createdAt: string
@@ -24,6 +28,10 @@ export type SoloScoreEntry = {
   course: string
   roundScore: number
   holes: number[] | null
+  golfCourseId?: string | null
+  courseRating?: number | null
+  slopeRating?: number | null
+  coursePar?: number | null
   createdByUserId?: string
   createdByEmail?: string
   createdAt: string
@@ -47,4 +55,4 @@ export type Team = {
   members: TeamMember[]
   createdAt: string
   hasPendingMembers?: boolean
-} 
+}

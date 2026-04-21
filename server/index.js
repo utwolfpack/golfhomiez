@@ -13,6 +13,7 @@ import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
+import { findGolfCourseForState, listGolfCourseNamesByState } from './lib/course-catalog.js'
 import { sendMail } from './mailer.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, redeemHostInvite, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
@@ -87,6 +88,24 @@ app.get('/api/locations/search', (req, res) => {
   } catch (error) {
     logRouteError('Location search error', req, error)
     res.status(500).json({ message: 'Location suggestions are temporarily unavailable.' })
+  }
+})
+
+app.get('/api/golf-courses', (req, res) => {
+  try {
+    const state = String(req.query.state || '').trim().toUpperCase()
+    if (!state) return res.status(400).json({ message: 'state query parameter required' })
+
+    const courses = listGolfCourseNamesByState(state)
+    logApi('golf_courses_list_completed', {
+      ...requestContext(req),
+      state,
+      resultCount: courses.length,
+    })
+    return res.json(courses)
+  } catch (error) {
+    logRouteError('Golf course list error', req, error)
+    return res.status(500).json({ message: 'Golf course catalog is temporarily unavailable.' })
   }
 })
 
@@ -880,11 +899,14 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       if (typeof roundScore !== 'number' || Number.isNaN(roundScore)) return res.status(400).json({ message: 'roundScore must be a number' })
       if (roundScore < 0) return res.status(400).json({ message: 'roundScore must be zero or greater' })
 
+      const matchedCourse = findGolfCourseForState(state, course)
+      if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
+
       const entry = await storage.createScore({
         mode: 'solo',
         date,
         state: String(state).toUpperCase(),
-        course,
+        course: matchedCourse.name,
         roundScore,
         holes: Array.isArray(holes) ? holes : null,
         createdByUserId: req.user.id,
@@ -905,6 +927,9 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
     if (typeof opponentTotal !== 'number' || Number.isNaN(opponentTotal)) return res.status(400).json({ message: 'opponentTotal must be a number' })
     if (teamTotal < 0 || opponentTotal < 0) return res.status(400).json({ message: 'Scores must be zero or greater' })
 
+    const matchedCourse = findGolfCourseForState(state, course)
+    if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
+
     const myTeam = await findTeamByName(team)
     if (!myTeam) return res.status(400).json({ message: 'Your team must be a known team (create it first)' })
     if (!(await isUserOnTeam(team, req.user.email))) return res.status(403).json({ message: 'You are not a member of the selected team' })
@@ -920,7 +945,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       mode: 'team',
       date,
       state: String(state).toUpperCase(),
-      course,
+      course: matchedCourse.name,
       team,
       opponentTeam: String(opponentTeam).trim(),
       teamTotal,

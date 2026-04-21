@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { US_STATES } from '../data/usStates'
-import { getCoursesForState } from '../data/coursesByState'
 import { useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import UseMyLocationButton from '../components/UseMyLocationButton'
@@ -14,10 +13,6 @@ export default function SoloLogger() {
   const { user } = useAuth()
   const nav = useNavigate()
   const today = getUserTodayISO()
-
-  const statesWithCourses = useMemo(() => {
-    return US_STATES.filter(s => getCoursesForState(s.abbr).length > 0)
-  }, [])
 
   const [date, setDate] = useState(() => getUserTodayISO())
   const [state, setState] = useState('UT')
@@ -31,8 +26,28 @@ export default function SoloLogger() {
   const [locationMessage, setLocationMessage] = useState<string | null>(null)
   const [showValidation, setShowValidation] = useState(false)
 
-  const courses = useMemo(() => getCoursesForState(state), [state])
+  const [courses, setCourses] = useState<string[]>([])
   const holesTotal = useMemo(() => holes.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0), [holes])
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadCourses() {
+      try {
+        const names = await api<string[]>(`/api/golf-courses?state=${encodeURIComponent(state)}`)
+        if (cancelled) return
+        setCourses(names)
+        setCourse(prev => (prev && names.includes(prev) ? prev : (names[0] || '')))
+      } catch {
+        if (cancelled) return
+        setCourses([])
+        setCourse('')
+      }
+    }
+
+    loadCourses()
+    return () => { cancelled = true }
+  }, [state])
+
   const missingFields = useMemo(() => {
     const missing: string[] = []
     const scoreNum = Number(roundScore)
@@ -45,11 +60,6 @@ export default function SoloLogger() {
     return missing
   }, [date, today, state, course, roundScore])
 
-  useEffect(() => {
-    if (!course && courses.length) setCourse(courses[0])
-    if (course && courses.length && !courses.includes(course)) setCourse(courses[0] || '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, courses.join('|')])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -118,7 +128,7 @@ export default function SoloLogger() {
             <div>
               <label className="label">State</label>
               <select className="input" value={state} onChange={e => { setState(e.target.value); setCourse('') }}>
-                {statesWithCourses.map(s => (
+                {US_STATES.map(s => (
                   <option key={s.abbr} value={s.abbr}>{s.name}</option>
                 ))}
               </select>
@@ -126,15 +136,15 @@ export default function SoloLogger() {
 
             <div>
               <label className="label">Course</label>
-              <select className="input" value={course} onChange={e => setCourse(e.target.value)}>
+              <select className="input" value={course} onChange={e => setCourse(e.target.value)} disabled={!courses.length}>
+                {!courses.length ? <option value="">No courses available</option> : null}
                 {courses.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 <UseMyLocationButton
                   onResolved={(location) => {
                     setState(location.stateCode)
-                    const nextCourses = getCoursesForState(location.stateCode)
-                    setCourse(nextCourses[0] || '')
+                    setCourse('')
                     setLocationMessage(`Location set to ${location.label}.`)
                   }}
                   onStatus={setLocationMessage}
