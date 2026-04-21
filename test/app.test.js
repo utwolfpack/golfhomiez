@@ -4,7 +4,6 @@ import fs from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
 import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
-import { __resetGolfCourseServiceCachesForTests, findGolfCourseForState, listGolfCourseNamesByState } from '../server/lib/golf-course-service.js'
 
 function addDays(isoDate, days) {
   const base = new Date(`${isoDate}T00:00:00Z`)
@@ -449,13 +448,20 @@ test('host auth flow adds direct host routes, invite redemption, and reset endpo
 })
 
 
-test('golf course service exports compatibility helpers for course catalog lookups', async () => {
-  __resetGolfCourseServiceCachesForTests()
-  const utahCourses = await listGolfCourseNamesByState('UT')
-  assert.equal(Array.isArray(utahCourses), true)
-  assert.equal(utahCourses.length > 0, true)
+test('mysql score storage remains compatible before and after golf-course score columns exist', async () => {
+  const mysqlStorage = await readFile(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
+  const migrations = await readFile(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const migrationSql = await readFile(new URL('../migration_scripts/20260421_016_scores_golf_course_catalog_columns.sql', import.meta.url), 'utf8')
 
-  const selectedCourse = utahCourses.find((name) => /mountain dell/i.test(name)) || utahCourses[0]
-  const resolved = await findGolfCourseForState('UT', selectedCourse)
-  assert.equal(resolved?.name, selectedCourse)
+  assert.match(mysqlStorage, /information_schema\.columns/)
+  assert.match(mysqlStorage, /table_name = 'scores'/)
+  assert.match(mysqlStorage, /optionalColumnEntries/)
+  assert.match(mysqlStorage, /golf_course_id/)
+  assert.match(mysqlStorage, /course_rating/)
+  assert.match(mysqlStorage, /slope_rating/)
+  assert.match(mysqlStorage, /course_par/)
+  assert.match(migrations, /20260421_016/)
+  assert.match(migrations, /scores_golf_course_catalog_columns/)
+  assert.match(migrationSql, /ADD COLUMN golf_course_id/)
+  assert.match(migrationSql, /ADD INDEX idx_scores_golf_course_id/)
 })

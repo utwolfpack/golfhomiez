@@ -156,60 +156,6 @@ export const APP_MIGRATIONS = [
     },
   },
   {
-    version: '20260421_016',
-    name: 'golf_course_catalog',
-    filename: '20260421_016_golf_course_catalog.sql',
-    async isSatisfied(db) {
-      return (
-        await tableExists(db, 'golf_courses') &&
-        await columnExists(db, 'golf_courses', 'state_code') &&
-        await columnExists(db, 'golf_courses', 'hole_pars_json') &&
-        await indexExists(db, 'golf_courses', 'idx_golf_courses_state_code_name') &&
-        await columnExists(db, 'scores', 'state')
-      )
-    },
-    async getSql(db) {
-      if (!(await tableExists(db, 'golf_courses'))) {
-        return loadMigrationSql('20260421_016_golf_course_catalog.sql')
-      }
-
-      const statements = []
-      const push = (sql) => {
-        if (sql) statements.push(sql)
-      }
-
-      if (!(await columnExists(db, 'golf_courses', 'normalized_name'))) push('ALTER TABLE golf_courses ADD COLUMN normalized_name VARCHAR(191) NOT NULL DEFAULT "" AFTER name')
-      if (!(await columnExists(db, 'golf_courses', 'country'))) push('ALTER TABLE golf_courses ADD COLUMN country VARCHAR(16) NULL AFTER normalized_name')
-      if (!(await columnExists(db, 'golf_courses', 'state'))) push('ALTER TABLE golf_courses ADD COLUMN state VARCHAR(64) NOT NULL DEFAULT "" AFTER country')
-      else push('ALTER TABLE golf_courses MODIFY COLUMN state VARCHAR(64) NOT NULL')
-      if (!(await columnExists(db, 'golf_courses', 'state_code'))) push('ALTER TABLE golf_courses ADD COLUMN state_code VARCHAR(8) NOT NULL DEFAULT "" AFTER state')
-      if (!(await columnExists(db, 'golf_courses', 'city'))) push('ALTER TABLE golf_courses ADD COLUMN city VARCHAR(191) NULL AFTER state_code')
-      if (!(await columnExists(db, 'golf_courses', 'course_type'))) push('ALTER TABLE golf_courses ADD COLUMN course_type VARCHAR(64) NULL AFTER city')
-      if (!(await columnExists(db, 'golf_courses', 'holes_count'))) push('ALTER TABLE golf_courses ADD COLUMN holes_count INT NULL AFTER course_type')
-      if (!(await columnExists(db, 'golf_courses', 'par_total'))) push('ALTER TABLE golf_courses ADD COLUMN par_total INT NULL AFTER holes_count')
-      if (!(await columnExists(db, 'golf_courses', 'latitude'))) push('ALTER TABLE golf_courses ADD COLUMN latitude DECIMAL(10,7) NULL AFTER par_total')
-      if (!(await columnExists(db, 'golf_courses', 'longitude'))) push('ALTER TABLE golf_courses ADD COLUMN longitude DECIMAL(10,7) NULL AFTER latitude')
-      if (!(await columnExists(db, 'golf_courses', 'phone'))) push('ALTER TABLE golf_courses ADD COLUMN phone VARCHAR(64) NULL AFTER longitude')
-      if (!(await columnExists(db, 'golf_courses', 'website'))) push('ALTER TABLE golf_courses ADD COLUMN website VARCHAR(255) NULL AFTER phone')
-      if (!(await columnExists(db, 'golf_courses', 'year_built'))) push('ALTER TABLE golf_courses ADD COLUMN year_built INT NULL AFTER website')
-      if (!(await columnExists(db, 'golf_courses', 'address'))) push('ALTER TABLE golf_courses ADD COLUMN address VARCHAR(255) NULL AFTER year_built')
-      if (!(await columnExists(db, 'golf_courses', 'postal_code'))) push('ALTER TABLE golf_courses ADD COLUMN postal_code VARCHAR(32) NULL AFTER address')
-      if (!(await columnExists(db, 'golf_courses', 'architect'))) push('ALTER TABLE golf_courses ADD COLUMN architect VARCHAR(255) NULL AFTER postal_code')
-      if (!(await columnExists(db, 'golf_courses', 'total_yardage'))) push('ALTER TABLE golf_courses ADD COLUMN total_yardage INT NULL AFTER architect')
-      if (!(await columnExists(db, 'golf_courses', 'osm_id'))) push('ALTER TABLE golf_courses ADD COLUMN osm_id VARCHAR(64) NULL AFTER total_yardage')
-      if (!(await columnExists(db, 'golf_courses', 'source_updated_at'))) push('ALTER TABLE golf_courses ADD COLUMN source_updated_at VARCHAR(64) NULL AFTER osm_id')
-      if (!(await columnExists(db, 'golf_courses', 'hole_pars_json'))) push('ALTER TABLE golf_courses ADD COLUMN hole_pars_json JSON NULL AFTER source_updated_at')
-      if (!(await columnExists(db, 'golf_courses', 'hole_handicaps_json'))) push('ALTER TABLE golf_courses ADD COLUMN hole_handicaps_json JSON NULL AFTER hole_pars_json')
-      if (!(await columnExists(db, 'golf_courses', 'created_at'))) push('ALTER TABLE golf_courses ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP')
-      if (!(await columnExists(db, 'golf_courses', 'updated_at'))) push('ALTER TABLE golf_courses ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')
-      if (!(await indexExists(db, 'golf_courses', 'idx_golf_courses_state_code_name'))) push('ALTER TABLE golf_courses ADD INDEX idx_golf_courses_state_code_name (state_code, name)')
-      if (!(await indexExists(db, 'golf_courses', 'idx_golf_courses_normalized_name'))) push('ALTER TABLE golf_courses ADD INDEX idx_golf_courses_normalized_name (state_code, normalized_name)')
-      if (await columnExists(db, 'scores', 'state')) push('ALTER TABLE scores MODIFY COLUMN state VARCHAR(64) NOT NULL')
-
-      return statements.join(';\n')
-    },
-  },
-  {
     version: '20260420_015',
     name: 'admin_rbac_portal_compat',
     filename: '20260420_015_admin_rbac_portal_compat.sql',
@@ -631,6 +577,39 @@ ON DUPLICATE KEY UPDATE
   description = VALUES(description),
   updated_at = CURRENT_TIMESTAMP`)
 
+      return statements.join(';\n')
+    },
+  },
+  {
+    version: '20260421_016',
+    name: 'scores_golf_course_catalog_columns',
+    filename: '20260421_016_scores_golf_course_catalog_columns.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'scores', 'golf_course_id') &&
+        await columnExists(db, 'scores', 'course_rating') &&
+        await columnExists(db, 'scores', 'slope_rating') &&
+        await columnExists(db, 'scores', 'course_par') &&
+        await indexExists(db, 'scores', 'idx_scores_golf_course_id')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'scores', 'golf_course_id'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN golf_course_id VARCHAR(191) NULL AFTER course')
+      }
+      if (!(await columnExists(db, 'scores', 'course_rating'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN course_rating DECIMAL(4,1) NULL AFTER golf_course_id')
+      }
+      if (!(await columnExists(db, 'scores', 'slope_rating'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN slope_rating INT NULL AFTER course_rating')
+      }
+      if (!(await columnExists(db, 'scores', 'course_par'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN course_par INT NULL AFTER slope_rating')
+      }
+      if (!(await indexExists(db, 'scores', 'idx_scores_golf_course_id'))) {
+        statements.push('ALTER TABLE scores ADD INDEX idx_scores_golf_course_id (golf_course_id)')
+      }
       return statements.join(';\n')
     },
   },
