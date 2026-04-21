@@ -13,7 +13,7 @@ import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
-import { findGolfCourseForState, listGolfCourseNamesByState } from './lib/course-catalog.js'
+import { findGolfCourseForState, listGolfCourseNamesByState } from './lib/golf-course-service.js'
 import { sendMail } from './mailer.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, redeemHostInvite, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
@@ -91,12 +91,12 @@ app.get('/api/locations/search', (req, res) => {
   }
 })
 
-app.get('/api/golf-courses', (req, res) => {
+app.get('/api/golf-courses', async (req, res) => {
   try {
     const state = String(req.query.state || '').trim().toUpperCase()
     if (!state) return res.status(400).json({ message: 'state query parameter required' })
 
-    const courses = listGolfCourseNamesByState(state)
+    const courses = await listGolfCourseNamesByState(state)
     logApi('golf_courses_list_completed', {
       ...requestContext(req),
       state,
@@ -899,7 +899,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       if (typeof roundScore !== 'number' || Number.isNaN(roundScore)) return res.status(400).json({ message: 'roundScore must be a number' })
       if (roundScore < 0) return res.status(400).json({ message: 'roundScore must be zero or greater' })
 
-      const matchedCourse = findGolfCourseForState(state, course)
+      const matchedCourse = await findGolfCourseForState(state, course)
       if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
       const entry = await storage.createScore({
@@ -927,7 +927,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
     if (typeof opponentTotal !== 'number' || Number.isNaN(opponentTotal)) return res.status(400).json({ message: 'opponentTotal must be a number' })
     if (teamTotal < 0 || opponentTotal < 0) return res.status(400).json({ message: 'Scores must be zero or greater' })
 
-    const matchedCourse = findGolfCourseForState(state, course)
+    const matchedCourse = await findGolfCourseForState(state, course)
     if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
     const myTeam = await findTeamByName(team)

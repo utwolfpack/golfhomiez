@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
 import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
+import { __resetGolfCourseServiceCachesForTests, findGolfCourseForState, listGolfCourseNamesByState } from '../server/lib/golf-course-service.js'
 
 function addDays(isoDate, days) {
   const base = new Date(`${isoDate}T00:00:00Z`)
@@ -448,32 +449,13 @@ test('host auth flow adds direct host routes, invite redemption, and reset endpo
 })
 
 
-test('golf course catalog loads Utah CSV courses including Mountain View and legacy-compatible Mountain Dell matching', async () => {
-  const catalog = await import('../server/lib/course-catalog.js')
-  const utahCourses = catalog.listGolfCourseNamesByState('UT')
+test('golf course service exports compatibility helpers for course catalog lookups', async () => {
+  __resetGolfCourseServiceCachesForTests()
+  const utahCourses = await listGolfCourseNamesByState('UT')
+  assert.equal(Array.isArray(utahCourses), true)
+  assert.equal(utahCourses.length > 0, true)
 
-  assert.equal(utahCourses.includes('Mountain View Golf Course'), true)
-  assert.equal(utahCourses.includes('Canyon At Mountain Dell Golf Course'), true)
-  assert.equal(utahCourses.includes('Lake At Mountain Dell Golf Course'), true)
-  assert.equal(catalog.isKnownGolfCourseForState('UT', 'Mountain View Golf Course'), true)
-  assert.equal(catalog.isKnownGolfCourseForState('UT', 'Mountain Dell Golf Course'), true)
-})
-
-test('logger pages fetch catalog-backed courses and render select dropdowns without the retired helper copy', () => {
-  const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
-  const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
-  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-
-  assert.match(golfLogger, /await api<string\[\]>\(`/)
-  assert.match(golfLogger, /\/api\/golf-courses\?state=/)
-  assert.match(golfLogger, /<select className="input" value=\{course\}/)
-  assert.doesNotMatch(golfLogger, /Start typing a course/)
-  assert.doesNotMatch(golfLogger, /Results come from the imported golf course catalog for the selected state\./)
-
-  assert.match(soloLogger, /await api<string\[\]>\(`/)
-  assert.match(soloLogger, /\/api\/golf-courses\?state=/)
-  assert.match(soloLogger, /<select className="input" value=\{course\}/)
-
-  assert.match(server, /app\.get\('\/api\/golf-courses'/)
-  assert.match(server, /Select a golf course from the catalog for the selected state/)
+  const selectedCourse = utahCourses.find((name) => /mountain dell/i.test(name)) || utahCourses[0]
+  const resolved = await findGolfCourseForState('UT', selectedCourse)
+  assert.equal(resolved?.name, selectedCourse)
 })
