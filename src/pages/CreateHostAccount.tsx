@@ -1,6 +1,7 @@
 import { FormEvent, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import PageHero from '../components/PageHero'
+import GolfCourseInput from '../components/GolfCourseInput'
 import { useHostAuth } from '../context/HostAuthContext'
 
 export default function CreateHostAccount() {
@@ -46,10 +47,14 @@ export default function CreateHostAccount() {
             <label className="label">Invited email</label>
             <input className="input" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="course@example.com" />
           </div>
-          <div>
-            <label className="label">Golf-course account name</label>
-            <input className="input" value={golfCourseName} onChange={e => setGolfCourseName(e.target.value)} placeholder="Murray Parkway" />
-          </div>
+          <GolfCourseInput
+            label="Golf-course account name"
+            value={golfCourseName}
+            onChange={setGolfCourseName}
+            datalistId="host-account-course-options"
+            helperText="Search the imported golf course catalog and pick the course tied to this host account."
+            placeholder="Start typing the golf course name…"
+          />
           <div>
             <label className="label">Security key</label>
             <input className="input" value={securityKey} onChange={e => setSecurityKey(e.target.value)} placeholder="Enter the security key from your invite" />

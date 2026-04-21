@@ -3,7 +3,6 @@ import { api } from '../lib/api'
 import ProtectedRoute from '../components/ProtectedRoute'
 import type { ScoreEntry, TeamMember } from '../types'
 import { US_STATES } from '../data/usStates'
-import { getCoursesForState } from '../data/coursesByState'
 import { createTeam, fetchTeams, lookupUserByEmail, sendHomieInvite } from '../lib/teams'
 import { getUserTodayISO } from '../lib/date'
 import { useAuth } from '../context/AuthContext'
@@ -104,8 +103,28 @@ function GolfLoggerInner() {
     })
   }, [leadMember])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadCourses() {
+      try {
+        const names = await api<string[]>(`/api/golf-courses?state=${encodeURIComponent(stateAbbr)}`)
+        if (cancelled) return
+        setCourseOptions(names)
+        setCourse(prev => (prev && names.includes(prev) ? prev : (names[0] || '')))
+      } catch {
+        if (cancelled) return
+        setCourseOptions([])
+        setCourse('')
+      }
+    }
+
+    loadCourses()
+    return () => { cancelled = true }
+  }, [stateAbbr])
+
   const holesTotal = useMemo(() => holes.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0), [holes])
-  const courseOptions = useMemo(() => getCoursesForState(stateAbbr), [stateAbbr])
+  const [courseOptions, setCourseOptions] = useState<string[]>([])
 
   const totals = useMemo(() => {
     const your = Number(teamTotal)
@@ -324,18 +343,17 @@ function GolfLoggerInner() {
           </div>
           <div>
             <label className="label">Course</label>
-            <input className="input" list="courseOptionsByState" value={course} onChange={e => setCourse(e.target.value)} placeholder="Start typing a course…" />
-            <datalist id="courseOptionsByState">
+            <select className="input" value={course} onChange={e => setCourse(e.target.value)} disabled={!courseOptions.length}>
+              {!courseOptions.length ? <option value="">No courses available</option> : null}
               {courseOptions.map((c) => (
-                <option key={c} value={c} />
+                <option key={c} value={c}>{c}</option>
               ))}
-            </datalist>
+            </select>
             <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
               <UseMyLocationButton
                 onResolved={(location) => {
                   setStateAbbr(location.stateCode)
-                  const nextCourses = getCoursesForState(location.stateCode)
-                  setCourse(nextCourses[0] || '')
+                  setCourse('')
                   setLocationMessage(`Location set to ${location.label}.`)
                 }}
                 onStatus={setLocationMessage}

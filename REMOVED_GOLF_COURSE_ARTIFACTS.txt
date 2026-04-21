@@ -1,0 +1,4 @@
+server/course-data.js
+src/data/coursesByState.ts
+src/data/courseDetails.ts
+src/data/utahCourses.ts

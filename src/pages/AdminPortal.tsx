@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PageHero from '../components/PageHero'
+import GolfCourseInput from '../components/GolfCourseInput'
 import {
   adminLogin,
   adminLogout,
@@ -285,10 +286,13 @@ export default function AdminPortal() {
                 <label className="label">Invitee name</label>
                 <input className="input" value={inviteForm.inviteeName} onChange={(e) => setInviteForm((s) => ({ ...s, inviteeName: e.target.value }))} />
               </div>
-              <div>
-                <label className="label">Golf course name</label>
-                <input className="input" value={inviteForm.golfCourseName} onChange={(e) => setInviteForm((s) => ({ ...s, golfCourseName: e.target.value }))} />
-              </div>
+              <GolfCourseInput
+                label="Golf course name"
+                value={inviteForm.golfCourseName}
+                onChange={(next) => setInviteForm((s) => ({ ...s, golfCourseName: next }))}
+                datalistId="admin-host-invite-course-options"
+                helperText="Search the imported golf course catalog before creating the invite."
+              />
               <button className="btnPrimary" type="submit">Send host invite</button>
             </form>
           </FormCard>
