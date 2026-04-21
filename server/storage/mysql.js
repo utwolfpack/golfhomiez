@@ -1,7 +1,32 @@
 import { v4 as uuidv4 } from 'uuid'
 import { initDb, getPool } from '../db.js'
 import { logError, logInfo } from '../lib/logger.js'
-import { getGolfCourseByName } from '../lib/golf-course-service.js'
+
+let scoreTableColumnsPromise = null
+
+
+
+async function getScoreTableColumns() {
+  if (!scoreTableColumnsPromise) {
+    const db = getPool()
+    scoreTableColumnsPromise = db.execute(
+      `SELECT column_name
+         FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'scores'`,
+    ).then(([rows]) => new Set(rows.map((row) => row.column_name)))
+      .catch((error) => {
+        scoreTableColumnsPromise = null
+        throw error
+      })
+  }
+
+  return scoreTableColumnsPromise
+}
+
+function hasColumn(row, columnName) {
+  return Object.prototype.hasOwnProperty.call(row || {}, columnName)
+}
 
 function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase()
@@ -57,13 +82,13 @@ function mapScore(row) {
     money: row.money == null ? null : Number(row.money),
     won: row.won == null ? null : Boolean(row.won),
     holes: row.holes_json ? (typeof row.holes_json === 'string' ? JSON.parse(row.holes_json) : row.holes_json) : null,
-    golfCourseId: row.golf_course_id || null,
-    courseRating: row.course_rating == null ? null : Number(row.course_rating),
-    slopeRating: row.slope_rating == null ? null : Number(row.slope_rating),
-    coursePar: row.course_par == null ? null : Number(row.course_par),
     createdByUserId: row.created_by_user_id,
     createdByEmail: row.created_by_email,
     createdAt: toIso(row.created_at),
+    golfCourseId: hasColumn(row, 'golf_course_id') ? row.golf_course_id : null,
+    courseRating: hasColumn(row, 'course_rating') ? (row.course_rating == null ? null : Number(row.course_rating)) : null,
+    slopeRating: hasColumn(row, 'slope_rating') ? (row.slope_rating == null ? null : Number(row.slope_rating)) : null,
+    coursePar: hasColumn(row, 'course_par') ? (row.course_par == null ? null : Number(row.course_par)) : null,
   }
 }
 
@@ -207,50 +232,88 @@ export async function getScoreById(id) {
 
 export async function createScore(entry) {
   const db = getPool()
-  const resolvedCourse = await getGolfCourseByName({ state: entry.state, name: entry.course })
   const score = {
     id: uuidv4(),
     ...entry,
-    golfCourseId: resolvedCourse?.id || null,
-    courseRating: entry.courseRating ?? null,
-    slopeRating: entry.slopeRating ?? null,
-    coursePar: entry.coursePar ?? resolvedCourse?.parTotal ?? null,
     createdAt: new Date().toISOString(),
   }
+
+  const columns = [
+    'id',
+    'mode',
+    'date',
+    'state',
+    'course',
+    'team',
+    'opponent_team',
+    'team_total',
+    'opponent_total',
+    'round_score',
+    'money',
+    'won',
+    'holes_json',
+    'created_by_user_id',
+    'created_by_email',
+    'created_at',
+  ]
+  const values = [
+    score.id,
+    score.mode,
+    score.date,
+    score.state,
+    score.course,
+    score.team ?? null,
+    score.opponentTeam ?? null,
+    score.teamTotal ?? null,
+    score.opponentTotal ?? null,
+    score.roundScore ?? null,
+    score.money ?? null,
+    score.won === true ? 1 : score.won === false ? 0 : null,
+    score.holes ? JSON.stringify(score.holes) : null,
+    score.createdByUserId,
+    score.createdByEmail,
+    new Date(),
+  ]
+
   try {
+    const scoreColumns = await getScoreTableColumns()
+
+    const optionalColumnEntries = [
+      ['golf_course_id', score.golfCourseId ?? null],
+      ['course_rating', score.courseRating ?? null],
+      ['slope_rating', score.slopeRating ?? null],
+      ['course_par', score.coursePar ?? null],
+    ]
+
+    for (const [columnName, value] of optionalColumnEntries) {
+      if (scoreColumns.has(columnName)) {
+        columns.push(columnName)
+        values.push(value)
+      }
+    }
+
+    const placeholders = columns.map(() => '?').join(', ')
     await db.execute(
-      `INSERT INTO scores (
-        id, mode, date, state, course, team, opponent_team,
-        team_total, opponent_total, round_score, money, won,
-        holes_json, golf_course_id, course_rating, slope_rating, course_par,
-        created_by_user_id, created_by_email, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        score.id,
-        score.mode,
-        score.date,
-        score.state,
-        score.course,
-        score.team ?? null,
-        score.opponentTeam ?? null,
-        score.teamTotal ?? null,
-        score.opponentTotal ?? null,
-        score.roundScore ?? null,
-        score.money ?? null,
-        score.won === true ? 1 : score.won === false ? 0 : null,
-        score.holes ? JSON.stringify(score.holes) : null,
-        score.golfCourseId,
-        score.courseRating ?? null,
-        score.slopeRating ?? null,
-        score.coursePar ?? null,
-        score.createdByUserId,
-        score.createdByEmail,
-      ],
+      `INSERT INTO scores (${columns.join(', ')}) VALUES (${placeholders})`,
+      values,
     )
-    logInfo('Created score', { scoreId: score.id, mode: score.mode, golfCourseId: score.golfCourseId, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
+    logInfo('Created score', {
+      scoreId: score.id,
+      mode: score.mode,
+      golfCourseId: score.golfCourseId ?? null,
+      createdByUserId: score.createdByUserId,
+      createdByEmail: score.createdByEmail,
+    })
     return score
   } catch (error) {
-    logError('Failed to create score in MySQL storage', { error, scoreId: score.id, mode: score.mode, golfCourseId: score.golfCourseId, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
+    logError('Failed to create score in MySQL storage', {
+      error,
+      scoreId: score.id,
+      mode: score.mode,
+      golfCourseId: score.golfCourseId ?? null,
+      createdByUserId: score.createdByUserId,
+      createdByEmail: score.createdByEmail,
+    })
     throw error
   }
 }
