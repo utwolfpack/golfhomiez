@@ -1,4 +1,4 @@
-import { createCorrelationId, logFrontendEvent } from './frontend-logger'
+import { getCorrelationId, logFrontendEvent } from './frontend-logger'
 
 export type ResolvedLocation = {
   city?: string
@@ -13,7 +13,7 @@ export type ResolvedLocation = {
 }
 
 async function fetchJson<T>(url: string, action: string): Promise<T> {
-  const correlationId = createCorrelationId()
+  const correlationId = getCorrelationId()
   const startedAt = Date.now()
 
   logFrontendEvent({

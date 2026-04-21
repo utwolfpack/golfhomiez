@@ -1,4 +1,4 @@
-import { createCorrelationId, getRoutePath, sendFrontendLog } from './frontend-logger'
+import { getCorrelationId, getRoutePath, sendFrontendLog } from './frontend-logger'
 
 function getUserTimeZoneHeader() {
   try {
@@ -23,7 +23,7 @@ export async function requestJson<T>(url: string, opts: RequestInit = {}): Promi
   const timeZone = getUserTimeZoneHeader()
   if (timeZone && !headers.has('X-User-Timezone')) headers.set('X-User-Timezone', timeZone)
 
-  const correlationId = headers.get('X-Correlation-Id') || createCorrelationId()
+  const correlationId = headers.get('X-Correlation-Id') || getCorrelationId()
   headers.set('X-Correlation-Id', correlationId)
 
   const shouldLog = !shouldSkipAutomaticLogging(url, headers)

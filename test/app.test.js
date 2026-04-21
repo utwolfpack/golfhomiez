@@ -446,3 +446,34 @@ test('host auth flow adds direct host routes, invite redemption, and reset endpo
   assert.match(hostLogin, /Forgot host password\?/) 
   assert.match(hostReset, /Finish your golf-course password reset/)
 })
+
+
+test('golf course catalog loads Utah CSV courses including Mountain View and legacy-compatible Mountain Dell matching', async () => {
+  const catalog = await import('../server/lib/course-catalog.js')
+  const utahCourses = catalog.listGolfCourseNamesByState('UT')
+
+  assert.equal(utahCourses.includes('Mountain View Golf Course'), true)
+  assert.equal(utahCourses.includes('Canyon At Mountain Dell Golf Course'), true)
+  assert.equal(utahCourses.includes('Lake At Mountain Dell Golf Course'), true)
+  assert.equal(catalog.isKnownGolfCourseForState('UT', 'Mountain View Golf Course'), true)
+  assert.equal(catalog.isKnownGolfCourseForState('UT', 'Mountain Dell Golf Course'), true)
+})
+
+test('logger pages fetch catalog-backed courses and render select dropdowns without the retired helper copy', () => {
+  const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
+  const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(golfLogger, /await api<string\[\]>\(`/)
+  assert.match(golfLogger, /\/api\/golf-courses\?state=/)
+  assert.match(golfLogger, /<select className="input" value=\{course\}/)
+  assert.doesNotMatch(golfLogger, /Start typing a course/)
+  assert.doesNotMatch(golfLogger, /Results come from the imported golf course catalog for the selected state\./)
+
+  assert.match(soloLogger, /await api<string\[\]>\(`/)
+  assert.match(soloLogger, /\/api\/golf-courses\?state=/)
+  assert.match(soloLogger, /<select className="input" value=\{course\}/)
+
+  assert.match(server, /app\.get\('\/api\/golf-courses'/)
+  assert.match(server, /Select a golf course from the catalog for the selected state/)
+})

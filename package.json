@@ -16,7 +16,8 @@
     "test": "node --test test/app.test.js test/schema-rollback.test.js",
     "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js",
     "db:rollback:chat": "node server/scripts/run-one-time-chat-schema-rollback.js",
-    "db:migrate": "node server/run-migrations.js"
+    "db:migrate": "node server/run-migrations.js",
+    "golf-courses:import": "node server/scripts/import-golf-courses.js"
   },
   "engines": {
     "node": ">=18"
