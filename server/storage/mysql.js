@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { initDb, getPool } from '../db.js'
 import { logError, logInfo } from '../lib/logger.js'
+import { getGolfCourseByName } from '../lib/golf-course-service.js'
 
 function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase()
@@ -56,6 +57,10 @@ function mapScore(row) {
     money: row.money == null ? null : Number(row.money),
     won: row.won == null ? null : Boolean(row.won),
     holes: row.holes_json ? (typeof row.holes_json === 'string' ? JSON.parse(row.holes_json) : row.holes_json) : null,
+    golfCourseId: row.golf_course_id || null,
+    courseRating: row.course_rating == null ? null : Number(row.course_rating),
+    slopeRating: row.slope_rating == null ? null : Number(row.slope_rating),
+    coursePar: row.course_par == null ? null : Number(row.course_par),
     createdByUserId: row.created_by_user_id,
     createdByEmail: row.created_by_email,
     createdAt: toIso(row.created_at),
@@ -202,9 +207,14 @@ export async function getScoreById(id) {
 
 export async function createScore(entry) {
   const db = getPool()
+  const resolvedCourse = await getGolfCourseByName({ state: entry.state, name: entry.course })
   const score = {
     id: uuidv4(),
     ...entry,
+    golfCourseId: resolvedCourse?.id || null,
+    courseRating: entry.courseRating ?? null,
+    slopeRating: entry.slopeRating ?? null,
+    coursePar: entry.coursePar ?? resolvedCourse?.parTotal ?? null,
     createdAt: new Date().toISOString(),
   }
   try {
@@ -212,8 +222,9 @@ export async function createScore(entry) {
       `INSERT INTO scores (
         id, mode, date, state, course, team, opponent_team,
         team_total, opponent_total, round_score, money, won,
-        holes_json, created_by_user_id, created_by_email, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        holes_json, golf_course_id, course_rating, slope_rating, course_par,
+        created_by_user_id, created_by_email, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         score.id,
         score.mode,
@@ -228,14 +239,18 @@ export async function createScore(entry) {
         score.money ?? null,
         score.won === true ? 1 : score.won === false ? 0 : null,
         score.holes ? JSON.stringify(score.holes) : null,
+        score.golfCourseId,
+        score.courseRating ?? null,
+        score.slopeRating ?? null,
+        score.coursePar ?? null,
         score.createdByUserId,
         score.createdByEmail,
       ],
     )
-    logInfo('Created score', { scoreId: score.id, mode: score.mode, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
+    logInfo('Created score', { scoreId: score.id, mode: score.mode, golfCourseId: score.golfCourseId, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
     return score
   } catch (error) {
-    logError('Failed to create score in MySQL storage', { error, scoreId: score.id, mode: score.mode, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
+    logError('Failed to create score in MySQL storage', { error, scoreId: score.id, mode: score.mode, golfCourseId: score.golfCourseId, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
     throw error
   }
 }

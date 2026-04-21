@@ -1,4 +1,3 @@
-import { calculateHandicapDifferential, calculateHandicapIndex, getCourseDetails } from '../data/courseDetails'
 import type { ScoreEntry, SoloScoreEntry } from '../types'
 
 type HandicapRound = {
@@ -23,6 +22,22 @@ export type HandicapStats = {
   consideredRounds: HandicapRound[]
 }
 
+function calculateHandicapDifferential(score: number, courseRating: number, slopeRating: number) {
+  if (!Number.isFinite(score) || !Number.isFinite(courseRating) || !Number.isFinite(slopeRating) || slopeRating <= 0) return null
+  return Math.round((((score - courseRating) * 113) / slopeRating) * 10) / 10
+}
+
+function calculateHandicapIndex(differentials: number[]) {
+  const valid = differentials.filter((value) => Number.isFinite(value)).sort((a, b) => a - b)
+  if (!valid.length) return null
+  const count = Math.min(valid.length, 20)
+  const recent = valid.slice(0, count)
+  const usedCount = count >= 20 ? 8 : count >= 16 ? 6 : count >= 12 ? 4 : count >= 8 ? 2 : 1
+  const used = recent.slice(0, usedCount)
+  const average = used.reduce((sum, value) => sum + value, 0) / used.length
+  return Math.round(average * 10) / 10
+}
+
 function isLegacySoloShape(score: any) {
   return score && (score.mode === 'solo' || (score.roundScore != null && score.teamTotal == null && score.opponentTotal == null))
 }
@@ -39,9 +54,7 @@ function resolveRoundRating(score: any) {
     return { courseRating: explicitCourseRating, slopeRating: explicitSlopeRating }
   }
 
-  const details = getCourseDetails(String(score?.state || ''), String(score?.course || ''))
-  if (!details) return null
-  return { courseRating: details.courseRating, slopeRating: details.slopeRating }
+  return null
 }
 
 function sortNewestFirst(scores: any[]) {
