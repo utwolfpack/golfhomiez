@@ -1,18 +1,20 @@
 import 'dotenv/config'
-import { initDb, closeDb } from '../db.js'
+import { closeDb } from '../db.js'
 import { importGolfCoursesFromCsv } from '../lib/golf-course-service.js'
+import { logError, logInfo } from '../lib/logger.js'
 
 async function main() {
-  await initDb()
-  const result = await importGolfCoursesFromCsv()
-  console.log(`Imported ${result.imported} golf courses from ${result.filePath}`)
+  try {
+    const result = await importGolfCoursesFromCsv()
+    logInfo('Golf courses import completed', result)
+    console.log(`Imported ${result.imported} golf courses.`)
+  } catch (error) {
+    logError('Golf courses import failed', { error })
+    console.error('Golf courses import failed:', error)
+    process.exitCode = 1
+  } finally {
+    await closeDb()
+  }
 }
 
 main()
-  .catch((error) => {
-    console.error('Golf courses import failed:', error)
-    process.exitCode = 1
-  })
-  .finally(async () => {
-    await closeDb().catch(() => {})
-  })
