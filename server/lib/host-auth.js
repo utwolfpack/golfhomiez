@@ -468,7 +468,11 @@ export async function hostAuthMiddleware(req, res, next) {
 
 export async function createHostPasswordReset(source, identifier) {
   const db = getDb(source)
-  const host = await getHostAccountByEmail(db, String(identifier || '').trim().toLowerCase())
+  const normalizedIdentifier = typeof identifier === 'string'
+    ? String(identifier || '').trim().toLowerCase()
+    : String(identifier?.email || identifier?.identifier || '').trim().toLowerCase()
+  const resetUrlBase = typeof identifier === 'object' && identifier ? String(identifier.resetUrlBase || '').trim() : ''
+  const host = await getHostAccountByEmail(db, normalizedIdentifier)
   if (!host) return { ok: true }
   const token = randomId(32)
   const tokenHash = sha256(token)
@@ -490,7 +494,7 @@ export async function createHostPasswordReset(source, identifier) {
     throw new Error(`host_password_reset_tokens missing values for required columns: ${missingRequired.join(', ')}`)
   }
   await db.execute(`INSERT INTO host_password_reset_tokens (${columns.join(', ')}) VALUES (${values.join(', ')})`, params)
-  const appOrigin = process.env.APP_ORIGIN || process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+  const appOrigin = resetUrlBase || process.env.APP_ORIGIN || process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
   const resetUrl = `${appOrigin.replace(/\/$/, '')}/host/reset-password?token=${encodeURIComponent(token)}`
   await sendMail({
     to: host.reset_email || host.email,

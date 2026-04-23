@@ -66,3 +66,13 @@ test('team member primary key scope migration is satisfied once the composite ke
   const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260409_009')
   assert.equal(await migration.isSatisfied(makeDb([], false, ['team_id', 'id'], ['idx_team_members_member_id'])), true)
 })
+
+test('host account request migration is registered for production deployments', async () => {
+  const migrations = await readFile(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const sql = await readFile(new URL('../migration_scripts/20260422_017_host_account_requests.sql', import.meta.url), 'utf8')
+
+  assert.match(migrations, /20260422_017/)
+  assert.match(migrations, /host_account_requests/)
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS host_account_requests/)
+  assert.match(sql, /idx_host_account_requests_status_created/)
+})

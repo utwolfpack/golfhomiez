@@ -17,7 +17,7 @@ import { findGolfCourseForState, listGolfCourseNamesByState } from './lib/golf-c
 import { sendMail } from './mailer.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, redeemHostInvite, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
-import { authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, createAdminUser, createHostInvite, consumeAdminResetToken, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
+import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, createAdminUser, createHostAccountRequest, createHostInvite, consumeAdminResetToken, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -36,6 +36,29 @@ const allowedOrigins = new Set([
   'http://127.0.0.1:5001',
   'http://localhost:5001',
 ].filter(Boolean))
+
+function getHostAppBaseUrl(req) {
+  const explicit =
+    process.env.APP_BASE_URL ||
+    process.env.PUBLIC_APP_URL ||
+    process.env.PUBLIC_WEB_URL ||
+    process.env.FRONTEND_URL ||
+    process.env.CLIENT_URL ||
+    process.env.CLIENT_ORIGIN ||
+    process.env.VITE_APP_URL ||
+    ''
+
+  const trimmed = String(explicit || '').trim()
+  if (trimmed) return trimmed.replace(/\/$/, '')
+
+  const originHeader = String(req?.headers?.origin || '').trim()
+  if (originHeader) return originHeader.replace(/\/$/, '')
+
+  const host = typeof req?.get === 'function' ? String(req.get('host') || '').trim() : ''
+  if (host) return `${req.protocol || 'http'}://${host}`.replace(/\/$/, '')
+
+  return 'http://127.0.0.1:5174'
+}
 
 app.use(cors({
   origin(origin, callback) {
@@ -384,7 +407,7 @@ async function proxyClientApp(req, res, next) {
   }
 }
 
-app.get(['/register', '/login', '/verify-contact', '/golfadmin', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal'], async (req, res, next) => {
+app.get(['/register', '/login', '/verify-contact', '/golfadmin', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/redeem', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
 
@@ -528,6 +551,48 @@ app.post('/api/admin/host-invites', adminMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Could not create host invite' })
   }
 })
+app.post('/api/admin/host-account-requests/:id/approve', adminMiddleware, async (req, res) => {
+  try {
+    const requestId = String(req.params.id || '').trim()
+    if (!requestId) return res.status(400).json({ message: 'Request id is required' })
+
+    const result = await approveHostAccountRequest({
+      requestId,
+      adminUserId: req.adminUser.id,
+      adminEmail: req.adminUser.email,
+    })
+    logApi('host_account_request_approved', { ...requestContext(req), requestId, adminUserId: req.adminUser.id, hostAccountId: result.hostAccountId || null })
+    res.json(result)
+  } catch (error) {
+    if (error instanceof Error && /not found|already been reviewed/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Approve host account request error', req, error)
+    res.status(500).json({ message: 'Could not approve golf-course account request' })
+  }
+})
+
+
+app.delete('/api/admin/host-account-requests/:id', adminMiddleware, async (req, res) => {
+  try {
+    const requestId = String(req.params.id || '').trim()
+    if (!requestId) return res.status(400).json({ message: 'Request id is required' })
+
+    const result = await deleteHostAccountRequest({
+      requestId,
+      adminUserId: req.adminUser.id,
+      adminEmail: req.adminUser.email,
+    })
+    logApi('host_account_request_deleted', { ...requestContext(req), requestId, adminUserId: req.adminUser.id })
+    res.json(result)
+  } catch (error) {
+    if (error instanceof Error && /not found|only pending/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Delete host account request error', req, error)
+    res.status(500).json({ message: 'Could not delete golf-course account request' })
+  }
+})
 
 app.get('/api/host/session', async (req, res) => {
   try {
@@ -551,6 +616,44 @@ app.get('/api/host/session', async (req, res) => {
   }
 })
 
+app.post('/api/host/account-requests', async (req, res) => {
+  try {
+    const firstName = String(req.body?.firstName || '').trim()
+    const lastName = String(req.body?.lastName || '').trim()
+    const email = normalizeEmail(req.body?.email)
+    const stateCode = String(req.body?.stateCode || '').trim().toUpperCase()
+    const stateName = String(req.body?.stateName || '').trim()
+    const golfCourseName = String(req.body?.golfCourseName || '').trim()
+    const representativeDetails = String(req.body?.representativeDetails || '').trim()
+    const password = String(req.body?.password || '')
+
+    if (!firstName) return res.status(400).json({ message: 'First name is required.' })
+    if (!lastName) return res.status(400).json({ message: 'Last name is required.' })
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email address is required.' })
+    if (!stateCode) return res.status(400).json({ message: 'State is required.' })
+    if (!stateName) return res.status(400).json({ message: 'State is required.' })
+    if (!golfCourseName) return res.status(400).json({ message: 'Golf course is required.' })
+    if (!representativeDetails) return res.status(400).json({ message: 'Representative details are required.' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' })
+
+    const request = await createHostAccountRequest({
+      firstName,
+      lastName,
+      email,
+      stateCode,
+      stateName,
+      golfCourseName,
+      representativeDetails,
+      password,
+    })
+    logApi('host_account_request_created', { ...requestContext(req), email, golfCourseName, stateCode, requestId: request.id })
+    return res.status(201).json({ request })
+  } catch (error) {
+    logRouteError('Host account request error', req, error)
+    return res.status(500).json({ message: 'Could not submit golf-course account request' })
+  }
+})
+
 app.post('/api/host/register', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email)
@@ -565,7 +668,7 @@ app.post('/api/host/register', async (req, res) => {
     const db = getPool()
     const hostAccount = await redeemHostInvite(db, { email, golfCourseName, securityKey, password })
     const session = await createHostSession(db, hostAccount.id)
-    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.id, session.expiresAt))
     logApi('host_register_completed', { ...requestContext(req), email, golfCourseName, hostAccountId: hostAccount.id })
     res.status(201).json({ hostAccount })
   } catch (error) {
@@ -585,8 +688,9 @@ app.post('/api/host/login', async (req, res) => {
     if (!password) return res.status(400).json({ message: 'Password is required' })
     const db = getPool()
     const hostAccount = await authenticateHostLogin(db, { email, password })
+    if (!hostAccount) return res.status(401).json({ message: 'Invalid email or password' })
     const session = await createHostSession(db, hostAccount.id)
-    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.id, session.expiresAt))
     logApi('host_login_completed', { ...requestContext(req), email, hostAccountId: hostAccount.id })
     res.json({ hostAccount })
   } catch (error) {
@@ -1109,6 +1213,28 @@ app.post('/api/admin/host-invites', adminMiddleware, async (req, res) => {
   }
 })
 
+
+app.delete('/api/admin/host-account-requests/:id', adminMiddleware, async (req, res) => {
+  try {
+    const requestId = String(req.params.id || '').trim()
+    if (!requestId) return res.status(400).json({ message: 'Request id is required' })
+
+    const result = await deleteHostAccountRequest({
+      requestId,
+      adminUserId: req.adminUser.id,
+      adminEmail: req.adminUser.email,
+    })
+    logApi('host_account_request_deleted', { ...requestContext(req), requestId, adminUserId: req.adminUser.id })
+    res.json(result)
+  } catch (error) {
+    if (error instanceof Error && /not found|only pending/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Delete host account request error', req, error)
+    res.status(500).json({ message: 'Could not delete golf-course account request' })
+  }
+})
+
 app.get('/api/host/session', async (req, res) => {
   try {
     const db = getPool()
@@ -1145,7 +1271,7 @@ app.post('/api/host/register', async (req, res) => {
     const db = getPool()
     const hostAccount = await redeemHostInvite(db, { email, golfCourseName, securityKey, password })
     const session = await createHostSession(db, hostAccount.id)
-    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.id, session.expiresAt))
     logApi('host_register_completed', { ...requestContext(req), email, golfCourseName, hostAccountId: hostAccount.id })
     res.status(201).json({ hostAccount })
   } catch (error) {
@@ -1165,8 +1291,9 @@ app.post('/api/host/login', async (req, res) => {
     if (!password) return res.status(400).json({ message: 'Password is required' })
     const db = getPool()
     const hostAccount = await authenticateHostLogin(db, { email, password })
+    if (!hostAccount) return res.status(401).json({ message: 'Invalid email or password' })
     const session = await createHostSession(db, hostAccount.id)
-    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.token, session.expiresAt))
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.id, session.expiresAt))
     logApi('host_login_completed', { ...requestContext(req), email, hostAccountId: hostAccount.id })
     res.json({ hostAccount })
   } catch (error) {
