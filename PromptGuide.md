@@ -8,6 +8,8 @@ if changes are made provide the changed files in a downloadable zip file and out
 
 if the changes made are around ports the application is running on, do not hardcode any port information in the application, use the .env file PORT variable to obtain the necessary port information
 
+assume all changes requested that are for the user-interface also need to have built the necessary backend and data sources necessary to support the request
+
 Create the logging support these changes to make diagnosing errors and transactions easy.  Also include the necessary front-end logging to to capture front-end error and transaction information.  Create separate access, api and front-end log files but bind all transactions with a common correlation id so the correlation id can be searched on in the access, error and front-end log files to view a complete transaction lifecycle.
 
 

@@ -17,6 +17,7 @@ import MyGolfScores from './pages/MyGolfScores'
 import VerifyContact from './pages/VerifyContact'
 import Profile from './pages/Profile'
 import CreateHostAccount from './pages/CreateHostAccount'
+import RedeemHostInvite from './pages/RedeemHostInvite'
 import HostLogin from './pages/HostLogin'
 import HostForgotPassword from './pages/HostForgotPassword'
 import HostResetPassword from './pages/HostResetPassword'
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
         <Route path="/host/register" element={<CreateHostAccount />} />
+        <Route path="/host/redeem" element={<RedeemHostInvite />} />
         <Route path="/host/login" element={<HostLogin />} />
         <Route path="/host/request-password-reset" element={<HostForgotPassword />} />
         <Route path="/host/reset-password" element={<HostResetPassword />} />
