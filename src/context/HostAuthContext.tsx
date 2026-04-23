@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { getHostSession, HostAccount, loginHostAccount, logoutHostAccount, registerHostAccount } from '../lib/host-auth'
+import { getHostSession, HostAccount, loginHostAccount, logoutHostAccount, redeemHostInviteAccount } from '../lib/host-auth'
 
 type HostAuthState = {
   hostAccount: HostAccount | null
@@ -44,7 +44,7 @@ export function HostAuthProvider({ children }: { children: React.ReactNode }) {
       setHostAccount(result.data?.hostAccount || null)
     },
     async registerHost(payload) {
-      const result = await registerHostAccount(payload)
+      const result = await redeemHostInviteAccount(payload)
       if (!result.response.ok) throw new Error(result.data && 'message' in (result.data as any) ? (result.data as any).message : 'Host registration failed')
       setHostAccount(result.data?.hostAccount || null)
     },

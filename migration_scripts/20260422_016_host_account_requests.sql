@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS host_account_requests (
+  id VARCHAR(191) PRIMARY KEY,
+  first_name VARCHAR(191) NOT NULL,
+  last_name VARCHAR(191) NOT NULL,
+  email VARCHAR(191) NOT NULL,
+  golf_course_name VARCHAR(191) NOT NULL,
+  location_label VARCHAR(191) NOT NULL,
+  location_city VARCHAR(191) NULL,
+  location_state_code VARCHAR(16) NULL,
+  location_state_name VARCHAR(128) NULL,
+  location_latitude DECIMAL(10, 7) NULL,
+  location_longitude DECIMAL(10, 7) NULL,
+  representative_details TEXT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  reviewed_at DATETIME NULL,
+  reviewed_by_admin_id VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_host_account_requests_status (status),
+  INDEX idx_host_account_requests_created_at (created_at),
+  INDEX idx_host_account_requests_email (email),
+  CONSTRAINT fk_host_account_requests_admin FOREIGN KEY (reviewed_by_admin_id) REFERENCES admin_users(id) ON DELETE SET NULL
+);

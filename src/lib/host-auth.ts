@@ -8,8 +8,26 @@ export type HostAccount = {
   validatedAt: string | null
 }
 
+export type HostAccountRequestPayload = {
+  firstName: string
+  lastName: string
+  email: string
+  stateCode: string
+  stateName: string
+  golfCourseName: string
+  representativeDetails: string
+  password: string
+}
+
 export async function getHostSession() {
   return requestJson<{ hostAccount: HostAccount | null }>('/api/host/session')
+}
+
+export async function requestHostAccount(payload: HostAccountRequestPayload) {
+  return requestJson<{ request: { id: string; status: string } }>('/api/host/account-requests', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function registerHostAccount(payload: { email: string; golfCourseName: string; securityKey: string; password: string }) {
@@ -17,6 +35,11 @@ export async function registerHostAccount(payload: { email: string; golfCourseNa
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+
+export async function redeemHostInviteAccount(payload: { email: string; golfCourseName: string; securityKey: string; password: string }) {
+  return registerHostAccount(payload)
 }
 
 export async function loginHostAccount(payload: { email: string; password: string }) {
