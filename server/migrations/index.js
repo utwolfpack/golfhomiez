@@ -612,7 +612,37 @@ ON DUPLICATE KEY UPDATE
       }
       return statements.join(';\n')
     },
+  },{
+  version: '20260422_017',
+  name: 'host_account_requests',
+  filename: '20260422_017_host_account_requests.sql',
+  async isSatisfied(db) {
+    return (
+      await tableExists(db, 'host_account_requests') &&
+      await columnExists(db, 'host_account_requests', 'state_code') &&
+      await columnExists(db, 'host_account_requests', 'golf_course_name') &&
+      await columnExists(db, 'host_account_requests', 'representative_details') &&
+      await indexExists(db, 'host_account_requests', 'idx_host_account_requests_status_created')
+    )
   },
+  async getSql() {
+    return loadMigrationSql('20260422_017_host_account_requests.sql')
+  },
+},{
+  version: '20260422_018',
+  name: 'host_account_request_password_hash',
+  filename: '20260422_018_host_account_request_password_hash.sql',
+  async isSatisfied(db) {
+    return (
+      await tableExists(db, 'host_account_requests') &&
+      await columnExists(db, 'host_account_requests', 'requested_password_hash')
+    )
+  },
+  async getSql() {
+    return loadMigrationSql('20260422_018_host_account_request_password_hash.sql')
+  },
+},
+
 ]
 
 export function sortMigrations(migrations) {

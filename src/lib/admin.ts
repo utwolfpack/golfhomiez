@@ -40,7 +40,21 @@ export async function fetchAdminPortal() {
     hosts: Array<Record<string, unknown>>
     invites: Array<Record<string, unknown>>
     users: Array<Record<string, unknown>>
+    requests: Array<Record<string, unknown>>
   }>('/api/admin/portal')
+}
+
+export async function approveHostAccountRequest(requestId: string) {
+  return api<{ request: Record<string, unknown>; hostAccountId?: string | null; approved: true }>(`/api/admin/host-account-requests/${encodeURIComponent(requestId)}/approve`, {
+    method: 'POST',
+  })
+}
+
+
+export async function deleteHostAccountRequest(requestId: string) {
+  return api<{ deleted: true; requestId: string }>(`/api/admin/host-account-requests/${encodeURIComponent(requestId)}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function createAdminAccount(username: string, email: string, password: string) {

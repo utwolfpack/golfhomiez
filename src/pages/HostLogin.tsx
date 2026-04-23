@@ -28,7 +28,7 @@ export default function HostLogin() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero eyebrow="Golf-course access" title="Sign in to your host portal" subtitle="Use the email and password set during invite redemption to manage your golf-course account." />
+        <PageHero eyebrow="Golf-course access" title="Sign in to your host portal" subtitle="Use the email and password for your approved golf-course account to manage your host portal." />
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">Email</label>
@@ -41,7 +41,7 @@ export default function HostLogin() {
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btnPrimary" disabled={busy}>{busy ? 'Signing in…' : 'Host login'}</button>
-            <Link className="btn" to="/host/register">Redeem invite</Link>
+            <Link className="btn" to="/host/redeem">Redeem invite</Link>
           </div>
           <div className="small"><Link to="/host/request-password-reset">Forgot host password?</Link></div>
         </form>
