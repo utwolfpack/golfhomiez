@@ -3,7 +3,7 @@
 -- tournament_id must match tournaments.id exactly (VARCHAR(191)) or MySQL rejects the FK with ER_FK_INCOMPATIBLE_COLUMNS.
 
 CREATE TABLE IF NOT EXISTS tournament_registrations (
-  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  id VARCHAR(191) NOT NULL PRIMARY KEY,
   tournament_id VARCHAR(191) NOT NULL,
   auth_user_id VARCHAR(191) NOT NULL,
   email VARCHAR(191) NOT NULL,

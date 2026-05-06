@@ -648,16 +648,16 @@ ON DUPLICATE KEY UPDATE
   filename: '20260427_020_tournament_portals_registrations.sql',
   async isSatisfied(db) {
     const [columnRows] = await db.execute(
-      `SELECT column_type, character_set_name, collation_name
-         FROM information_schema.columns
+      `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+         FROM information_schema.COLUMNS
         WHERE table_schema = DATABASE()
           AND table_name = 'tournament_registrations'
           AND column_name = 'tournament_id'
         LIMIT 1`
     )
     const [tournamentIdRows] = await db.execute(
-      `SELECT column_type, character_set_name, collation_name
-         FROM information_schema.columns
+      `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+         FROM information_schema.COLUMNS
         WHERE table_schema = DATABASE()
           AND table_name = 'tournaments'
           AND column_name = 'id'
@@ -684,24 +684,26 @@ ON DUPLICATE KEY UPDATE
   async getSql(db) {
     const quoteIdentifier = (value) => `\`${String(value).replaceAll('`', '``')}\``
     const [tournamentIdRows] = await db.execute(
-      `SELECT column_type, character_set_name, collation_name
-         FROM information_schema.columns
+      `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+         FROM information_schema.COLUMNS
         WHERE table_schema = DATABASE()
           AND table_name = 'tournaments'
           AND column_name = 'id'
         LIMIT 1`
     )
     const tournamentId = tournamentIdRows[0]
-    const tournamentIdDefinition = tournamentId
-      ? [
-          String(tournamentId.column_type).toUpperCase(),
-          tournamentId.character_set_name ? `CHARACTER SET ${quoteIdentifier(tournamentId.character_set_name)}` : '',
-          tournamentId.collation_name ? `COLLATE ${quoteIdentifier(tournamentId.collation_name)}` : '',
-          'NOT NULL',
-        ]
-          .filter(Boolean)
-          .join(' ')
-      : 'VARCHAR(191) NOT NULL'
+    const tournamentColumnType = String(tournamentId?.column_type || '').trim()
+    if (!tournamentColumnType) {
+      throw new Error('Cannot build tournament_registrations migration: tournaments.id column type could not be detected')
+    }
+    const tournamentIdDefinition = [
+      tournamentColumnType.toUpperCase(),
+      tournamentId.character_set_name ? `CHARACTER SET ${quoteIdentifier(tournamentId.character_set_name)}` : '',
+      tournamentId.collation_name ? `COLLATE ${quoteIdentifier(tournamentId.collation_name)}` : '',
+      'NOT NULL',
+    ]
+      .filter(Boolean)
+      .join(' ')
 
     const statements = []
     const hasRegistrationTable = await tableExists(db, 'tournament_registrations')
