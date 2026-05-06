@@ -759,6 +759,12 @@ ON DUPLICATE KEY UPDATE
     if (!(await columnExists(db, 'tournaments', 'portal_slug'))) {
       statements.push('ALTER TABLE tournaments ADD COLUMN portal_slug VARCHAR(191) NULL')
     }
+    if (!(await columnExists(db, 'tournaments', 'is_public'))) {
+      statements.push('ALTER TABLE tournaments ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    if (!(await columnExists(db, 'tournaments', 'status'))) {
+      statements.push("ALTER TABLE tournaments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'draft'")
+    }
     if (!(await indexExists(db, 'tournaments', 'idx_tournaments_portal_slug'))) {
       statements.push('CREATE INDEX idx_tournaments_portal_slug ON tournaments (portal_slug)')
     }
