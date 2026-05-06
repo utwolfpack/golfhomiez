@@ -710,3 +710,11 @@ test('server blocks duplicate tournament registration instead of upserting exist
   assert.match(server, /You are already registered for this tournament\./)
   assert.doesNotMatch(server, /ON DUPLICATE KEY UPDATE[\s\S]*tournament_registration_completed/)
 })
+
+test('tournament registrations migration keeps tournament_id compatible with tournaments id', () => {
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260427_020_tournament_portals_registrations.sql', import.meta.url), 'utf8')
+
+  assert.match(migrationSql, /tournament_id VARCHAR\(191\) NOT NULL/)
+  assert.doesNotMatch(migrationSql, /tournament_id VARCHAR\(64\) NOT NULL/)
+  assert.match(migrationSql, /FOREIGN KEY \(tournament_id\) REFERENCES tournaments\(id\)/)
+})
