@@ -642,6 +642,22 @@ ON DUPLICATE KEY UPDATE
     return loadMigrationSql('20260422_018_host_account_request_password_hash.sql')
   },
 },
+{
+  version: '20260427_020',
+  name: 'tournament_portals_registrations',
+  filename: '20260427_020_tournament_portals_registrations.sql',
+  async isSatisfied(db) {
+    return (
+      await tableExists(db, 'tournament_registrations') &&
+      await columnExists(db, 'tournament_registrations', 'correlation_id') &&
+      await columnExists(db, 'tournaments', 'portal_slug') &&
+      await indexExists(db, 'tournament_registrations', 'uniq_tournament_registrations_user')
+    )
+  },
+  async getSql() {
+    return loadMigrationSql('20260427_020_tournament_portals_registrations.sql')
+  },
+},
 
 ]
 

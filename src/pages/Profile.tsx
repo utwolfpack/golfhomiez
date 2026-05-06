@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import ProtectedRoute from '../components/ProtectedRoute'
 import UseMyLocationButton from '../components/UseMyLocationButton'
@@ -47,8 +48,10 @@ function ProfileInner() {
   const [needsEnrichment, setNeedsEnrichment] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
+  const { hasRole } = useAuth()
 
   const isGuidedEnrichment = useMemo(() => new URLSearchParams(location.search).get('enrich') === '1', [location.search])
+  const isPreferenceRestricted = hasRole('admin') || hasRole('host') || hasRole('organizer')
   const alcoholSelected = form.alcoholPreference === 'alcohol_friendly'
   const cannabisSelected = form.cannabisPreference === 'weed_friendly'
   const soberSelected = form.sobrietyPreference === 'sober_only'
@@ -131,7 +134,8 @@ function ProfileInner() {
     setError(null)
     setStatus(null)
     try {
-      const saved = await saveProfile(form)
+      const payload = isPreferenceRestricted ? { ...form, alcoholPreference: '', cannabisPreference: '', sobrietyPreference: '' } : form
+      const saved = await saveProfile(payload)
       setNeedsEnrichment(Boolean(saved.needsEnrichment))
       setStatus('Profile saved.')
       logFrontendEvent({ category: 'profile.save', message: 'profile_saved', data: { needsEnrichment: saved.needsEnrichment } })
@@ -180,26 +184,30 @@ function ProfileInner() {
             </div>
           </div>
 
-          <div>
-            <label className="label">Alcohol</label>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-              <ChoiceCard selected={alcoholSelected} disabled={alcoholAnd420Disabled} title={alcoholSelected ? 'You are alcohol freindly' : 'Alcohol-friendly'} imageSrc={beerImg} imageAlt="Alcohol-friendly golfer option" onClick={toggleAlcoholPreference} />
-            </div>
-          </div>
+          {!isPreferenceRestricted ? (
+            <>
+              <div>
+                <label className="label">Alcohol</label>
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+                  <ChoiceCard selected={alcoholSelected} disabled={alcoholAnd420Disabled} title={alcoholSelected ? 'You are alcohol freindly' : 'Alcohol-friendly'} imageSrc={beerImg} imageAlt="Alcohol-friendly golfer option" onClick={toggleAlcoholPreference} />
+                </div>
+              </div>
 
-          <div>
-            <label className="label">Weed</label>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-              <ChoiceCard selected={cannabisSelected} disabled={alcoholAnd420Disabled} title={cannabisSelected ? 'You are 420 freindly' : '420 friendly'} imageSrc={friendly420Img} imageAlt="420-friendly golfer option" onClick={toggleCannabisPreference} />
-            </div>
-          </div>
+              <div>
+                <label className="label">Weed</label>
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+                  <ChoiceCard selected={cannabisSelected} disabled={alcoholAnd420Disabled} title={cannabisSelected ? 'You are 420 freindly' : '420 friendly'} imageSrc={friendly420Img} imageAlt="420-friendly golfer option" onClick={toggleCannabisPreference} />
+                </div>
+              </div>
 
-          <div>
-            <label className="label">Sobriety</label>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-              <ChoiceCard selected={soberSelected} disabled={soberDisabled} title="Prefer to golf with other sober golfers" imageSrc={soberGolfImg} imageAlt="Sober golfer preference option" onClick={toggleSobrietyPreference} />
-            </div>
-          </div>
+              <div>
+                <label className="label">Sobriety</label>
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+                  <ChoiceCard selected={soberSelected} disabled={soberDisabled} title="Prefer to golf with other sober golfers" imageSrc={soberGolfImg} imageAlt="Sober golfer preference option" onClick={toggleSobrietyPreference} />
+                </div>
+              </div>
+            </>
+          ) : <div className="small">Preference settings are not available for admin, host, or organizer accounts.</div>}
 
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
           {status ? <div className="small" style={{ color: '#166534' }}>{status}</div> : null}

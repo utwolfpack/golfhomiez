@@ -1,8 +1,8 @@
 import { FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import clubhouseImg from '../assets/gallery/clubhouse-twilight.svg'
+import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -17,7 +17,8 @@ export default function Login() {
     setBusy(true)
     setError(null)
     try {
-      await login(email.trim(), password)
+      const normalizedEmail = email.trim().toLowerCase()
+      await login(normalizedEmail, password)
       navigate('/')
     } catch (err: any) {
       setError(err?.message || 'Login failed')
@@ -32,7 +33,7 @@ export default function Login() {
         <PageHero
           eyebrow="Welcome back"
           title="Sign in and hit the first tee"
-          subtitle="Jump into your rounds, roster updates, and dashboard stats without losing your place."
+          subtitle="User, host, and organizer accounts can share the same email address, but each account signs in here only with its own user credentials."
         />
 
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>

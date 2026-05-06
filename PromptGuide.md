@@ -10,12 +10,9 @@ if the changes made are around ports the application is running on, do not hardc
 
 assume all changes requested that are for the user-interface also need to have built the necessary backend and data sources necessary to support the request
 
-Create the logging support these changes to make diagnosing errors and transactions easy.  Also include the necessary front-end logging to to capture front-end error and transaction information.  Create separate access, api and front-end log files but bind all transactions with a common correlation id so the correlation id can be searched on in the access, error and front-end log files to view a complete transaction lifecycle.
+Create the logging support for the requested these changes to make diagnosing errors and transactions easy.  Also include the necessary front-end logging to to capture front-end error and transaction information.  Create separate access, api and front-end log files but bind all transactions with a common correlation id so the correlation id can be searched on in the access, error and front-end log files to view a complete transaction lifecycle.
 
 
 <!-- The prompt below is for when you experienve deployment issues with nginx or other environment specific issues -->
 deployed this to the stage environment in cloudpanel hostinger.  I uploaded some log files from the application and nginx for you to review and resolve.  Make the changes to address the following issue or issues described as necessary without breaking local development functionality and create a new zip file with  the changes.  Explain the changes you made.
 
-<!--
-Create a logging framework with the appropriate logging throughout the application to make diagnosing errors and transactions easy. Also include the necessary front-end logging to to capture front-end error and transaction information. Create separate access, api and front-end log files but bind all transactions with a common correlation id so the correlation id can be searched on in the access, error and front-end log files to view a complete transaction lifecycle.
--->
