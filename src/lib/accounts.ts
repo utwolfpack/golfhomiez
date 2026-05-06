@@ -3,36 +3,37 @@ import { api } from './api'
 export type HostAccountInput = {
   golfCourseName: string
   contactName: string
-  phone?: string
-  websiteUrl?: string
-  city?: string
-  state?: string
-  postalCode?: string
-  notes?: string
-  securityKey?: string
+  phone?: string | null
+  websiteUrl?: string | null
+  city?: string | null
+  state?: string | null
+  postalCode?: string | null
+  notes?: string | null
+  securityKey?: string | null
 }
 
 export type OrganizerAccountInput = {
   organizationName: string
   contactName: string
-  phone?: string
-  websiteUrl?: string
-  notes?: string
+  phone?: string | null
+  websiteUrl?: string | null
+  notes?: string | null
 }
 
 export type TournamentInput = {
   name: string
-  description?: string
-  startDate: string
-  endDate?: string
-  hostAccountId?: string
+  description?: string | null
+  startDate?: string | null
+  endDate?: string | null
+  hostAccountId?: string | null
   status?: string
   isPublic?: boolean
+  organizerEmail?: string | null
 }
 
 export type HostInviteInput = {
   email: string
-  message?: string
+  message?: string | null
   expiresInDays?: number
 }
 
@@ -56,18 +57,39 @@ export type OrganizerAccount = OrganizerAccountInput & {
   updatedAt?: string | null
 }
 
+export type TournamentRegistration = {
+  id: string
+  tournamentId: string
+  authUserId?: string | null
+  email: string
+  name: string
+  status: string
+  registeredAt?: string | null
+  updatedAt?: string | null
+}
+
 export type Tournament = {
   id: string
-  organizerAccountId: string
+  organizerAccountId: string | null
   hostAccountId?: string | null
   name: string
+  tournamentIdentifier?: string | null
+  organizerEmail?: string | null
   description?: string | null
-  startDate: string
+  startDate?: string | null
   endDate?: string | null
   status: string
   isPublic: boolean
   organizerName?: string | null
   hostGolfCourseName?: string | null
+  portalPath?: string | null
+  portalUrl?: string | null
+  registrationUrl?: string | null
+  registrationCount?: number
+  registrations?: TournamentRegistration[]
+  inviteId?: string | null
+  inviteStatus?: string | null
+  inviteUrl?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -113,6 +135,18 @@ export type HostInvite = {
   securityKey?: string
 }
 
+export type OrganizerTournamentInvite = {
+  id: string
+  tournamentId: string
+  organizerEmail: string
+  inviteUrl?: string | null
+  status: string
+  sentAt?: string | null
+  acceptedAt?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
 export type AdminPortalSummary = {
   users: AdminUser[]
   roleAssignments: RoleAssignment[]
@@ -120,6 +154,42 @@ export type AdminPortalSummary = {
   organizerAccounts: OrganizerAccount[]
   tournaments: Tournament[]
   hostInvites: HostInvite[]
+}
+
+export type OrganizerPortalSummary = {
+  organizerAccount: OrganizerAccount | null
+  tournaments: Tournament[]
+}
+
+export type TournamentPortal = {
+  tournament: Tournament
+  registrationCount: number
+  registrations?: TournamentRegistration[]
+  isViewerRegistered?: boolean
+  viewerRegistration?: TournamentRegistration | null
+}
+
+export type UserRegisteredTournament = Tournament & {
+  registration: TournamentRegistration
+}
+
+export type UserTournamentsSummary = {
+  tournaments: UserRegisteredTournament[]
+}
+
+export type TournamentRegistrationResult = {
+  ok: boolean
+  tournamentId: string
+  status: string
+  alreadyRegistered?: boolean
+  registration?: TournamentRegistration | null
+}
+
+export type OrganizerInviteEligibility = {
+  email: string
+  eligible: boolean
+  inviteCount: number
+  hasOrganizerAccount: boolean
 }
 
 export type RbacSummary = {
@@ -151,8 +221,9 @@ export function createOrganizerAccount(input: OrganizerAccountInput) {
   return api<OrganizerAccount>('/api/accounts/organizer', { method: 'POST', body: JSON.stringify(input) })
 }
 
-export function fetchGolfCourses() {
-  return api<HostAccount[]>('/api/golf-courses')
+export function fetchGolfCourses(state?: string) {
+  const query = state ? `?state=${encodeURIComponent(state)}` : ''
+  return api<HostAccount[]>(`/api/golf-courses${query}`)
 }
 
 export function fetchTournaments() {
@@ -161,6 +232,46 @@ export function fetchTournaments() {
 
 export function createTournamentRecord(input: TournamentInput) {
   return api<Tournament>('/api/tournaments', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function updateOrganizerTournamentRecord(tournamentId: string, input: TournamentInput) {
+  return api<Tournament>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}`, { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function updateHostTournamentRecord(tournamentId: string, input: TournamentInput) {
+  return api<Tournament>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}`, { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function createHostTournament(input: TournamentInput) {
+  return api<{ tournament: Tournament }>('/api/host/tournaments', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function sendHostTournamentInvite(tournamentId: string, input: { organizerEmail: string; message?: string | null }) {
+  return api<{ invite: OrganizerTournamentInvite; organizerUrl: string }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/invite`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function fetchOrganizerPortal() {
+  return api<OrganizerPortalSummary>('/api/organizer/portal')
+}
+
+export function fetchOrganizerInviteEligibility(email: string) {
+  const query = new URLSearchParams({ email }).toString()
+  return api<OrganizerInviteEligibility>(`/api/organizer/invite-eligibility?${query}`)
+}
+
+export function fetchUserTournaments() {
+  return api<UserTournamentsSummary>('/api/users/tournaments')
+}
+
+export function fetchTournamentPortal(id: string) {
+  return api<TournamentPortal>(`/api/tournament-portals/${encodeURIComponent(id)}`)
+}
+
+export function registerForTournament(id: string) {
+  return api<TournamentRegistrationResult>(`/api/tournament-portals/${encodeURIComponent(id)}/register`, { method: 'POST', body: JSON.stringify({}) })
 }
 
 export function fetchAdminPortal() {

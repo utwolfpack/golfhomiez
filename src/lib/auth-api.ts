@@ -1,3 +1,4 @@
+import { handleExpiredSession } from './session-expiration'
 import { attachRequestMetadata, logFrontendEvent } from './frontend-logger'
 
 export type SessionUser = { id: string; email: string; name?: string | null }
@@ -89,6 +90,7 @@ async function authFetch<T>(url: string, init: RequestInit, requestName: string)
       },
     })
 
+    handleExpiredSession('auth', res.status)
     return parseResponse<T>(res)
   } catch (error) {
     logFrontendEvent({

@@ -1,18 +1,16 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import GolfCourseInput from '../components/GolfCourseInput'
 import {
-  adminLogin,
-  adminLogout,
   approveHostAccountRequest,
   createAdminAccount,
   deleteHostAccountRequest,
   createHostInvite,
   fetchAdminPortal,
-  fetchAdminSession,
   requestAdminPasswordReset,
 } from '../lib/admin'
+import { useAdminAuth } from '../context/AdminAuthContext'
 
 type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
 type AdminIdentity = { id: string; username: string; email: string }
@@ -166,10 +164,10 @@ function FormCard({ title, subtitle, children }: { title: string; subtitle?: str
 }
 
 export default function AdminPortal() {
-  const [checkingSession, setCheckingSession] = useState(true)
-  const [adminUser, setAdminUser] = useState<AdminIdentity | null>(null)
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
   const [loginError, setLoginError] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const { adminUser, loading: adminLoading, loginAdmin, logoutAdmin } = useAdminAuth()
   const [portal, setPortal] = useState<PortalState | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -180,29 +178,17 @@ export default function AdminPortal() {
   const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null)
 
   async function loadPortal() {
-    const [me, portalData] = await Promise.all([fetchAdminSession(), fetchAdminPortal()])
-    setAdminUser(me.adminUser)
+    const portalData = await fetchAdminPortal()
     setPortal(portalData)
   }
 
   useEffect(() => {
-    let active = true
-    ;(async () => {
-      try {
-        await loadPortal()
-      } catch {
-        if (active) {
-          setAdminUser(null)
-          setPortal(null)
-        }
-      } finally {
-        if (active) setCheckingSession(false)
-      }
-    })()
-    return () => {
-      active = false
+    if (!adminUser) {
+      setPortal(null)
+      return
     }
-  }, [])
+    void loadPortal()
+  }, [adminUser])
 
   async function onLogin(e: FormEvent) {
     e.preventDefault()
@@ -210,7 +196,7 @@ export default function AdminPortal() {
     setError(null)
     setMessage(null)
     try {
-      await adminLogin(loginForm.username, loginForm.password)
+      await loginAdmin(loginForm.username, loginForm.password)
       await loadPortal()
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : 'Admin login failed.')
@@ -218,10 +204,11 @@ export default function AdminPortal() {
   }
 
   async function onLogout() {
-    await adminLogout()
-    setAdminUser(null)
+    await logoutAdmin()
     setPortal(null)
     setLoginForm({ username: '', password: '' })
+    setMessage('Signed out of admin portal.')
+    navigate('/golfadmin', { replace: true })
   }
 
   async function onCreateInvite(e: FormEvent) {
@@ -306,7 +293,7 @@ export default function AdminPortal() {
   const userRows = useMemo(() => (portal?.users ?? []) as RowRecord[], [portal])
   const requestRows = useMemo(() => (portal?.requests ?? []) as RowRecord[], [portal])
 
-  if (checkingSession) {
+  if (adminLoading) {
     return <div className="container pageStack"><div className="card pageCardShell">Loading admin portal…</div></div>
   }
 

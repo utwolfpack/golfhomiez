@@ -1,3 +1,4 @@
+import { handleExpiredSession } from './session-expiration'
 import { getCorrelationId, getRoutePath, sendFrontendLog } from './frontend-logger'
 
 function getUserTimeZoneHeader() {
@@ -42,6 +43,7 @@ export async function requestJson<T>(url: string, opts: RequestInit = {}): Promi
   try {
     const response = await fetch(url, { ...opts, headers, credentials: 'include' })
     const data = await parseJsonResponse<T>(response)
+    handleExpiredSession('requestJson', response.status)
 
     if (shouldLog) {
       void sendFrontendLog({

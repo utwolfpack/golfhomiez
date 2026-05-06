@@ -111,6 +111,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { active = false }
   }, [])
 
+
+  useEffect(() => {
+    if (!user) return
+    let lastRefreshAt = 0
+    const refreshOnActivity = () => {
+      const now = Date.now()
+      if (now - lastRefreshAt < 60_000) return
+      lastRefreshAt = now
+      logFrontendEvent({ category: 'auth.session', message: 'activity_ttl_refresh_started', data: { userId: user.id } })
+      void refreshSession()
+    }
+    const events = ['click', 'keydown', 'focus', 'visibilitychange']
+    events.forEach((eventName) => globalThis.addEventListener?.(eventName, refreshOnActivity, { passive: true }))
+    return () => events.forEach((eventName) => globalThis.removeEventListener?.(eventName, refreshOnActivity))
+  }, [user?.id])
   const value = useMemo<AuthState>(() => ({
     user,
     loading,

@@ -4,7 +4,7 @@ import { getPool } from '../db.js'
 
 const HOST_SESSION_COOKIE = 'golfhomiez_host_session'
 const HOST_RESET_TTL_MS = 1000 * 60 * 60
-const HOST_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14
+export const HOST_SESSION_TTL_MS = 1000 * 60 * 60 * 24
 
 function getDb(source) {
   const candidates = [
@@ -412,11 +412,25 @@ export async function createHostSession(source, hostAccountId) {
 
 export function serializeHostSessionCookie(sessionId) {
   const maxAge = Math.floor(HOST_SESSION_TTL_MS / 1000)
-  return `${HOST_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
+  const secure = String(process.env.NODE_ENV || '').toLowerCase() === 'production' ? '; Secure' : ''
+  return `${HOST_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
 }
 
 export function clearHostSessionCookie() {
-  return `${HOST_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+  const secure = String(process.env.NODE_ENV || '').toLowerCase() === 'production' ? '; Secure' : ''
+  return `${HOST_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`
+}
+
+export async function refreshHostSessionExpiry(source, sessionId) {
+  const db = getDb(source)
+  if (!sessionId) return null
+  const columns = await getColumns(db, 'host_sessions')
+  if (!columns.has('expires_at')) return null
+  const matchCol = columns.has('token_hash') ? 'token_hash' : pickFirstAvailable(columns, ['token', 'session_token', 'session_id']) || 'id'
+  const matchValue = matchCol === 'token_hash' ? sha256(sessionId) : sessionId
+  const expiresAt = new Date(Date.now() + HOST_SESSION_TTL_MS)
+  await db.execute(`UPDATE host_sessions SET expires_at = ?, updated_at = NOW() WHERE ${matchCol} = ? AND (expires_at IS NULL OR expires_at > NOW())`, [expiresAt, matchValue])
+  return expiresAt
 }
 
 export async function destroyHostSession(source, sessionId) {
@@ -448,7 +462,9 @@ export async function getHostAccountBySession(source, sessionId) {
      LIMIT 1`,
     [matchValue],
   )
-  return rows[0] || null
+  const hostAccount = rows[0] || null
+  if (hostAccount) await refreshHostSessionExpiry(source, sessionId)
+  return hostAccount
 }
 
 
@@ -460,12 +476,12 @@ export async function hostAuthMiddleware(req, res, next) {
     if (!hostAccount) return res.status(401).json({ error: 'Host authentication required' })
     req.hostAccount = hostAccount
     req.hostSessionId = sessionId
+    res.setHeader('Set-Cookie', serializeHostSessionCookie(sessionId))
     return next()
   } catch (error) {
     return next(error)
   }
 }
-
 export async function createHostPasswordReset(source, identifier) {
   const db = getDb(source)
   const normalizedIdentifier = typeof identifier === 'string'
@@ -494,7 +510,7 @@ export async function createHostPasswordReset(source, identifier) {
     throw new Error(`host_password_reset_tokens missing values for required columns: ${missingRequired.join(', ')}`)
   }
   await db.execute(`INSERT INTO host_password_reset_tokens (${columns.join(', ')}) VALUES (${values.join(', ')})`, params)
-  const appOrigin = resetUrlBase || process.env.APP_ORIGIN || process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+  const appOrigin = resetUrlBase || process.env.APP_ORIGIN || process.env.CLIENT_ORIGIN || (process.env.BETTER_AUTH_URL || '')
   const resetUrl = `${appOrigin.replace(/\/$/, '')}/host/reset-password?token=${encodeURIComponent(token)}`
   await sendMail({
     to: host.reset_email || host.email,
