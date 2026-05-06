@@ -19,7 +19,7 @@ function normalizeCallbackPath(callbackURL) {
   if (raw.startsWith('/')) return raw
 
   try {
-    const clientOrigin = process.env.CLIENT_ORIGIN || process.env.BETTER_AUTH_URL || 'http://127.0.0.1:5001'
+    const clientOrigin = process.env.CLIENT_ORIGIN || process.env.BETTER_AUTH_URL
     const parsed = new URL(raw, clientOrigin)
     const allowedOrigins = new Set([
       process.env.CLIENT_ORIGIN,
@@ -38,7 +38,7 @@ function normalizeCallbackPath(callbackURL) {
 }
 
 function getVerificationOrigin() {
-  const raw = String(process.env.BETTER_AUTH_URL || process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5001').trim()
+  const raw = String(process.env.BETTER_AUTH_URL || process.env.CLIENT_ORIGIN).trim()
   return raw.replace(/\/$/, '')
 }
 

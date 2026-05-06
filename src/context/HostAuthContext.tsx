@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { getHostSession, HostAccount, loginHostAccount, logoutHostAccount, redeemHostInviteAccount } from '../lib/host-auth'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 type HostAuthState = {
   hostAccount: HostAccount | null
@@ -33,6 +34,21 @@ export function HostAuthProvider({ children }: { children: React.ReactNode }) {
     })()
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    if (!hostAccount) return
+    let lastRefreshAt = 0
+    const refreshOnActivity = () => {
+      const now = Date.now()
+      if (now - lastRefreshAt < 60_000) return
+      lastRefreshAt = now
+      logFrontendEvent({ category: 'host.auth.session', message: 'activity_ttl_refresh_started', data: { hostAccountId: hostAccount.id } })
+      void refreshHostSession()
+    }
+    const events = ['click', 'keydown', 'focus', 'visibilitychange']
+    events.forEach((eventName) => globalThis.addEventListener?.(eventName, refreshOnActivity, { passive: true }))
+    return () => events.forEach((eventName) => globalThis.removeEventListener?.(eventName, refreshOnActivity))
+  }, [hostAccount?.id])
 
   const value = useMemo<HostAuthState>(() => ({
     hostAccount,

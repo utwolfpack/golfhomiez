@@ -5,6 +5,7 @@ import { normalizeEmail, isEmail } from './team-utils.js'
 import { ensureHostAuthSchema } from './host-auth.js'
 
 const ADMIN_COOKIE = 'golf_admin_session'
+export const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24
 const ADMIN_EMAIL_FROM = 'GolfHomiez Admin <no-reply@golfhomiez.com>'
 const ADMIN_RESET_ROUTE = '/golfadmin/reset-password'
 const ADMIN_LOGIN_ROUTE = '/golfadmin'
@@ -169,7 +170,7 @@ function getAppBaseUrl() {
     ''
 
   const trimmed = String(explicit || '').trim()
-  return trimmed ? trimmed.replace(/\/$/, '') : 'http://127.0.0.1:5174'
+  return trimmed ? trimmed.replace(/\/$/, '') : (process.env.CLIENT_ORIGIN || process.env.BETTER_AUTH_URL || '')
 }
 
 function buildHostRegisterUrl(email) {
@@ -567,7 +568,7 @@ function parseCookies(header = '') {
 }
 
 export function createAdminSessionCookie(adminUser) {
-  const maxAgeMs = 1000 * 60 * 60 * 12
+  const maxAgeMs = ADMIN_SESSION_TTL_MS
   const token = signAdminToken({ adminUserId: adminUser.id, username: adminUser.username, exp: Date.now() + maxAgeMs })
   const parts = [
     `${ADMIN_COOKIE}=${encodeURIComponent(token)}`,
@@ -617,6 +618,10 @@ export async function authenticateAdminRequest(req) {
   const adminUser = await getAdminUserById(payload.adminUserId)
   if (!adminUser || !Number(adminUser.is_active)) return null
   return adminUser
+}
+
+export function refreshAdminSessionCookie(adminUser) {
+  return createAdminSessionCookie(adminUser)
 }
 
 export function getPortalUrls(req) {
