@@ -1,0 +1,5 @@
+-- 20260506_021_tournament_schema_stage_compat
+-- This migration is generated dynamically by server/migrations/index.js so it can
+-- safely reconcile partial stage/production schemas without manual SQL.
+-- It ensures tournament portal columns, organizer display-name compatibility,
+-- host golf-course compatibility, and supporting tournament indexes exist.

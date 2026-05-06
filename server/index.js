@@ -418,8 +418,14 @@ async function attachTournamentRegistrations(pool, tournaments = []) {
 }
 
 async function getTournamentPortalById(pool, tournamentId, req = null) {
+  const organizerColumns = await listTableColumns(pool, 'organizer_role_accounts')
+  const hostRoleColumns = await listTableColumns(pool, 'host_role_accounts')
+  const hostAccountColumns = await listTableColumns(pool, 'host_accounts')
+  const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
+  const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const [rows] = await pool.execute(
-    `SELECT t.*, ora.organization_name AS organizer_name, hra.golf_course_name AS host_golf_course_name, ha.golf_course_name AS host_account_name,
+    `SELECT t.*, ${organizerNameExpr} AS organizer_name, ${hostRoleGolfCourseExpr} AS host_golf_course_name, ${hostAccountGolfCourseExpr} AS host_account_name,
             COUNT(tr.id) AS registration_count
        FROM tournaments t
        LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
@@ -568,7 +574,11 @@ async function getOrganizerPortalSummary(pool, user, req) {
   const isPublicExpr = columnExpr(tournamentColumns, 't', ['is_public'], '1')
   const organizerEmailExpr = columnExpr(tournamentColumns, 't', ['organizer_email'], 'NULL')
   const tournamentIdentifierExpr = columnExpr(tournamentColumns, 't', ['tournament_identifier'], 'NULL')
-  const organizerJoinNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name'], 'NULL')
+  const hostRoleColumns = await listTableColumns(pool, 'host_role_accounts')
+  const hostAccountColumns = await listTableColumns(pool, 'host_accounts')
+  const organizerJoinNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
+  const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const organizerAccountFilter = organizerAccount ? 't.organizer_account_id = ? OR' : ''
   const inviteJoin = inviteColumns.size
     ? 'LEFT JOIN organizer_tournament_invites oti ON oti.tournament_id = t.id'
@@ -584,7 +594,7 @@ async function getOrganizerPortalSummary(pool, user, req) {
             ${organizerEmailExpr} AS organizer_email,
             ${tournamentIdentifierExpr} AS tournament_identifier,
             ${organizerJoinNameExpr} AS organizer_name,
-            COALESCE(hra.golf_course_name, ha.golf_course_name) AS host_golf_course_name,
+            COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}) AS host_golf_course_name,
             oti.id AS invite_id,
             oti.status AS invite_status,
             oti.invite_url AS invite_url
@@ -616,16 +626,22 @@ async function getOrganizerPortalSummary(pool, user, req) {
 }
 
 async function listHostPortalTournaments(pool, hostAccount, req = null) {
+  const organizerColumns = await listTableColumns(pool, 'organizer_role_accounts')
+  const hostRoleColumns = await listTableColumns(pool, 'host_role_accounts')
+  const hostAccountColumns = await listTableColumns(pool, 'host_accounts')
+  const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
+  const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const [rows] = await pool.execute(
-    `SELECT DISTINCT t.*, ora.organization_name AS organizer_name,
-            COALESCE(hra.golf_course_name, ha.golf_course_name) AS host_golf_course_name
+    `SELECT DISTINCT t.*, ${organizerNameExpr} AS organizer_name,
+            COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}) AS host_golf_course_name
        FROM tournaments t
        LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
        LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
        LEFT JOIN user_role_assignments host_ura ON host_ura.id = hra.role_assignment_id
        LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
       WHERE t.host_account_id = ?
-         OR LOWER(COALESCE(hra.golf_course_name, ha.golf_course_name, '')) = LOWER(?)
+         OR LOWER(COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}, '')) = LOWER(?)
          OR LOWER(COALESCE(host_ura.email, ha.email, '')) = LOWER(?)
       ORDER BY t.start_date DESC, t.created_at DESC`,
     [hostAccount?.id || '', hostAccount?.golfCourseName || hostAccount?.golf_course_name || '', hostAccount?.email || ''],
@@ -640,6 +656,10 @@ async function listHostPortalTournaments(pool, hostAccount, req = null) {
 }
 
 async function getHostEditableTournament(pool, hostAccount, tournamentId) {
+  const hostRoleColumns = await listTableColumns(pool, 'host_role_accounts')
+  const hostAccountColumns = await listTableColumns(pool, 'host_accounts')
+  const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const [rows] = await pool.execute(
     `SELECT DISTINCT t.*
        FROM tournaments t
@@ -648,7 +668,7 @@ async function getHostEditableTournament(pool, hostAccount, tournamentId) {
        LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
       WHERE (t.id = ? OR t.tournament_identifier = ?)
         AND (t.host_account_id = ?
-             OR LOWER(COALESCE(hra.golf_course_name, ha.golf_course_name, '')) = LOWER(?)
+             OR LOWER(COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}, '')) = LOWER(?)
              OR LOWER(COALESCE(host_ura.email, ha.email, '')) = LOWER(?))
       LIMIT 1`,
     [tournamentId, tournamentId, hostAccount?.id || '', hostAccount?.golfCourseName || hostAccount?.golf_course_name || '', hostAccount?.email || ''],
@@ -1522,8 +1542,14 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
   try {
     const pool = getPool()
     const email = normalizeEmail(req.user.email)
+    const organizerColumns = await listTableColumns(pool, 'organizer_role_accounts')
+    const hostRoleColumns = await listTableColumns(pool, 'host_role_accounts')
+    const hostAccountColumns = await listTableColumns(pool, 'host_accounts')
+    const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
+    const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+    const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
     const [rows] = await pool.execute(
-      `SELECT t.*, ora.organization_name AS organizer_name, hra.golf_course_name AS host_golf_course_name, ha.golf_course_name AS host_account_name,
+      `SELECT t.*, ${organizerNameExpr} AS organizer_name, ${hostRoleGolfCourseExpr} AS host_golf_course_name, ${hostAccountGolfCourseExpr} AS host_account_name,
               tr.id AS registration_id, tr.auth_user_id AS registration_auth_user_id, tr.email AS registration_email,
               tr.name AS registration_name, tr.status AS registration_status, tr.created_at AS registered_at,
               tr.updated_at AS registration_updated_at,
