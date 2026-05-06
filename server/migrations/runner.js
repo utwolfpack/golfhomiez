@@ -43,8 +43,27 @@ export async function recordAppliedMigration(db, migration, checksum, executionM
   )
 }
 
+
+export function assertSafeMigrationSql(sql, migration) {
+  const normalizedSql = String(sql || '').trim()
+  if (!normalizedSql) {
+    throw new Error(`Migration ${migration?.version || 'unknown'} produced no SQL while not satisfied`)
+  }
+
+  if (/\bUNDEFINED\b/i.test(normalizedSql)) {
+    throw new Error(`Migration ${migration?.version || 'unknown'} produced invalid SQL containing UNDEFINED. Check the migration column type detection before deploying.`)
+  }
+
+  if (/\bNULL\s+NOT\s+NULL\b/i.test(normalizedSql)) {
+    throw new Error(`Migration ${migration?.version || 'unknown'} produced contradictory NULL/NOT NULL SQL.`)
+  }
+
+  return normalizedSql
+}
+
 export async function applyMigration(db, migration) {
-  const sql = await migration.getSql(db)
+  const rawSql = await migration.getSql(db)
+  const sql = assertSafeMigrationSql(rawSql, migration)
   const checksum = checksumSql(sql)
 
   if (await migration.isSatisfied(db)) {
