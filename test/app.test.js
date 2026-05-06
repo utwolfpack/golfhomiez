@@ -652,10 +652,10 @@ test('published tournament registration uses resolved tournament id for foreign 
 })
 
 test('host and organizer tournament tiles expose registered golfer counts and details', () => {
-  const server = fs.readFileSync(path.join(repoRoot, 'server', 'index.js'), 'utf8')
-  const accounts = fs.readFileSync(path.join(repoRoot, 'src', 'lib', 'accounts.ts'), 'utf8')
-  const hostPage = fs.readFileSync(path.join(repoRoot, 'src', 'pages', 'HostPortal.tsx'), 'utf8')
-  const organizerPage = fs.readFileSync(path.join(repoRoot, 'src', 'pages', 'OrganizerTournaments.tsx'), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const accounts = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
+  const hostPage = fs.readFileSync(new URL('../src/pages/HostPortal.tsx', import.meta.url), 'utf8')
+  const organizerPage = fs.readFileSync(new URL('../src/pages/OrganizerTournaments.tsx', import.meta.url), 'utf8')
 
   assert.match(server, /async function listTournamentRegistrations/)
   assert.match(server, /attachTournamentRegistrations\(pool, tournaments\)/)
@@ -667,7 +667,7 @@ test('host and organizer tournament tiles expose registered golfer counts and de
 })
 
 test('tournament registration sends confirmation email with tournament link', () => {
-  const server = fs.readFileSync(path.join(repoRoot, 'server', 'index.js'), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   assert.match(server, /tournament_registration_confirmation_email_sent/)
   assert.match(server, /Registration confirmed:/)
   assert.match(server, /View tournament details/)
@@ -711,10 +711,16 @@ test('server blocks duplicate tournament registration instead of upserting exist
   assert.doesNotMatch(server, /ON DUPLICATE KEY UPDATE[\s\S]*tournament_registration_completed/)
 })
 
-test('tournament registrations migration keeps tournament_id compatible with tournaments id', () => {
+test('tournament registrations migration keeps tournament_id compatible with tournaments id and runs during npm install', () => {
   const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260427_020_tournament_portals_registrations.sql', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 
   assert.match(migrationSql, /tournament_id VARCHAR\(191\) NOT NULL/)
   assert.doesNotMatch(migrationSql, /tournament_id VARCHAR\(64\) NOT NULL/)
   assert.match(migrationSql, /FOREIGN KEY \(tournament_id\) REFERENCES tournaments\(id\)/)
+  assert.match(migrations, /MODIFY COLUMN tournament_id \$\{tournamentIdDefinition\}/)
+  assert.match(migrations, /character_set_name/)
+  assert.match(migrations, /collation_name/)
+  assert.match(pkg, /"postinstall": "npm run db:migrate && npm run build"/)
 })

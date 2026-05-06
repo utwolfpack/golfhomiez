@@ -6,7 +6,7 @@ test('one-time schema rollback is wired into postinstall and removes itself afte
   const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
   const script = fs.readFileSync(new URL('../server/scripts/run-one-time-chat-schema-rollback.js', import.meta.url), 'utf8')
 
-  assert.match(pkg, /"postinstall": "npm run build"/)
+  assert.match(pkg, /"postinstall": "npm run db:migrate && npm run build"/)
   assert.match(script, /currentPostinstall\.replace\(selfInvocationPrefix, ''\)/)
   assert.match(script, /pkg\.scripts\.postinstall = cleanedPostinstall/)
 })
