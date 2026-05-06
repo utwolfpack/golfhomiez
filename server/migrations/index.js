@@ -776,6 +776,132 @@ ON DUPLICATE KEY UPDATE
   },
 },
 
+
+  {
+    version: '20260506_021',
+    name: 'tournament_schema_stage_compat',
+    filename: '20260506_021_tournament_schema_stage_compat.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'tournaments') &&
+        await columnExists(db, 'tournaments', 'name') &&
+        await columnExists(db, 'tournaments', 'description') &&
+        await columnExists(db, 'tournaments', 'start_date') &&
+        await columnExists(db, 'tournaments', 'end_date') &&
+        await columnExists(db, 'tournaments', 'status') &&
+        await columnExists(db, 'tournaments', 'is_public') &&
+        await columnExists(db, 'tournaments', 'tournament_identifier') &&
+        await columnExists(db, 'tournaments', 'portal_slug') &&
+        await columnExists(db, 'tournaments', 'organizer_email') &&
+        await columnExists(db, 'tournaments', 'host_account_id') &&
+        await columnExists(db, 'tournaments', 'organizer_account_id') &&
+        await tableExists(db, 'organizer_role_accounts') &&
+        await columnExists(db, 'organizer_role_accounts', 'organization_name') &&
+        await tableExists(db, 'host_role_accounts') &&
+        await columnExists(db, 'host_role_accounts', 'golf_course_name') &&
+        await tableExists(db, 'host_accounts') &&
+        await columnExists(db, 'host_accounts', 'golf_course_name') &&
+        await indexExists(db, 'tournaments', 'idx_tournaments_identifier') &&
+        await indexExists(db, 'tournaments', 'idx_tournaments_host_account') &&
+        await indexExists(db, 'tournaments', 'idx_tournaments_organizer_account')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      const addColumn = async (tableName, columnName, sql) => {
+        if (await tableExists(db, tableName)) {
+          if (!(await columnExists(db, tableName, columnName))) statements.push(sql)
+        }
+      }
+      const addIndex = async (tableName, indexName, sql) => {
+        if (await tableExists(db, tableName)) {
+          if (!(await indexExists(db, tableName, indexName))) statements.push(sql)
+        }
+      }
+
+      if (!(await tableExists(db, 'tournaments'))) {
+        statements.push(`CREATE TABLE tournaments (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  tournament_identifier VARCHAR(191) NULL,
+  portal_slug VARCHAR(191) NULL,
+  name VARCHAR(191) NOT NULL,
+  title VARCHAR(191) NULL,
+  description TEXT NULL,
+  start_date DATE NULL,
+  end_date DATE NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'draft',
+  is_public TINYINT(1) NOT NULL DEFAULT 0,
+  host_account_id VARCHAR(191) NULL,
+  organizer_account_id VARCHAR(191) NULL,
+  organizer_email VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_tournaments_identifier (tournament_identifier),
+  KEY idx_tournaments_portal_slug (portal_slug),
+  KEY idx_tournaments_status_public (status, is_public),
+  KEY idx_tournaments_host_account (host_account_id),
+  KEY idx_tournaments_organizer_account (organizer_account_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+      } else {
+        await addColumn('tournaments', 'tournament_identifier', 'ALTER TABLE tournaments ADD COLUMN tournament_identifier VARCHAR(191) NULL')
+        await addColumn('tournaments', 'portal_slug', 'ALTER TABLE tournaments ADD COLUMN portal_slug VARCHAR(191) NULL')
+        await addColumn('tournaments', 'name', 'ALTER TABLE tournaments ADD COLUMN name VARCHAR(191) NULL')
+        await addColumn('tournaments', 'title', 'ALTER TABLE tournaments ADD COLUMN title VARCHAR(191) NULL')
+        await addColumn('tournaments', 'description', 'ALTER TABLE tournaments ADD COLUMN description TEXT NULL')
+        await addColumn('tournaments', 'start_date', 'ALTER TABLE tournaments ADD COLUMN start_date DATE NULL')
+        await addColumn('tournaments', 'end_date', 'ALTER TABLE tournaments ADD COLUMN end_date DATE NULL')
+        await addColumn('tournaments', 'status', "ALTER TABLE tournaments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'draft'")
+        await addColumn('tournaments', 'is_public', 'ALTER TABLE tournaments ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 0')
+        await addColumn('tournaments', 'host_account_id', 'ALTER TABLE tournaments ADD COLUMN host_account_id VARCHAR(191) NULL')
+        await addColumn('tournaments', 'organizer_account_id', 'ALTER TABLE tournaments ADD COLUMN organizer_account_id VARCHAR(191) NULL')
+        await addColumn('tournaments', 'organizer_email', 'ALTER TABLE tournaments ADD COLUMN organizer_email VARCHAR(191) NULL')
+        await addColumn('tournaments', 'created_at', 'ALTER TABLE tournaments ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP')
+        await addColumn('tournaments', 'updated_at', 'ALTER TABLE tournaments ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')
+        if ((await columnExists(db, 'tournaments', 'title')) && (await columnExists(db, 'tournaments', 'name'))) {
+          statements.push("UPDATE tournaments SET name = COALESCE(NULLIF(name, ''), NULLIF(title, ''), CONCAT('Tournament ', id)) WHERE name IS NULL OR name = ''")
+        }
+        await addIndex('tournaments', 'idx_tournaments_identifier', 'CREATE INDEX idx_tournaments_identifier ON tournaments (tournament_identifier)')
+        await addIndex('tournaments', 'idx_tournaments_portal_slug', 'CREATE INDEX idx_tournaments_portal_slug ON tournaments (portal_slug)')
+        await addIndex('tournaments', 'idx_tournaments_status_public', 'CREATE INDEX idx_tournaments_status_public ON tournaments (status, is_public)')
+        await addIndex('tournaments', 'idx_tournaments_host_account', 'CREATE INDEX idx_tournaments_host_account ON tournaments (host_account_id)')
+        await addIndex('tournaments', 'idx_tournaments_organizer_account', 'CREATE INDEX idx_tournaments_organizer_account ON tournaments (organizer_account_id)')
+      }
+
+      await addColumn('organizer_role_accounts', 'organization_name', 'ALTER TABLE organizer_role_accounts ADD COLUMN organization_name VARCHAR(191) NULL')
+      if (await tableExists(db, 'organizer_role_accounts')) {
+        const hasOrgName = await columnExists(db, 'organizer_role_accounts', 'organizer_name')
+        const hasContactName = await columnExists(db, 'organizer_role_accounts', 'contact_name')
+        const hasEmail = await columnExists(db, 'organizer_role_accounts', 'email')
+        const candidates = [hasOrgName ? 'NULLIF(organizer_name, \'\')' : null, hasContactName ? 'NULLIF(contact_name, \'\')' : null, hasEmail ? 'email' : null].filter(Boolean)
+        if (candidates.length) {
+          statements.push(`UPDATE organizer_role_accounts SET organization_name = COALESCE(NULLIF(organization_name, ''), ${candidates.join(', ')}) WHERE organization_name IS NULL OR organization_name = ''`)
+        }
+      }
+
+      await addColumn('host_role_accounts', 'golf_course_name', 'ALTER TABLE host_role_accounts ADD COLUMN golf_course_name VARCHAR(191) NULL')
+      if (await tableExists(db, 'host_role_accounts')) {
+        const hasAccountName = await columnExists(db, 'host_role_accounts', 'account_name')
+        const hasCourseName = await columnExists(db, 'host_role_accounts', 'course_name')
+        const candidates = [hasAccountName ? 'NULLIF(account_name, \'\')' : null, hasCourseName ? 'NULLIF(course_name, \'\')' : null].filter(Boolean)
+        if (candidates.length) {
+          statements.push(`UPDATE host_role_accounts SET golf_course_name = COALESCE(NULLIF(golf_course_name, ''), ${candidates.join(', ')}) WHERE golf_course_name IS NULL OR golf_course_name = ''`)
+        }
+      }
+
+      await addColumn('host_accounts', 'golf_course_name', 'ALTER TABLE host_accounts ADD COLUMN golf_course_name VARCHAR(191) NULL')
+      if (await tableExists(db, 'host_accounts')) {
+        const hasAccountName = await columnExists(db, 'host_accounts', 'account_name')
+        const hasCourseName = await columnExists(db, 'host_accounts', 'course_name')
+        const candidates = [hasAccountName ? 'NULLIF(account_name, \'\')' : null, hasCourseName ? 'NULLIF(course_name, \'\')' : null].filter(Boolean)
+        if (candidates.length) {
+          statements.push(`UPDATE host_accounts SET golf_course_name = COALESCE(NULLIF(golf_course_name, ''), ${candidates.join(', ')}) WHERE golf_course_name IS NULL OR golf_course_name = ''`)
+        }
+      }
+
+      return statements.join(';\n')
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {
