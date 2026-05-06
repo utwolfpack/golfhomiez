@@ -305,7 +305,7 @@ async function ensureAppUserProfileRow(user) {
   await pool.execute(
     `INSERT INTO app_users (id, auth_user_id, email, name)
      VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
+     ON DUPLICATE KEY ` + `UPDATE
        email = VALUES(email),
        name = VALUES(name)`,
     [user.id, user.id, normalizeEmail(user.email), user.name || null],
@@ -1102,7 +1102,7 @@ app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
     const data = await getHostPortalData(db, req.hostAccount.id)
     if (!data) return res.status(404).json({ message: 'Golf-course account not found' })
     const account = data.account || data.host || req.hostAccount
-    const tournaments = await listHostPortalTournaments(db, account, req)
+    const tournaments = await listHostPortalTournaments(db, account)
     logApi('host_portal_loaded', { ...requestContext(req), hostAccountId: account?.id || req.hostAccount.id, tournamentCount: tournaments.length })
     res.json({ ...data, account, host: data.host || account, tournaments })
   } catch (error) {
@@ -1377,7 +1377,7 @@ app.get('/api/organizer/portal', requireStorage, organizerAuthMiddleware, async 
   try {
     const summary = await getOrganizerPortalSummary(getPool(), req.organizerUser, req)
     if (!summary.organizerAccount && summary.tournaments.length === 0) {
-      logApi('organizer_portal_forbidden', { ...requestContext(req), email: normalizeEmail(req.organizerUser.email) })
+      logApi('organizer_portal_forbidden', { ...requestContext(req), email: normalizeEmail(req.organizerUser?.email || '') })
       return res.status(403).json({ message: 'No organizer account or tournament invitations were found for this Golf Homiez user.' })
     }
     logApi('organizer_portal_loaded', { ...requestContext(req), organizerAccountId: summary.organizerAccount?.id || null, tournamentCount: summary.tournaments.length })
