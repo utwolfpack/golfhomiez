@@ -8,6 +8,9 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const rootDir = path.resolve(__dirname, '../..')
 const envPath = path.join(rootDir, '.env')
+const devPort = String(process.env.PORT || '5001')
+const devClientOrigin = process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174'
+const devApiOrigin = process.env.BETTER_AUTH_URL || `http://127.0.0.1:${devPort}`
 
 const defaultEnv = {
   DB_HOST: '127.0.0.1',
@@ -15,10 +18,13 @@ const defaultEnv = {
   DB_NAME: 'golf_homiez',
   DB_USER: 'golf_homiez_user',
   DB_PASSWORD: 'change_me',
-  CLIENT_ORIGIN: 'http://127.0.0.1:5174',
-  BETTER_AUTH_URL: 'http://127.0.0.1:5001',
+  PORT: devPort,
+  CLIENT_ORIGIN: devClientOrigin,
+  BETTER_AUTH_URL: devApiOrigin,
+  DEV_CLIENT_ORIGIN: devClientOrigin,
+  DEV_API_ORIGIN: devApiOrigin,
   BETTER_AUTH_SECRET: 'dev-only-secret-change-me-1234567890123456',
-  VITE_AUTH_BASE_URL: 'http://127.0.0.1:5001/api/auth',
+  VITE_AUTH_BASE_URL: process.env.VITE_AUTH_BASE_URL || `${devApiOrigin}/api/auth`,
 }
 
 if (!fs.existsSync(envPath)) {

@@ -13,16 +13,15 @@ export const auth = betterAuth({
   database: getPool(),
   secret: authSecret,
   session: {
+    // 24-hour authentication TTL. updateAge 0 keeps the sliding window fresh on activity.
     expiresIn: 60 * 60 * 24,
-    updateAge: 60 * 60,
+    updateAge: 0,
   },
   trustedOrigins: Array.from(new Set([
     process.env.BETTER_AUTH_URL,
     process.env.CLIENT_ORIGIN,
-    'http://localhost:5174',
-    'http://127.0.0.1:5174',
-    'http://localhost:5001',
-    'http://127.0.0.1:5001',
+    process.env.DEV_CLIENT_ORIGIN,
+    process.env.DEV_API_ORIGIN,
   ].filter(Boolean))),
   emailAndPassword: {
     enabled: true,

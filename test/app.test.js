@@ -448,9 +448,9 @@ test('host auth flow adds direct host routes, public account requests, invite re
   assert.match(hostClient, /\/api\/host\/account-requests/)
   assert.match(hostRegister, /Request your golf-course account/)
   assert.match(hostRegister, /<label className="label">State<\/label>/)
-  assert.match(hostRegister, /<label className=\"label\">Golf Course<\\/label>/)
-  assert.match(hostRegister, /<label className=\"label\">Password<\\/label>/)
-  assert.match(hostRegister, /<label className=\"label\">Confirm password<\\/label>/)
+  assert.match(hostRegister, /<label className="label">Golf Course<\/label>/)
+  assert.match(hostRegister, /<label className="label">Password<\/label>/)
+  assert.match(hostRegister, /<label className="label">Confirm password<\/label>/)
   assert.match(hostRegister, /thank you for your Golf Homiez golf-course account request/i)
   assert.doesNotMatch(hostRegister, /Have an invite\?/) 
   assert.doesNotMatch(hostRegister, /UseMyLocationButton/)
@@ -518,4 +518,195 @@ test('mysql score storage remains compatible before and after golf-course score 
   assert.match(migrations, /scores_golf_course_catalog_columns/)
   assert.match(migrationSql, /ADD COLUMN golf_course_id/)
   assert.match(migrationSql, /ADD INDEX idx_scores_golf_course_id/)
+})
+
+test('auth TTL is 24 hours and refreshed on authenticated activity for user, admin, and host sessions', () => {
+  const betterAuth = fs.readFileSync(new URL('../server/auth.js', import.meta.url), 'utf8')
+  const adminPortal = fs.readFileSync(new URL('../server/lib/admin-portal.js', import.meta.url), 'utf8')
+  const hostAuth = fs.readFileSync(new URL('../server/lib/host-auth.js', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const authContext = fs.readFileSync(new URL('../src/context/AuthContext.tsx', import.meta.url), 'utf8')
+  const hostContext = fs.readFileSync(new URL('../src/context/HostAuthContext.tsx', import.meta.url), 'utf8')
+
+  assert.match(betterAuth, /expiresIn: 60 \* 60 \* 24/)
+  assert.match(betterAuth, /updateAge: 0/)
+  assert.match(adminPortal, /ADMIN_SESSION_TTL_MS = 1000 \* 60 \* 60 \* 24/)
+  assert.match(adminPortal, /refreshAdminSessionCookie/)
+  assert.match(hostAuth, /HOST_SESSION_TTL_MS = 1000 \* 60 \* 60 \* 24/)
+  assert.match(hostAuth, /refreshHostSessionExpiry/)
+  assert.match(hostAuth, /UPDATE host_sessions SET expires_at = \?, updated_at = NOW\(\)/)
+  assert.match(server, /admin_session_ttl_refreshed/)
+  assert.match(server, /host_session_ttl_refreshed/)
+  assert.match(authContext, /activity_ttl_refresh_started/)
+  assert.match(hostContext, /activity_ttl_refresh_started/)
+})
+
+test('expired authenticated sessions redirect to the correct login page and log frontend event data', () => {
+  const sessionExpiration = fs.readFileSync(new URL('../src/lib/session-expiration.ts', import.meta.url), 'utf8')
+  const api = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
+  const authApi = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
+  const request = fs.readFileSync(new URL('../src/lib/request.ts', import.meta.url), 'utf8')
+
+  assert.match(sessionExpiration, /session_ttl_exhausted_redirect/)
+  assert.match(sessionExpiration, /path\.startsWith\('\/host'\)/)
+  assert.match(sessionExpiration, /HOST_LOGIN_ROUTE = '\/host\/login'/)
+  assert.match(sessionExpiration, /ADMIN_LOGIN_ROUTE = '\/golfadmin'/)
+  assert.match(sessionExpiration, /USER_LOGIN_ROUTE = '\/login'/)
+  assert.match(api, /handleExpiredSession\('api', res\.status\)/)
+  assert.match(authApi, /handleExpiredSession\('auth', res\.status\)/)
+  assert.match(request, /handleExpiredSession\('requestJson', response\.status\)/)
+})
+
+test('auth TTL migration and port configuration are deployable without hardcoded server ports', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const migration = fs.readFileSync(new URL('../migration_scripts/20260501_023_auth_ttl_and_logging_support.sql', import.meta.url), 'utf8')
+  const directions = fs.readFileSync(new URL('../AUTH_TTL_LOGGING_DIRECTIONS.md', import.meta.url), 'utf8')
+
+  assert.match(server, /const PORT = Number\(process\.env\.PORT\)/)
+  assert.match(server, /PORT must be set to a valid positive number/)
+  assert.doesNotMatch(server, /const PORT = Number\(process\.env\.PORT \|\| 5001\)/)
+  assert.match(migration, /idx_host_sessions_expires/)
+  assert.match(migration, /idx_host_sessions_updated_at/)
+  assert.match(migration, /DELETE FROM host_sessions WHERE expires_at IS NOT NULL AND expires_at <= NOW\(\)/)
+  assert.match(directions, /20260501_023_auth_ttl_and_logging_support\.sql/)
+})
+
+
+test('host portal exposes tournament creation, portal listing, and organizer invite routes', () => {
+  const source = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /app\.get\('\/api\/host\/portal', hostAuthMiddleware/)
+  assert.match(source, /listHostPortalTournaments\(db, account\)/)
+  assert.match(source, /app\.post\('\/api\/host\/tournaments', hostAuthMiddleware/)
+  assert.match(source, /createHostManagedTournament\(db, req\.hostAccount\.id, req\.body \|\| \{\}\)/)
+  assert.match(source, /app\.post\('\/api\/host\/tournaments\/:id\/invite', hostAuthMiddleware/)
+  assert.match(source, /createTournamentOrganizerInvite\(db, \{ tournamentId, hostAccountId: req\.hostAccount\.id, organizerEmail: payload\.organizerEmail, inviteUrl: organizerUrl \}\)/)
+})
+
+test('organizer invite flow exposes direct auth, portal, eligibility, and public tournament portal endpoints', () => {
+  const source = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /app\.get\('\/api\/organizer\/session'/)
+  assert.match(source, /app\.post\('\/api\/organizer\/register'/)
+  assert.match(source, /app\.post\('\/api\/organizer\/login'/)
+  assert.match(source, /app\.get\('\/api\/organizer\/portal', requireStorage, organizerAuthMiddleware/)
+  assert.match(source, /app\.get\('\/api\/organizer\/invite-eligibility'/)
+  assert.match(source, /app\.get\('\/api\/tournament-portals\/:id'/)
+})
+
+test('organizer sessions use the same 24-hour sliding TTL pattern as host sessions', () => {
+  const source = fs.readFileSync(new URL('../server/lib/organizer-auth.js', import.meta.url), 'utf8')
+  assert.match(source, /ORGANIZER_SESSION_TTL_MS = 1000 \* 60 \* 60 \* 24(?! \*)/)
+  assert.match(source, /refreshOrganizerSessionExpiry/)
+  assert.match(source, /expires_at = \? WHERE token_hash = \?/)
+  assert.match(source, /res\.setHeader\('Set-Cookie', serializeOrganizerSessionCookie\(sessionId\)\)/)
+})
+
+test('organizer portal only edits host-invited tournaments and does not create tournaments', () => {
+  const organizerPage = fs.readFileSync(new URL('../src/pages/OrganizerTournaments.tsx', import.meta.url), 'utf8')
+  const accounts = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(organizerPage, /Manage invited tournaments/)
+  assert.match(organizerPage, /Modify tournament/)
+  assert.match(organizerPage, /updateOrganizerTournamentRecord/)
+  assert.doesNotMatch(organizerPage, /Create tournament/)
+  assert.doesNotMatch(organizerPage, /fetchGolfCourses/)
+  assert.match(accounts, /\/api\/organizer\/tournaments\/\$\{encodeURIComponent\(tournamentId\)\}/)
+  assert.match(server, /organizer_tournament_create_blocked/)
+  assert.match(server, /app\.put\('\/api\/organizer\/tournaments\/:id'/)
+  assert.match(server, /updateOrganizerInvitedTournament/)
+})
+
+test('tournament portal lookup accepts host-generated public identifiers as well as ids', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(server, /WHERE t\.id = \? OR t\.tournament_identifier = \?/)
+  assert.match(server, /tournamentIdentifier: row\.tournament_identifier \|\| null/)
+})
+
+test('host portal lets hosts modify every golf-course tournament and exposes published registration URLs', () => {
+  const hostPage = fs.readFileSync(new URL('../src/pages/HostPortal.tsx', import.meta.url), 'utf8')
+  const accounts = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const organizerPage = fs.readFileSync(new URL('../src/pages/OrganizerTournaments.tsx', import.meta.url), 'utf8')
+
+  assert.match(hostPage, /updateHostTournamentRecord/)
+  assert.match(hostPage, /Click a tile to modify the tournament/)
+  assert.match(hostPage, /Golfer registration URL/)
+  assert.match(hostPage, /host_tournament_updated/)
+  assert.match(accounts, /export function updateHostTournamentRecord/)
+  assert.match(accounts, /\/api\/host\/tournaments\/\$\{encodeURIComponent\(tournamentId\)\}/)
+  assert.match(accounts, /registrationUrl\?: string \| null/)
+  assert.match(server, /app\.put\('\/api\/host\/tournaments\/:id', hostAuthMiddleware/)
+  assert.match(server, /updateHostOwnedTournament\(getPool\(\), req\.hostAccount, tournamentId, input, req\)/)
+  assert.match(server, /getHostEditableTournament/)
+  assert.match(server, /registrationUrl: String\(row\.status \|\| ''\) === 'published'/)
+  assert.match(organizerPage, /Golfer registration URL/)
+})
+
+test('published tournament registration uses resolved tournament id for foreign key inserts', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(server, /const resolvedTournamentId = portal\.tournament\.id/)
+  assert.match(server, /\[registrationId, resolvedTournamentId, req\.user\.id/)
+  assert.match(server, /requestedTournamentId: tournamentId/)
+  assert.doesNotMatch(server, /normalizeEmail\(req\.organizerUser\.email\)/)
+})
+
+test('host and organizer tournament tiles expose registered golfer counts and details', () => {
+  const server = fs.readFileSync(path.join(repoRoot, 'server', 'index.js'), 'utf8')
+  const accounts = fs.readFileSync(path.join(repoRoot, 'src', 'lib', 'accounts.ts'), 'utf8')
+  const hostPage = fs.readFileSync(path.join(repoRoot, 'src', 'pages', 'HostPortal.tsx'), 'utf8')
+  const organizerPage = fs.readFileSync(path.join(repoRoot, 'src', 'pages', 'OrganizerTournaments.tsx'), 'utf8')
+
+  assert.match(server, /async function listTournamentRegistrations/)
+  assert.match(server, /attachTournamentRegistrations\(pool, tournaments\)/)
+  assert.match(accounts, /export type TournamentRegistration/)
+  assert.match(hostPage, /Registered golfers/)
+  assert.match(hostPage, /registration\.email/)
+  assert.match(organizerPage, /Registered golfers/)
+  assert.match(organizerPage, /registration\.registeredAt/)
+})
+
+test('tournament registration sends confirmation email with tournament link', () => {
+  const server = fs.readFileSync(path.join(repoRoot, 'server', 'index.js'), 'utf8')
+  assert.match(server, /tournament_registration_confirmation_email_sent/)
+  assert.match(server, /Registration confirmed:/)
+  assert.match(server, /View tournament details/)
+  assert.match(server, /const registrationUrl = portal\.tournament\.portalUrl/)
+})
+
+test('signed-in golfers have a registered tournaments page and API route', () => {
+  const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const navSource = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
+  const accountSource = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
+  const serverSource = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(appSource, /path="\/my-tournaments"/)
+  assert.match(navSource, /to="\/my-tournaments"/)
+  assert.match(accountSource, /fetchUserTournaments/)
+  assert.match(accountSource, /\/api\/users\/tournaments/)
+  assert.match(serverSource, /app\.get\('\/api\/users\/tournaments'/)
+  assert.match(serverSource, /JOIN tournaments t ON t\.id = tr\.tournament_id/)
+  assert.match(serverSource, /tr\.auth_user_id = \?/)
+})
+
+test('tournament portal marks already registered golfers and replaces register button with a label', () => {
+  const portalPage = fs.readFileSync(new URL('../src/pages/TournamentPortal.tsx', import.meta.url), 'utf8')
+  const accountLib = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
+
+  assert.match(portalPage, /setRegistered\(Boolean\(result\.isViewerRegistered\)\)/)
+  assert.match(portalPage, /You are already registered for this tournament\./)
+  assert.match(portalPage, /registered \? \(/)
+  assert.match(portalPage, /Register for tournament/)
+  assert.doesNotMatch(portalPage, /disabled=\{registering \|\| registered \|\| registrationClosed \|\| authLoading\}/)
+  assert.match(accountLib, /isViewerRegistered\?: boolean/)
+  assert.match(accountLib, /viewerRegistration\?: TournamentRegistration \| null/)
+})
+
+test('server blocks duplicate tournament registration instead of upserting existing rows', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(server, /tournament_registration_duplicate_blocked/)
+  assert.match(server, /alreadyRegistered: true/)
+  assert.match(server, /You are already registered for this tournament\./)
+  assert.doesNotMatch(server, /ON DUPLICATE KEY UPDATE[\s\S]*tournament_registration_completed/)
 })

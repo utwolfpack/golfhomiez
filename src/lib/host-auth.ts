@@ -68,5 +68,5 @@ export async function resetHostPassword(token: string, password: string) {
 }
 
 export async function fetchHostPortal() {
-  return requestJson<{ account: HostAccount & { createdAt?: string | null; updatedAt?: string | null }; invites: Array<{ id: string; email: string; inviteeName: string | null; golfCourseName: string | null; createdAt: string | null; consumedAt: string | null; expiresAt: string | null }> }>('/api/host/portal')
+  return requestJson<{ account: HostAccount & { createdAt?: string | null; updatedAt?: string | null }; invites: Array<{ id: string; email: string; inviteeName: string | null; golfCourseName: string | null; createdAt: string | null; consumedAt: string | null; expiresAt: string | null }>; tournaments: Array<{ id: string; name: string; tournamentIdentifier?: string | null; organizerEmail?: string | null; inviteStatus?: string | null; inviteUrl?: string | null; startDate?: string | null; endDate?: string | null; status?: string | null }> }>('/api/host/portal')
 }
