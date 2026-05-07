@@ -238,28 +238,33 @@ export function sanitizeTournamentPayload(body = {}, options = {}) {
   const name = String(body.name || '').trim()
   const description = String(body.description || '').trim()
   const startDate = String(body.startDate || '').trim()
-  const endDate = String(body.endDate || '').trim()
+  const endDate = ''
   const hostAccountId = String(body.hostAccountId || '').trim()
   const status = String(body.status || 'draft').trim().toLowerCase()
-  const isPublic = body.isPublic === true || body.isPublic === 'true' || body.isPublic === 1 || body.isPublic === '1'
+  const isPublic = status === 'published'
   const requireDates = options.requireDates !== false
   const allowedStatuses = new Set(['draft', 'published', 'completed', 'cancelled'])
+  const allowedTemplateKeys = new Set(['classic-flyer'])
+  const templateKey = String(body.templateKey || 'classic-flyer').trim()
+  const templateBackgroundImageUrl = String(body.templateBackgroundImageUrl || '').trim()
 
   if (!name) throw new Error('Tournament name is required.')
   if (requireDates && !startDate) throw new Error('Tournament start date is required.')
   if (startDate && Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) throw new Error('Tournament start date is invalid.')
-  if (endDate && Number.isNaN(Date.parse(`${endDate}T00:00:00Z`))) throw new Error('Tournament end date is invalid.')
-  if (startDate && endDate && endDate < startDate) throw new Error('Tournament end date cannot be earlier than the start date.')
   if (!allowedStatuses.has(status)) throw new Error('Tournament status is invalid.')
+  if (!allowedTemplateKeys.has(templateKey)) throw new Error('Tournament template is invalid.')
 
   return {
     name,
     description: description || null,
     startDate: startDate || null,
-    endDate: endDate || null,
+    endDate: null,
     hostAccountId: hostAccountId || null,
     status,
     isPublic,
+    templateKey,
+    templateBackgroundImageUrl: templateBackgroundImageUrl || null,
+    templateData: sanitizeTournamentTemplateData(body.templateData),
   }
 }
 
@@ -317,6 +322,39 @@ function mapOrganizerAccountRow(row) {
   }
 }
 
+
+function parseTournamentTemplateData(value) {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try { return JSON.parse(value) } catch { return null }
+}
+
+function sanitizeTournamentTemplateData(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  const cleanString = (key) => source[key] == null ? null : String(source[key]).trim() || null
+  const startType = String(source.startType || 'shotgun').trim()
+  const logoFiles = Array.isArray(source.logoFiles) ? source.logoFiles.map((logo) => String(logo || '').trim()).filter(Boolean).slice(0, 18) : []
+  return {
+    tournamentName: cleanString('tournamentName'),
+    hostOrganization: cleanString('hostOrganization'),
+    beneficiaryCharity: cleanString('beneficiaryCharity'),
+    checkInTime: cleanString('checkInTime'),
+    startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
+    tournamentFormat: cleanString('tournamentFormat'),
+    registrationDeadline: cleanString('registrationDeadline'),
+    entryFee: cleanString('entryFee'),
+    feesInclude: cleanString('feesInclude'),
+    prizeDetails: cleanString('prizeDetails'),
+    holeContestsExtras: cleanString('holeContestsExtras'),
+    contactPerson: cleanString('contactPerson'),
+    contactPhone: cleanString('contactPhone'),
+    contactEmail: cleanString('contactEmail'),
+    logoFiles,
+    supportingPhotoUrl: cleanString('supportingPhotoUrl'),
+    miscNotes: cleanString('miscNotes'),
+  }
+}
+
 function mapTournamentRow(row) {
   return {
     id: row.id,
@@ -330,6 +368,9 @@ function mapTournamentRow(row) {
     endDate: row.end_date,
     status: row.status,
     isPublic: Boolean(row.is_public),
+    templateKey: row.template_key || 'classic-flyer',
+    templateBackgroundImageUrl: row.template_background_image_url || null,
+    templateData: parseTournamentTemplateData(row.template_data),
     createdByAuthUserId: row.created_by_auth_user_id,
     organizerName: row.organizer_name,
     hostGolfCourseName: row.host_golf_course_name,
@@ -821,9 +862,9 @@ export async function createOrganizerTournamentForEmail(pool, organizerEmail, in
   const tournamentIdentifier = buildTournamentIdentifier(payload.name)
   await pool.execute(
     `INSERT INTO tournaments
-      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, created_by_auth_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, legacyOrganizerAccount?.id || null, payload.hostAccountId, tournamentIdentifier, normalizedEmail, payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, `organizer:${normalizedEmail}`],
+      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, template_key, template_background_image_url, template_data, created_by_auth_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, legacyOrganizerAccount?.id || null, payload.hostAccountId, tournamentIdentifier, normalizedEmail, payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, payload.templateKey, payload.templateBackgroundImageUrl, JSON.stringify(payload.templateData || {}), `organizer:${normalizedEmail}`],
   )
 
   const [rows] = await pool.execute(
@@ -969,9 +1010,9 @@ export async function createTournament(pool, user, input) {
   const tournamentIdentifier = buildTournamentIdentifier(payload.name)
   await pool.execute(
     `INSERT INTO tournaments
-      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, created_by_auth_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, organizerAccount.id, payload.hostAccountId, tournamentIdentifier, normalizeEmail(user.email), payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, user.id],
+      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, template_key, template_background_image_url, template_data, created_by_auth_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, organizerAccount.id, payload.hostAccountId, tournamentIdentifier, normalizeEmail(user.email), payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, payload.templateKey, payload.templateBackgroundImageUrl, JSON.stringify(payload.templateData || {}), user.id],
   )
 
   const [rows] = await pool.execute(
@@ -996,9 +1037,9 @@ export async function createHostManagedTournament(pool, hostAccountId, input) {
 
   await pool.execute(
     `INSERT INTO tournaments
-      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, created_by_auth_user_id)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, resolvedHostAccountId, tournamentIdentifier, organizerEmail || null, payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, `host:${resolvedHostAccountId}`],
+      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, template_key, template_background_image_url, template_data, created_by_auth_user_id)
+     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, resolvedHostAccountId, tournamentIdentifier, organizerEmail || null, payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, payload.templateKey, payload.templateBackgroundImageUrl, JSON.stringify(payload.templateData || {}), `host:${resolvedHostAccountId}`],
   )
 
   const [rows] = await pool.execute(

@@ -3,25 +3,28 @@ import { useLocation } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { fetchOrganizerPortal, updateOrganizerTournamentRecord, type OrganizerPortalSummary, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { formatFriendlyDateTime } from '../lib/time-format'
+import TournamentTemplateFields from '../components/TournamentTemplateFields'
 
 function formatRegisteredAt(value?: string | null) {
   if (!value) return 'Unknown time'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  return formatFriendlyDateTime(value)
 }
 
 function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   const registrations = tournament.registrations || []
   return (
     <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
-      <div style={{ fontWeight: 700 }}>Registered golfers ({tournament.registrationCount ?? registrations.length})</div>
+      <div style={{ fontWeight: 700 }}>Registered teams and golfers ({tournament.registrationCount ?? registrations.length})</div>
       {registrations.length === 0 ? (
         <div className="small">No golfers have registered yet.</div>
       ) : (
         <div className="formStack" style={{ marginTop: 8 }}>
           {registrations.map((registration) => (
             <div key={registration.id} className="small">
-              <strong>{registration.name || 'Registered golfer'}</strong> · {registration.email} · {formatRegisteredAt(registration.registeredAt)}
+              <strong>{registration.teamName || registration.name || 'Registered team'}</strong> · {formatRegisteredAt(registration.registeredAt)}
+              <div>Registrant: {registration.name || 'Registered golfer'} · {registration.email}</div>
+              <div>Members: {(registration.teamMembers || []).map((member) => `${member.name || member.email} <${member.email}>`).join(', ') || 'Team roster unavailable'}</div>
             </div>
           ))}
         </div>
@@ -35,9 +38,12 @@ function toEditForm(tournament: Tournament): TournamentInput {
     name: tournament.name || '',
     description: tournament.description || '',
     startDate: tournament.startDate ? String(tournament.startDate).slice(0, 10) : '',
-    endDate: tournament.endDate ? String(tournament.endDate).slice(0, 10) : '',
+    endDate: null,
     status: tournament.status || 'draft',
-    isPublic: Boolean(tournament.isPublic),
+    isPublic: tournament.status === 'published',
+    templateKey: tournament.templateKey || 'classic-flyer',
+    templateBackgroundImageUrl: tournament.templateBackgroundImageUrl || null,
+    templateData: tournament.templateData || null,
   }
 }
 
@@ -67,7 +73,15 @@ export default function OrganizerTournaments() {
   }, [])
 
   const tournaments = summary?.tournaments || []
-  const publishedCount = useMemo(() => tournaments.filter((item) => item.status === 'published').length, [tournaments])
+  const statusCounts = useMemo(() => tournaments.reduce<Record<string, number>>((counts, item) => {
+    const status = String(item.status || 'draft').toLowerCase()
+    counts[status] = (counts[status] || 0) + 1
+    return counts
+  }, {}), [tournaments])
+  const statusSummary = useMemo(() => {
+    const statuses = ['draft', 'published', 'completed', 'cancelled']
+    return statuses.map((status) => `${status}: ${statusCounts[status] || 0}`).join(' · ')
+  }, [statusCounts])
 
   useEffect(() => {
     if (!summary || editingId) return
@@ -90,7 +104,7 @@ export default function OrganizerTournaments() {
     setSaving(true)
     setError(null)
     try {
-      const saved = await updateOrganizerTournamentRecord(editingId, form)
+      const saved = await updateOrganizerTournamentRecord(editingId, { ...form, endDate: null })
       setSummary((prev) => prev ? { ...prev, tournaments: prev.tournaments.map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : prev)
       setEditingId(null)
       setForm(null)
@@ -110,9 +124,8 @@ export default function OrganizerTournaments() {
     <div className="container pageStack">
       <div className="card pageCardShell">
         <PageHero
-          eyebrow="Tournament workspace"
           title="Manage invited tournaments"
-          subtitle={`Organizers can modify tournaments only after a host invitation. ${publishedCount} published.`}
+          subtitle={`Tournament status counts — ${statusSummary}`}
         />
 
         {error ? <div className="small" style={{ color: '#b91c1c', marginBottom: 16 }}>{error}</div> : null}
@@ -133,12 +146,8 @@ export default function OrganizerTournaments() {
                   </div>
                   <div className="formRow formRow--split">
                     <div>
-                      <label className="label">Start date</label>
-                      <input className="input" type="date" value={form.startDate || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, startDate: e.target.value }) : prev)} />
-                    </div>
-                    <div>
-                      <label className="label">End date</label>
-                      <input className="input" type="date" value={form.endDate || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, endDate: e.target.value }) : prev)} />
+                      <label className="label">Tournament date</label>
+                      <input className="input" type="date" value={form.startDate || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, startDate: e.target.value, endDate: null }) : prev)} />
                     </div>
                   </div>
                   <div>
@@ -150,10 +159,7 @@ export default function OrganizerTournaments() {
                       <option value="cancelled">Cancelled</option>
                     </select>
                   </div>
-                  <label className="small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="checkbox" checked={Boolean(form.isPublic)} onChange={(e) => setForm((prev) => prev ? ({ ...prev, isPublic: e.target.checked }) : prev)} />
-                    Make this tournament publicly visible
-                  </label>
+                  <TournamentTemplateFields value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button className="btn btnPrimary" disabled={saving}>{saving ? 'Saving…' : 'Save tournament changes'}</button>
                     <button type="button" className="btn" onClick={() => { setEditingId(null); setForm(null); setError(null) }}>Cancel</button>
@@ -162,7 +168,7 @@ export default function OrganizerTournaments() {
               ) : (
                 <>
                   <div style={{ fontWeight: 700 }}>{tournament.name}</div>
-                  <div className="small">{tournament.startDate || 'No start date'}{tournament.endDate ? ` to ${tournament.endDate}` : ''} · {tournament.status}</div>
+                  <div className="small">{tournament.startDate ? formatFriendlyDateTime(tournament.startDate) : 'No tournament date'} · {tournament.status}</div>
                   <div className="small">Host: {tournament.hostGolfCourseName || 'Host golf course'}{tournament.inviteStatus ? ` · Invite: ${tournament.inviteStatus}` : ''}</div>
                   <div className="small">Registered golfers: {tournament.registrationCount ?? tournament.registrations?.length ?? 0}</div>
                   {tournament.description ? <div className="small">{tournament.description}</div> : null}

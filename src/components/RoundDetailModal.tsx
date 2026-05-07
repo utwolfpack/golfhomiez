@@ -1,5 +1,6 @@
 import type { ScoreEntry } from '../types'
 import { compareRoundToHistory } from '../lib/roundInsights'
+import { formatFriendlyDateTime } from '../lib/time-format'
 
 function formatMoney(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
@@ -20,7 +21,7 @@ export default function RoundDetailModal({ round, allScores, onClose }: { round:
           <div>
             <h3 id="round-detail-title" style={{ margin: '4px 0 0' }}>{round.course}</h3>
             <div className="small" style={{ marginTop: 4 }}>
-              {round.date} • {String((round as any).state || '').toUpperCase()} • {round.mode === 'solo' ? 'Solo round' : 'Team round'}
+              {formatFriendlyDateTime(round.date)} • {String((round as any).state || '').toUpperCase()} • {round.mode === 'solo' ? 'Solo round' : 'Team round'}
             </div>
           </div>
           <button type="button" className="btn btnSmall" onClick={onClose}>Close</button>
@@ -44,7 +45,7 @@ export default function RoundDetailModal({ round, allScores, onClose }: { round:
                   <div><strong>Money:</strong> {formatMoney((round as any).money || 0)}</div>
                 </>
               )}
-              <div><strong>Logged at:</strong> {String((round as any).createdAt || '').replace('T', ' ').replace('Z', '') || 'Unknown'}</div>
+              <div><strong>Logged at:</strong> {formatFriendlyDateTime((round as any).createdAt)}</div>
               <div><strong>Hole detail:</strong> {holes.length ? holes.join(', ') : 'No hole-by-hole detail saved'}</div>
             </div>
           </div>

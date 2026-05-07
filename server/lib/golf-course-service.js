@@ -97,6 +97,8 @@ function mapCourseRecord(row, rowIndex) {
   const stateName = normalizeWhitespace(rawState)
   const name = normalizeWhitespace(inferField(row, ['name', 'course_name', 'golf_course_name']))
   const city = normalizeWhitespace(inferField(row, ['city', 'municipality']))
+  const address = normalizeWhitespace(inferField(row, ['address', 'street', 'street_address']))
+  const postalCode = normalizeWhitespace(inferField(row, ['postal_code', 'zip', 'zip_code']))
   const country = normalizeWhitespace(inferField(row, ['country'])) || 'US'
   const idSource = normalizeWhitespace(inferField(row, ['id', 'course_id', 'uuid', 'slug']))
   const id = idSource || `${stateCode || 'NA'}-${normalizeCourseName(name) || `row-${rowIndex + 1}`}`
@@ -109,6 +111,8 @@ function mapCourseRecord(row, rowIndex) {
     state: stateName || stateCode,
     state_code: stateCode || stateName,
     city,
+    address,
+    postal_code: postalCode,
   }
 }
 
@@ -170,6 +174,8 @@ async function ensureGolfCoursesTable() {
       state VARCHAR(64) NOT NULL,
       state_code VARCHAR(8) NULL,
       city VARCHAR(191) NULL,
+      address VARCHAR(255) NULL,
+      postal_code VARCHAR(32) NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_golf_courses_state (state),
@@ -216,7 +222,7 @@ async function listCoursesFromDatabase(state) {
 
   const whereClause = predicates.length ? `WHERE ${predicates.join(' OR ')}` : ''
   const [rows] = await pool.execute(
-    `SELECT id, name, normalized_name, country, state${columns.has('state_code') ? ', state_code' : ', NULL AS state_code'}, city
+    `SELECT id, name, normalized_name, country, state${columns.has('state_code') ? ', state_code' : ', NULL AS state_code'}, city${columns.has('address') ? ', address' : ', NULL AS address'}${columns.has('postal_code') ? ', postal_code' : ', NULL AS postal_code'}
        FROM golf_courses
        ${whereClause}
       ORDER BY name ASC`,
@@ -231,6 +237,8 @@ async function listCoursesFromDatabase(state) {
     state: row.state,
     state_code: row.state_code || normalizeStateCode(row.state),
     city: row.city || null,
+    address: row.address || null,
+    postal_code: row.postal_code || null,
   }))
 }
 
@@ -269,7 +277,7 @@ export async function getGolfCourseByName(courseName, state = '') {
   if (schema.exists) {
     const pool = getPool()
     const [rows] = await pool.execute(
-      `SELECT id, name, normalized_name, country, state${schema.columns.has('state_code') ? ', state_code' : ', NULL AS state_code'}, city
+      `SELECT id, name, normalized_name, country, state${schema.columns.has('state_code') ? ', state_code' : ', NULL AS state_code'}, city${schema.columns.has('address') ? ', address' : ', NULL AS address'}${schema.columns.has('postal_code') ? ', postal_code' : ', NULL AS postal_code'}
          FROM golf_courses
         WHERE normalized_name = ? OR LOWER(name) = LOWER(?)
         ORDER BY name ASC
@@ -286,6 +294,8 @@ export async function getGolfCourseByName(courseName, state = '') {
         state: row.state,
         state_code: row.state_code || normalizeStateCode(row.state),
         city: row.city || null,
+        address: row.address || null,
+        postal_code: row.postal_code || null,
       }
     }
   }
@@ -303,6 +313,8 @@ export async function importGolfCoursesFromCsv(csvPath = process.env.GOLF_COURSE
   const insertColumns = ['id', 'name', 'normalized_name', 'country', 'state']
   if (columns.has('state_code')) insertColumns.push('state_code')
   if (columns.has('city')) insertColumns.push('city')
+  if (columns.has('address')) insertColumns.push('address')
+  if (columns.has('postal_code')) insertColumns.push('postal_code')
   const placeholders = insertColumns.map(() => '?').join(', ')
   const updateAssignments = insertColumns
     .filter((column) => column !== 'id')
