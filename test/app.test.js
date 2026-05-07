@@ -622,6 +622,18 @@ test('tournament portal lookup accepts host-generated public identifiers as well
   assert.match(server, /tournamentIdentifier: row\.tournament_identifier \|\| null/)
 })
 
+
+
+test('host portal queries support stage schemas without host role assignment ids', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(server, /hostRoleColumns\.has\('role_assignment_id'\)/)
+  assert.match(server, /hostRoleAssignmentJoinConditions/)
+  assert.match(server, /LEFT JOIN user_role_assignments host_ura ON \$\{hostRoleAssignmentJoinConditions\}/)
+  assert.match(server, /\|\| '1 = 0'/)
+  assert.doesNotMatch(server, new RegExp("LEFT JOIN user_role_assignments host_ura ON host_ura\\.id = hra\\.role_assignment_id\\n       LEFT JOIN host_accounts"))
+})
+
 test('host portal lets hosts modify every golf-course tournament and exposes published registration URLs', () => {
   const hostPage = fs.readFileSync(new URL('../src/pages/HostPortal.tsx', import.meta.url), 'utf8')
   const accounts = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
@@ -877,7 +889,7 @@ test('tournament flyer template is persisted, editable, and supports organizer-p
   assert.match(tournamentPortal, /@page \{ size: letter portrait; margin: 0\.15in; \}/)
   assert.match(tournamentPortal, /tournament-flyer-print-content/)
   assert.match(tournamentPortal, /transform: scale\(0\.58\)/)
-  assert.match(tournamentPortal, /max-height: 10\.5in/)
+  assert.match(tournamentPortal, /max-height: 10\.7in/)
   assert.match(tournamentPortal, /<a href=\{flyerPageUrl \|\| undefined\}/)
   assert.doesNotMatch(tournamentPortal, /Sponsor Logos|Misc Notes:/)
   assert.doesNotMatch(tournamentPortal, /Tournament portal|Tournament details and Golf Homiez account registration\.|<PageHero/)
