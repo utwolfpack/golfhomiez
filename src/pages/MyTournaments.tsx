@@ -3,19 +3,16 @@ import { Link } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { fetchUserTournaments, type UserRegisteredTournament } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { formatFriendlyDateTime } from '../lib/time-format'
 
 function formatDateTime(value?: string | null) {
   if (!value) return 'Not set'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
+  return formatFriendlyDateTime(value)
 }
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not set'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString()
+  return formatFriendlyDateTime(value)
 }
 
 export default function MyTournaments() {
@@ -64,7 +61,7 @@ export default function MyTournaments() {
                 </div>
                 <span className="small" style={{ textTransform: 'uppercase', fontWeight: 700 }}>{tournament.status}</span>
               </div>
-              <div className="small" style={{ marginTop: 12 }}><strong>Dates:</strong> {formatDate(tournament.startDate)}{tournament.endDate ? ` to ${formatDate(tournament.endDate)}` : ''}</div>
+              <div className="small" style={{ marginTop: 12 }}><strong>Date:</strong> {formatDate(tournament.startDate)}</div>
               <div className="small"><strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</div>
               <div className="small"><strong>Organizer:</strong> {tournament.organizerName || 'Golf Homiez organizer'}</div>
               <div className="small"><strong>Registered golfers:</strong> {tournament.registrationCount ?? 0}</div>

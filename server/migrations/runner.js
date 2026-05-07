@@ -62,15 +62,17 @@ export function assertSafeMigrationSql(sql, migration) {
 }
 
 export async function applyMigration(db, migration) {
-  const rawSql = await migration.getSql(db)
-  const sql = assertSafeMigrationSql(rawSql, migration)
-  const checksum = checksumSql(sql)
-
   if (await migration.isSatisfied(db)) {
+    const rawSql = await migration.getSql(db)
+    const sql = String(rawSql || `-- ${migration.version} already satisfied`).trim()
+    const checksum = checksumSql(sql)
     await recordAppliedMigration(db, migration, checksum, 'detected_existing_schema')
     return { version: migration.version, status: 'already_satisfied' }
   }
 
+  const rawSql = await migration.getSql(db)
+  const sql = assertSafeMigrationSql(rawSql, migration)
+  const checksum = checksumSql(sql)
   await db.query(sql)
   await recordAppliedMigration(db, migration, checksum, 'executed')
   return { version: migration.version, status: 'executed' }

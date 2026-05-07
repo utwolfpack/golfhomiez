@@ -48,7 +48,7 @@ function ProfileInner() {
   const [needsEnrichment, setNeedsEnrichment] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
-  const { hasRole } = useAuth()
+  const { hasRole, refreshProfileStatus } = useAuth()
 
   const isGuidedEnrichment = useMemo(() => new URLSearchParams(location.search).get('enrich') === '1', [location.search])
   const isPreferenceRestricted = hasRole('admin') || hasRole('host') || hasRole('organizer')
@@ -139,7 +139,12 @@ function ProfileInner() {
       setNeedsEnrichment(Boolean(saved.needsEnrichment))
       setStatus('Profile saved.')
       logFrontendEvent({ category: 'profile.save', message: 'profile_saved', data: { needsEnrichment: saved.needsEnrichment } })
-      navigate('/', { replace: true })
+      await refreshProfileStatus()
+      if (isGuidedEnrichment) {
+        navigate('/?profileEnriched=1', { replace: true })
+      } else {
+        navigate('/', { replace: true })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save profile.')
       logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_save_failed', data: { error: err instanceof Error ? err.message : String(err) } })
