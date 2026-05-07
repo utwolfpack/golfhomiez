@@ -1,4 +1,5 @@
 import { api } from './api'
+import type { Team } from '../types'
 
 export type HostAccountInput = {
   golfCourseName: string
@@ -29,7 +30,14 @@ export type TournamentInput = {
   status?: string
   isPublic?: boolean
   organizerEmail?: string | null
+  teamId?: string | null
+  teamName?: string | null
+  teamMembers?: Array<{ id?: string; name: string; email: string }> | null
+  templateKey?: string | null
+  templateBackgroundImageUrl?: string | null
+  templateData?: Record<string, unknown> | null
 }
+
 
 export type HostInviteInput = {
   email: string
@@ -66,6 +74,9 @@ export type TournamentRegistration = {
   status: string
   registeredAt?: string | null
   updatedAt?: string | null
+  teamId?: string | null
+  teamName?: string | null
+  teamMembers?: Array<{ id?: string; name: string; email: string }>
 }
 
 export type Tournament = {
@@ -82,6 +93,7 @@ export type Tournament = {
   isPublic: boolean
   organizerName?: string | null
   hostGolfCourseName?: string | null
+  hostGolfCourseAddress?: string | null
   portalPath?: string | null
   portalUrl?: string | null
   registrationUrl?: string | null
@@ -92,6 +104,9 @@ export type Tournament = {
   inviteUrl?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  templateKey?: string | null
+  templateBackgroundImageUrl?: string | null
+  templateData?: Record<string, unknown> | null
 }
 
 export type AdminUser = {
@@ -270,8 +285,12 @@ export function fetchTournamentPortal(id: string) {
   return api<TournamentPortal>(`/api/tournament-portals/${encodeURIComponent(id)}`)
 }
 
-export function registerForTournament(id: string) {
-  return api<TournamentRegistrationResult>(`/api/tournament-portals/${encodeURIComponent(id)}/register`, { method: 'POST', body: JSON.stringify({}) })
+export function registerForTournament(id: string, input: { teamId?: string | null; teamName?: string | null; teamMembers?: Array<{ id?: string; name: string; email: string }> } = {}) {
+  return api<TournamentRegistrationResult>(`/api/tournament-portals/${encodeURIComponent(id)}/register`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function fetchMyTeams() {
+  return api<Team[]>('/api/teams?mine=1')
 }
 
 export function fetchAdminPortal() {
