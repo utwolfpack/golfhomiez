@@ -760,13 +760,20 @@ async function listHostPortalTournaments(pool, hostAccount, req = null) {
   const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
   const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
+  const hostRoleAssignmentJoinConditions = [
+    hostRoleColumns.has('auth_user_id') ? 'host_ura.auth_user_id = hra.auth_user_id' : null,
+    hostRoleColumns.has('email') ? 'LOWER(host_ura.email) = LOWER(hra.email)' : null,
+  ].filter(Boolean).join(' OR ') || '1 = 0'
+  const hostRoleAssignmentJoin = hostRoleColumns.has('role_assignment_id')
+    ? 'LEFT JOIN user_role_assignments host_ura ON host_ura.id = hra.role_assignment_id'
+    : `LEFT JOIN user_role_assignments host_ura ON ${hostRoleAssignmentJoinConditions}`
   const [rows] = await pool.execute(
     `SELECT DISTINCT t.*, ${organizerNameExpr} AS organizer_name,
             COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}) AS host_golf_course_name
        FROM tournaments t
        LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
        LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
-       LEFT JOIN user_role_assignments host_ura ON host_ura.id = hra.role_assignment_id
+       ${hostRoleAssignmentJoin}
        LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
       WHERE t.host_account_id = ?
          OR LOWER(COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}, '')) = LOWER(?)
@@ -790,11 +797,18 @@ async function getHostEditableTournament(pool, hostAccount, tournamentId) {
   const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
   const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
+  const hostRoleAssignmentJoinConditions = [
+    hostRoleColumns.has('auth_user_id') ? 'host_ura.auth_user_id = hra.auth_user_id' : null,
+    hostRoleColumns.has('email') ? 'LOWER(host_ura.email) = LOWER(hra.email)' : null,
+  ].filter(Boolean).join(' OR ') || '1 = 0'
+  const hostRoleAssignmentJoin = hostRoleColumns.has('role_assignment_id')
+    ? 'LEFT JOIN user_role_assignments host_ura ON host_ura.id = hra.role_assignment_id'
+    : `LEFT JOIN user_role_assignments host_ura ON ${hostRoleAssignmentJoinConditions}`
   const [rows] = await pool.execute(
     `SELECT DISTINCT t.*
        FROM tournaments t
        LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
-       LEFT JOIN user_role_assignments host_ura ON host_ura.id = hra.role_assignment_id
+       ${hostRoleAssignmentJoin}
        LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
       WHERE (t.id = ? OR t.tournament_identifier = ?)
         AND (t.host_account_id = ?
