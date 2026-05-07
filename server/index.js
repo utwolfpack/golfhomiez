@@ -13,7 +13,7 @@ import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
-import { findGolfCourseForState, listGolfCourseNamesByState } from './lib/golf-course-service.js'
+import { findGolfCourseForState, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
 import { sendMail } from './mailer.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, redeemHostInvite, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
@@ -157,9 +157,17 @@ app.get('/api/locations/nearest', async (req, res) => {
 })
 
 app.all('/api/auth/*', toNodeHandler(auth))
-app.use(express.json())
+const apiJsonBodyLimit = String(process.env.API_JSON_BODY_LIMIT || '4mb').trim() || '4mb'
+app.use(express.json({ limit: apiJsonBodyLimit }))
+app.use((error, req, res, next) => {
+  if (error?.type === 'entity.too.large') {
+    logRouteError('JSON payload too large', req, error, { bodyLimit: apiJsonBodyLimit })
+    return res.status(413).json({ message: 'Uploaded image is too large. Please select a smaller image or try again after the image is compressed.' })
+  }
+  return next(error)
+})
 
-app.post(['/api/client-logs', '/api/client-log'], express.json({ limit: '64kb' }), (req, res) => {
+app.post(['/api/client-logs', '/api/client-log'], (req, res) => {
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const correlationId = String(body.correlationId || req.correlationId || '').trim() || req.correlationId || null
@@ -362,6 +370,42 @@ function mapTournamentRegistrationRow(row) {
     status: row.status || 'registered',
     registeredAt: row.created_at || row.registered_at || null,
     updatedAt: row.updated_at || null,
+    teamId: row.team_id || null,
+    teamName: row.team_name || null,
+    teamMembers: parseTeamMembers(row.team_members_json),
+  }
+}
+
+
+function parseTournamentTemplateData(value) {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try { return JSON.parse(value) } catch { return null }
+}
+
+function sanitizeTournamentTemplateData(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  const cleanString = (key) => source[key] == null ? null : String(source[key]).trim() || null
+  const startType = String(source.startType || 'shotgun').trim()
+  const logoFiles = Array.isArray(source.logoFiles) ? source.logoFiles.map((logo) => String(logo || '').trim()).filter(Boolean).slice(0, 18) : []
+  return {
+    tournamentName: cleanString('tournamentName'),
+    hostOrganization: cleanString('hostOrganization'),
+    beneficiaryCharity: cleanString('beneficiaryCharity'),
+    checkInTime: cleanString('checkInTime'),
+    startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
+    tournamentFormat: cleanString('tournamentFormat'),
+    registrationDeadline: cleanString('registrationDeadline'),
+    entryFee: cleanString('entryFee'),
+    feesInclude: cleanString('feesInclude'),
+    prizeDetails: cleanString('prizeDetails'),
+    holeContestsExtras: cleanString('holeContestsExtras'),
+    contactPerson: cleanString('contactPerson'),
+    contactPhone: cleanString('contactPhone'),
+    contactEmail: cleanString('contactEmail'),
+    logoFiles,
+    supportingPhotoUrl: cleanString('supportingPhotoUrl'),
+    miscNotes: cleanString('miscNotes'),
   }
 }
 
@@ -377,8 +421,12 @@ function mapTournamentPortalRow(row, req = null) {
     endDate: row.end_date || row.ends_at,
     status: row.status,
     isPublic: Boolean(row.is_public),
+    templateKey: row.template_key || 'classic-flyer',
+    templateBackgroundImageUrl: row.template_background_image_url || null,
+    templateData: parseTournamentTemplateData(row.template_data),
     organizerName: row.organizer_name || null,
     hostGolfCourseName: row.host_golf_course_name || row.host_account_name || null,
+    hostGolfCourseAddress: row.host_golf_course_address || null,
     registrationCount: Number(row.registration_count || 0),
     registrations: Array.isArray(row.registrations) ? row.registrations : [],
     portalPath: tournamentPortalPath(row.tournament_identifier || row.id),
@@ -388,12 +436,67 @@ function mapTournamentPortalRow(row, req = null) {
   }
 }
 
+
+function serializeTeamMembers(members = []) {
+  return JSON.stringify((Array.isArray(members) ? members : []).map((member) => ({
+    id: member.id || null,
+    name: String(member.name || '').trim(),
+    email: normalizeEmail(member.email),
+  })).filter((member) => member.name || member.email))
+}
+
+function parseTeamMembers(value) {
+  if (!value) return []
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    return Array.isArray(parsed) ? parsed.map((member) => ({
+      id: member?.id || null,
+      name: String(member?.name || '').trim(),
+      email: normalizeEmail(member?.email),
+    })).filter((member) => member.name || member.email) : []
+  } catch (_) {
+    return []
+  }
+}
+
+function enforceTournamentTeamSize(members = []) {
+  if (![2, 4].includes(members.length)) throw new Error('Tournament teams must have exactly 2 or 4 players.')
+}
+
+async function resolveRegistrationTeam(pool, body = {}, user) {
+  const requestedTeamId = String(body.teamId || '').trim()
+  const requesterEmail = normalizeEmail(user?.email)
+
+  if (requestedTeamId) {
+    const team = await storage.getTeamById(requestedTeamId)
+    if (!team) throw new Error('Selected team was not found.')
+    const isMember = (team.members || []).some((member) => normalizeEmail(member.email) === requesterEmail)
+    if (!isMember) throw new Error('You must be a member of an existing team to register it for a tournament.')
+    enforceTournamentTeamSize(team.members || [])
+    return { teamId: team.id, teamName: team.name, teamMembers: team.members || [] }
+  }
+
+  const teamName = String(body.teamName || '').trim()
+  const rawMembers = Array.isArray(body.teamMembers) ? body.teamMembers : []
+  if (!teamName) throw new Error('Team name is required for tournament registration.')
+  const normalizedMembers = normalizeCreateTeamMembers(rawMembers, user)
+  enforceTournamentTeamSize(normalizedMembers)
+  for (const member of normalizedMembers) {
+    if (!member.name) throw new Error('Each team member must have a name.')
+    if (!isEmail(member.email)) throw new Error(`Invalid team member email: ${member.email}`)
+  }
+  const existing = await storage.getTeamByName(teamName)
+  if (existing) throw new Error('A team with that name already exists. Choose it from existing teams or use a different name.')
+  const team = await storage.createTeam({ name: teamName, members: normalizedMembers })
+  return { teamId: team.id, teamName: team.name, teamMembers: team.members || normalizedMembers }
+}
+
 async function listTournamentRegistrations(pool, tournamentIds = []) {
   const ids = [...new Set((tournamentIds || []).filter(Boolean).map((id) => String(id)))]
   if (!ids.length) return new Map()
   const placeholders = ids.map(() => '?').join(',')
   const [rows] = await pool.execute(
-    `SELECT tr.id, tr.tournament_id, tr.auth_user_id, tr.email, tr.name, tr.status, tr.created_at, tr.updated_at
+    `SELECT tr.id, tr.tournament_id, tr.auth_user_id, tr.email, tr.name, tr.status, tr.team_id, tr.team_name, tr.team_members_json, tr.created_at, tr.updated_at
        FROM tournament_registrations tr
       WHERE tr.tournament_id IN (${placeholders})
         AND tr.status = 'registered'
@@ -424,8 +527,11 @@ async function getTournamentPortalById(pool, tournamentId, req = null) {
   const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
   const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
+  const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
   const [rows] = await pool.execute(
     `SELECT t.*, ${organizerNameExpr} AS organizer_name, ${hostRoleGolfCourseExpr} AS host_golf_course_name, ${hostAccountGolfCourseExpr} AS host_account_name,
+            ${hostRoleStateExpr} AS host_golf_course_state, ${hostAccountStateExpr} AS host_account_state,
             COUNT(tr.id) AS registration_count
        FROM tournaments t
        LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
@@ -441,7 +547,18 @@ async function getTournamentPortalById(pool, tournamentId, req = null) {
   if (!row) return null
   const registrationsByTournament = await listTournamentRegistrations(pool, [row.id])
   const registrations = registrationsByTournament.get(String(row.id)) || []
-  const tournament = { ...mapTournamentPortalRow({ ...row, registrations, registration_count: registrations.length }, req), tournamentIdentifier: row.tournament_identifier || null }
+  const mappedRow = { ...row, registrations, registration_count: registrations.length }
+  const courseName = row.host_golf_course_name || row.host_account_name || ''
+  try {
+    const courseState = row.host_golf_course_state || row.host_account_state || ''
+    const course = courseName ? await getGolfCourseByName(courseName, courseState) : null
+    if (course?.address) {
+      mappedRow.host_golf_course_address = [course.address, course.city, course.state_code || course.state, course.postal_code].filter(Boolean).join(', ')
+    }
+  } catch (error) {
+    logError('Tournament golf course address lookup failed', { correlationId: req?.correlationId || null, tournamentId, courseName, error })
+  }
+  const tournament = { ...mapTournamentPortalRow(mappedRow, req), tournamentIdentifier: row.tournament_identifier || null }
   return { tournament, registrationCount: registrations.length, registrations }
 }
 
@@ -490,14 +607,21 @@ function sanitizeOrganizerTournamentUpdatePayload(body = {}) {
   if (!name) throw new Error('Tournament name is required.')
   const status = String(body.status || 'draft').trim()
   const allowedStatuses = new Set(['draft', 'published', 'completed', 'cancelled'])
+  const allowedTemplateKeys = new Set(['classic-flyer'])
+  const templateKey = String(body.templateKey || 'classic-flyer').trim()
+  const templateBackgroundImageUrl = String(body.templateBackgroundImageUrl || '').trim()
   if (!allowedStatuses.has(status)) throw new Error('Tournament status is invalid.')
+  if (!allowedTemplateKeys.has(templateKey)) throw new Error('Tournament template is invalid.')
   return {
     name,
     description: body.description == null ? null : String(body.description).trim() || null,
     startDate: body.startDate ? String(body.startDate).slice(0, 10) : null,
-    endDate: body.endDate ? String(body.endDate).slice(0, 10) : null,
+    endDate: null,
     status,
-    isPublic: Boolean(body.isPublic),
+    isPublic: status === 'published',
+    templateKey,
+    templateBackgroundImageUrl: templateBackgroundImageUrl || null,
+    templateData: sanitizeTournamentTemplateData(body.templateData),
   }
 }
 
@@ -506,9 +630,9 @@ async function updateOrganizerInvitedTournament(pool, user, tournamentId, input,
   if (!existing) return null
   await pool.execute(
     `UPDATE tournaments
-        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, template_key = ?, template_background_image_url = ?, template_data = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
-    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, existing.id],
+    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, input.templateKey, input.templateBackgroundImageUrl, JSON.stringify(input.templateData || {}), existing.id],
   )
   const portal = await getTournamentPortalById(pool, existing.id, req)
   return portal?.tournament || null
@@ -579,6 +703,8 @@ async function getOrganizerPortalSummary(pool, user, req) {
   const organizerJoinNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
   const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
+  const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
   const organizerAccountFilter = organizerAccount ? 't.organizer_account_id = ? OR' : ''
   const inviteJoin = inviteColumns.size
     ? 'LEFT JOIN organizer_tournament_invites oti ON oti.tournament_id = t.id'
@@ -632,6 +758,8 @@ async function listHostPortalTournaments(pool, hostAccount, req = null) {
   const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
   const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
+  const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
   const [rows] = await pool.execute(
     `SELECT DISTINCT t.*, ${organizerNameExpr} AS organizer_name,
             COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}) AS host_golf_course_name
@@ -660,6 +788,8 @@ async function getHostEditableTournament(pool, hostAccount, tournamentId) {
   const hostAccountColumns = await listTableColumns(pool, 'host_accounts')
   const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
+  const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
   const [rows] = await pool.execute(
     `SELECT DISTINCT t.*
        FROM tournaments t
@@ -681,9 +811,9 @@ async function updateHostOwnedTournament(pool, hostAccount, tournamentId, input,
   if (!existing) return null
   await pool.execute(
     `UPDATE tournaments
-        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, template_key = ?, template_background_image_url = ?, template_data = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
-    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, existing.id],
+    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, input.templateKey, input.templateBackgroundImageUrl, JSON.stringify(input.templateData || {}), existing.id],
   )
   const portal = await getTournamentPortalById(pool, existing.id, req)
   return portal?.tournament ? {
@@ -1444,7 +1574,7 @@ app.get('/api/tournament-portals/:id', requireStorage, async (req, res) => {
     const pool = getPool()
     const portal = await getTournamentPortalById(pool, id, req)
     if (!portal) return res.status(404).json({ message: 'Tournament not found' })
-    if (!portal.tournament.isPublic && portal.tournament.status === 'draft') return res.status(404).json({ message: 'Tournament not found' })
+    if (portal.tournament.status !== 'published') return res.status(404).json({ message: 'Tournament not found' })
 
     let viewer = null
     try {
@@ -1456,7 +1586,7 @@ app.get('/api/tournament-portals/:id', requireStorage, async (req, res) => {
     let viewerRegistration = null
     if (viewer?.id) {
       const [registrationRows] = await pool.execute(
-        `SELECT id, tournament_id, auth_user_id, email, name, status, created_at, updated_at
+        `SELECT id, tournament_id, auth_user_id, email, name, status, team_id, team_name, team_members_json, created_at, updated_at
            FROM tournament_registrations
           WHERE tournament_id = ?
             AND auth_user_id = ?
@@ -1484,7 +1614,7 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
     if (portal.tournament.status === 'cancelled' || portal.tournament.status === 'completed') return res.status(400).json({ message: 'Tournament registration is closed.' })
     const resolvedTournamentId = portal.tournament.id
     const [existingRows] = await pool.execute(
-      `SELECT id, tournament_id, auth_user_id, email, name, status, created_at, updated_at
+      `SELECT id, tournament_id, auth_user_id, email, name, status, team_id, team_name, team_members_json, created_at, updated_at
          FROM tournament_registrations
         WHERE tournament_id = ?
           AND auth_user_id = ?
@@ -1498,11 +1628,12 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
       return res.status(409).json({ ok: false, alreadyRegistered: true, tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, status: 'registered', registration: existingRegistration, message: 'You are already registered for this tournament.' })
     }
 
+    const registrationTeam = await resolveRegistrationTeam(pool, req.body || {}, req.user)
     const registrationId = uuidv4()
     await pool.execute(
-      `INSERT INTO tournament_registrations (id, tournament_id, auth_user_id, email, name, status, correlation_id)
-       VALUES (?, ?, ?, ?, ?, 'registered', ?)`,
-      [registrationId, resolvedTournamentId, req.user.id, normalizeEmail(req.user.email), req.user.name || null, req.correlationId || null],
+      `INSERT INTO tournament_registrations (id, tournament_id, auth_user_id, email, name, status, team_id, team_name, team_members_json, correlation_id)
+       VALUES (?, ?, ?, ?, ?, 'registered', ?, ?, ?, ?)`,
+      [registrationId, resolvedTournamentId, req.user.id, normalizeEmail(req.user.email), req.user.name || null, registrationTeam.teamId, registrationTeam.teamName, serializeTeamMembers(registrationTeam.teamMembers), req.correlationId || null],
     )
     const registrationUrl = portal.tournament.portalUrl || tournamentPortalUrl(req, portal.tournament.tournamentIdentifier || resolvedTournamentId)
     try {
@@ -1511,16 +1642,16 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
         subject: `Registration confirmed: ${portal.tournament.name}`,
         text: [
           `You are registered for ${portal.tournament.name}.`,
-          portal.tournament.startDate ? `Start date: ${portal.tournament.startDate}` : '',
-          portal.tournament.endDate ? `End date: ${portal.tournament.endDate}` : '',
+          portal.tournament.startDate ? `Tournament date: ${portal.tournament.startDate}` : '',
+
           portal.tournament.hostGolfCourseName ? `Host: ${portal.tournament.hostGolfCourseName}` : '',
           portal.tournament.organizerName ? `Organizer: ${portal.tournament.organizerName}` : '',
           `Tournament link: ${registrationUrl}`,
         ].filter(Boolean).join('\n'),
         html: `
           <p>You are registered for <strong>${portal.tournament.name}</strong>.</p>
-          ${portal.tournament.startDate ? `<p><strong>Start date:</strong> ${portal.tournament.startDate}</p>` : ''}
-          ${portal.tournament.endDate ? `<p><strong>End date:</strong> ${portal.tournament.endDate}</p>` : ''}
+          ${portal.tournament.startDate ? `<p><strong>Tournament date:</strong> ${portal.tournament.startDate}</p>` : ''}
+
           ${portal.tournament.hostGolfCourseName ? `<p><strong>Host:</strong> ${portal.tournament.hostGolfCourseName}</p>` : ''}
           ${portal.tournament.organizerName ? `<p><strong>Organizer:</strong> ${portal.tournament.organizerName}</p>` : ''}
           <p><a href="${registrationUrl}">View tournament details</a></p>
@@ -1531,8 +1662,12 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
       logRouteError('Tournament registration confirmation email error', req, mailError)
     }
     logApi('tournament_registration_completed', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, authUserId: req.user.id, email: normalizeEmail(req.user.email) })
-    res.status(201).json({ ok: true, tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, status: 'registered' })
+    res.status(201).json({ ok: true, tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, status: 'registered', registration: { id: registrationId, tournamentId: resolvedTournamentId, authUserId: req.user.id, email: normalizeEmail(req.user.email), name: req.user.name || normalizeEmail(req.user.email), status: 'registered', teamId: registrationTeam.teamId, teamName: registrationTeam.teamName, teamMembers: registrationTeam.teamMembers } })
   } catch (error) {
+    if (error instanceof Error && /team|member|email|players|name|exists/i.test(error.message)) {
+      logApi('tournament_registration_validation_failed', { ...requestContext(req), validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
     logRouteError('Tournament registration error', req, error)
     res.status(500).json({ message: 'Could not register for tournament' })
   }
@@ -1686,7 +1821,11 @@ app.post('/api/invitations/resend-registration', requireStorage, authMiddleware,
 app.get('/api/teams', requireStorage, authMiddleware, async (req, res) => {
   try {
     const teams = await storage.listTeams()
-    res.json(teams)
+    const onlyMine = String(req.query.mine || '').toLowerCase() === '1' || String(req.query.mine || '').toLowerCase() === 'true'
+    const requesterEmail = normalizeEmail(req.user.email)
+    const visibleTeams = onlyMine ? teams.filter((team) => (team.members || []).some((member) => normalizeEmail(member.email) === requesterEmail)) : teams
+    logApi('teams_listed', { ...requestContext(req), onlyMine, teamCount: visibleTeams.length })
+    res.json(visibleTeams)
   } catch (error) {
     logRouteError('List teams error', req, error)
     res.status(500).json({ message: 'Could not load teams' })

@@ -11,14 +11,20 @@ import {
   requestAdminPasswordReset,
 } from '../lib/admin'
 import { useAdminAuth } from '../context/AdminAuthContext'
+import { formatFriendlyDateTime } from '../lib/time-format'
 
 type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
 type AdminIdentity = { id: string; username: string; email: string }
 type RowRecord = Record<string, unknown>
 
-function formatValue(value: unknown) {
+function isDateKey(key?: string) {
+  return Boolean(key && /(^|_)(created|updated|expires|consumed|validated)_?at$|createdAt|updatedAt|expiresAt|consumedAt/i.test(key))
+}
+
+function formatValue(value: unknown, key?: string) {
   if (value == null || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (isDateKey(key)) return formatFriendlyDateTime(String(value))
   return String(value)
 }
 
@@ -65,7 +71,7 @@ function DataTable({ title, rows, columns }: { title: string; rows: RowRecord[];
             {rows.length ? rows.map((row, index) => (
               <tr key={String(row.id ?? row.username ?? row.email ?? `${title}-${index}`)}>
                 {columns.map((column) => (
-                  <td key={column.key}>{formatValue(row[column.key])}</td>
+                  <td key={column.key}>{formatValue(row[column.key], column.key)}</td>
                 ))}
               </tr>
             )) : (
@@ -112,7 +118,7 @@ function RequestTable({ rows, approvingRequestId, deletingRequestId, onApprove, 
               const busy = approvingRequestId === requestId || deletingRequestId === requestId
               return (
                 <tr key={requestId}>
-                  <td>{formatValue(row.created_at)}</td>
+                  <td>{formatValue(row.created_at, 'created_at')}</td>
                   <td>{formatValue(row.first_name)}</td>
                   <td>{formatValue(row.last_name)}</td>
                   <td>{formatValue(row.email)}</td>

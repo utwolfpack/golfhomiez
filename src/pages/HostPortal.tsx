@@ -5,6 +5,8 @@ import PageHero from '../components/PageHero'
 import { useHostAuth } from '../context/HostAuthContext'
 import { createHostTournament, sendHostTournamentInvite, updateHostTournamentRecord, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { formatFriendlyDateTime } from '../lib/time-format'
+import TournamentTemplateFields from '../components/TournamentTemplateFields'
 import { fetchHostPortal } from '../lib/host-auth'
 
 type HostPortalState = {
@@ -23,26 +25,29 @@ const EMPTY_FORM: TournamentInput = {
   status: 'draft',
   isPublic: false,
   organizerEmail: '',
+  templateKey: 'classic-flyer',
+  templateBackgroundImageUrl: null,
 }
 
 function formatRegisteredAt(value?: string | null) {
   if (!value) return 'Unknown time'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  return formatFriendlyDateTime(value)
 }
 
 function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   const registrations = tournament.registrations || []
   return (
     <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
-      <div style={{ fontWeight: 700 }}>Registered golfers ({tournament.registrationCount ?? registrations.length})</div>
+      <div style={{ fontWeight: 700 }}>Registered teams and golfers ({tournament.registrationCount ?? registrations.length})</div>
       {registrations.length === 0 ? (
         <div className="small">No golfers have registered yet.</div>
       ) : (
         <div className="formStack" style={{ marginTop: 8 }}>
           {registrations.map((registration) => (
             <div key={registration.id} className="small">
-              <strong>{registration.name || 'Registered golfer'}</strong> · {registration.email} · {formatRegisteredAt(registration.registeredAt)}
+              <strong>{registration.teamName || registration.name || 'Registered team'}</strong> · {formatRegisteredAt(registration.registeredAt)}
+              <div>Registrant: {registration.name || 'Registered golfer'} · {registration.email}</div>
+              <div>Members: {(registration.teamMembers || []).map((member) => `${member.name || member.email} <${member.email}>`).join(', ') || 'Team roster unavailable'}</div>
             </div>
           ))}
         </div>
@@ -56,9 +61,12 @@ function toEditForm(tournament: Tournament): TournamentInput {
     name: tournament.name || '',
     description: tournament.description || '',
     startDate: tournament.startDate ? String(tournament.startDate).slice(0, 10) : '',
-    endDate: tournament.endDate ? String(tournament.endDate).slice(0, 10) : '',
+    endDate: null,
     status: tournament.status || 'draft',
-    isPublic: Boolean(tournament.isPublic),
+    isPublic: tournament.status === 'published',
+    templateKey: tournament.templateKey || 'classic-flyer',
+    templateBackgroundImageUrl: tournament.templateBackgroundImageUrl || null,
+    templateData: tournament.templateData || null,
   }
 }
 
@@ -135,7 +143,7 @@ export default function HostPortal() {
     setError(null)
     setSuccess(null)
     try {
-      const saved = await updateHostTournamentRecord(editingId, editForm)
+      const saved = await updateHostTournamentRecord(editingId, { ...editForm, endDate: null })
       setPortalData((prev) => prev ? { ...prev, tournaments: (prev.tournaments || []).map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : prev)
       setSuccess(saved.status === 'published' && (saved.registrationUrl || saved.portalUrl) ? `Tournament updated. Registration URL: ${saved.registrationUrl || saved.portalUrl}` : 'Tournament updated.')
       setEditingId(null)
@@ -194,6 +202,7 @@ export default function HostPortal() {
                 <label className="label">Tournament organizer email</label>
                 <input className="input" type="email" value={form.organizerEmail || ''} onChange={(e) => setForm((prev) => ({ ...prev, organizerEmail: e.target.value }))} placeholder="organizer@example.com" />
               </div>
+              <TournamentTemplateFields value={form} onChange={(next) => setForm((prev) => ({ ...prev, ...next }))} />
               <div>
                 <button className="btn btnPrimary" disabled={saving}>{saving ? 'Creating…' : 'Create tournament'}</button>
               </div>
@@ -218,12 +227,8 @@ export default function HostPortal() {
                         </div>
                         <div className="formRow formRow--split">
                           <div>
-                            <label className="label">Start date</label>
-                            <input className="input" type="date" value={editForm.startDate || ''} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, startDate: e.target.value }) : prev)} />
-                          </div>
-                          <div>
-                            <label className="label">End date</label>
-                            <input className="input" type="date" value={editForm.endDate || ''} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, endDate: e.target.value }) : prev)} />
+                            <label className="label">Tournament date</label>
+                            <input className="input" type="date" value={editForm.startDate || ''} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, startDate: e.target.value, endDate: null }) : prev)} />
                           </div>
                         </div>
                         <div>
@@ -235,10 +240,7 @@ export default function HostPortal() {
                             <option value="cancelled">Cancelled</option>
                           </select>
                         </div>
-                        <label className="small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <input type="checkbox" checked={Boolean(editForm.isPublic)} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, isPublic: e.target.checked }) : prev)} />
-                          Make this tournament publicly visible
-                        </label>
+                        <TournamentTemplateFields value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <button className="btn btnPrimary" disabled={saving}>{saving ? 'Saving…' : 'Save tournament changes'}</button>
                           <button type="button" className="btn" onClick={() => { setEditingId(null); setEditForm(null); setError(null) }}>Cancel</button>

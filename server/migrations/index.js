@@ -902,6 +902,88 @@ ON DUPLICATE KEY UPDATE
     },
   },
 
+
+  {
+    version: '20260507_024',
+    name: 'tournament_registration_teams',
+    filename: '20260507_024_tournament_registration_teams.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'tournament_registrations') &&
+        await columnExists(db, 'tournament_registrations', 'team_id') &&
+        await columnExists(db, 'tournament_registrations', 'team_name') &&
+        await columnExists(db, 'tournament_registrations', 'team_members_json') &&
+        await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_team')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'tournament_registrations', 'team_id'))) statements.push('ALTER TABLE tournament_registrations ADD COLUMN team_id VARCHAR(191) NULL AFTER status')
+      if (!(await columnExists(db, 'tournament_registrations', 'team_name'))) statements.push('ALTER TABLE tournament_registrations ADD COLUMN team_name VARCHAR(191) NULL AFTER team_id')
+      if (!(await columnExists(db, 'tournament_registrations', 'team_members_json'))) statements.push('ALTER TABLE tournament_registrations ADD COLUMN team_members_json JSON NULL AFTER team_name')
+      if (!(await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_team'))) statements.push('CREATE INDEX idx_tournament_registrations_team ON tournament_registrations (team_id)')
+      return statements.join(';\n')
+    },
+  },
+
+
+  {
+    version: '20260507_025',
+    name: 'tournament_page_templates',
+    filename: '20260507_025_tournament_page_templates.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'tournaments', 'template_key') &&
+        await columnExists(db, 'tournaments', 'template_background_image_url') &&
+        await columnExists(db, 'tournaments', 'template_data') &&
+        await indexExists(db, 'tournaments', 'idx_tournaments_template_key')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'tournaments', 'template_key'))) statements.push('ALTER TABLE tournaments ADD COLUMN template_key VARCHAR(64) NULL AFTER is_public')
+      if (!(await columnExists(db, 'tournaments', 'template_background_image_url'))) statements.push('ALTER TABLE tournaments ADD COLUMN template_background_image_url LONGTEXT NULL AFTER template_key')
+      if (!(await columnExists(db, 'tournaments', 'template_data'))) statements.push('ALTER TABLE tournaments ADD COLUMN template_data LONGTEXT NULL AFTER template_background_image_url')
+      if (!(await indexExists(db, 'tournaments', 'idx_tournaments_template_key'))) statements.push('CREATE INDEX idx_tournaments_template_key ON tournaments (template_key)')
+      return statements.join(';\n')
+    },
+  },
+
+
+  {
+    version: '20260507_026',
+    name: 'tournament_flyer_template_fields',
+    filename: '20260507_026_tournament_flyer_template_fields.sql',
+    async isSatisfied(db) {
+      return await columnExists(db, 'tournaments', 'template_data')
+    },
+    async getSql(db) {
+      if (await columnExists(db, 'tournaments', 'template_data')) return ''
+      return 'ALTER TABLE tournaments ADD COLUMN template_data LONGTEXT NULL AFTER template_background_image_url'
+    },
+  },
+
+
+  {
+    version: '20260507_027',
+    name: 'golf_course_address_fields',
+    filename: '20260507_027_golf_course_address_fields.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'golf_courses'))) return true
+      return (
+        await columnExists(db, 'golf_courses', 'address') &&
+        await columnExists(db, 'golf_courses', 'postal_code')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await tableExists(db, 'golf_courses'))) return '-- golf_courses table does not exist; runtime table creation includes address fields'
+      if (!(await columnExists(db, 'golf_courses', 'address'))) statements.push('ALTER TABLE golf_courses ADD COLUMN address VARCHAR(255) NULL AFTER city')
+      if (!(await columnExists(db, 'golf_courses', 'postal_code'))) statements.push('ALTER TABLE golf_courses ADD COLUMN postal_code VARCHAR(32) NULL AFTER address')
+      return statements.join(';\n') || '-- golf_courses address fields already exist'
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {
