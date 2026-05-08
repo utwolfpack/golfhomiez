@@ -984,6 +984,39 @@ ON DUPLICATE KEY UPDATE
     },
   },
 
+
+  {
+    version: '20260508_028',
+    name: 'host_tournament_creation_schema_alignment',
+    filename: '20260508_028_host_tournament_creation_schema_alignment.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'tournaments'))) return true
+      return (
+        await columnExists(db, 'tournaments', 'created_by_auth_user_id') &&
+        await columnExists(db, 'tournaments', 'template_key') &&
+        await columnExists(db, 'tournaments', 'template_background_image_url') &&
+        await columnExists(db, 'tournaments', 'template_data') &&
+        await columnExists(db, 'tournaments', 'tournament_identifier') &&
+        await columnExists(db, 'tournaments', 'organizer_email') &&
+        await indexExists(db, 'tournaments', 'idx_tournaments_identifier') &&
+        await indexExists(db, 'tournaments', 'idx_tournaments_template_key')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await tableExists(db, 'tournaments'))) return '-- tournaments table does not exist; baseline migration creates it for fresh installs'
+      if (!(await columnExists(db, 'tournaments', 'tournament_identifier'))) statements.push('ALTER TABLE tournaments ADD COLUMN tournament_identifier VARCHAR(191) NULL AFTER host_account_id')
+      if (!(await columnExists(db, 'tournaments', 'organizer_email'))) statements.push('ALTER TABLE tournaments ADD COLUMN organizer_email VARCHAR(191) NULL AFTER tournament_identifier')
+      if (!(await columnExists(db, 'tournaments', 'created_by_auth_user_id'))) statements.push('ALTER TABLE tournaments ADD COLUMN created_by_auth_user_id VARCHAR(191) NULL AFTER is_public')
+      if (!(await columnExists(db, 'tournaments', 'template_key'))) statements.push('ALTER TABLE tournaments ADD COLUMN template_key VARCHAR(64) NULL AFTER is_public')
+      if (!(await columnExists(db, 'tournaments', 'template_background_image_url'))) statements.push('ALTER TABLE tournaments ADD COLUMN template_background_image_url LONGTEXT NULL AFTER template_key')
+      if (!(await columnExists(db, 'tournaments', 'template_data'))) statements.push('ALTER TABLE tournaments ADD COLUMN template_data LONGTEXT NULL AFTER template_background_image_url')
+      if (!(await indexExists(db, 'tournaments', 'idx_tournaments_identifier'))) statements.push('CREATE INDEX idx_tournaments_identifier ON tournaments (tournament_identifier)')
+      if (!(await indexExists(db, 'tournaments', 'idx_tournaments_template_key'))) statements.push('CREATE INDEX idx_tournaments_template_key ON tournaments (template_key)')
+      return statements.join(';\n') || '-- host tournament creation schema is already aligned'
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {

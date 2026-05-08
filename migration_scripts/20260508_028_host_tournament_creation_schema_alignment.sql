@@ -1,0 +1,4 @@
+-- Align stage and production tournament schemas for host-created tournaments.
+-- The JavaScript migration runner builds conditional ALTER statements from
+-- information_schema so npm install can safely run this across environments
+-- where some or all of these columns already exist.
