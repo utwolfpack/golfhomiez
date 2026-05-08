@@ -1,6 +1,10 @@
 export type TournamentTemplateKey = 'classic-flyer'
 
-export type TournamentAttributeIconKey = 'date' | 'teeTime' | 'course' | 'location' | 'format' | 'registrationFee'
+export const DEFAULT_TOURNAMENT_BANNER_URL = '/tournament-templates/TourneyBannerDefault.png'
+export const DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL = '/tournament-templates/GolfHomiezGiving.png'
+export const DEFAULT_TOURNAMENT_CHARITY_MESSAGE = 'Support the featured cause and help make this tournament a meaningful day on and off the course.'
+
+export type TournamentAttributeIconKey = 'date' | 'checkInTime' | 'teeTime' | 'course' | 'location' | 'format' | 'registrationFee'
 
 export type TournamentTemplate = {
   key: TournamentTemplateKey
@@ -11,10 +15,12 @@ export type TournamentTemplate = {
 }
 
 export type TournamentTemplateData = {
-  tournamentName?: string | null
   hostOrganization?: string | null
   beneficiaryCharity?: string | null
+  charityMessage?: string | null
+  locationAddress?: string | null
   checkInTime?: string | null
+  teeTime?: string | null
   startType?: 'shotgun' | 'tee-times' | string | null
   tournamentFormat?: string | null
   registrationDeadline?: string | null
@@ -28,16 +34,18 @@ export type TournamentTemplateData = {
   logoFiles?: string[] | null
   supportingPhotoUrl?: string | null
   miscNotes?: string | null
+  sponsorsAvailable?: boolean | null
 }
 
 export const TOURNAMENT_TEMPLATES: TournamentTemplate[] = [
   {
     key: 'classic-flyer',
     name: 'Classic tournament flyer',
-    description: 'Clean green-and-gold flyer layout with readable event rows, uploaded tournament attribute icons, registration information, contact details, and sponsor logos.',
+    description: 'Clean green-and-gold flyer layout with readable event rows, uploaded tournament attribute icons, charity highlights, registration information, contact details, and sponsor logos.',
     accentColor: '#0f3f24',
     attributeIcons: {
       date: '/tournament-templates/date.jpg',
+      checkInTime: '/tournament-templates/tee-time.jpg',
       teeTime: '/tournament-templates/tee-time.jpg',
       course: '/tournament-templates/golf-course.jpg',
       location: '/tournament-templates/location.png',
@@ -53,10 +61,12 @@ export function getTournamentTemplate(key?: string | null) {
 
 export function emptyTournamentTemplateData(): TournamentTemplateData {
   return {
-    tournamentName: '',
     hostOrganization: '',
     beneficiaryCharity: '',
+    charityMessage: DEFAULT_TOURNAMENT_CHARITY_MESSAGE,
+    locationAddress: '',
     checkInTime: '',
+    teeTime: '',
     startType: 'shotgun',
     tournamentFormat: '',
     registrationDeadline: '',
@@ -70,5 +80,6 @@ export function emptyTournamentTemplateData(): TournamentTemplateData {
     logoFiles: [],
     supportingPhotoUrl: '',
     miscNotes: '',
+    sponsorsAvailable: false,
   }
 }

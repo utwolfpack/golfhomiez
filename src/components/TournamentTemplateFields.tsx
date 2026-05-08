@@ -1,4 +1,4 @@
-import { TOURNAMENT_TEMPLATES, emptyTournamentTemplateData, getTournamentTemplate, type TournamentTemplateData } from '../lib/tournament-templates'
+import { DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, emptyTournamentTemplateData, type TournamentTemplateData } from '../lib/tournament-templates'
 import ImageUploadField from './ImageUploadField'
 import { compressImageFile } from '../lib/image-upload'
 
@@ -14,9 +14,9 @@ type Props = {
 }
 
 export default function TournamentTemplateFields({ value, onChange }: Props) {
-  const selected = getTournamentTemplate(value.templateKey)
   const templateData = { ...emptyTournamentTemplateData(), ...(value.templateData || {}) }
   const supportingPhotoUrl = templateData.supportingPhotoUrl || ''
+  const charityImageUrl = supportingPhotoUrl || DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL
   const flyerBackgroundUrl = value.templateBackgroundImageUrl || ''
 
   function updateTemplateData(next: Partial<TournamentTemplateData>) {
@@ -34,8 +34,9 @@ export default function TournamentTemplateFields({ value, onChange }: Props) {
 
   const textFields: Array<[keyof TournamentTemplateData, string, string?]> = [
     ['hostOrganization', 'Host organization'],
-    ['beneficiaryCharity', 'Beneficiary/charity'],
+    ['beneficiaryCharity', 'Beneficiary / Charity'],
     ['checkInTime', 'Check-in time', 'time'],
+    ['teeTime', 'Tee time', 'time'],
     ['tournamentFormat', 'Tournament format'],
     ['registrationDeadline', 'Registration deadline', 'date'],
     ['entryFee', 'Entry fee'],
@@ -46,38 +47,10 @@ export default function TournamentTemplateFields({ value, onChange }: Props) {
 
   return (
     <div className="card" style={{ padding: 16 }}>
-      <div style={{ fontWeight: 700 }}>Tournament page design</div>
-      <p className="small" style={{ marginTop: 4 }}>Use the clean golf flyer template with uploaded icons for the key tournament attributes. Organizer-uploaded background images are compressed and shown behind the flyer content.</p>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 12 }}>
-        {TOURNAMENT_TEMPLATES.map((template) => {
-          const checked = (value.templateKey || TOURNAMENT_TEMPLATES[0].key) === template.key
-          return (
-            <label key={template.key} className="card" style={{ padding: 10, borderColor: checked ? template.accentColor : undefined, cursor: 'pointer' }}>
-              <div style={{ minHeight: 170, borderRadius: 12, background: '#fff', border: '1px solid #d1d5db', padding: 14 }}>
-                <div style={{ fontWeight: 900, color: template.accentColor, fontSize: 24, textAlign: 'center', textTransform: 'uppercase' }}>Tournament Name</div>
-                <div className="formStack" style={{ gap: 6, marginTop: 12 }}>
-                  {Object.entries(template.attributeIcons).slice(0, 6).map(([key, icon]) => (
-                    <div key={key} style={{ display: 'grid', gridTemplateColumns: '36px 1fr', gap: 8, alignItems: 'center', borderTop: '1px solid #b7d7ad', paddingTop: 5 }}>
-                      <img src={icon} alt="" aria-hidden="true" style={{ width: 30, height: 30, objectFit: 'contain' }} />
-                      <div style={{ height: 12, background: '#e5efe2', borderRadius: 999 }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-                <input type="radio" name="tournamentTemplate" checked={checked} onChange={() => onChange({ ...value, templateKey: template.key })} />
-                <span className="small" style={{ fontWeight: 700 }}>{template.name}</span>
-              </div>
-              <div className="small">{template.description}</div>
-            </label>
-          )
-        })}
-      </div>
-
       <ImageUploadField
         label="Flyer background image"
         value={flyerBackgroundUrl}
-        emptyText="No flyer background uploaded."
+        emptyText={`No flyer background uploaded. The default banner ${DEFAULT_TOURNAMENT_BANNER_URL} will be used.`}
         previewAlt="Selected flyer background preview"
         options={{ maxWidth: 1400, maxHeight: 700, quality: 0.72, maxBytes: 420 * 1024, minQuality: 0.42, correlationData: { usage: 'tournament_flyer_background' } }}
         onChange={(dataUrl) => onChange({ ...value, templateBackgroundImageUrl: dataUrl })}
@@ -85,20 +58,41 @@ export default function TournamentTemplateFields({ value, onChange }: Props) {
       />
 
       <ImageUploadField
-        label="Supporting photo (optional)"
+        label="Charity Image (optional)"
         value={supportingPhotoUrl}
-        emptyText="No supporting photo uploaded."
-        previewAlt="Selected supporting photo preview"
-        options={{ maxWidth: 1000, maxHeight: 1000, quality: 0.74, maxBytes: 320 * 1024, minQuality: 0.42, correlationData: { usage: 'tournament_supporting_photo' } }}
+        previewValue={charityImageUrl}
+        emptyText={`No charity image uploaded. The default charity image ${DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL} will be used.`}
+        previewAlt="Selected charity image preview"
+        options={{ maxWidth: 1000, maxHeight: 1000, quality: 0.74, maxBytes: 320 * 1024, minQuality: 0.42, correlationData: { usage: 'tournament_charity_image' } }}
         onChange={(dataUrl) => updateTemplateData({ supportingPhotoUrl: dataUrl })}
         onRemove={() => updateTemplateData({ supportingPhotoUrl: '' })}
       />
 
+      <div style={{ marginTop: 14 }}>
+        <label className="label">Beneficiary / Charity message</label>
+        <textarea
+          className="input"
+          rows={3}
+          value={String(templateData.charityMessage || DEFAULT_TOURNAMENT_CHARITY_MESSAGE)}
+          onChange={(e) => updateTemplateData({ charityMessage: e.target.value })}
+        />
+        <div className="small" style={{ marginTop: 4 }}>This message appears in the Beneficiary / Charity section of the public tournament page.</div>
+      </div>
+
+
+      <div style={{ marginTop: 14 }}>
+        <label className="label">Location</label>
+        <textarea
+          className="input"
+          rows={2}
+          value={String(templateData.locationAddress || '')}
+          onChange={(e) => updateTemplateData({ locationAddress: e.target.value })}
+          placeholder="Physical address for the tournament"
+        />
+        <div className="small" style={{ marginTop: 4 }}>Defaults to the golf-course address when available. Edit this when the tournament uses a different location or needs extra directions.</div>
+      </div>
+
       <div className="formRow formRow--split" style={{ marginTop: 14 }}>
-        <div>
-          <label className="label">Tournament Name</label>
-          <input className="input" value={templateData.tournamentName || ''} onChange={(e) => updateTemplateData({ tournamentName: e.target.value })} />
-        </div>
         {textFields.map(([key, label, type]) => (
           <div key={key}>
             <label className="label">{label}</label>
@@ -127,6 +121,18 @@ export default function TournamentTemplateFields({ value, onChange }: Props) {
             <textarea className="input" rows={3} value={String(templateData[key] || '')} onChange={(e) => updateTemplateData({ [key]: e.target.value })} />
           </div>
         ))}
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
+          <input
+            type="checkbox"
+            checked={Boolean(templateData.sponsorsAvailable)}
+            onChange={(e) => updateTemplateData({ sponsorsAvailable: e.target.checked })}
+          />
+          Sponsors available
+        </label>
+        <div className="small" style={{ marginTop: 4 }}>When checked, the tournament page sponsor section shows that sponsor opportunities are available.</div>
       </div>
 
       <div style={{ marginTop: 14 }}>

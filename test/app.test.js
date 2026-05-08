@@ -4,6 +4,9 @@ import fs from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
 import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
+import { createQrMatrix, generateQrSvg, MAX_QR_BYTE_LENGTH, QR_SIZE } from '../server/lib/qr-code.js'
+import { deleteTournamentWithSafeAssociations, SAFE_TOURNAMENT_CHILD_DELETES } from '../server/lib/tournament-delete.js'
+import { deleteCancelledTournaments, nextCancelledTournamentCleanupRun, CANCELLED_TOURNAMENT_CLEANUP_TIME_ZONE } from '../server/lib/cancelled-tournament-cleanup.js'
 
 function addDays(isoDate, days) {
   const base = new Date(`${isoDate}T00:00:00Z`)
@@ -329,6 +332,12 @@ test('navigation uses the styled dropdown menu items and keeps invite access ava
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
   assert.match(nav, /Invite Homie/)
+  assert.match(nav, /brandEmblem/)
+  assert.match(nav, /GolfHomiezEmblem\.png/)
+  assert.match(nav, /const navHomePath = adminUser \? '\/golfadmin' : hostAccount \? '\/host\/portal' : \(organizerAccount \|\| roles\.includes\('organizer'\)\) \? '\/organizer\/portal' : '\/'/)
+  assert.match(nav, /to=\{navHomePath\}/)
+  assert.match(nav, /nav_brand_emblem_loaded/)
+  assert.match(nav, /nav_brand_emblem_load_failed/)
   assert.match(css, /\.navDropdownItem/)
   assert.match(css, /background:#f0fdf4/)
   assert.match(css, /color:#15803d/)
@@ -575,7 +584,7 @@ test('auth TTL migration and port configuration are deployable without hardcoded
 test('host portal exposes tournament creation, portal listing, and organizer invite routes', () => {
   const source = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   assert.match(source, /app\.get\('\/api\/host\/portal', hostAuthMiddleware/)
-  assert.match(source, /listHostPortalTournaments\(db, account\)/)
+  assert.match(source, /listHostPortalTournaments\(db, account, req\)/)
   assert.match(source, /app\.post\('\/api\/host\/tournaments', hostAuthMiddleware/)
   assert.match(source, /createHostManagedTournament\(db, req\.hostAccount\.id, req\.body \|\| \{\}\)/)
   assert.match(source, /app\.post\('\/api\/host\/tournaments\/:id\/invite', hostAuthMiddleware/)
@@ -836,6 +845,11 @@ test('tournament flyer template is persisted, editable, and supports organizer-p
   assert.match(templateLib, /TournamentTemplateData/)
   assert.match(templateLib, /logoFiles/)
   assert.match(templateLib, /supportingPhotoUrl/)
+  assert.match(templateLib, /DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL/)
+  assert.match(templateLib, /DEFAULT_TOURNAMENT_CHARITY_MESSAGE/)
+  assert.match(templateLib, /charityMessage/)
+  assert.match(templateLib, /locationAddress/)
+  assert.match(templateLib, /GolfHomiezGiving\.png/)
   assert.match(templateLib, /attributeIcons/)
   assert.match(templateLib, /date\.jpg/)
   assert.match(templateLib, /tee-time\.jpg/)
@@ -848,29 +862,75 @@ test('tournament flyer template is persisted, editable, and supports organizer-p
   assert.match(templateFields, /type="file" accept="image\/\*"/)
   assert.match(templateFields, /multiple/)
   assert.match(templateFields, /18 - existing\.length/)
-  assert.match(templateFields, /Tournament Name/)
+  assert.doesNotMatch(templateFields, /templateData\.tournamentName|tournamentName:|Tournament Name/)
+  assert.doesNotMatch(templateFields, /Tournament page design|Tournament Title|TOURNAMENT_TEMPLATES/)
   assert.match(templateFields, /Host organization/)
-  assert.match(templateFields, /Beneficiary\/charity/)
+  assert.match(templateFields, /<label className="label">Location<\/label>/)
+  assert.match(templateFields, /templateData\.locationAddress/)
+  assert.match(templateFields, /Beneficiary \/ Charity/)
+  assert.match(templateFields, /Check-in time/)
+  assert.match(templateFields, /Tee time/)
+  assert.match(templateFields, /Charity Image \(optional\)/)
+  assert.match(templateFields, /Beneficiary \/ Charity message/)
+  assert.match(templateFields, /DEFAULT_TOURNAMENT_CHARITY_MESSAGE/)
+  assert.match(templateFields, /charityMessage/)
+  assert.match(templateFields, /previewValue=\{charityImageUrl\}/)
+  assert.match(templateFields, /tournament_charity_image/)
+  assert.match(templateFields, /Sponsors available/)
   assert.match(templateFields, /Shotgun Start or tee times/)
   assert.match(templateFields, /Tournament Information|Misc Notes/)
   assert.match(templateFields, /compressImageFile/)
-  assert.match(templateFields, /template\.attributeIcons/)
+  assert.doesNotMatch(templateFields, /template\.attributeIcons/)
   assert.doesNotMatch(templateFields, /template\.detailLinesImageUrl|backgroundImageUrl|Use template background/)
   assert.match(hostPage, /<TournamentTemplateFields value=\{form\}/)
   assert.match(hostPage, /<TournamentTemplateFields value=\{editForm\}/)
+  assert.match(hostPage, /toEditableTemplateData/)
+  assert.match(hostPage, /templateData\.locationAddress = tournament\.hostGolfCourseAddress \|\| tournament\.hostGolfCourseName \|\| ''/)
   assert.match(organizerPage, /<TournamentTemplateFields value=\{form\}/)
+  assert.match(organizerPage, /toEditableTemplateData/)
+  assert.match(organizerPage, /templateData\.locationAddress = tournament\.hostGolfCourseAddress \|\| tournament\.hostGolfCourseName \|\| ''/)
   assert.match(tournamentPortal, /TournamentFlyer/)
+  assert.match(tournamentPortal, /DEFAULT_TOURNAMENT_BANNER_URL/)
+  assert.match(tournamentPortal, /height: 204/)
+  assert.match(tournamentPortal, /DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL/)
+  assert.match(tournamentPortal, /DEFAULT_TOURNAMENT_CHARITY_MESSAGE/)
+  assert.match(tournamentPortal, /const charityMessage = templateData\.charityMessage \|\| DEFAULT_TOURNAMENT_CHARITY_MESSAGE/)
+  assert.match(tournamentPortal, /tournament-flyer-beneficiary-section/)
+  assert.match(tournamentPortal, /tournament-flyer-sponsors-section/)
+  assert.match(tournamentPortal, /tournament-flyer-contact-register-grid/)
+  assert.match(tournamentPortal, /tournament_banner_loaded/)
+  assert.match(tournamentPortal, /tournament_banner_load_failed/)
+  assert.match(tournamentPortal, /charity_image_loaded/)
+  assert.match(tournamentPortal, /charity_image_load_failed/)
+  assert.doesNotMatch(tournamentPortal, /templateData\.tournamentName/)
   assert.match(tournamentPortal, /attributeIcons=\{attributeIcons\}/)
   assert.match(tournamentPortal, /Tournament flyer attribute rows/)
   assert.match(tournamentPortal, /ATTRIBUTE_ROWS/)
   assert.match(tournamentPortal, /Course \/ Venue/)
+  assert.match(tournamentPortal, /templateData\.locationAddress \|\| tournament\.hostGolfCourseAddress \|\| tournament\.hostGolfCourseName/)
+  assert.match(tournamentPortal, /Default Golf Homiez charity image/)
+  assert.match(tournamentPortal, /Check-in time/)
+  assert.match(tournamentPortal, /Tee time/)
+  assert.match(tournamentPortal, /SPONSERS - available/)
+  assert.match(tournamentPortal, /templateData\.sponsorsAvailable \? 'SPONSERS - available' : 'SPONSORS'/)
   assert.match(tournamentPortal, /gridTemplateColumns: '96px 28px minmax\(145px, 260px\) 1fr'/)
-  assert.match(tournamentPortal, /Sponsors|Sponsor Logos/)
+  assert.match(tournamentPortal, /SPONSORS|Sponsor Logos/)
   assert.doesNotMatch(tournamentPortal, /detailLinesImageUrl|Tournament flyer detail lines|aspectRatio: '626 \/ 292'|left: '60\.5%'/)
   assert.match(server, /template_data = \?/)
   assert.match(server, /sanitizeTournamentTemplateData/)
+  assert.match(server, /charityMessage: cleanString\('charityMessage'\)/)
+  assert.match(server, /locationAddress: cleanString\('locationAddress'\)/)
+  assert.match(server, /teeTime: cleanString\('teeTime'\)/)
+  assert.doesNotMatch(server, /tournamentName: cleanString\('tournamentName'\)/)
+  assert.match(server, /sponsorsAvailable: Boolean\(source\.sponsorsAvailable\)/)
   assert.match(rbac, /template_key, template_background_image_url, template_data/)
+  assert.match(rbac, /charityMessage: cleanString\('charityMessage'\)/)
+  assert.match(rbac, /locationAddress: cleanString\('locationAddress'\)/)
+  assert.match(rbac, /teeTime: cleanString\('teeTime'\)/)
+  assert.match(rbac, /sponsorsAvailable: Boolean\(source\.sponsorsAvailable\)/)
+  assert.doesNotMatch(rbac, /tournamentName: cleanString\('tournamentName'\)/)
   assert.match(migrations, /20260507_026/)
+  assert.match(migrations, /20260508_032/)
 })
 
 test('host tournament creation supports stage schemas without host role assignment ids', () => {
@@ -951,4 +1011,225 @@ test('organizer session lookup is collation-safe for stage schema differences', 
     migrationSql,
     /ALTER TABLE organizer_role_accounts MODIFY id/
   );
+})
+
+
+test('tournament portal QR code generator returns a scannable SVG-sized matrix and rejects oversized URLs', () => {
+  const url = 'https://golfhomiez.example/tournaments/spring-classic-open'
+  const matrix = createQrMatrix(url)
+  const svg = generateQrSvg(url)
+
+  assert.equal(matrix.length, QR_SIZE)
+  assert.equal(matrix.every((row) => row.length === QR_SIZE), true)
+  assert.match(svg, /<svg[^>]+aria-label="Tournament page QR code"/)
+  assert.match(svg, /viewBox="0 0 65 65"/)
+  assert.match(svg, /<path fill="#000" d="M/)
+  assert.throws(() => generateQrSvg('x'.repeat(MAX_QR_BYTE_LENGTH + 1)), /too long/)
+})
+
+test('tournament flyer renders a per-page QR code backed by an API route with shared correlation logging', () => {
+  const portalPage = fs.readFileSync(new URL('../src/pages/TournamentPortal.tsx', import.meta.url), 'utf8')
+  const qrClient = fs.readFileSync(new URL('../src/lib/tournament-qr.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = fs.readFileSync(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+
+  assert.match(portalPage, /getTournamentQrCodeUrl\(tournament\.tournamentIdentifier \|\| tournament\.id\)/)
+  assert.match(portalPage, /className="tournament-flyer-qr-code"/)
+  assert.match(portalPage, /Scan to open tournament page/)
+  assert.match(portalPage, /qr_code_loaded/)
+  assert.match(portalPage, /qr_code_load_failed/)
+  assert.match(qrClient, /\/api\/tournament-portals\/\$\{encodeURIComponent\(id\)\}\/qr-code\.svg\?\$\{params\.toString\(\)\}/)
+  assert.match(qrClient, /cid: getCorrelationId\(\)/)
+  assert.match(server, /app\.get\('\/api\/tournament-portals\/:id\/qr-code\.svg'/)
+  assert.match(server, /const portalUrl = tournamentPortalUrl\(req, portal\.tournament\.tournamentIdentifier \|\| portal\.tournament\.id\)/)
+  assert.match(server, /generateQrSvg\(portalUrl\)/)
+  assert.match(server, /tournament_portal_qr_code_generated/)
+  assert.match(logger, /normalizeIncomingCorrelationId\(req\.query\?\.cid\)/)
+  assert.match(logger, /normalizeIncomingCorrelationId\(req\.headers\['x-correlation-id'\]\)/)
+})
+
+
+test('tournament delete helper removes only safe tournament-owned records inside one transaction', async () => {
+  const statements = []
+  const connection = {
+    async beginTransaction() { statements.push('BEGIN') },
+    async commit() { statements.push('COMMIT') },
+    async rollback() { statements.push('ROLLBACK') },
+    release() { statements.push('RELEASE') },
+    async execute(sql, params) {
+      const normalized = sql.replace(/\s+/g, ' ').trim()
+      statements.push(normalized)
+      if (/information_schema\.TABLES/.test(normalized)) return [[{ table_exists: 1 }]]
+      if (/SELECT id, tournament_identifier, name, status FROM tournaments/.test(normalized)) {
+        return [[{ id: 'tournament-1', tournament_identifier: 'spring-open', name: 'Spring Open', status: 'published' }]]
+      }
+      if (/DELETE FROM tournament_registrations/.test(normalized)) return [{ affectedRows: 3 }]
+      if (/DELETE FROM organizer_tournament_invites/.test(normalized)) return [{ affectedRows: 2 }]
+      if (/DELETE FROM tournaments WHERE id = \?/.test(normalized)) return [{ affectedRows: 1 }]
+      throw new Error(`Unexpected SQL: ${normalized}`)
+    },
+  }
+  const pool = { async getConnection() { return connection } }
+
+  const result = await deleteTournamentWithSafeAssociations(pool, { id: 'tournament-1' })
+
+  assert.equal(result.deleted, true)
+  assert.deepEqual(result.deletedRecords, {
+    tournamentRegistrations: 3,
+    organizerTournamentInvites: 2,
+    tournaments: 1,
+  })
+  assert.equal(SAFE_TOURNAMENT_CHILD_DELETES.map((item) => item.tableName).includes('tournament_registrations'), true)
+  assert.equal(SAFE_TOURNAMENT_CHILD_DELETES.map((item) => item.tableName).includes('organizer_tournament_invites'), true)
+  assert.equal(statements.includes('COMMIT'), true)
+  assert.equal(statements.some((statement) => /DELETE FROM teams\b/i.test(statement)), false)
+  assert.equal(statements.some((statement) => /DELETE FROM users\b/i.test(statement)), false)
+  assert.equal(statements.some((statement) => /DELETE FROM host_accounts\b/i.test(statement)), false)
+  assert.equal(statements.some((statement) => /DELETE FROM organizer_role_accounts\b/i.test(statement)), false)
+})
+
+test('manual tournament delete controls are removed and cancelled tournaments are scheduled for safe Sunday cleanup', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const cleanupLib = fs.readFileSync(new URL('../server/lib/cancelled-tournament-cleanup.js', import.meta.url), 'utf8')
+  const deleteLib = fs.readFileSync(new URL('../server/lib/tournament-delete.js', import.meta.url), 'utf8')
+  const accounts = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
+  const hostPage = fs.readFileSync(new URL('../src/pages/HostPortal.tsx', import.meta.url), 'utf8')
+  const organizerPage = fs.readFileSync(new URL('../src/pages/OrganizerTournaments.tsx', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(server, /app\.delete\('\/api\/host\/tournaments\/:id'/)
+  assert.doesNotMatch(server, /app\.delete\('\/api\/organizer\/tournaments\/:id'/)
+  assert.match(server, /startCancelledTournamentCleanupScheduler\(\(\) => getPool\(\), \{ logApi, logError, logInfo \}\)/)
+  assert.match(cleanupLib, /Sunday 18:00 MT/)
+  assert.match(cleanupLib, /America\/Denver/)
+  assert.match(cleanupLib, /WHERE LOWER\(status\) = 'cancelled'/)
+  assert.match(cleanupLib, /deleteTournamentWithSafeAssociations\(pool, row\)/)
+  assert.match(cleanupLib, /cancelled_tournament_cleanup_started/)
+  assert.match(cleanupLib, /cancelled_tournament_cleanup_completed/)
+  assert.match(deleteLib, /DELETE FROM tournament_registrations WHERE tournament_id = \?/) 
+  assert.match(deleteLib, /DELETE FROM organizer_tournament_invites WHERE tournament_id = \?/) 
+  assert.match(deleteLib, /DELETE FROM tournaments WHERE id = \?/) 
+  assert.doesNotMatch(deleteLib, /DELETE FROM teams\b/)
+  assert.doesNotMatch(deleteLib, /DELETE FROM users\b/)
+  assert.doesNotMatch(deleteLib, /DELETE FROM host_accounts\b/)
+  assert.doesNotMatch(deleteLib, /DELETE FROM organizer_role_accounts\b/)
+  assert.doesNotMatch(accounts, /deleteHostTournamentRecord/)
+  assert.doesNotMatch(accounts, /deleteOrganizerTournamentRecord/)
+  assert.doesNotMatch(accounts, /method: 'DELETE'/)
+  assert.doesNotMatch(hostPage, /Delete tournament/)
+  assert.doesNotMatch(hostPage, /window\.confirm/)
+  assert.match(hostPage, /This tournament is scheduled to be deleted because it is cancelled/)
+  assert.match(hostPage, /cancelled_tournament_deletion_notice_shown/)
+  assert.doesNotMatch(organizerPage, /Delete tournament/)
+  assert.doesNotMatch(organizerPage, /window\.confirm/)
+  assert.match(organizerPage, /This tournament is scheduled to be deleted because it is cancelled/)
+  assert.match(organizerPage, /cancelled_tournament_deletion_notice_shown/)
+})
+
+
+test('cancelled tournament cleanup job deletes cancelled tournaments and totals safe child records', async () => {
+  const statements = []
+  const deletedIds = []
+  const connection = {
+    async beginTransaction() { statements.push('BEGIN') },
+    async commit() { statements.push('COMMIT') },
+    async rollback() { statements.push('ROLLBACK') },
+    release() { statements.push('RELEASE') },
+    async execute(sql, params) {
+      const normalized = sql.replace(/\s+/g, ' ').trim()
+      statements.push(normalized)
+      if (/information_schema\.TABLES/.test(normalized)) return [[{ table_exists: 1 }]]
+      if (/SELECT id, tournament_identifier, name, status FROM tournaments WHERE id = \? FOR UPDATE/.test(normalized)) {
+        const id = params[0]
+        return [[{ id, tournament_identifier: `${id}-identifier`, name: `Tournament ${id}`, status: 'cancelled' }]]
+      }
+      if (/DELETE FROM tournament_registrations/.test(normalized)) return [{ affectedRows: 1 }]
+      if (/DELETE FROM organizer_tournament_invites/.test(normalized)) return [{ affectedRows: 1 }]
+      if (/DELETE FROM tournaments WHERE id = \?/.test(normalized)) { deletedIds.push(params[0]); return [{ affectedRows: 1 }] }
+      throw new Error(`Unexpected connection SQL: ${normalized}`)
+    },
+  }
+  const pool = {
+    async execute(sql) {
+      const normalized = sql.replace(/\s+/g, ' ').trim()
+      statements.push(normalized)
+      if (/WHERE LOWER\(status\) = 'cancelled'/.test(normalized)) return [[
+        { id: 'cancelled-1', tournament_identifier: 'cancelled-one', name: 'Cancelled One', status: 'cancelled' },
+        { id: 'cancelled-2', tournament_identifier: 'cancelled-two', name: 'Cancelled Two', status: 'cancelled' },
+      ]]
+      throw new Error(`Unexpected pool SQL: ${normalized}`)
+    },
+    async getConnection() { return connection },
+  }
+  const apiMessages = []
+
+  const result = await deleteCancelledTournaments(pool, { correlationId: 'cleanup-test', logApi: (message) => apiMessages.push(message), logError: () => {} })
+
+  assert.equal(result.correlationId, 'cleanup-test')
+  assert.equal(result.deletedCount, 2)
+  assert.deepEqual(result.deletedRecords, { tournamentRegistrations: 2, organizerTournamentInvites: 2, tournaments: 2 })
+  assert.deepEqual(deletedIds, ['cancelled-1', 'cancelled-2'])
+  assert.equal(apiMessages.includes('cancelled_tournament_cleanup_started'), true)
+  assert.equal(apiMessages.includes('cancelled_tournament_cleanup_completed'), true)
+})
+
+
+test('cancelled tournament cleanup next run is Sunday at 18:00 America/Denver', () => {
+  const next = nextCancelledTournamentCleanupRun(new Date('2026-05-08T18:00:00Z'))
+  assert.equal(CANCELLED_TOURNAMENT_CLEANUP_TIME_ZONE, 'America/Denver')
+  assert.equal(next.toISOString(), '2026-05-11T00:00:00.000Z')
+})
+
+
+test('uploaded app and tournament banner assets are wired with correlated frontend logging', () => {
+  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+  const templateLib = fs.readFileSync(new URL('../src/lib/tournament-templates.ts', import.meta.url), 'utf8')
+  const tournamentPortal = fs.readFileSync(new URL('../src/pages/TournamentPortal.tsx', import.meta.url), 'utf8')
+
+  assert.match(home, /GolfHomiezEmblem\.png/)
+  assert.match(nav, /GolfHomiezEmblem\.png/)
+  assert.match(nav, /nav_brand_emblem_loaded/)
+  assert.match(home, /app_banner_emblem_loaded/)
+  assert.match(home, /app_banner_emblem_load_failed/)
+  assert.match(css, /bannerImg--emblem/)
+  assert.match(css, /navBrandImg/)
+  assert.match(templateLib, /DEFAULT_TOURNAMENT_BANNER_URL = '\/tournament-templates\/TourneyBannerDefault\.png'/)
+  assert.match(tournamentPortal, /const backgroundImageUrl = tournament\.templateBackgroundImageUrl \|\| DEFAULT_TOURNAMENT_BANNER_URL/)
+  assert.match(tournamentPortal, /data-correlation-id=\{bannerCorrelationId\}/)
+})
+
+test('redundant tournament template name migration removes legacy JSON name data', () => {
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260508_032_remove_redundant_tournament_template_name.sql', import.meta.url), 'utf8')
+
+  assert.match(migrations, /20260508_032/)
+  assert.match(migrations, /remove_redundant_tournament_template_name/)
+  assert.match(migrations, /JSON_CONTAINS_PATH\(template_data, 'one', '\$\.tournamentName'\)/)
+  assert.match(migrationSql, /JSON_REMOVE\(template_data, '\$\.tournamentName'\)/)
+  assert.match(migrationSql, /JSON_VALID\(template_data\)/)
+})
+
+test('tournament locations use resolved physical golf-course addresses and print keeps the banner full width', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const golfCourseService = fs.readFileSync(new URL('../server/lib/golf-course-service.js', import.meta.url), 'utf8')
+  const tournamentPortal = fs.readFileSync(new URL('../src/pages/TournamentPortal.tsx', import.meta.url), 'utf8')
+  const myTournaments = fs.readFileSync(new URL('../src/pages/MyTournaments.tsx', import.meta.url), 'utf8')
+
+  assert.match(golfCourseService, /formatGolfCoursePhysicalAddress/)
+  assert.match(golfCourseService, /findBestGolfCourseByName/)
+  assert.match(golfCourseService, /pickBestGolfCourseMatch/)
+  assert.match(server, /resolveTournamentGolfCourseAddress/)
+  assert.match(server, /formatGolfCoursePhysicalAddress\(course\)/)
+  assert.match(server, /mappedRow\.host_golf_course_address = physicalAddress/)
+  assert.match(server, /tournament_golf_course_address_resolved/)
+  assert.match(server, /const rowsWithAddresses = await resolveTournamentGolfCourseAddresses\(rows, req\)/)
+  assert.match(tournamentPortal, /templateData\.locationAddress \|\| tournament\.hostGolfCourseAddress \|\| tournament\.hostGolfCourseName/)
+  assert.match(myTournaments, /<strong>Location:<\/strong> \{\(tournament\.templateData as any\)\?\.locationAddress \|\| tournament\.hostGolfCourseAddress \|\| tournament\.hostGolfCourseName/)
+  assert.match(tournamentPortal, /objectPosition: isDefaultBackground \? 'center right' : 'center center'/)
+  assert.match(tournamentPortal, /object-fit: cover !important/)
+  assert.match(tournamentPortal, /width: '100%', maxWidth: 920/)
+  assert.match(tournamentPortal, /max-width: none !important; width: 100% !important/)
+  assert.match(tournamentPortal, /tournament-flyer-summary-grid/)
+  assert.match(tournamentPortal, /tournament-flyer-info-panel/)
 })

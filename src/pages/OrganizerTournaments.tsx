@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { useLocation } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { fetchOrganizerPortal, updateOrganizerTournamentRecord, type OrganizerPortalSummary, type Tournament, type TournamentInput } from '../lib/accounts'
@@ -10,6 +11,7 @@ function formatRegisteredAt(value?: string | null) {
   if (!value) return 'Unknown time'
   return formatFriendlyDateTime(value)
 }
+
 
 function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   const registrations = tournament.registrations || []
@@ -33,6 +35,15 @@ function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   )
 }
 
+function toEditableTemplateData(tournament: Tournament): Record<string, unknown> {
+  const templateData = { ...(tournament.templateData || {}) }
+  const locationAddress = String((templateData as any).locationAddress || '').trim()
+  if (!locationAddress) {
+    templateData.locationAddress = tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || ''
+  }
+  return templateData
+}
+
 function toEditForm(tournament: Tournament): TournamentInput {
   return {
     name: tournament.name || '',
@@ -43,7 +54,7 @@ function toEditForm(tournament: Tournament): TournamentInput {
     isPublic: tournament.status === 'published',
     templateKey: tournament.templateKey || 'classic-flyer',
     templateBackgroundImageUrl: tournament.templateBackgroundImageUrl || null,
-    templateData: tournament.templateData || null,
+    templateData: toEditableTemplateData(tournament),
   }
 }
 
@@ -53,6 +64,7 @@ export default function OrganizerTournaments() {
   const [form, setForm] = useState<TournamentInput | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [success, setSuccess] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const location = useLocation()
 
@@ -71,6 +83,17 @@ export default function OrganizerTournaments() {
     })()
     return () => { active = false }
   }, [])
+
+
+  useEffect(() => {
+    const cancelledTournaments = (summary?.tournaments || []).filter((tournament) => tournament.status === 'cancelled')
+    if (!cancelledTournaments.length) return
+    logFrontendEvent({
+      category: 'tournaments.organizer',
+      message: 'cancelled_tournament_deletion_notice_shown',
+      data: { count: cancelledTournaments.length, tournamentIds: cancelledTournaments.map((tournament) => tournament.id) },
+    })
+  }, [summary?.tournaments])
 
   const tournaments = summary?.tournaments || []
   const statusCounts = useMemo(() => tournaments.reduce<Record<string, number>>((counts, item) => {
@@ -95,14 +118,17 @@ export default function OrganizerTournaments() {
     setEditingId(tournament.id)
     setForm(toEditForm(tournament))
     setError(null)
+    setSuccess(null)
     logFrontendEvent({ category: 'tournaments.organizer', message: 'tournament_edit_started', data: { tournamentId: tournament.id, inviteId: tournament.inviteId || null } })
   }
+
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     if (!editingId || !form) return
     setSaving(true)
     setError(null)
+    setSuccess(null)
     try {
       const saved = await updateOrganizerTournamentRecord(editingId, { ...form, endDate: null })
       setSummary((prev) => prev ? { ...prev, tournaments: prev.tournaments.map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : prev)
@@ -129,6 +155,7 @@ export default function OrganizerTournaments() {
         />
 
         {error ? <div className="small" style={{ color: '#b91c1c', marginBottom: 16 }}>{error}</div> : null}
+        {success ? <div className="small" style={{ color: '#166534', marginBottom: 16 }}>{success}</div> : null}
 
         <div className="formStack">
           {tournaments.length === 0 ? <div className="small">No host tournament invitations were found for this organizer account.</div> : tournaments.map((tournament) => (
@@ -159,6 +186,7 @@ export default function OrganizerTournaments() {
                       <option value="cancelled">Cancelled</option>
                     </select>
                   </div>
+                  {form.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
                   <TournamentTemplateFields value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button className="btn btnPrimary" disabled={saving}>{saving ? 'Saving…' : 'Save tournament changes'}</button>
@@ -169,11 +197,14 @@ export default function OrganizerTournaments() {
                 <>
                   <div style={{ fontWeight: 700 }}>{tournament.name}</div>
                   <div className="small">{tournament.startDate ? formatFriendlyDateTime(tournament.startDate) : 'No tournament date'} · {tournament.status}</div>
+                  {tournament.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
                   <div className="small">Host: {tournament.hostGolfCourseName || 'Host golf course'}{tournament.inviteStatus ? ` · Invite: ${tournament.inviteStatus}` : ''}</div>
                   <div className="small">Registered golfers: {tournament.registrationCount ?? tournament.registrations?.length ?? 0}</div>
                   {tournament.description ? <div className="small">{tournament.description}</div> : null}
                   {tournament.status === 'published' && (tournament.registrationUrl || tournament.portalUrl) ? <div className="small">Golfer registration URL: <a href={tournament.registrationUrl || tournament.portalUrl || undefined}>{tournament.registrationUrl || tournament.portalUrl}</a></div> : null}
-                  <div style={{ marginTop: 10 }}><button type="button" className="btn btnPrimary" onClick={() => startEditing(tournament)}>Modify tournament</button></div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                    <button type="button" className="btn btnPrimary" onClick={() => startEditing(tournament)}>Modify tournament</button>
+                  </div>
                 </>
               )}
             </div>

@@ -6,9 +6,11 @@ import { useHostAuth } from '../context/HostAuthContext'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 import InviteHomieModal from './InviteHomieModal'
 import { sendHomieInvite } from '../lib/teams'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import brandEmblem from '../assets/GolfHomiezEmblem.png'
 
 export default function NavBar() {
-  const { user, logout } = useAuth()
+  const { user, logout, roles } = useAuth()
   const { adminUser, logoutAdmin } = useAdminAuth()
   const { hostAccount, logoutHost } = useHostAuth()
   const { organizerAccount, logoutOrganizer } = useOrganizerAuth()
@@ -27,6 +29,9 @@ export default function NavBar() {
 
   const restrictedSession = Boolean(restrictedRole)
   const menuLabel = adminUser?.email || hostAccount?.email || organizerAccount?.email || user?.email || 'Account'
+  const navHomePath = adminUser ? '/golfadmin' : hostAccount ? '/host/portal' : (organizerAccount || roles.includes('organizer')) ? '/organizer/portal' : '/'
+  const navHomeLabel = adminUser ? 'admin home' : hostAccount ? 'host portal home' : (organizerAccount || roles.includes('organizer')) ? 'organizer portal home' : 'Golf Homiez home'
+  const navBrandCorrelationId = getCorrelationId()
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -69,7 +74,16 @@ export default function NavBar() {
   return (
     <>
       <div className="nav">
-        <Link to="/" className="navBrand">⛳ Golf Homiez!</Link>
+        <Link to={navHomePath} className="navBrand navBrand--image" aria-label={`Go to ${navHomeLabel}`}>
+          <img
+            src={brandEmblem}
+            alt="Golf Homiez"
+            className="navBrandImg"
+            data-correlation-id={navBrandCorrelationId}
+            onLoad={() => logFrontendEvent({ category: 'app.nav', message: 'nav_brand_emblem_loaded', data: { navHomePath, correlationId: navBrandCorrelationId } })}
+            onError={() => logFrontendEvent({ category: 'app.nav', level: 'error', message: 'nav_brand_emblem_load_failed', data: { navHomePath, correlationId: navBrandCorrelationId } })}
+          />
+        </Link>
         <div className="navMenuWrap" ref={menuRef}>
           {!user && !hostAccount && !adminUser && !organizerAccount ? (
             <NavLink to="/login" className="navMenuTrigger">Login/Register</NavLink>
