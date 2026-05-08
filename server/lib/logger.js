@@ -173,9 +173,19 @@ export function requestContext(req) {
 }
 
 
+function normalizeIncomingCorrelationId(value) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const id = typeof raw === 'string' ? raw.trim() : ''
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(id) ? id : ''
+}
+
 export function requestCorrelationMiddleware(req, res, next) {
-  const incoming = req.headers['x-correlation-id'] || req.headers['x-request-id']
-  const correlationId = typeof incoming === 'string' && incoming.trim() ? incoming.trim() : randomUUID()
+  const correlationId =
+    normalizeIncomingCorrelationId(req.headers['x-correlation-id']) ||
+    normalizeIncomingCorrelationId(req.headers['x-request-id']) ||
+    normalizeIncomingCorrelationId(req.query?.cid) ||
+    normalizeIncomingCorrelationId(req.query?.correlationId) ||
+    randomUUID()
   req.correlationId = correlationId
   res.setHeader('X-Correlation-Id', correlationId)
   requestStore.run({ correlationId }, () => next())

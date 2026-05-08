@@ -479,11 +479,13 @@ function sanitizeTournamentTemplateData(value = {}) {
   const startType = String(source.startType || 'shotgun').trim()
   const logoFiles = Array.isArray(source.logoFiles) ? source.logoFiles.map((logo) => String(logo || '').trim()).filter(Boolean).slice(0, 18) : []
   return {
-    tournamentName: cleanString('tournamentName'),
     hostOrganization: cleanString('hostOrganization'),
     beneficiaryCharity: cleanString('beneficiaryCharity'),
+    charityMessage: cleanString('charityMessage'),
+    locationAddress: cleanString('locationAddress'),
     eventDate: cleanString('eventDate'),
     checkInTime: cleanString('checkInTime'),
+    teeTime: cleanString('teeTime'),
     startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
     tournamentFormat: cleanString('tournamentFormat'),
     registrationDeadline: cleanString('registrationDeadline'),
@@ -497,6 +499,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     logoFiles,
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
     miscNotes: cleanString('miscNotes'),
+    sponsorsAvailable: Boolean(source.sponsorsAvailable),
   }
 }
 

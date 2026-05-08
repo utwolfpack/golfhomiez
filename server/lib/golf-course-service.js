@@ -194,6 +194,57 @@ function matchesState(course, state) {
   return !requested || requested === courseStateCode || requested === courseStateText
 }
 
+
+function scoreCourseNameMatch(course, normalizedTarget) {
+  const normalizedCourse = normalizeCourseName(course?.normalized_name || course?.name)
+  if (!normalizedCourse || !normalizedTarget) return 0
+  if (normalizedCourse === normalizedTarget) return 100
+  if (normalizedCourse.includes(normalizedTarget) || normalizedTarget.includes(normalizedCourse)) {
+    const lengthDelta = Math.abs(normalizedCourse.length - normalizedTarget.length)
+    return Math.max(60, 88 - lengthDelta)
+  }
+  const targetWords = normalizedTarget.split(' ').filter((word) => word.length > 2)
+  if (!targetWords.length) return 0
+  const matchingWords = targetWords.filter((word) => normalizedCourse.includes(word)).length
+  return matchingWords >= Math.max(2, Math.ceil(targetWords.length * 0.75)) ? 50 + matchingWords : 0
+}
+
+function pickBestGolfCourseMatch(courses, courseName, preferAddress = true) {
+  const normalizedTarget = normalizeCourseName(courseName)
+  if (!normalizedTarget || !Array.isArray(courses) || !courses.length) return null
+  return courses
+    .map((course) => {
+      const score = scoreCourseNameMatch(course, normalizedTarget) + (preferAddress && course?.address ? 12 : 0)
+      return { course, score }
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || String(left.course.name || '').localeCompare(String(right.course.name || '')))[0]?.course || null
+}
+
+export function formatGolfCoursePhysicalAddress(course) {
+  if (!course?.address) return ''
+  const city = normalizeWhitespace(course.city)
+  const state = normalizeWhitespace(course.state_code || course.state)
+  const postalCode = normalizeWhitespace(course.postal_code)
+  const cityStateZip = [city, [state, postalCode].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+  return [normalizeWhitespace(course.address), cityStateZip].filter(Boolean).join(', ')
+}
+
+async function findBestGolfCourseByName(courseName, state = '') {
+  const normalizedTarget = normalizeCourseName(courseName)
+  if (!normalizedTarget) return null
+
+  const scopedCourses = state ? await listGolfCoursesForState(state) : []
+  const scopedMatch = pickBestGolfCourseMatch(scopedCourses, courseName)
+  if (scopedMatch?.address) return scopedMatch
+
+  const allCourses = await listGolfCoursesForState('')
+  const allMatch = pickBestGolfCourseMatch(allCourses, courseName)
+  if (allMatch?.address) return allMatch
+
+  return scopedMatch || allMatch || null
+}
+
 async function listCoursesFromDatabase(state) {
   const schema = await getGolfCoursesTableSchema()
   if (!schema.exists) return null
@@ -266,42 +317,7 @@ export async function findGolfCourseForState(state, courseName) {
 }
 
 export async function getGolfCourseByName(courseName, state = '') {
-  const normalizedTarget = normalizeCourseName(courseName)
-  if (!normalizedTarget) return null
-
-  if (state) {
-    return resolveGolfCourseForState(state, courseName)
-  }
-
-  const schema = await getGolfCoursesTableSchema()
-  if (schema.exists) {
-    const pool = getPool()
-    const [rows] = await pool.execute(
-      `SELECT id, name, normalized_name, country, state${schema.columns.has('state_code') ? ', state_code' : ', NULL AS state_code'}, city${schema.columns.has('address') ? ', address' : ', NULL AS address'}${schema.columns.has('postal_code') ? ', postal_code' : ', NULL AS postal_code'}
-         FROM golf_courses
-        WHERE normalized_name = ? OR LOWER(name) = LOWER(?)
-        ORDER BY name ASC
-        LIMIT 1`,
-      [normalizedTarget, normalizeWhitespace(courseName)],
-    )
-    if (Array.isArray(rows) && rows.length) {
-      const row = rows[0]
-      return {
-        id: row.id,
-        name: row.name,
-        normalized_name: row.normalized_name || normalizeCourseName(row.name),
-        country: row.country || 'US',
-        state: row.state,
-        state_code: row.state_code || normalizeStateCode(row.state),
-        city: row.city || null,
-        address: row.address || null,
-        postal_code: row.postal_code || null,
-      }
-    }
-  }
-
-  const csvCourses = await loadCsvCourses()
-  return csvCourses.find((course) => normalizeCourseName(course.name) === normalizedTarget) || null
+  return findBestGolfCourseByName(courseName, state)
 }
 
 export async function importGolfCoursesFromCsv(csvPath = process.env.GOLF_COURSES_CSV_PATH || DEFAULT_CSV_PATH) {
