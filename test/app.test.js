@@ -891,3 +891,18 @@ test('host tournament creation supports stage schemas without host role assignme
   assert.match(migrations, /host_tournament_creation_schema_alignment/)
   assert.match(migrations, /created_by_auth_user_id/)
 })
+
+
+test('host tournament invite supports stage schemas without organizer role assignment ids', () => {
+  const organizerAuth = fs.readFileSync(new URL('../server/lib/organizer-auth.js', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+
+  assert.match(organizerAuth, /tableColumns\(db, 'organizer_role_accounts'\)/)
+  assert.match(organizerAuth, /const hasRoleAssignmentId = organizerColumns\.has\('role_assignment_id'\)/)
+  assert.match(organizerAuth, /if \(hasRoleAssignmentId\)/)
+  assert.match(organizerAuth, /LOWER\(ora\.email\) = \?/) 
+  assert.match(organizerAuth, /idx_organizer_role_accounts_role_assignment/)
+  assert.match(migrations, /20260508_029/)
+  assert.match(migrations, /organizer_invite_schema_alignment/)
+  assert.match(migrations, /idx_organizer_role_accounts_role_assignment/)
+})

@@ -57,6 +57,14 @@ async function columnExists(db, tableName, columnName) {
   return rows.length > 0
 }
 
+async function tableColumns(db, tableName) {
+  const [rows] = await db.execute(
+    'SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+    [tableName],
+  )
+  return new Set(rows.map((row) => row.COLUMN_NAME))
+}
+
 async function ensureColumn(db, tableName, definitionStart) {
   const col = definitionStart.trim().split(/\s+/)[0].replace(/`/g, '')
   if (await columnExists(db, tableName, col)) return
@@ -80,6 +88,7 @@ export async function ensureOrganizerAuthSchema(source) {
   const db = getDb(source)
   const { ensureTournamentInviteSchema } = await getRbacHelpers()
   await ensureTournamentInviteSchema(db)
+  await ensureColumn(db, 'organizer_role_accounts', 'role_assignment_id VARCHAR(64) NULL')
   await ensureColumn(db, 'organizer_role_accounts', 'password_hash VARCHAR(255) NULL')
   await ensureColumn(db, 'organizer_role_accounts', 'reset_email VARCHAR(191) NULL')
   await db.query(`CREATE TABLE IF NOT EXISTS organizer_sessions (
@@ -98,6 +107,9 @@ export async function ensureOrganizerAuthSchema(source) {
   await ensureIndex(db, 'organizer_sessions', 'idx_organizer_sessions_account', 'CREATE INDEX idx_organizer_sessions_account ON organizer_sessions (organizer_account_id)')
   await ensureIndex(db, 'organizer_sessions', 'idx_organizer_sessions_expires', 'CREATE INDEX idx_organizer_sessions_expires ON organizer_sessions (expires_at)')
   await ensureIndex(db, 'organizer_role_accounts', 'idx_organizer_role_accounts_email_direct', 'CREATE INDEX idx_organizer_role_accounts_email_direct ON organizer_role_accounts (email)')
+  if (await columnExists(db, 'organizer_role_accounts', 'role_assignment_id')) {
+    await ensureIndex(db, 'organizer_role_accounts', 'idx_organizer_role_accounts_role_assignment', 'CREATE INDEX idx_organizer_role_accounts_role_assignment ON organizer_role_accounts (role_assignment_id)')
+  }
   return true
 }
 
@@ -123,17 +135,47 @@ export async function getOrganizerAccountByEmailDirect(source, email) {
   const db = getDb(source)
   await ensureOrganizerAuthSchema(db)
   const normalizedEmail = normalizeEmail(email)
+  const organizerColumns = await tableColumns(db, 'organizer_role_accounts')
+  const hasRoleAssignmentId = organizerColumns.has('role_assignment_id')
+  const hasAuthUserId = organizerColumns.has('auth_user_id')
+  const hasEmail = organizerColumns.has('email')
+  const emailExpression = [hasEmail ? 'ora.email' : null, hasRoleAssignmentId ? 'ura.email' : null].filter(Boolean).join(', ') || '?'
+  if (hasRoleAssignmentId) {
+    const [rows] = await db.execute(
+      `SELECT ora.*, ura.auth_user_id, ura.email AS assignment_email
+         FROM organizer_role_accounts ora
+         LEFT JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
+        WHERE LOWER(COALESCE(${emailExpression})) = ?
+        LIMIT 1`,
+      emailExpression === '?' ? [normalizedEmail, normalizedEmail] : [normalizedEmail],
+    )
+    const row = rows[0]
+    if (!row) return null
+    return { ...row, email: row.email || row.assignment_email || normalizedEmail }
+  }
+
+  const whereClauses = []
+  const params = []
+  if (hasEmail) {
+    whereClauses.push('LOWER(ora.email) = ?')
+    params.push(normalizedEmail)
+  }
+  if (hasAuthUserId) {
+    whereClauses.push('LOWER(ora.auth_user_id) = ?')
+    params.push(`organizer:${normalizedEmail}`.toLowerCase())
+  }
+  if (!whereClauses.length) return null
+
   const [rows] = await db.execute(
-    `SELECT ora.*, ura.auth_user_id, ura.email AS assignment_email
+    `SELECT ora.*
        FROM organizer_role_accounts ora
-       LEFT JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
-      WHERE LOWER(COALESCE(ora.email, ura.email)) = ?
+      WHERE ${whereClauses.join(' OR ')}
       LIMIT 1`,
-    [normalizedEmail],
+    params,
   )
   const row = rows[0]
   if (!row) return null
-  return { ...row, email: row.email || row.assignment_email || normalizedEmail }
+  return { ...row, email: row.email || normalizedEmail, assignment_email: row.email || normalizedEmail }
 }
 
 export async function getOrganizerAuthAccountByEmail(source, email) {
@@ -216,13 +258,21 @@ export async function getOrganizerAccountBySession(source, sessionId) {
   const db = getDb(source)
   if (!sessionId) return null
   await ensureOrganizerAuthSchema(db)
+  const organizerColumns = await tableColumns(db, 'organizer_role_accounts')
+  const hasRoleAssignmentId = organizerColumns.has('role_assignment_id')
   const [rows] = await db.execute(
-    `SELECT ora.*, ura.auth_user_id, ura.email AS assignment_email
-       FROM organizer_sessions s
-       JOIN organizer_role_accounts ora ON ora.id = s.organizer_account_id
-       LEFT JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
-      WHERE s.token_hash = ? AND s.expires_at > NOW()
-      LIMIT 1`,
+    hasRoleAssignmentId
+      ? `SELECT ora.*, ura.auth_user_id, ura.email AS assignment_email
+           FROM organizer_sessions s
+           JOIN organizer_role_accounts ora ON ora.id = s.organizer_account_id
+           LEFT JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
+          WHERE s.token_hash = ? AND s.expires_at > NOW()
+          LIMIT 1`
+      : `SELECT ora.*
+           FROM organizer_sessions s
+           JOIN organizer_role_accounts ora ON ora.id = s.organizer_account_id
+          WHERE s.token_hash = ? AND s.expires_at > NOW()
+          LIMIT 1`,
     [sha256(sessionId)],
   )
   const row = rows[0]
