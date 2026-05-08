@@ -34,6 +34,7 @@ function formatRegisteredAt(value?: string | null) {
   return formatFriendlyDateTime(value)
 }
 
+
 function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   const registrations = tournament.registrations || []
   return (
@@ -56,6 +57,15 @@ function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   )
 }
 
+function toEditableTemplateData(tournament: Tournament): Record<string, unknown> {
+  const templateData = { ...(tournament.templateData || {}) }
+  const locationAddress = String((templateData as any).locationAddress || '').trim()
+  if (!locationAddress) {
+    templateData.locationAddress = tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || ''
+  }
+  return templateData
+}
+
 function toEditForm(tournament: Tournament): TournamentInput {
   return {
     name: tournament.name || '',
@@ -66,7 +76,7 @@ function toEditForm(tournament: Tournament): TournamentInput {
     isPublic: tournament.status === 'published',
     templateKey: tournament.templateKey || 'classic-flyer',
     templateBackgroundImageUrl: tournament.templateBackgroundImageUrl || null,
-    templateData: tournament.templateData || null,
+    templateData: toEditableTemplateData(tournament),
   }
 }
 
@@ -102,6 +112,17 @@ export default function HostPortal() {
     })()
     return () => { active = false }
   }, [])
+
+
+  useEffect(() => {
+    const cancelledTournaments = (portalData?.tournaments || []).filter((tournament) => tournament.status === 'cancelled')
+    if (!cancelledTournaments.length) return
+    logFrontendEvent({
+      category: 'host.portal',
+      message: 'cancelled_tournament_deletion_notice_shown',
+      data: { count: cancelledTournaments.length, tournamentIds: cancelledTournaments.map((tournament) => tournament.id) },
+    })
+  }, [portalData?.tournaments])
 
   function startEditing(tournament: Tournament) {
     setEditingId(tournament.id)
@@ -157,6 +178,7 @@ export default function HostPortal() {
       setSaving(false)
     }
   }
+
 
   async function onSendInvite(tournamentId: string, organizerEmail: string) {
     if (!organizerEmail) {
@@ -240,6 +262,7 @@ export default function HostPortal() {
                             <option value="cancelled">Cancelled</option>
                           </select>
                         </div>
+                        {editForm.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
                         <TournamentTemplateFields value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <button className="btn btnPrimary" disabled={saving}>{saving ? 'Saving…' : 'Save tournament changes'}</button>
@@ -252,10 +275,13 @@ export default function HostPortal() {
                         <div className="small">Tournament identifier: {tournament.tournamentIdentifier}</div>
                         <div className="small">Organizer email: {tournament.organizerEmail || 'Not invited yet'}</div>
                         <div className="small">Invite status: {tournament.inviteStatus || 'not_sent'} · Status: {tournament.status || 'draft'}</div>
+                        {tournament.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
                         <div className="small">Registered golfers: {tournament.registrationCount ?? tournament.registrations?.length ?? 0}</div>
                         {tournament.status === 'published' && (tournament.registrationUrl || tournament.portalUrl) ? <div className="small">Golfer registration URL: <a href={tournament.registrationUrl || tournament.portalUrl || undefined} onClick={(e) => e.stopPropagation()}>{tournament.registrationUrl || tournament.portalUrl}</a></div> : null}
                         {tournament.inviteUrl ? <div className="small">Organizer link: <a href={tournament.inviteUrl} onClick={(e) => e.stopPropagation()}>{tournament.inviteUrl}</a></div> : null}
-                        {tournament.organizerEmail ? <div style={{ marginTop: 10 }}><button className="btn" type="button" onClick={(e) => { e.stopPropagation(); void onSendInvite(tournament.id, tournament.organizerEmail || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Resend organizer invite'}</button></div> : null}
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                          {tournament.organizerEmail ? <button className="btn" type="button" onClick={(e) => { e.stopPropagation(); void onSendInvite(tournament.id, tournament.organizerEmail || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Resend organizer invite'}</button> : null}
+                        </div>
                       </>
                     )}
                   </div>

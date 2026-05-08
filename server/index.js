@@ -13,8 +13,10 @@ import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
-import { findGolfCourseForState, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
+import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
 import { sendMail } from './mailer.js'
+import { generateQrSvg } from './lib/qr-code.js'
+import { startCancelledTournamentCleanupScheduler } from './lib/cancelled-tournament-cleanup.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, redeemHostInvite, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
 import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
@@ -27,6 +29,7 @@ const __dirname = path.dirname(__filename)
 const app = express()
 app.set('trust proxy', 1)
 const PORT = Number(process.env.PORT)
+let cancelledTournamentCleanupScheduler = null
 if (!Number.isFinite(PORT) || PORT <= 0) throw new Error('PORT must be set to a valid positive number in the environment')
 let storageReady = false
 const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()
@@ -389,10 +392,12 @@ function sanitizeTournamentTemplateData(value = {}) {
   const startType = String(source.startType || 'shotgun').trim()
   const logoFiles = Array.isArray(source.logoFiles) ? source.logoFiles.map((logo) => String(logo || '').trim()).filter(Boolean).slice(0, 18) : []
   return {
-    tournamentName: cleanString('tournamentName'),
     hostOrganization: cleanString('hostOrganization'),
     beneficiaryCharity: cleanString('beneficiaryCharity'),
+    charityMessage: cleanString('charityMessage'),
+    locationAddress: cleanString('locationAddress'),
     checkInTime: cleanString('checkInTime'),
+    teeTime: cleanString('teeTime'),
     startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
     tournamentFormat: cleanString('tournamentFormat'),
     registrationDeadline: cleanString('registrationDeadline'),
@@ -406,7 +411,50 @@ function sanitizeTournamentTemplateData(value = {}) {
     logoFiles,
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
     miscNotes: cleanString('miscNotes'),
+    sponsorsAvailable: Boolean(source.sponsorsAvailable),
   }
+}
+
+
+async function resolveTournamentGolfCourseAddress(row, req = null) {
+  if (!row) return row
+  const mappedRow = { ...row }
+  if (mappedRow.host_golf_course_address) return mappedRow
+
+  const courseName = mappedRow.host_golf_course_name || mappedRow.host_account_name || ''
+  const courseState = mappedRow.host_golf_course_state || mappedRow.host_account_state || mappedRow.host_state || mappedRow.state || ''
+  if (!courseName) return mappedRow
+
+  try {
+    const course = await getGolfCourseByName(courseName, courseState)
+    const physicalAddress = formatGolfCoursePhysicalAddress(course)
+    if (physicalAddress) {
+      mappedRow.host_golf_course_address = physicalAddress
+      logApi('tournament_golf_course_address_resolved', {
+        ...(req ? requestContext(req) : {}),
+        tournamentId: mappedRow.id || null,
+        courseName,
+        courseState: courseState || null,
+        courseId: course?.id || null,
+        addressResolved: true,
+      })
+    } else {
+      logApi('tournament_golf_course_address_missing', {
+        ...(req ? requestContext(req) : {}),
+        tournamentId: mappedRow.id || null,
+        courseName,
+        courseState: courseState || null,
+        addressResolved: false,
+      })
+    }
+  } catch (error) {
+    logError('Tournament golf course address lookup failed', { correlationId: req?.correlationId || null, tournamentId: mappedRow.id || null, courseName, courseState, error })
+  }
+  return mappedRow
+}
+
+async function resolveTournamentGolfCourseAddresses(rows = [], req = null) {
+  return Promise.all((Array.isArray(rows) ? rows : []).map((row) => resolveTournamentGolfCourseAddress(row, req)))
 }
 
 function mapTournamentPortalRow(row, req = null) {
@@ -547,17 +595,7 @@ async function getTournamentPortalById(pool, tournamentId, req = null) {
   if (!row) return null
   const registrationsByTournament = await listTournamentRegistrations(pool, [row.id])
   const registrations = registrationsByTournament.get(String(row.id)) || []
-  const mappedRow = { ...row, registrations, registration_count: registrations.length }
-  const courseName = row.host_golf_course_name || row.host_account_name || ''
-  try {
-    const courseState = row.host_golf_course_state || row.host_account_state || ''
-    const course = courseName ? await getGolfCourseByName(courseName, courseState) : null
-    if (course?.address) {
-      mappedRow.host_golf_course_address = [course.address, course.city, course.state_code || course.state, course.postal_code].filter(Boolean).join(', ')
-    }
-  } catch (error) {
-    logError('Tournament golf course address lookup failed', { correlationId: req?.correlationId || null, tournamentId, courseName, error })
-  }
+  const mappedRow = await resolveTournamentGolfCourseAddress({ ...row, registrations, registration_count: registrations.length }, req)
   const tournament = { ...mapTournamentPortalRow(mappedRow, req), tournamentIdentifier: row.tournament_identifier || null }
   return { tournament, registrationCount: registrations.length, registrations }
 }
@@ -721,6 +759,7 @@ async function getOrganizerPortalSummary(pool, user, req) {
             ${tournamentIdentifierExpr} AS tournament_identifier,
             ${organizerJoinNameExpr} AS organizer_name,
             COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}) AS host_golf_course_name,
+            COALESCE(${hostRoleStateExpr}, ${hostAccountStateExpr}) AS host_golf_course_state,
             oti.id AS invite_id,
             oti.status AS invite_status,
             oti.invite_url AS invite_url
@@ -735,7 +774,8 @@ async function getOrganizerPortalSummary(pool, user, req) {
     params,
   )
 
-  const tournaments = tournamentRows.map((row) => ({
+  const tournamentRowsWithAddresses = await resolveTournamentGolfCourseAddresses(tournamentRows, req)
+  const tournaments = tournamentRowsWithAddresses.map((row) => ({
     ...mapTournamentPortalRow(row, req),
     tournamentIdentifier: row.tournament_identifier || null,
     organizerEmail: row.organizer_email || null,
@@ -769,7 +809,8 @@ async function listHostPortalTournaments(pool, hostAccount, req = null) {
     : `LEFT JOIN user_role_assignments host_ura ON ${hostRoleAssignmentJoinConditions}`
   const [rows] = await pool.execute(
     `SELECT DISTINCT t.*, ${organizerNameExpr} AS organizer_name,
-            COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}) AS host_golf_course_name
+            COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}) AS host_golf_course_name,
+            COALESCE(${hostRoleStateExpr}, ${hostAccountStateExpr}) AS host_golf_course_state
        FROM tournaments t
        LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
        LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
@@ -781,7 +822,8 @@ async function listHostPortalTournaments(pool, hostAccount, req = null) {
       ORDER BY t.start_date DESC, t.created_at DESC`,
     [hostAccount?.id || '', hostAccount?.golfCourseName || hostAccount?.golf_course_name || '', hostAccount?.email || ''],
   )
-  const tournaments = rows.map((row) => ({
+  const rowsWithAddresses = await resolveTournamentGolfCourseAddresses(rows, req)
+  const tournaments = rowsWithAddresses.map((row) => ({
     ...mapTournamentPortalRow(row, req),
     tournamentIdentifier: row.tournament_identifier || null,
     organizerEmail: row.organizer_email || null,
@@ -1266,7 +1308,7 @@ app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
     const data = await getHostPortalData(db, req.hostAccount.id)
     if (!data) return res.status(404).json({ message: 'Golf-course account not found' })
     const account = data.account || data.host || req.hostAccount
-    const tournaments = await listHostPortalTournaments(db, account)
+    const tournaments = await listHostPortalTournaments(db, account, req)
     logApi('host_portal_loaded', { ...requestContext(req), hostAccountId: account?.id || req.hostAccount.id, tournamentCount: tournaments.length })
     res.json({ ...data, account, host: data.host || account, tournaments })
   } catch (error) {
@@ -1312,6 +1354,7 @@ app.put('/api/host/tournaments/:id', hostAuthMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Could not update tournament' })
   }
 })
+
 
 app.post('/api/host/tournaments/:id/invite', hostAuthMiddleware, async (req, res) => {
   try {
@@ -1450,6 +1493,9 @@ app.put('/api/organizer/tournaments/:id', requireStorage, organizerAuthMiddlewar
 })
 
 
+
+
+
 app.get('/api/organizer/session', requireStorage, async (req, res) => {
   try {
     const db = getPool()
@@ -1582,6 +1628,33 @@ app.get('/api/organizer/invite-eligibility', requireStorage, async (req, res) =>
   }
 })
 
+app.get('/api/tournament-portals/:id/qr-code.svg', requireStorage, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    const pool = getPool()
+    const portal = await getTournamentPortalById(pool, id, req)
+    if (!portal || portal.tournament.status !== 'published') {
+      logApi('tournament_portal_qr_code_not_found', { ...requestContext(req), tournamentId: id })
+      return res.status(404).type('text/plain').send('Tournament not found')
+    }
+
+    const portalUrl = tournamentPortalUrl(req, portal.tournament.tournamentIdentifier || portal.tournament.id)
+    const svg = generateQrSvg(portalUrl)
+    logApi('tournament_portal_qr_code_generated', {
+      ...requestContext(req),
+      tournamentId: portal.tournament.id,
+      tournamentIdentifier: portal.tournament.tournamentIdentifier || null,
+      portalUrl,
+    })
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8')
+    res.setHeader('Cache-Control', 'public, max-age=300')
+    return res.send(svg)
+  } catch (error) {
+    logRouteError('Tournament portal QR code error', req, error)
+    return res.status(500).type('text/plain').send('Could not generate tournament QR code')
+  }
+})
+
 app.get('/api/tournament-portals/:id', requireStorage, async (req, res) => {
   try {
     const id = String(req.params.id || '').trim()
@@ -1697,8 +1770,11 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
     const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
     const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
     const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+    const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
+    const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
     const [rows] = await pool.execute(
       `SELECT t.*, ${organizerNameExpr} AS organizer_name, ${hostRoleGolfCourseExpr} AS host_golf_course_name, ${hostAccountGolfCourseExpr} AS host_account_name,
+              ${hostRoleStateExpr} AS host_golf_course_state, ${hostAccountStateExpr} AS host_account_state,
               tr.id AS registration_id, tr.auth_user_id AS registration_auth_user_id, tr.email AS registration_email,
               tr.name AS registration_name, tr.status AS registration_status, tr.created_at AS registered_at,
               tr.updated_at AS registration_updated_at,
@@ -1715,7 +1791,8 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
         ORDER BY COALESCE(t.start_date, t.created_at) DESC, tr.created_at DESC`,
       [req.user.id, email],
     )
-    const tournaments = rows.map((row) => ({
+    const rowsWithAddresses = await resolveTournamentGolfCourseAddresses(rows, req)
+    const tournaments = rowsWithAddresses.map((row) => ({
       ...mapTournamentPortalRow(row, req),
       tournamentIdentifier: row.tournament_identifier || null,
       registration: mapTournamentRegistrationRow({
@@ -2333,6 +2410,9 @@ async function bootstrap() {
     storageReady = true
     const backend = await storage.getBackendName()
     logInfo('Storage backend initialized', { backend, storageReady, ...logPaths })
+    if (!cancelledTournamentCleanupScheduler) {
+      cancelledTournamentCleanupScheduler = startCancelledTournamentCleanupScheduler(() => getPool(), { logApi, logError, logInfo })
+    }
   } catch (error) {
     storageReady = false
     logError('Storage initialization failed; starting in degraded mode', { error, storageReady, ...logPaths })

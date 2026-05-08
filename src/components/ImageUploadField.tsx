@@ -5,6 +5,7 @@ import { logFrontendEvent } from '../lib/frontend-logger'
 type Props = {
   label: string
   value?: string | null
+  previewValue?: string | null
   emptyText?: string
   previewAlt: string
   onChange: (dataUrl: string) => void
@@ -12,7 +13,7 @@ type Props = {
   options?: ImageUploadOptions
 }
 
-export default function ImageUploadField({ label, value, emptyText = 'No image uploaded.', previewAlt, onChange, onRemove, options }: Props) {
+export default function ImageUploadField({ label, value, previewValue, emptyText = 'No image uploaded.', previewAlt, onChange, onRemove, options }: Props) {
   const [uploadError, setUploadError] = useState('')
 
   async function handleFile(file?: File | null) {
@@ -30,11 +31,13 @@ export default function ImageUploadField({ label, value, emptyText = 'No image u
     }
   }
 
+  const displayValue = previewValue || value
+
   return (
     <div style={{ marginTop: 14 }}>
       <label className="label">{label}</label>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        {value ? <img src={value} alt={previewAlt} style={{ width: 160, height: 100, borderRadius: 12, objectFit: 'cover', border: '1px solid #d1d5db' }} /> : <div className="small" style={{ width: 160 }}>{emptyText}</div>}
+        {displayValue ? <img src={displayValue} alt={previewAlt} style={{ width: 160, height: 100, borderRadius: 12, objectFit: 'cover', border: '1px solid #d1d5db' }} /> : <div className="small" style={{ width: 160 }}>{emptyText}</div>}
         <input className="input" type="file" accept="image/*" onChange={(e) => { void handleFile(e.target.files?.[0]); e.currentTarget.value = '' }} style={{ maxWidth: 340 }} />
         {value && onRemove ? <button type="button" className="btn" onClick={onRemove}>Remove image</button> : null}
       </div>

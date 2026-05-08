@@ -63,6 +63,7 @@ export default function MyTournaments() {
               </div>
               <div className="small" style={{ marginTop: 12 }}><strong>Date:</strong> {formatDate(tournament.startDate)}</div>
               <div className="small"><strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</div>
+              <div className="small"><strong>Location:</strong> {(tournament.templateData as any)?.locationAddress || tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || 'Location to be announced'}</div>
               <div className="small"><strong>Organizer:</strong> {tournament.organizerName || 'Golf Homiez organizer'}</div>
               <div className="small"><strong>Registered golfers:</strong> {tournament.registrationCount ?? 0}</div>
               <div className="small"><strong>Your registration:</strong> {formatDateTime(tournament.registration.registeredAt)}</div>

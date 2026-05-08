@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import bannerImg from '../assets/golf-banner.png'
+import bannerImg from '../assets/GolfHomiezEmblem.png'
 import RoundDetailModal from '../components/RoundDetailModal'
 import HandicapBreakdownModal from '../components/HandicapBreakdownModal'
 import HandicapSummaryCard from '../components/HandicapSummaryCard'
@@ -12,6 +12,7 @@ import { GUEST_HOME_EMAIL, GUEST_HOME_SCORES } from '../lib/dashboardSample'
 import { jumpToFirstByLetter } from '../lib/selectHotkey'
 import { sortScoresNewestFirst } from '../lib/roundInsights'
 import { calculateHandicapFromScores } from '../lib/handicap'
+import { logFrontendEvent } from '../lib/frontend-logger'
 import type { ScoreEntry, SoloScoreEntry, TeamScoreEntry } from '../types'
 
 function formatMoney(n: number) {
@@ -200,7 +201,7 @@ export default function Home() {
   return (
     <div className="container">
       <div className="bannerCard">
-        <img src={bannerImg} alt="Golf Homiez banner" className="bannerImg" />
+        <img src={bannerImg} alt="Golf Homiez emblem" className="bannerImg bannerImg--emblem" onLoad={() => logFrontendEvent({ category: 'home.banner', message: 'app_banner_emblem_loaded' })} onError={() => logFrontendEvent({ category: 'home.banner', level: 'error', message: 'app_banner_emblem_load_failed' })} />
         <div className="bannerOverlay">
           <div className="bannerTitle">Fairways, Friends & Scorecards</div>
           <div className="bannerSubtitle">Track scrambles • Track solo rounds • Keep it fun</div>
