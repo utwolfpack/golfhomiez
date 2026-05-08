@@ -906,3 +906,16 @@ test('host tournament invite supports stage schemas without organizer role assig
   assert.match(migrations, /organizer_invite_schema_alignment/)
   assert.match(migrations, /idx_organizer_role_accounts_role_assignment/)
 })
+
+
+test('organizer registration schema alignment adds account registration columns', () => {
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260508_030_organizer_registration_schema_alignment.sql', import.meta.url), 'utf8')
+
+  assert.match(migrations, /20260508_030/)
+  assert.match(migrations, /organizer_registration_schema_alignment/)
+  assert.match(migrations, /contact_name/)
+  assert.match(migrations, /password_hash/)
+  assert.match(migrations, /reset_email/)
+  assert.match(migrationSql, /ALTER TABLE organizer_role_accounts ADD COLUMN contact_name/)
+})

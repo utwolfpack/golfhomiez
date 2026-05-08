@@ -341,6 +341,13 @@ export const APP_MIGRATIONS = [
   auth_user_id VARCHAR(191) NULL,
   email VARCHAR(191) NULL,
   organizer_name VARCHAR(191) NULL,
+  organization_name VARCHAR(191) NULL,
+  contact_name VARCHAR(191) NULL,
+  phone VARCHAR(64) NULL,
+  website_url VARCHAR(512) NULL,
+  notes TEXT NULL,
+  password_hash VARCHAR(255) NULL,
+  reset_email VARCHAR(191) NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'active',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -351,6 +358,13 @@ export const APP_MIGRATIONS = [
             ['auth_user_id', 'ALTER TABLE organizer_role_accounts ADD COLUMN auth_user_id VARCHAR(191) NULL'],
             ['email', 'ALTER TABLE organizer_role_accounts ADD COLUMN email VARCHAR(191) NULL'],
             ['organizer_name', 'ALTER TABLE organizer_role_accounts ADD COLUMN organizer_name VARCHAR(191) NULL'],
+            ['organization_name', 'ALTER TABLE organizer_role_accounts ADD COLUMN organization_name VARCHAR(191) NULL'],
+            ['contact_name', 'ALTER TABLE organizer_role_accounts ADD COLUMN contact_name VARCHAR(191) NULL'],
+            ['phone', 'ALTER TABLE organizer_role_accounts ADD COLUMN phone VARCHAR(64) NULL'],
+            ['website_url', 'ALTER TABLE organizer_role_accounts ADD COLUMN website_url VARCHAR(512) NULL'],
+            ['notes', 'ALTER TABLE organizer_role_accounts ADD COLUMN notes TEXT NULL'],
+            ['password_hash', 'ALTER TABLE organizer_role_accounts ADD COLUMN password_hash VARCHAR(255) NULL'],
+            ['reset_email', 'ALTER TABLE organizer_role_accounts ADD COLUMN reset_email VARCHAR(191) NULL'],
             ['status', "ALTER TABLE organizer_role_accounts ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'active'"],
             ['created_at', 'ALTER TABLE organizer_role_accounts ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
             ['updated_at', 'ALTER TABLE organizer_role_accounts ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
@@ -612,103 +626,103 @@ ON DUPLICATE KEY UPDATE
       }
       return statements.join(';\n')
     },
-  }, {
-    version: '20260422_017',
-    name: 'host_account_requests',
-    filename: '20260422_017_host_account_requests.sql',
-    async isSatisfied(db) {
-      return (
-        await tableExists(db, 'host_account_requests') &&
-        await columnExists(db, 'host_account_requests', 'state_code') &&
-        await columnExists(db, 'host_account_requests', 'golf_course_name') &&
-        await columnExists(db, 'host_account_requests', 'representative_details') &&
-        await indexExists(db, 'host_account_requests', 'idx_host_account_requests_status_created')
-      )
-    },
-    async getSql() {
-      return loadMigrationSql('20260422_017_host_account_requests.sql')
-    },
-  }, {
-    version: '20260422_018',
-    name: 'host_account_request_password_hash',
-    filename: '20260422_018_host_account_request_password_hash.sql',
-    async isSatisfied(db) {
-      return (
-        await tableExists(db, 'host_account_requests') &&
-        await columnExists(db, 'host_account_requests', 'requested_password_hash')
-      )
-    },
-    async getSql() {
-      return loadMigrationSql('20260422_018_host_account_request_password_hash.sql')
-    },
+  },{
+  version: '20260422_017',
+  name: 'host_account_requests',
+  filename: '20260422_017_host_account_requests.sql',
+  async isSatisfied(db) {
+    return (
+      await tableExists(db, 'host_account_requests') &&
+      await columnExists(db, 'host_account_requests', 'state_code') &&
+      await columnExists(db, 'host_account_requests', 'golf_course_name') &&
+      await columnExists(db, 'host_account_requests', 'representative_details') &&
+      await indexExists(db, 'host_account_requests', 'idx_host_account_requests_status_created')
+    )
   },
-  {
-    version: '20260427_020',
-    name: 'tournament_portals_registrations',
-    filename: '20260427_020_tournament_portals_registrations.sql',
-    async isSatisfied(db) {
-      const [columnRows] = await db.execute(
-        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+  async getSql() {
+    return loadMigrationSql('20260422_017_host_account_requests.sql')
+  },
+},{
+  version: '20260422_018',
+  name: 'host_account_request_password_hash',
+  filename: '20260422_018_host_account_request_password_hash.sql',
+  async isSatisfied(db) {
+    return (
+      await tableExists(db, 'host_account_requests') &&
+      await columnExists(db, 'host_account_requests', 'requested_password_hash')
+    )
+  },
+  async getSql() {
+    return loadMigrationSql('20260422_018_host_account_request_password_hash.sql')
+  },
+},
+{
+  version: '20260427_020',
+  name: 'tournament_portals_registrations',
+  filename: '20260427_020_tournament_portals_registrations.sql',
+  async isSatisfied(db) {
+    const [columnRows] = await db.execute(
+      `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
          FROM information_schema.COLUMNS
         WHERE table_schema = DATABASE()
           AND table_name = 'tournament_registrations'
           AND column_name = 'tournament_id'
         LIMIT 1`
-      )
-      const [tournamentIdRows] = await db.execute(
-        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+    )
+    const [tournamentIdRows] = await db.execute(
+      `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
          FROM information_schema.COLUMNS
         WHERE table_schema = DATABASE()
           AND table_name = 'tournaments'
           AND column_name = 'id'
         LIMIT 1`
-      )
-      const registrationTournamentId = columnRows[0]
-      const tournamentId = tournamentIdRows[0]
-      const tournamentIdCompatible = Boolean(
-        registrationTournamentId &&
+    )
+    const registrationTournamentId = columnRows[0]
+    const tournamentId = tournamentIdRows[0]
+    const tournamentIdCompatible = Boolean(
+      registrationTournamentId &&
         tournamentId &&
         String(registrationTournamentId.column_type).toLowerCase() === String(tournamentId.column_type).toLowerCase() &&
         String(registrationTournamentId.character_set_name || '').toLowerCase() === String(tournamentId.character_set_name || '').toLowerCase() &&
         String(registrationTournamentId.collation_name || '').toLowerCase() === String(tournamentId.collation_name || '').toLowerCase()
-      )
-      return (
-        await tableExists(db, 'tournament_registrations') &&
-        tournamentIdCompatible &&
-        await columnExists(db, 'tournament_registrations', 'correlation_id') &&
-        await columnExists(db, 'tournaments', 'portal_slug') &&
-        await indexExists(db, 'tournament_registrations', 'uniq_tournament_registrations_user') &&
-        await foreignKeyExists(db, 'tournament_registrations', 'fk_tournament_registrations_tournament')
-      )
-    },
-    async getSql(db) {
-      const quoteIdentifier = (value) => `\`${String(value).replaceAll('`', '``')}\``
-      const [tournamentIdRows] = await db.execute(
-        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+    )
+    return (
+      await tableExists(db, 'tournament_registrations') &&
+      tournamentIdCompatible &&
+      await columnExists(db, 'tournament_registrations', 'correlation_id') &&
+      await columnExists(db, 'tournaments', 'portal_slug') &&
+      await indexExists(db, 'tournament_registrations', 'uniq_tournament_registrations_user') &&
+      await foreignKeyExists(db, 'tournament_registrations', 'fk_tournament_registrations_tournament')
+    )
+  },
+  async getSql(db) {
+    const quoteIdentifier = (value) => `\`${String(value).replaceAll('`', '``')}\``
+    const [tournamentIdRows] = await db.execute(
+      `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
          FROM information_schema.COLUMNS
         WHERE table_schema = DATABASE()
           AND table_name = 'tournaments'
           AND column_name = 'id'
         LIMIT 1`
-      )
-      const tournamentId = tournamentIdRows[0]
-      const tournamentColumnType = String(tournamentId?.column_type || '').trim()
-      if (!tournamentColumnType) {
-        throw new Error('Cannot build tournament_registrations migration: tournaments.id column type could not be detected')
-      }
-      const tournamentIdDefinition = [
-        tournamentColumnType.toUpperCase(),
-        tournamentId.character_set_name ? `CHARACTER SET ${quoteIdentifier(tournamentId.character_set_name)}` : '',
-        tournamentId.collation_name ? `COLLATE ${quoteIdentifier(tournamentId.collation_name)}` : '',
-        'NOT NULL',
-      ]
-        .filter(Boolean)
-        .join(' ')
+    )
+    const tournamentId = tournamentIdRows[0]
+    const tournamentColumnType = String(tournamentId?.column_type || '').trim()
+    if (!tournamentColumnType) {
+      throw new Error('Cannot build tournament_registrations migration: tournaments.id column type could not be detected')
+    }
+    const tournamentIdDefinition = [
+      tournamentColumnType.toUpperCase(),
+      tournamentId.character_set_name ? `CHARACTER SET ${quoteIdentifier(tournamentId.character_set_name)}` : '',
+      tournamentId.collation_name ? `COLLATE ${quoteIdentifier(tournamentId.collation_name)}` : '',
+      'NOT NULL',
+    ]
+      .filter(Boolean)
+      .join(' ')
 
-      const statements = []
-      const hasRegistrationTable = await tableExists(db, 'tournament_registrations')
-      if (!hasRegistrationTable) {
-        statements.push(`CREATE TABLE tournament_registrations (
+    const statements = []
+    const hasRegistrationTable = await tableExists(db, 'tournament_registrations')
+    if (!hasRegistrationTable) {
+      statements.push(`CREATE TABLE tournament_registrations (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   tournament_id ${tournamentIdDefinition},
   auth_user_id VARCHAR(191) NOT NULL,
@@ -726,55 +740,55 @@ ON DUPLICATE KEY UPDATE
     FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
-      } else {
-        const hasRegistrationFk = await foreignKeyExists(db, 'tournament_registrations', 'fk_tournament_registrations_tournament')
-        if (hasRegistrationFk) {
-          statements.push('ALTER TABLE tournament_registrations DROP FOREIGN KEY fk_tournament_registrations_tournament')
-        }
-        if (!(await columnExists(db, 'tournament_registrations', 'correlation_id'))) {
-          statements.push('ALTER TABLE tournament_registrations ADD COLUMN correlation_id VARCHAR(191) NULL AFTER status')
-        }
-        if (!(await columnExists(db, 'tournament_registrations', 'updated_at'))) {
-          statements.push('ALTER TABLE tournament_registrations ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at')
-        }
-        statements.push(`ALTER TABLE tournament_registrations MODIFY COLUMN tournament_id ${tournamentIdDefinition}`)
-        if (!(await indexExists(db, 'tournament_registrations', 'uniq_tournament_registrations_user'))) {
-          statements.push('CREATE UNIQUE INDEX uniq_tournament_registrations_user ON tournament_registrations (tournament_id, auth_user_id)')
-        }
-        if (!(await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_tournament'))) {
-          statements.push('CREATE INDEX idx_tournament_registrations_tournament ON tournament_registrations (tournament_id)')
-        }
-        if (!(await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_email'))) {
-          statements.push('CREATE INDEX idx_tournament_registrations_email ON tournament_registrations (email)')
-        }
-        if (!(await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_correlation'))) {
-          statements.push('CREATE INDEX idx_tournament_registrations_correlation ON tournament_registrations (correlation_id)')
-        }
-        statements.push(`ALTER TABLE tournament_registrations
+    } else {
+      const hasRegistrationFk = await foreignKeyExists(db, 'tournament_registrations', 'fk_tournament_registrations_tournament')
+      if (hasRegistrationFk) {
+        statements.push('ALTER TABLE tournament_registrations DROP FOREIGN KEY fk_tournament_registrations_tournament')
+      }
+      if (!(await columnExists(db, 'tournament_registrations', 'correlation_id'))) {
+        statements.push('ALTER TABLE tournament_registrations ADD COLUMN correlation_id VARCHAR(191) NULL AFTER status')
+      }
+      if (!(await columnExists(db, 'tournament_registrations', 'updated_at'))) {
+        statements.push('ALTER TABLE tournament_registrations ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at')
+      }
+      statements.push(`ALTER TABLE tournament_registrations MODIFY COLUMN tournament_id ${tournamentIdDefinition}`)
+      if (!(await indexExists(db, 'tournament_registrations', 'uniq_tournament_registrations_user'))) {
+        statements.push('CREATE UNIQUE INDEX uniq_tournament_registrations_user ON tournament_registrations (tournament_id, auth_user_id)')
+      }
+      if (!(await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_tournament'))) {
+        statements.push('CREATE INDEX idx_tournament_registrations_tournament ON tournament_registrations (tournament_id)')
+      }
+      if (!(await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_email'))) {
+        statements.push('CREATE INDEX idx_tournament_registrations_email ON tournament_registrations (email)')
+      }
+      if (!(await indexExists(db, 'tournament_registrations', 'idx_tournament_registrations_correlation'))) {
+        statements.push('CREATE INDEX idx_tournament_registrations_correlation ON tournament_registrations (correlation_id)')
+      }
+      statements.push(`ALTER TABLE tournament_registrations
   ADD CONSTRAINT fk_tournament_registrations_tournament
   FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
   ON DELETE CASCADE`)
-      }
+    }
 
-      if (!(await columnExists(db, 'tournaments', 'portal_slug'))) {
-        statements.push('ALTER TABLE tournaments ADD COLUMN portal_slug VARCHAR(191) NULL')
-      }
-      if (!(await columnExists(db, 'tournaments', 'is_public'))) {
-        statements.push('ALTER TABLE tournaments ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 0')
-      }
-      if (!(await columnExists(db, 'tournaments', 'status'))) {
-        statements.push("ALTER TABLE tournaments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'draft'")
-      }
-      if (!(await indexExists(db, 'tournaments', 'idx_tournaments_portal_slug'))) {
-        statements.push('CREATE INDEX idx_tournaments_portal_slug ON tournaments (portal_slug)')
-      }
-      if (!(await indexExists(db, 'tournaments', 'idx_tournaments_status_public'))) {
-        statements.push('CREATE INDEX idx_tournaments_status_public ON tournaments (status, is_public)')
-      }
+    if (!(await columnExists(db, 'tournaments', 'portal_slug'))) {
+      statements.push('ALTER TABLE tournaments ADD COLUMN portal_slug VARCHAR(191) NULL')
+    }
+    if (!(await columnExists(db, 'tournaments', 'is_public'))) {
+      statements.push('ALTER TABLE tournaments ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 0')
+    }
+    if (!(await columnExists(db, 'tournaments', 'status'))) {
+      statements.push("ALTER TABLE tournaments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'draft'")
+    }
+    if (!(await indexExists(db, 'tournaments', 'idx_tournaments_portal_slug'))) {
+      statements.push('CREATE INDEX idx_tournaments_portal_slug ON tournaments (portal_slug)')
+    }
+    if (!(await indexExists(db, 'tournaments', 'idx_tournaments_status_public'))) {
+      statements.push('CREATE INDEX idx_tournaments_status_public ON tournaments (status, is_public)')
+    }
 
-      return statements.join(';\n')
-    },
+    return statements.join(';\n')
   },
+},
 
 
   {
@@ -1035,6 +1049,34 @@ ON DUPLICATE KEY UPDATE
       if (!(await columnExists(db, 'organizer_role_accounts', 'role_assignment_id'))) statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN role_assignment_id VARCHAR(64) NULL AFTER id')
       if (!(await indexExists(db, 'organizer_role_accounts', 'idx_organizer_role_accounts_role_assignment'))) statements.push('CREATE INDEX idx_organizer_role_accounts_role_assignment ON organizer_role_accounts (role_assignment_id)')
       return statements.join(';\n') || '-- organizer invite schema is already aligned'
+    },
+  },
+
+  {
+    version: '20260508_030',
+    name: 'organizer_registration_schema_alignment',
+    filename: '20260508_030_organizer_registration_schema_alignment.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'organizer_role_accounts'))) return true
+      return (
+        await columnExists(db, 'organizer_role_accounts', 'contact_name') &&
+        await columnExists(db, 'organizer_role_accounts', 'phone') &&
+        await columnExists(db, 'organizer_role_accounts', 'website_url') &&
+        await columnExists(db, 'organizer_role_accounts', 'notes') &&
+        await columnExists(db, 'organizer_role_accounts', 'password_hash') &&
+        await columnExists(db, 'organizer_role_accounts', 'reset_email')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await tableExists(db, 'organizer_role_accounts'))) return '-- organizer_role_accounts table does not exist; baseline migration creates it for fresh installs'
+      if (!(await columnExists(db, 'organizer_role_accounts', 'contact_name'))) statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN contact_name VARCHAR(191) NULL')
+      if (!(await columnExists(db, 'organizer_role_accounts', 'phone'))) statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN phone VARCHAR(64) NULL')
+      if (!(await columnExists(db, 'organizer_role_accounts', 'website_url'))) statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN website_url VARCHAR(512) NULL')
+      if (!(await columnExists(db, 'organizer_role_accounts', 'notes'))) statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN notes TEXT NULL')
+      if (!(await columnExists(db, 'organizer_role_accounts', 'password_hash'))) statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN password_hash VARCHAR(255) NULL')
+      if (!(await columnExists(db, 'organizer_role_accounts', 'reset_email'))) statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN reset_email VARCHAR(191) NULL')
+      return statements.join(';\n') || '-- organizer registration schema is already aligned'
     },
   },
 
