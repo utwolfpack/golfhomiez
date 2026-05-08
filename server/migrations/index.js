@@ -1107,7 +1107,28 @@ ON DUPLICATE KEY UPDATE
     async getSql(_db) {
       return 'SELECT 1'
     },
-  }
+  },
+
+  {
+    version: '20260508_032',
+    name: 'remove_redundant_tournament_template_name',
+    filename: '20260508_032_remove_redundant_tournament_template_name.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'tournaments'))) return true
+      if (!(await columnExists(db, 'tournaments', 'template_data'))) return true
+      const [[row = {}] = []] = await db.execute(`
+        SELECT COUNT(*) AS remaining
+          FROM tournaments
+         WHERE template_data IS NOT NULL
+           AND JSON_VALID(template_data)
+           AND JSON_CONTAINS_PATH(template_data, 'one', '$.tournamentName')
+      `)
+      return Number(row.remaining || 0) === 0
+    },
+    async getSql() {
+      return loadMigrationSql('20260508_032_remove_redundant_tournament_template_name.sql')
+    },
+  },
 ]
 
 export function sortMigrations(migrations) {

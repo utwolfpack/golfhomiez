@@ -192,6 +192,8 @@ export type UserTournamentsSummary = {
   tournaments: UserRegisteredTournament[]
 }
 
+
+
 export type TournamentRegistrationResult = {
   ok: boolean
   tournamentId: string
@@ -256,6 +258,7 @@ export function updateOrganizerTournamentRecord(tournamentId: string, input: Tou
 export function updateHostTournamentRecord(tournamentId: string, input: TournamentInput) {
   return api<Tournament>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}`, { method: 'PUT', body: JSON.stringify(input) })
 }
+
 
 export function createHostTournament(input: TournamentInput) {
   return api<{ tournament: Tournament }>('/api/host/tournaments', { method: 'POST', body: JSON.stringify(input) })
