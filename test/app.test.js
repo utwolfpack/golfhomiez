@@ -452,7 +452,7 @@ test('host auth flow adds direct host routes, public account requests, invite re
   assert.match(hostRegister, /<label className="label">Password<\/label>/)
   assert.match(hostRegister, /<label className="label">Confirm password<\/label>/)
   assert.match(hostRegister, /thank you for your Golf Homiez golf-course account request/i)
-  assert.doesNotMatch(hostRegister, /Have an invite\?/) 
+  assert.doesNotMatch(hostRegister, /Have an invite\?/)
   assert.doesNotMatch(hostRegister, /UseMyLocationButton/)
   assert.doesNotMatch(hostRegister, /Public sign-up for golf-course admins\./)
   assert.match(hostRedeem, /Create your golf-course account/)
@@ -460,7 +460,7 @@ test('host auth flow adds direct host routes, public account requests, invite re
   assert.match(hostRedeem, /Create golf-course account/)
   assert.match(hostLogin, /Sign in to your host portal/)
   assert.match(hostLogin, /to="\/host\/redeem"/)
-  assert.match(hostLogin, /Forgot host password\?/) 
+  assert.match(hostLogin, /Forgot host password\?/)
   assert.match(hostReset, /Finish your golf-course password reset/)
 })
 
@@ -867,10 +867,10 @@ test('tournament flyer template is persisted, editable, and supports organizer-p
   assert.match(tournamentPortal, /gridTemplateColumns: '96px 28px minmax\(145px, 260px\) 1fr'/)
   assert.match(tournamentPortal, /Sponsors|Sponsor Logos/)
   assert.doesNotMatch(tournamentPortal, /detailLinesImageUrl|Tournament flyer detail lines|aspectRatio: '626 \/ 292'|left: '60\.5%'/)
-  assert.match(server, /template_data = \?/) 
-  assert.match(server, /sanitizeTournamentTemplateData/) 
-  assert.match(rbac, /template_key, template_background_image_url, template_data/) 
-  assert.match(migrations, /20260507_026/) 
+  assert.match(server, /template_data = \?/)
+  assert.match(server, /sanitizeTournamentTemplateData/)
+  assert.match(rbac, /template_key, template_background_image_url, template_data/)
+  assert.match(migrations, /20260507_026/)
 })
 
 test('host tournament creation supports stage schemas without host role assignment ids', () => {
@@ -900,7 +900,7 @@ test('host tournament invite supports stage schemas without organizer role assig
   assert.match(organizerAuth, /tableColumns\(db, 'organizer_role_accounts'\)/)
   assert.match(organizerAuth, /const hasRoleAssignmentId = organizerColumns\.has\('role_assignment_id'\)/)
   assert.match(organizerAuth, /if \(hasRoleAssignmentId\)/)
-  assert.match(organizerAuth, /LOWER\(ora\.email\) = \?/) 
+  assert.match(organizerAuth, /LOWER\(CONVERT\(ora\.email USING utf8mb4\) COLLATE utf8mb4_general_ci\) = \? COLLATE utf8mb4_general_ci/)
   assert.match(organizerAuth, /idx_organizer_role_accounts_role_assignment/)
   assert.match(migrations, /20260508_029/)
   assert.match(migrations, /organizer_invite_schema_alignment/)
@@ -924,4 +924,31 @@ test('organizer registration schema alignment adds account registration columns'
   assert.match(rbac, /add\('email', normalizeEmail\(user\.email\), \{ update: false \}\)/)
   assert.match(rbac, /INSERT INTO organizer_role_accounts/)
   assert.match(rbac, /\$\{insertColumns\.join\(', '\)\}/)
+})
+
+
+test('organizer session lookup is collation-safe for stage schema differences', () => {
+  const organizerAuth = fs.readFileSync(new URL('../server/lib/organizer-auth.js', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260508_031_organizer_session_collation_alignment.sql', import.meta.url), 'utf8')
+
+  assert.match(organizerAuth, /ora\.id COLLATE utf8mb4_general_ci = s\.organizer_account_id COLLATE utf8mb4_general_ci/)
+  assert.match(organizerAuth, /s\.token_hash COLLATE utf8mb4_general_ci = \? COLLATE utf8mb4_general_ci/)
+  assert.match(organizerAuth, /ura\.id COLLATE utf8mb4_general_ci = ora\.role_assignment_id COLLATE utf8mb4_general_ci/)
+  assert.match(migrations, /20260508_031/)
+  assert.match(migrations, /organizer_session_collation_alignment/)
+  assert.match(migrations, /columnCollation/)
+  assert.match(
+    migrationSql,
+    /Runtime organizer session queries now use explicit COLLATE clauses/
+  );
+
+  assert.match(
+    migrationSql,
+    /SELECT 1;/
+  );
+  assert.doesNotMatch(
+    migrationSql,
+    /ALTER TABLE organizer_role_accounts MODIFY id/
+  );
 })
