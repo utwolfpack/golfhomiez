@@ -97,6 +97,15 @@ async function getHostRoleAccountsColumns(pool) {
   }
 }
 
+async function getOrganizerRoleAccountsColumns(pool) {
+  try {
+    const [rows] = await pool.execute('SHOW COLUMNS FROM organizer_role_accounts')
+    return new Set(rows.map((row) => row.Field))
+  } catch {
+    return new Set()
+  }
+}
+
 async function getTournamentColumns(pool) {
   try {
     const [rows] = await pool.execute('SHOW COLUMNS FROM tournaments')
@@ -772,27 +781,68 @@ export async function upsertHostAccount(pool, user, input) {
 export async function upsertOrganizerAccount(pool, user, input) {
   const payload = sanitizeOrganizerAccountPayload(input)
   const assignment = await createOrUpdateRoleAssignment(pool, user, ROLE_ORGANIZER)
+  const organizerColumns = await getOrganizerRoleAccountsColumns(pool)
+  const insertColumns = ['id']
+  const placeholders = ['?']
+  const values = [createId()]
+  const updates = []
+
+  function add(column, value, { update = true } = {}) {
+    if (!organizerColumns.has(column)) return
+    insertColumns.push(column)
+    placeholders.push('?')
+    values.push(value)
+    if (update) updates.push(`${column} = VALUES(${column})`)
+  }
+
+  add('role_assignment_id', assignment.id, { update: false })
+  add('auth_user_id', user.id, { update: false })
+  add('email', normalizeEmail(user.email), { update: false })
+  add('organization_name', payload.organizationName)
+  add('contact_name', payload.contactName)
+  add('phone', payload.phone)
+  add('website_url', payload.websiteUrl)
+  add('notes', payload.notes)
+
   await pool.execute(
     `INSERT INTO organizer_role_accounts
-      (id, role_assignment_id, organization_name, contact_name, phone, website_url, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+      (${insertColumns.join(', ')})
+     VALUES (${placeholders.join(', ')})
      ON DUPLICATE KEY UPDATE
-       organization_name = VALUES(organization_name),
-       contact_name = VALUES(contact_name),
-       phone = VALUES(phone),
-       website_url = VALUES(website_url),
-       notes = VALUES(notes),
-       updated_at = CURRENT_TIMESTAMP`,
-    [createId(), assignment.id, payload.organizationName, payload.contactName, payload.phone, payload.websiteUrl, payload.notes],
+       ${[...updates, 'updated_at = CURRENT_TIMESTAMP'].join(',\n       ')}`,
+    values,
   )
 
+  if (organizerColumns.has('role_assignment_id')) {
+    const [rows] = await pool.execute(
+      `SELECT ora.*, ura.auth_user_id, COALESCE(ora.email, ura.email) AS email, ura.role_key
+         FROM organizer_role_accounts ora
+         LEFT JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
+        WHERE ora.role_assignment_id = ?
+        LIMIT 1`,
+      [assignment.id],
+    )
+    return mapOrganizerAccountRow(rows[0] || null)
+  }
+
+  const whereClauses = []
+  const params = []
+  if (organizerColumns.has('email')) {
+    whereClauses.push('LOWER(ora.email) = ?')
+    params.push(normalizeEmail(user.email))
+  }
+  if (organizerColumns.has('auth_user_id')) {
+    whereClauses.push('ora.auth_user_id = ?')
+    params.push(user.id)
+  }
+  if (!whereClauses.length) return null
+
   const [rows] = await pool.execute(
-    `SELECT ora.*, ura.auth_user_id, ura.email, ura.role_key
+    `SELECT ora.*, ora.email AS email, ? AS role_key
        FROM organizer_role_accounts ora
-       JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
-      WHERE ora.role_assignment_id = ?
+      WHERE ${whereClauses.join(' OR ')}
       LIMIT 1`,
-    [assignment.id],
+    [ROLE_ORGANIZER, ...params],
   )
   return mapOrganizerAccountRow(rows[0] || null)
 }
