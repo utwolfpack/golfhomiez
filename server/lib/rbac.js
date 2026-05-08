@@ -97,6 +97,59 @@ async function getHostRoleAccountsColumns(pool) {
   }
 }
 
+async function getTournamentColumns(pool) {
+  try {
+    const [rows] = await pool.execute('SHOW COLUMNS FROM tournaments')
+    return new Set(rows.map((row) => row.Field))
+  } catch {
+    return new Set()
+  }
+}
+
+async function insertTournamentWithAvailableColumns(pool, values) {
+  const tournamentColumns = await getTournamentColumns(pool)
+  const columns = []
+  const placeholders = []
+  const params = []
+
+  function add(column, value) {
+    if (!tournamentColumns.has(column)) return
+    columns.push(column)
+    placeholders.push('?')
+    params.push(value)
+  }
+
+  add('id', values.id)
+  add('organizer_account_id', values.organizerAccountId)
+  add('host_account_id', values.hostAccountId)
+  add('tournament_identifier', values.tournamentIdentifier)
+  add('organizer_email', values.organizerEmail)
+  add('name', values.name)
+  add('title', values.name)
+  add('description', values.description)
+  add('start_date', values.startDate)
+  add('starts_at', values.startDate)
+  add('end_date', values.endDate)
+  add('ends_at', values.endDate)
+  add('status', values.status)
+  add('is_public', values.isPublic ? 1 : 0)
+  add('template_key', values.templateKey)
+  add('template_background_image_url', values.templateBackgroundImageUrl)
+  add('template_data', JSON.stringify(values.templateData || {}))
+  add('created_by_auth_user_id', values.createdByAuthUserId)
+
+  if (!columns.includes('id') || !(columns.includes('name') || columns.includes('title'))) {
+    throw new Error('Tournaments table is missing required tournament creation columns.')
+  }
+
+  await pool.execute(
+    `INSERT INTO tournaments
+      (${columns.join(', ')})
+     VALUES (${placeholders.join(', ')})`,
+    params,
+  )
+}
+
 async function resolveHostTournamentAccountId(pool, hostAccountId) {
   const directHostAccountId = String(hostAccountId || '').trim()
   if (!directHostAccountId) throw new Error('Host account is required.')
@@ -1091,12 +1144,23 @@ export async function createTournament(pool, user, input) {
 
   const id = createId()
   const tournamentIdentifier = buildTournamentIdentifier(payload.name)
-  await pool.execute(
-    `INSERT INTO tournaments
-      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, template_key, template_background_image_url, template_data, created_by_auth_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, organizerAccount.id, payload.hostAccountId, tournamentIdentifier, normalizeEmail(user.email), payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, payload.templateKey, payload.templateBackgroundImageUrl, JSON.stringify(payload.templateData || {}), user.id],
-  )
+  await insertTournamentWithAvailableColumns(pool, {
+    id,
+    organizerAccountId: organizerAccount.id,
+    hostAccountId: payload.hostAccountId,
+    tournamentIdentifier,
+    organizerEmail: normalizeEmail(user.email),
+    name: payload.name,
+    description: payload.description,
+    startDate: payload.startDate,
+    endDate: payload.endDate,
+    status: payload.status,
+    isPublic: payload.isPublic,
+    templateKey: payload.templateKey,
+    templateBackgroundImageUrl: payload.templateBackgroundImageUrl,
+    templateData: payload.templateData,
+    createdByAuthUserId: user.id,
+  })
 
   const [rows] = await pool.execute(
     `SELECT t.*, ora.organization_name AS organizer_name, hra.golf_course_name AS host_golf_course_name
@@ -1118,12 +1182,23 @@ export async function createHostManagedTournament(pool, hostAccountId, input) {
   const id = createId()
   const tournamentIdentifier = buildTournamentIdentifier(payload.name)
 
-  await pool.execute(
-    `INSERT INTO tournaments
-      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, template_key, template_background_image_url, template_data, created_by_auth_user_id)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, resolvedHostAccountId, tournamentIdentifier, organizerEmail || null, payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, payload.templateKey, payload.templateBackgroundImageUrl, JSON.stringify(payload.templateData || {}), `host:${resolvedHostAccountId}`],
-  )
+  await insertTournamentWithAvailableColumns(pool, {
+    id,
+    organizerAccountId: null,
+    hostAccountId: resolvedHostAccountId,
+    tournamentIdentifier,
+    organizerEmail: organizerEmail || null,
+    name: payload.name,
+    description: payload.description,
+    startDate: payload.startDate,
+    endDate: payload.endDate,
+    status: payload.status,
+    isPublic: payload.isPublic,
+    templateKey: payload.templateKey,
+    templateBackgroundImageUrl: payload.templateBackgroundImageUrl,
+    templateData: payload.templateData,
+    createdByAuthUserId: `host:${resolvedHostAccountId}`,
+  })
 
   const [rows] = await pool.execute(
     `SELECT t.*, hra.golf_course_name AS host_golf_course_name
