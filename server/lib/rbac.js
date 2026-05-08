@@ -79,6 +79,23 @@ function mapOrganizerTournamentInviteRow(row) {
   }
 }
 
+async function tableColumnExists(pool, tableName, columnName) {
+  try {
+    const [rows] = await pool.execute(`SHOW COLUMNS FROM ${tableName} LIKE ?`, [columnName])
+    return Boolean(rows[0])
+  } catch {
+    return false
+  }
+}
+
+async function getHostRoleAccountsColumns(pool) {
+  try {
+    const [rows] = await pool.execute('SHOW COLUMNS FROM host_role_accounts')
+    return new Set(rows.map((row) => row.Field))
+  } catch {
+    return new Set()
+  }
+}
 
 async function resolveHostTournamentAccountId(pool, hostAccountId) {
   const directHostAccountId = String(hostAccountId || '').trim()
@@ -109,8 +126,10 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
 
   const normalizedEmail = normalizeEmail(hostAccount?.email)
   const authUserId = String(hostAccount?.auth_user_id || '').trim()
+  const hostRoleColumns = await getHostRoleAccountsColumns(pool)
+  const hasRoleAssignmentId = hostRoleColumns.has('role_assignment_id')
 
-  if (authUserId) {
+  if (hasRoleAssignmentId && authUserId) {
     const [authRows] = await pool.execute(
       `SELECT hra.id
          FROM host_role_accounts hra
@@ -122,7 +141,7 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
     if (authRows[0]?.id) return authRows[0].id
   }
 
-  if (normalizedEmail) {
+  if (hasRoleAssignmentId && normalizedEmail) {
     const [emailRows] = await pool.execute(
       `SELECT hra.id
          FROM host_role_accounts hra
@@ -136,6 +155,41 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
 
   if (!hostAccount) {
     throw new Error('Host account was not found for tournament creation.')
+  }
+
+  const golfCourseName = String(hostAccount.golf_course_name || hostAccount.account_name || 'Host account').trim() || 'Host account'
+  const contactName = String(hostAccount.account_name || hostAccount.golf_course_name || 'Host account').trim() || 'Host account'
+
+  if (!hasRoleAssignmentId) {
+    const columns = ['id']
+    const placeholders = ['?']
+    const values = [directHostAccountId]
+    const updates = []
+
+    if (hostRoleColumns.has('golf_course_name')) {
+      columns.push('golf_course_name')
+      placeholders.push('?')
+      values.push(golfCourseName)
+      updates.push('golf_course_name = VALUES(golf_course_name)')
+    }
+    if (hostRoleColumns.has('contact_name')) {
+      columns.push('contact_name')
+      placeholders.push('?')
+      values.push(contactName)
+      updates.push('contact_name = VALUES(contact_name)')
+    }
+    if (hostRoleColumns.has('updated_at')) {
+      updates.push('updated_at = CURRENT_TIMESTAMP')
+    }
+
+    await pool.execute(
+      `INSERT INTO host_role_accounts (${columns.join(', ')})
+       VALUES (${placeholders.join(', ')})
+       ON DUPLICATE KEY UPDATE ${updates.length ? updates.join(', ') : 'id = VALUES(id)'}`,
+      values,
+    )
+
+    return directHostAccountId
   }
 
   const roleAssignmentAuthUserId = authUserId || `host-direct:${hostAccount.id}`
@@ -164,9 +218,6 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
   if (!assignmentId) {
     throw new Error('Unable to prepare host role assignment for tournament creation.')
   }
-
-  const golfCourseName = String(hostAccount.golf_course_name || hostAccount.account_name || 'Host account').trim() || 'Host account'
-  const contactName = String(hostAccount.account_name || hostAccount.golf_course_name || 'Host account').trim() || 'Host account'
 
   await pool.execute(
     `INSERT INTO host_role_accounts
@@ -338,6 +389,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     tournamentName: cleanString('tournamentName'),
     hostOrganization: cleanString('hostOrganization'),
     beneficiaryCharity: cleanString('beneficiaryCharity'),
+    eventDate: cleanString('eventDate'),
     checkInTime: cleanString('checkInTime'),
     startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
     tournamentFormat: cleanString('tournamentFormat'),
