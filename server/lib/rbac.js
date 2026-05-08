@@ -126,6 +126,7 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
 
   const normalizedEmail = normalizeEmail(hostAccount?.email)
   const authUserId = String(hostAccount?.auth_user_id || '').trim()
+  const hostRoleEmail = normalizedEmail || `${hostAccount?.id || directHostAccountId}@host.local`
   const hostRoleColumns = await getHostRoleAccountsColumns(pool)
   const hasRoleAssignmentId = hostRoleColumns.has('role_assignment_id')
 
@@ -166,6 +167,12 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
     const values = [directHostAccountId]
     const updates = []
 
+    if (hostRoleColumns.has('email')) {
+      columns.push('email')
+      placeholders.push('?')
+      values.push(hostRoleEmail)
+      updates.push('email = VALUES(email)')
+    }
     if (hostRoleColumns.has('golf_course_name')) {
       columns.push('golf_course_name')
       placeholders.push('?')
@@ -193,7 +200,7 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
   }
 
   const roleAssignmentAuthUserId = authUserId || `host-direct:${hostAccount.id}`
-  const roleAssignmentEmail = normalizedEmail || `${hostAccount.id}@host.local`
+  const roleAssignmentEmail = hostRoleEmail
   const roleAssignmentId = createId()
 
   await pool.execute(
@@ -219,16 +226,40 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
     throw new Error('Unable to prepare host role assignment for tournament creation.')
   }
 
+  const hostRoleAccountColumns = ['id', 'role_assignment_id']
+  const hostRoleAccountPlaceholders = ['?', '?']
+  const hostRoleAccountValues = [directHostAccountId, assignmentId]
+  const hostRoleAccountUpdates = ['role_assignment_id = VALUES(role_assignment_id)']
+
+  if (hostRoleColumns.has('email')) {
+    hostRoleAccountColumns.push('email')
+    hostRoleAccountPlaceholders.push('?')
+    hostRoleAccountValues.push(hostRoleEmail)
+    hostRoleAccountUpdates.push('email = VALUES(email)')
+  }
+  if (hostRoleColumns.has('golf_course_name')) {
+    hostRoleAccountColumns.push('golf_course_name')
+    hostRoleAccountPlaceholders.push('?')
+    hostRoleAccountValues.push(golfCourseName)
+    hostRoleAccountUpdates.push('golf_course_name = VALUES(golf_course_name)')
+  }
+  if (hostRoleColumns.has('contact_name')) {
+    hostRoleAccountColumns.push('contact_name')
+    hostRoleAccountPlaceholders.push('?')
+    hostRoleAccountValues.push(contactName)
+    hostRoleAccountUpdates.push('contact_name = VALUES(contact_name)')
+  }
+  if (hostRoleColumns.has('updated_at')) {
+    hostRoleAccountUpdates.push('updated_at = CURRENT_TIMESTAMP')
+  }
+
   await pool.execute(
     `INSERT INTO host_role_accounts
-      (id, role_assignment_id, golf_course_name, contact_name)
-     VALUES (?, ?, ?, ?)
+      (${hostRoleAccountColumns.join(', ')})
+     VALUES (${hostRoleAccountPlaceholders.join(', ')})
      ON DUPLICATE KEY UPDATE
-       role_assignment_id = VALUES(role_assignment_id),
-       golf_course_name = VALUES(golf_course_name),
-       contact_name = VALUES(contact_name),
-       updated_at = CURRENT_TIMESTAMP`,
-    [directHostAccountId, assignmentId, golfCourseName, contactName],
+       ${hostRoleAccountUpdates.join(', ')}`,
+    hostRoleAccountValues,
   )
 
   return directHostAccountId

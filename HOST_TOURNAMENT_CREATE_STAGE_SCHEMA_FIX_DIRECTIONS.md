@@ -2,48 +2,43 @@
 
 ## Root cause
 
-The stage log shows `POST /api/host/tournaments` failed with:
+The stage logs show `POST /api/host/tournaments` still returned 500, but the failing SQL changed from the prior missing `role_assignment_id` column to:
 
 ```text
-Unknown column 'hra.role_assignment_id' in 'on clause'
+Field 'email' doesn't have a default value
 ```
 
-The host tournament creation flow attempted to resolve a host account through `host_role_accounts.role_assignment_id`. The stage database has an older-compatible `host_role_accounts` schema that does not include that column, so the create transaction failed before inserting the tournament.
+This happened in `resolveHostTournamentAccountId` while creating/fixing a `host_role_accounts` row for legacy stage schemas. The fallback insert did not include `email`, but the stage table requires it.
 
 ## Changed files
 
 ```text
 server/lib/rbac.js
 test/app.test.js
-HOST_TOURNAMENT_CREATE_STAGE_SCHEMA_FIX_DIRECTIONS.md
 ```
 
-## Implementation
+## What changed
 
-`server/lib/rbac.js` now inspects the `host_role_accounts` columns before using `role_assignment_id`.
+`server/lib/rbac.js` now:
 
-When the column exists, the current RBAC join behavior is preserved.
+- Resolves a reusable `hostRoleEmail` from the host account email.
+- Falls back to a deterministic local host email when the host account email is unavailable.
+- Includes `email` when inserting/updating `host_role_accounts` if that column exists.
+- Uses dynamic column lists for both legacy and role-assignment schemas so required columns present in stage are populated.
 
-When the column does not exist, the host tournament creation path skips the unsupported join and creates or updates the compatible `host_role_accounts` row using only columns present in the deployed schema.
+## Deployment
 
-## Deploy directions
-
-1. Copy the changed files into the application root, preserving paths.
+1. Copy the changed files into the application at the same paths.
 2. Run:
 
 ```bash
-npm test
 npm install
 ```
 
 3. Restart the stage Node process.
-4. Sign in as the host and create a tournament from `/host/portal`.
-5. Confirm the request succeeds:
+4. Retry creating a tournament from `/host/portal`.
+5. Confirm `POST /api/host/tournaments` returns success instead of 500.
 
-```text
-POST /api/host/tournaments
-```
+## Migration
 
-## Database migration
-
-No migration is required for this patch. This fix is intentionally schema-compatible with both newer and older deployed schemas.
+No migration is required for this fix. It adapts the application code to the existing stage schema.

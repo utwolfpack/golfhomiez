@@ -878,7 +878,10 @@ test('host tournament creation supports stage schemas without host role assignme
 
   assert.match(rbac, /getHostRoleAccountsColumns/)
   assert.match(rbac, /const hasRoleAssignmentId = hostRoleColumns\.has\('role_assignment_id'\)/)
+  assert.match(rbac, /const hostRoleEmail = normalizedEmail \|\| `\$\{hostAccount\?\.id \|\| directHostAccountId\}@host\.local`/)
   assert.match(rbac, /if \(!hasRoleAssignmentId\)/)
+  assert.match(rbac, /hostRoleColumns\.has\('email'\)/)
+  assert.match(rbac, /email = VALUES\(email\)/)
   assert.match(rbac, /INSERT INTO host_role_accounts \(\$\{columns\.join\(', '\)\}\)/)
   assert.match(rbac, /ON DUPLICATE KEY UPDATE \$\{updates\.length \? updates\.join\(', '\) : 'id = VALUES\(id\)'\}/)
 })
