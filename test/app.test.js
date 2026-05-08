@@ -914,8 +914,14 @@ test('organizer registration schema alignment adds account registration columns'
 
   assert.match(migrations, /20260508_030/)
   assert.match(migrations, /organizer_registration_schema_alignment/)
+  const rbac = fs.readFileSync(new URL('../server/lib/rbac.js', import.meta.url), 'utf8')
+
   assert.match(migrations, /contact_name/)
   assert.match(migrations, /password_hash/)
   assert.match(migrations, /reset_email/)
   assert.match(migrationSql, /ALTER TABLE organizer_role_accounts ADD COLUMN contact_name/)
+  assert.match(rbac, /getOrganizerRoleAccountsColumns/)
+  assert.match(rbac, /add\('email', normalizeEmail\(user\.email\), \{ update: false \}\)/)
+  assert.match(rbac, /INSERT INTO organizer_role_accounts/)
+  assert.match(rbac, /\$\{insertColumns\.join\(', '\)\}/)
 })
