@@ -12,6 +12,19 @@ async function loadMigrationSql(filename) {
   return loadSqlFile(path.join(migrationDir, filename))
 }
 
+async function columnCollation(db, tableName, columnName) {
+  const [[row] = []] = await db.execute(
+    `SELECT COLLATION_NAME AS collationName
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1`,
+    [tableName, columnName],
+  )
+  return row?.collationName || null
+}
+
 export const APP_MIGRATIONS = [
   {
     version: '20260326_001',
@@ -1080,6 +1093,21 @@ ON DUPLICATE KEY UPDATE
     },
   },
 
+
+  {
+    version: '20260508_031',
+    name: 'organizer_session_collation_alignment',
+    filename: '20260508_031_organizer_session_collation_alignment.sql',
+    async isSatisfied(_db) {
+      // Organizer session/account joins are made collation-safe in code using
+      // explicit COLLATE clauses. Avoid altering foreign-keyed key columns in
+      // deployed databases because MySQL rejects incompatible FK column changes.
+      return true
+    },
+    async getSql(_db) {
+      return 'SELECT 1'
+    },
+  }
 ]
 
 export function sortMigrations(migrations) {

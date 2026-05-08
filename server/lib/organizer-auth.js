@@ -100,7 +100,7 @@ export async function ensureOrganizerAuthSchema(source) {
     INDEX idx_organizer_sessions_account (organizer_account_id),
     INDEX idx_organizer_sessions_token_hash (token_hash),
     INDEX idx_organizer_sessions_expires (expires_at)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`)
   await ensureColumn(db, 'organizer_sessions', 'token_hash VARCHAR(255) NULL')
   await db.query("UPDATE organizer_sessions SET token_hash = SHA2(id, 256) WHERE token_hash IS NULL OR token_hash = ''")
   await ensureIndex(db, 'organizer_sessions', 'idx_organizer_sessions_token_hash', 'CREATE INDEX idx_organizer_sessions_token_hash ON organizer_sessions (token_hash)')
@@ -144,8 +144,8 @@ export async function getOrganizerAccountByEmailDirect(source, email) {
     const [rows] = await db.execute(
       `SELECT ora.*, ura.auth_user_id, ura.email AS assignment_email
          FROM organizer_role_accounts ora
-         LEFT JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
-        WHERE LOWER(COALESCE(${emailExpression})) = ?
+         LEFT JOIN user_role_assignments ura ON ura.id COLLATE utf8mb4_general_ci = ora.role_assignment_id COLLATE utf8mb4_general_ci
+        WHERE LOWER(CONVERT(COALESCE(${emailExpression}) USING utf8mb4) COLLATE utf8mb4_general_ci) = ? COLLATE utf8mb4_general_ci
         LIMIT 1`,
       emailExpression === '?' ? [normalizedEmail, normalizedEmail] : [normalizedEmail],
     )
@@ -157,11 +157,11 @@ export async function getOrganizerAccountByEmailDirect(source, email) {
   const whereClauses = []
   const params = []
   if (hasEmail) {
-    whereClauses.push('LOWER(ora.email) = ?')
+    whereClauses.push('LOWER(CONVERT(ora.email USING utf8mb4) COLLATE utf8mb4_general_ci) = ? COLLATE utf8mb4_general_ci')
     params.push(normalizedEmail)
   }
   if (hasAuthUserId) {
-    whereClauses.push('LOWER(ora.auth_user_id) = ?')
+    whereClauses.push('LOWER(CONVERT(ora.auth_user_id USING utf8mb4) COLLATE utf8mb4_general_ci) = ? COLLATE utf8mb4_general_ci')
     params.push(`organizer:${normalizedEmail}`.toLowerCase())
   }
   if (!whereClauses.length) return null
@@ -264,14 +264,14 @@ export async function getOrganizerAccountBySession(source, sessionId) {
     hasRoleAssignmentId
       ? `SELECT ora.*, ura.auth_user_id, ura.email AS assignment_email
            FROM organizer_sessions s
-           JOIN organizer_role_accounts ora ON ora.id = s.organizer_account_id
-           LEFT JOIN user_role_assignments ura ON ura.id = ora.role_assignment_id
-          WHERE s.token_hash = ? AND s.expires_at > NOW()
+           JOIN organizer_role_accounts ora ON ora.id COLLATE utf8mb4_general_ci = s.organizer_account_id COLLATE utf8mb4_general_ci
+           LEFT JOIN user_role_assignments ura ON ura.id COLLATE utf8mb4_general_ci = ora.role_assignment_id COLLATE utf8mb4_general_ci
+          WHERE s.token_hash COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci AND s.expires_at > NOW()
           LIMIT 1`
       : `SELECT ora.*
            FROM organizer_sessions s
-           JOIN organizer_role_accounts ora ON ora.id = s.organizer_account_id
-          WHERE s.token_hash = ? AND s.expires_at > NOW()
+           JOIN organizer_role_accounts ora ON ora.id COLLATE utf8mb4_general_ci = s.organizer_account_id COLLATE utf8mb4_general_ci
+          WHERE s.token_hash COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci AND s.expires_at > NOW()
           LIMIT 1`,
     [sha256(sessionId)],
   )
