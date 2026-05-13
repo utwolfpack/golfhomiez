@@ -15,6 +15,23 @@ export function getUserTimeZone(): string | undefined {
   }
 }
 
+export function formatFriendlyDate(value?: string | null): string {
+  if (!value) return 'Unknown date'
+  const date = parseDateValue(String(value))
+  if (Number.isNaN(date.getTime())) return String(value).replace(/T.*$/, '')
+
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    timeZone: getUserTimeZone(),
+  })
+
+  const parts = formatter.formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value || ''
+  return `${part('month')} ${part('day')} ${part('year')}`
+}
+
 export function formatFriendlyDateTime(value?: string | null): string {
   if (!value) return 'Unknown time'
   const date = parseDateValue(String(value))

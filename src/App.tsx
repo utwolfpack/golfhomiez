@@ -23,11 +23,13 @@ import CreateHostAccount from './pages/CreateHostAccount'
 import OrganizerLogin from './pages/OrganizerLogin'
 import OrganizerRegister from './pages/OrganizerRegister'
 import OrganizerTournaments from './pages/OrganizerTournaments'
+import OrganizerProfile from './pages/OrganizerProfile'
 import RedeemHostInvite from './pages/RedeemHostInvite'
 import HostLogin from './pages/HostLogin'
 import HostForgotPassword from './pages/HostForgotPassword'
 import HostResetPassword from './pages/HostResetPassword'
 import HostPortal from './pages/HostPortal'
+import HostProfile from './pages/HostProfile'
 import TournamentPortal from './pages/TournamentPortal'
 import ProtectedRoute from './components/ProtectedRoute'
 import HostProtectedRoute from './components/HostProtectedRoute'
@@ -131,9 +133,11 @@ export default function App() {
               <Route path="/host/request-password-reset" element={<HostForgotPassword />} />
               <Route path="/host/reset-password" element={<HostResetPassword />} />
               <Route path="/host/portal" element={<HostProtectedRoute><HostPortal /></HostProtectedRoute>} />
+              <Route path="/host/portal/profile" element={<HostProtectedRoute><HostProfile /></HostProtectedRoute>} />
               <Route path="/organizer/register" element={<LoginEntryRoute mode="organizer"><Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading…</div></div>}><OrganizerRegister /></Suspense></LoginEntryRoute>} />
               <Route path="/organizer/login" element={<LoginEntryRoute mode="organizer"><OrganizerLogin /></LoginEntryRoute>} />
               <Route path="/organizer/portal" element={<OrganizerProtectedRoute><OrganizerTournaments /></OrganizerProtectedRoute>} />
+              <Route path="/organizer/portal/profile" element={<OrganizerProtectedRoute><OrganizerProfile /></OrganizerProtectedRoute>} />
               <Route path="/tournaments/:id" element={<TournamentPortal />} />
               <Route path="/golfadmin" element={<AdminEntryRoute><AdminPortal /></AdminEntryRoute>} />
               <Route path="*" element={<Navigate to="/" replace />} />

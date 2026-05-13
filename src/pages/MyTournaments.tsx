@@ -54,18 +54,14 @@ export default function MyTournaments() {
         <div className="formStack">
           {tournaments.map((tournament) => (
             <Link key={`${tournament.id}-${tournament.registration.id}`} className="card cardClickable" style={{ padding: 16, textDecoration: 'none', color: 'inherit' }} to={tournament.portalPath || `/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}`}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-                <div>
-                  <h3 style={{ margin: 0 }}>{tournament.name}</h3>
-                  <p className="small" style={{ margin: '4px 0 0' }}>{tournament.description || 'No description provided.'}</p>
-                </div>
-                <span className="small" style={{ textTransform: 'uppercase', fontWeight: 700 }}>{tournament.status}</span>
+              <div>
+                <h3 style={{ margin: 0 }}>{tournament.name}</h3>
+                <p className="small" style={{ margin: '4px 0 0' }}>{tournament.description || 'No description provided.'}</p>
               </div>
               <div className="small" style={{ marginTop: 12 }}><strong>Date:</strong> {formatDate(tournament.startDate)}</div>
               <div className="small"><strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</div>
               <div className="small"><strong>Location:</strong> {(tournament.templateData as any)?.locationAddress || tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || 'Location to be announced'}</div>
               <div className="small"><strong>Organizer:</strong> {tournament.organizerName || 'Golf Homiez organizer'}</div>
-              <div className="small"><strong>Registered golfers:</strong> {tournament.registrationCount ?? 0}</div>
               <div className="small"><strong>Your registration:</strong> {formatDateTime(tournament.registration.registeredAt)}</div>
               {tournament.portalUrl ? <div className="small"><strong>Tournament URL:</strong> {tournament.portalUrl}</div> : null}
             </Link>
