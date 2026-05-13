@@ -4,6 +4,10 @@ export type HostAccount = {
   id: string
   email: string
   golfCourseName: string
+  contactName?: string | null
+  phone?: string | null
+  websiteUrl?: string | null
+  notes?: string | null
   isValidated: boolean
   validatedAt: string | null
 }

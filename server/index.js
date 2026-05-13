@@ -32,6 +32,7 @@ const PORT = Number(process.env.PORT)
 let cancelledTournamentCleanupScheduler = null
 if (!Number.isFinite(PORT) || PORT <= 0) throw new Error('PORT must be set to a valid positive number in the environment')
 let storageReady = false
+const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
 const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()
 const publicServerOrigin = String(process.env.BETTER_AUTH_URL || '').trim()
 const allowedOrigins = new Set([
@@ -386,6 +387,17 @@ function parseTournamentTemplateData(value) {
   try { return JSON.parse(value) } catch { return null }
 }
 
+
+function sanitizeCurrencyField(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+  const stripped = raw.replace(/[^\d.]/g, '')
+  if (!stripped) return null
+  const numeric = Number(stripped)
+  if (!Number.isFinite(numeric) || numeric < 0) return null
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(numeric)
+}
+
 function sanitizeTournamentTemplateData(value = {}) {
   const source = value && typeof value === 'object' ? value : {}
   const cleanString = (key) => source[key] == null ? null : String(source[key]).trim() || null
@@ -401,7 +413,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
     tournamentFormat: cleanString('tournamentFormat'),
     registrationDeadline: cleanString('registrationDeadline'),
-    entryFee: cleanString('entryFee'),
+    entryFee: sanitizeCurrencyField(source.entryFee),
     feesInclude: cleanString('feesInclude'),
     prizeDetails: cleanString('prizeDetails'),
     holeContestsExtras: cleanString('holeContestsExtras'),
@@ -476,11 +488,16 @@ function mapTournamentPortalRow(row, req = null) {
     hostGolfCourseName: row.host_golf_course_name || row.host_account_name || null,
     hostGolfCourseAddress: row.host_golf_course_address || null,
     registrationCount: Number(row.registration_count || 0),
+    registeredTeamCount: Number(row.registered_team_count || row.registration_count || 0),
+    verifiedUserCount: Number(row.verified_user_count || 0),
+    teamSlotLimit: normalizeTournamentTeamSlotLimit(row.team_slot_limit),
+    openTeamSlotCount: Math.max(normalizeTournamentTeamSlotLimit(row.team_slot_limit) - Number(row.registered_team_count || row.registration_count || 0), 0),
     registrations: Array.isArray(row.registrations) ? row.registrations : [],
     portalPath: tournamentPortalPath(row.tournament_identifier || row.id),
     portalUrl: req ? tournamentPortalUrl(req, row.tournament_identifier || row.id) : tournamentPortalPath(row.tournament_identifier || row.id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    activityAt: row.activity_at || row.updated_at || row.created_at || null,
   }
 }
 
@@ -505,6 +522,78 @@ function parseTeamMembers(value) {
   } catch (_) {
     return []
   }
+}
+
+function normalizeTournamentTeamSlotLimit(value, fallback = DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(parsed, 9999)
+}
+
+function collectTournamentRegistrationEmails(registrations = []) {
+  const emails = new Set()
+  for (const registration of Array.isArray(registrations) ? registrations : []) {
+    const registeredMembers = (Array.isArray(registration?.teamMembers) ? registration.teamMembers : [])
+      .filter((member) => member?.registered === true)
+    if (registeredMembers.length) {
+      registeredMembers.forEach((member) => {
+        const memberEmail = normalizeEmail(member?.email)
+        if (memberEmail) emails.add(memberEmail)
+      })
+      continue
+    }
+
+    const registrationEmail = normalizeEmail(registration?.email)
+    if (registrationEmail) emails.add(registrationEmail)
+  }
+  return [...emails]
+}
+
+async function countVerifiedTournamentUsers(pool, registrations = []) {
+  const annotatedVerifiedEmails = new Set()
+  for (const registration of Array.isArray(registrations) ? registrations : []) {
+    for (const member of Array.isArray(registration?.teamMembers) ? registration.teamMembers : []) {
+      if (member?.registered === true && member?.verified === true) {
+        const email = normalizeEmail(member.email)
+        if (email) annotatedVerifiedEmails.add(email)
+      }
+    }
+  }
+  if (annotatedVerifiedEmails.size) return annotatedVerifiedEmails.size
+
+  const emails = collectTournamentRegistrationEmails(registrations)
+  if (!emails.length) return 0
+  const placeholders = emails.map(() => '?').join(',')
+  try {
+    const [rows] = await pool.execute(
+      `SELECT LOWER(email) AS email
+         FROM \`user\`
+        WHERE LOWER(email) IN (${placeholders})
+          AND COALESCE(emailVerified, 0) <> 0`,
+      emails,
+    )
+    return new Set(rows.map((row) => normalizeEmail(row.email))).size
+  } catch (error) {
+    logError('Tournament verified-user count failed', { error, emailCount: emails.length })
+    return 0
+  }
+}
+
+async function buildTournamentCapacityStats(pool, tournament, registrations = []) {
+  const teamSlotLimit = normalizeTournamentTeamSlotLimit(tournament?.teamSlotLimit ?? tournament?.team_slot_limit)
+  const registeredTeamCount = Array.isArray(registrations) ? registrations.length : 0
+  const verifiedUserCount = await countVerifiedTournamentUsers(pool, registrations)
+  return {
+    teamSlotLimit,
+    registeredTeamCount,
+    verifiedUserCount,
+    openTeamSlotCount: Math.max(teamSlotLimit - registeredTeamCount, 0),
+  }
+}
+
+async function attachTournamentCapacityStats(pool, tournament, registrations = []) {
+  const stats = await buildTournamentCapacityStats(pool, tournament, registrations)
+  return { ...tournament, ...stats, registrationCount: stats.registeredTeamCount }
 }
 
 function enforceTournamentTeamSize(members = []) {
@@ -539,6 +628,135 @@ async function resolveRegistrationTeam(pool, body = {}, user) {
   return { teamId: team.id, teamName: team.name, teamMembers: team.members || normalizedMembers }
 }
 
+function ensureRegistrationLeadMember(registration) {
+  const members = Array.isArray(registration?.teamMembers) ? [...registration.teamMembers] : []
+  const registrationEmail = normalizeEmail(registration?.email)
+  if (registrationEmail && !members.some((member) => normalizeEmail(member.email) === registrationEmail)) {
+    members.unshift({ id: registration.authUserId || null, name: registration.name || registrationEmail, email: registrationEmail })
+  }
+  return members
+}
+
+function tournamentRegistrationTeamKey(registration) {
+  const teamId = String(registration?.teamId || '').trim()
+  if (teamId) return `team:${teamId}`
+  const teamName = String(registration?.teamName || '').trim().toLowerCase()
+  if (teamName) return `name:${teamName}`
+  return `registration:${registration?.id}`
+}
+
+async function loadVerifiedRegistrationEmails(pool, registeredEmails = []) {
+  const emails = [...new Set((registeredEmails || []).map((email) => normalizeEmail(email)).filter(Boolean))]
+  if (!emails.length) return new Set()
+  const placeholders = emails.map(() => '?').join(',')
+  try {
+    const [rows] = await pool.execute(
+      `SELECT LOWER(email) AS email
+         FROM \`user\`
+        WHERE LOWER(email) IN (${placeholders})
+          AND COALESCE(emailVerified, 0) <> 0`,
+      emails,
+    )
+    return new Set(rows.map((row) => normalizeEmail(row.email)).filter(Boolean))
+  } catch (error) {
+    logError('Tournament registration member verification lookup failed', { error, emailCount: emails.length })
+    return new Set()
+  }
+}
+
+async function groupTournamentRegistrationsByTeam(pool, registrations = []) {
+  const registrationRows = Array.isArray(registrations) ? registrations : []
+  const registeredByEmail = new Map()
+  const registeredByAuthUserId = new Map()
+
+  for (const registration of registrationRows) {
+    const email = normalizeEmail(registration.email)
+    if (email && !registeredByEmail.has(email)) registeredByEmail.set(email, registration)
+    const authUserId = String(registration.authUserId || '').trim()
+    if (authUserId && !registeredByAuthUserId.has(authUserId)) registeredByAuthUserId.set(authUserId, registration)
+  }
+
+  const verifiedEmails = await loadVerifiedRegistrationEmails(pool, [...registeredByEmail.keys()])
+  const groups = new Map()
+
+  for (const registration of registrationRows) {
+    const key = tournamentRegistrationTeamKey(registration)
+    if (!groups.has(key)) {
+      groups.set(key, {
+        ...registration,
+        id: registration.id,
+        registeredAt: registration.registeredAt,
+        teamMembers: [],
+      })
+    }
+    const group = groups.get(key)
+    const existingMembers = new Map((group.teamMembers || []).map((member) => [normalizeEmail(member.email) || String(member.id || ''), member]))
+    for (const member of ensureRegistrationLeadMember(registration)) {
+      const email = normalizeEmail(member.email)
+      const authUserId = String(member.id || '').trim()
+      const matchingRegistration = (email && registeredByEmail.get(email)) || (authUserId && registeredByAuthUserId.get(authUserId)) || null
+      const memberKey = email || authUserId || `${registration.id}:${group.teamMembers.length}`
+      const annotatedMember = {
+        id: member.id || matchingRegistration?.authUserId || null,
+        name: String(member.name || matchingRegistration?.name || email || 'Team member').trim(),
+        email,
+        registered: Boolean(matchingRegistration),
+        verified: Boolean(matchingRegistration && verifiedEmails.has(normalizeEmail(matchingRegistration.email))),
+        registrationId: matchingRegistration?.id || null,
+        registrationAuthUserId: matchingRegistration?.authUserId || null,
+        registeredAt: matchingRegistration?.registeredAt || null,
+      }
+      const existing = existingMembers.get(memberKey)
+      if (existing) {
+        Object.assign(existing, {
+          ...annotatedMember,
+          name: existing.name || annotatedMember.name,
+          email: existing.email || annotatedMember.email,
+          registered: Boolean(existing.registered || annotatedMember.registered),
+          verified: Boolean(existing.verified || annotatedMember.verified),
+          registrationId: existing.registrationId || annotatedMember.registrationId,
+          registrationAuthUserId: existing.registrationAuthUserId || annotatedMember.registrationAuthUserId,
+          registeredAt: existing.registeredAt || annotatedMember.registeredAt,
+        })
+      } else {
+        group.teamMembers.push(annotatedMember)
+        existingMembers.set(memberKey, annotatedMember)
+      }
+    }
+  }
+
+  return [...groups.values()]
+}
+
+async function tournamentTeamAlreadyRegistered(pool, tournamentId, registrationTeam) {
+  const teamId = String(registrationTeam?.teamId || '').trim()
+  if (teamId) {
+    const [rows] = await pool.execute(
+      `SELECT id
+         FROM tournament_registrations
+        WHERE tournament_id = ?
+          AND team_id = ?
+          AND status = 'registered'
+        LIMIT 1`,
+      [tournamentId, teamId],
+    )
+    return Boolean(rows[0])
+  }
+
+  const teamName = String(registrationTeam?.teamName || '').trim()
+  if (!teamName) return false
+  const [rows] = await pool.execute(
+    `SELECT id
+       FROM tournament_registrations
+      WHERE tournament_id = ?
+        AND LOWER(team_name) = LOWER(?)
+        AND status = 'registered'
+      LIMIT 1`,
+    [tournamentId, teamName],
+  )
+  return Boolean(rows[0])
+}
+
 async function listTournamentRegistrations(pool, tournamentIds = []) {
   const ids = [...new Set((tournamentIds || []).filter(Boolean).map((id) => String(id)))]
   if (!ids.length) return new Map()
@@ -551,21 +769,27 @@ async function listTournamentRegistrations(pool, tournamentIds = []) {
       ORDER BY tr.created_at ASC`,
     ids,
   )
-  const byTournament = new Map(ids.map((id) => [id, []]))
+  const rawByTournament = new Map(ids.map((id) => [id, []]))
   for (const row of rows) {
     const tournamentId = String(row.tournament_id)
-    if (!byTournament.has(tournamentId)) byTournament.set(tournamentId, [])
-    byTournament.get(tournamentId).push(mapTournamentRegistrationRow(row))
+    if (!rawByTournament.has(tournamentId)) rawByTournament.set(tournamentId, [])
+    rawByTournament.get(tournamentId).push(mapTournamentRegistrationRow(row))
+  }
+
+  const byTournament = new Map(ids.map((id) => [id, []]))
+  for (const [tournamentId, tournamentRegistrations] of rawByTournament.entries()) {
+    byTournament.set(tournamentId, await groupTournamentRegistrationsByTeam(pool, tournamentRegistrations))
   }
   return byTournament
 }
 
 async function attachTournamentRegistrations(pool, tournaments = []) {
   const registrationsByTournament = await listTournamentRegistrations(pool, tournaments.map((item) => item.id))
-  return tournaments.map((item) => {
+  return Promise.all(tournaments.map(async (item) => {
     const registrations = registrationsByTournament.get(String(item.id)) || []
-    return { ...item, registrationCount: registrations.length, registrations }
-  })
+    const withStats = await attachTournamentCapacityStats(pool, item, registrations)
+    return { ...withStats, registrations }
+  }))
 }
 
 async function getTournamentPortalById(pool, tournamentId, req = null) {
@@ -595,9 +819,28 @@ async function getTournamentPortalById(pool, tournamentId, req = null) {
   if (!row) return null
   const registrationsByTournament = await listTournamentRegistrations(pool, [row.id])
   const registrations = registrationsByTournament.get(String(row.id)) || []
-  const mappedRow = await resolveTournamentGolfCourseAddress({ ...row, registrations, registration_count: registrations.length }, req)
-  const tournament = { ...mapTournamentPortalRow(mappedRow, req), tournamentIdentifier: row.tournament_identifier || null }
-  return { tournament, registrationCount: registrations.length, registrations }
+  const capacityStats = await buildTournamentCapacityStats(pool, row, registrations)
+  const mappedRow = await resolveTournamentGolfCourseAddress({ ...row, registrations, registration_count: registrations.length, registered_team_count: capacityStats.registeredTeamCount, verified_user_count: capacityStats.verifiedUserCount }, req)
+  const tournament = { ...mapTournamentPortalRow(mappedRow, req), tournamentIdentifier: row.tournament_identifier || null, ...capacityStats }
+  return { tournament, registrationCount: capacityStats.registeredTeamCount, registrations, ...capacityStats }
+}
+
+function publicTournamentPortalResponse(portal, viewerRegistration = null) {
+  const { registrations: _registrations, registrationCount: _registrationCount, registeredTeamCount: _registeredTeamCount, verifiedUserCount: _verifiedUserCount, ...publicPortal } = portal || {}
+  const {
+    registrations: _tournamentRegistrations,
+    registrationCount: _tournamentRegistrationCount,
+    registeredTeamCount: _tournamentRegisteredTeamCount,
+    verifiedUserCount: _tournamentVerifiedUserCount,
+    ...publicTournament
+  } = publicPortal.tournament || {}
+
+  return {
+    ...publicPortal,
+    tournament: publicTournament,
+    viewerRegistration,
+    isViewerRegistered: Boolean(viewerRegistration),
+  }
 }
 
 async function listTableColumns(pool, tableName) {
@@ -660,7 +903,139 @@ function sanitizeOrganizerTournamentUpdatePayload(body = {}) {
     templateKey,
     templateBackgroundImageUrl: templateBackgroundImageUrl || null,
     templateData: sanitizeTournamentTemplateData(body.templateData),
+    teamSlotLimit: normalizeTournamentTeamSlotLimit(body.teamSlotLimit ?? body.team_slot_limit),
   }
+}
+
+function sanitizeProfileText(value, maxLength = 512) {
+  const trimmed = String(value ?? '').trim()
+  return trimmed ? trimmed.slice(0, maxLength) : null
+}
+
+function sanitizeWebsiteUrl(value) {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return null
+  if (/^https?:\/\//i.test(trimmed)) return trimmed.slice(0, 512)
+  return `https://${trimmed}`.slice(0, 512)
+}
+
+function mapHostProfileRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    roleAssignmentId: row.role_assignment_id || '',
+    authUserId: row.auth_user_id || `host:${row.email}`,
+    email: row.email,
+    role: 'host',
+    golfCourseName: row.golf_course_name || row.account_name || row.course_name || row.name || '',
+    contactName: row.contact_name || null,
+    phone: row.phone || null,
+    websiteUrl: row.website_url || null,
+    notes: row.notes || null,
+    isValidated: Boolean(row.is_validated),
+    validatedAt: row.validated_at || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  }
+}
+
+async function getHostProfile(pool, hostAccountId) {
+  await ensureHostAuthSchema(pool)
+  const [rows] = await pool.execute('SELECT * FROM host_accounts WHERE id = ? LIMIT 1', [hostAccountId])
+  return mapHostProfileRow(rows[0] || null)
+}
+
+function sanitizeHostProfilePayload(body = {}) {
+  const golfCourseName = sanitizeProfileText(body.golfCourseName ?? body.golf_course_name, 191)
+  if (!golfCourseName) throw new Error('Golf-course name is required.')
+  return {
+    golfCourseName,
+    contactName: sanitizeProfileText(body.contactName ?? body.contact_name, 191),
+    phone: sanitizeProfileText(body.phone, 64),
+    websiteUrl: sanitizeWebsiteUrl(body.websiteUrl ?? body.website_url),
+    notes: sanitizeProfileText(body.notes, 5000),
+  }
+}
+
+async function updateHostProfile(pool, hostAccountId, input) {
+  await ensureHostAuthSchema(pool)
+  const columns = await listTableColumns(pool, 'host_accounts')
+  const updates = []
+  const params = []
+  const add = (column, value) => {
+    if (!columns.has(column)) return
+    updates.push(`${column} = ?`)
+    params.push(value)
+  }
+  for (const column of ['golf_course_name', 'account_name', 'course_name', 'name']) add(column, input.golfCourseName)
+  add('contact_name', input.contactName)
+  add('phone', input.phone)
+  add('website_url', input.websiteUrl)
+  add('notes', input.notes)
+  if (columns.has('updated_at')) updates.push('updated_at = CURRENT_TIMESTAMP')
+  if (!updates.length) return getHostProfile(pool, hostAccountId)
+  params.push(hostAccountId)
+  await pool.execute(`UPDATE host_accounts SET ${updates.join(', ')} WHERE id = ?`, params)
+  return getHostProfile(pool, hostAccountId)
+}
+
+function mapOrganizerProfileRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    roleAssignmentId: row.role_assignment_id || '',
+    authUserId: row.auth_user_id || `organizer:${row.email}`,
+    email: row.email,
+    role: 'organizer',
+    organizationName: row.organization_name || row.organizer_name || row.contact_name || row.email,
+    contactName: row.contact_name || row.organization_name || row.organizer_name || row.email,
+    phone: row.phone || null,
+    websiteUrl: row.website_url || null,
+    notes: row.notes || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  }
+}
+
+async function getOrganizerProfile(pool, organizerAccountId) {
+  await ensureOrganizerAuthSchema(pool)
+  const [rows] = await pool.execute('SELECT * FROM organizer_role_accounts WHERE id = ? LIMIT 1', [organizerAccountId])
+  return mapOrganizerProfileRow(rows[0] || null)
+}
+
+function sanitizeOrganizerProfilePayload(body = {}) {
+  const organizationName = sanitizeProfileText(body.organizationName ?? body.organization_name, 191)
+  if (!organizationName) throw new Error('Organization name is required.')
+  return {
+    organizationName,
+    contactName: sanitizeProfileText(body.contactName ?? body.contact_name, 191),
+    phone: sanitizeProfileText(body.phone, 64),
+    websiteUrl: sanitizeWebsiteUrl(body.websiteUrl ?? body.website_url),
+    notes: sanitizeProfileText(body.notes, 5000),
+  }
+}
+
+async function updateOrganizerProfile(pool, organizerAccountId, input) {
+  await ensureOrganizerAuthSchema(pool)
+  const columns = await listTableColumns(pool, 'organizer_role_accounts')
+  const updates = []
+  const params = []
+  const add = (column, value) => {
+    if (!columns.has(column)) return
+    updates.push(`${column} = ?`)
+    params.push(value)
+  }
+  add('organization_name', input.organizationName)
+  add('organizer_name', input.organizationName)
+  add('contact_name', input.contactName)
+  add('phone', input.phone)
+  add('website_url', input.websiteUrl)
+  add('notes', input.notes)
+  if (columns.has('updated_at')) updates.push('updated_at = CURRENT_TIMESTAMP')
+  if (!updates.length) return getOrganizerProfile(pool, organizerAccountId)
+  params.push(organizerAccountId)
+  await pool.execute(`UPDATE organizer_role_accounts SET ${updates.join(', ')} WHERE id = ?`, params)
+  return getOrganizerProfile(pool, organizerAccountId)
 }
 
 async function updateOrganizerInvitedTournament(pool, user, tournamentId, input, req = null) {
@@ -668,9 +1043,9 @@ async function updateOrganizerInvitedTournament(pool, user, tournamentId, input,
   if (!existing) return null
   await pool.execute(
     `UPDATE tournaments
-        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, template_key = ?, template_background_image_url = ?, template_data = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, template_key = ?, template_background_image_url = ?, template_data = ?, team_slot_limit = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
-    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, input.templateKey, input.templateBackgroundImageUrl, JSON.stringify(input.templateData || {}), existing.id],
+    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, input.templateKey, input.templateBackgroundImageUrl, JSON.stringify(input.templateData || {}), input.teamSlotLimit, existing.id],
   )
   const portal = await getTournamentPortalById(pool, existing.id, req)
   return portal?.tournament || null
@@ -746,7 +1121,9 @@ async function getOrganizerPortalSummary(pool, user, req) {
   const organizerAccountFilter = organizerAccount ? 't.organizer_account_id = ? OR' : ''
   const inviteJoin = inviteColumns.size
     ? 'LEFT JOIN organizer_tournament_invites oti ON oti.tournament_id = t.id'
-    : 'LEFT JOIN (SELECT NULL AS tournament_id, NULL AS organizer_email, NULL AS id, NULL AS status, NULL AS invite_url) oti ON oti.tournament_id = t.id'
+    : 'LEFT JOIN (SELECT NULL AS tournament_id, NULL AS organizer_email, NULL AS id, NULL AS status, NULL AS invite_url, NULL AS updated_at, NULL AS created_at) oti ON oti.tournament_id = t.id'
+  const inviteUpdatedAtExpr = inviteColumns.has('updated_at') ? 'oti.updated_at' : 'NULL'
+  const inviteCreatedAtExpr = inviteColumns.has('created_at') ? 'oti.created_at' : 'NULL'
   const params = organizerAccount ? [organizerAccount.id, email, email] : [email, email]
 
   const [tournamentRows] = await pool.execute(
@@ -762,7 +1139,8 @@ async function getOrganizerPortalSummary(pool, user, req) {
             COALESCE(${hostRoleStateExpr}, ${hostAccountStateExpr}) AS host_golf_course_state,
             oti.id AS invite_id,
             oti.status AS invite_status,
-            oti.invite_url AS invite_url
+            oti.invite_url AS invite_url,
+            GREATEST(COALESCE(t.updated_at, t.created_at), COALESCE(${inviteUpdatedAtExpr}, ${inviteCreatedAtExpr}), COALESCE(t.created_at, t.updated_at)) AS activity_at
        FROM tournaments t
        LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
        LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
@@ -770,7 +1148,7 @@ async function getOrganizerPortalSummary(pool, user, req) {
        ${inviteJoin}
       WHERE ${organizerAccountFilter} LOWER(COALESCE(t.organizer_email, '')) = LOWER(?)
          OR LOWER(COALESCE(oti.organizer_email, '')) = LOWER(?)
-      ORDER BY start_date DESC, t.created_at DESC`,
+      ORDER BY activity_at DESC, t.created_at DESC`,
     params,
   )
 
@@ -867,9 +1245,9 @@ async function updateHostOwnedTournament(pool, hostAccount, tournamentId, input,
   if (!existing) return null
   await pool.execute(
     `UPDATE tournaments
-        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, template_key = ?, template_background_image_url = ?, template_data = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, is_public = ?, template_key = ?, template_background_image_url = ?, template_data = ?, team_slot_limit = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
-    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, input.templateKey, input.templateBackgroundImageUrl, JSON.stringify(input.templateData || {}), existing.id],
+    [input.name, input.description, input.startDate, input.endDate, input.status, input.isPublic ? 1 : 0, input.templateKey, input.templateBackgroundImageUrl, JSON.stringify(input.templateData || {}), input.teamSlotLimit, existing.id],
   )
   const portal = await getTournamentPortalById(pool, existing.id, req)
   return portal?.tournament ? {
@@ -953,7 +1331,7 @@ async function proxyClientApp(req, res, next) {
   }
 }
 
-app.get(['/register', '/login', '/verify-contact', '/golfadmin', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/redeem', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal'], async (req, res, next) => {
+app.get(['/register', '/login', '/verify-contact', '/golfadmin', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/redeem', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/portal/profile'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
 
@@ -1317,6 +1695,33 @@ app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
   }
 })
 
+app.get('/api/host/profile', hostAuthMiddleware, async (req, res) => {
+  try {
+    const profile = await getHostProfile(getPool(), req.hostAccount.id)
+    if (!profile) return res.status(404).json({ message: 'Host profile not found' })
+    logApi('host_profile_loaded', { ...requestContext(req), hostAccountId: profile.id })
+    res.json(profile)
+  } catch (error) {
+    logRouteError('Host profile load error', req, error)
+    res.status(500).json({ message: 'Could not load host profile' })
+  }
+})
+
+app.put('/api/host/profile', hostAuthMiddleware, async (req, res) => {
+  try {
+    const input = sanitizeHostProfilePayload(req.body || {})
+    const profile = await updateHostProfile(getPool(), req.hostAccount.id, input)
+    logApi('host_profile_updated', { ...requestContext(req), hostAccountId: profile?.id || req.hostAccount.id })
+    res.json(profile)
+  } catch (error) {
+    if (error instanceof Error && /required|invalid/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host profile update error', req, error)
+    res.status(500).json({ message: 'Could not update host profile' })
+  }
+})
+
 
 app.post('/api/host/tournaments', hostAuthMiddleware, async (req, res) => {
   try {
@@ -1343,7 +1748,7 @@ app.put('/api/host/tournaments/:id', hostAuthMiddleware, async (req, res) => {
       logApi('host_tournament_update_not_found', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, tournamentId })
       return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
     }
-    logApi('host_tournament_updated', { ...requestContext(req), hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status })
+    logApi('host_tournament_updated', { ...requestContext(req), hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount })
     res.json(tournament)
   } catch (error) {
     if (error instanceof Error && /required|invalid/i.test(error.message)) {
@@ -1480,7 +1885,7 @@ app.put('/api/organizer/tournaments/:id', requireStorage, organizerAuthMiddlewar
       logApi('organizer_tournament_update_not_found', { ...requestContext(req), tournamentId, email: normalizeEmail(req.organizerUser?.email) })
       return res.status(404).json({ message: 'Tournament not found for this organizer invitation.' })
     }
-    logApi('organizer_tournament_updated', { ...requestContext(req), tournamentId: tournament.id, status: tournament.status, email: normalizeEmail(req.organizerUser?.email) })
+    logApi('organizer_tournament_updated', { ...requestContext(req), tournamentId: tournament.id, status: tournament.status, teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, email: normalizeEmail(req.organizerUser?.email) })
     res.json(tournament)
   } catch (error) {
     if (error instanceof Error && /required|invalid/i.test(error.message)) {
@@ -1598,6 +2003,33 @@ app.get('/api/organizer/portal', requireStorage, organizerAuthMiddleware, async 
   }
 })
 
+app.get('/api/organizer/profile', requireStorage, organizerAuthMiddleware, async (req, res) => {
+  try {
+    const profile = await getOrganizerProfile(getPool(), req.organizerAccount.id)
+    if (!profile) return res.status(404).json({ message: 'Organizer profile not found' })
+    logApi('organizer_profile_loaded', { ...requestContext(req), organizerAccountId: profile.id })
+    res.json(profile)
+  } catch (error) {
+    logRouteError('Organizer profile load error', req, error)
+    res.status(500).json({ message: 'Could not load organizer profile' })
+  }
+})
+
+app.put('/api/organizer/profile', requireStorage, organizerAuthMiddleware, async (req, res) => {
+  try {
+    const input = sanitizeOrganizerProfilePayload(req.body || {})
+    const profile = await updateOrganizerProfile(getPool(), req.organizerAccount.id, input)
+    logApi('organizer_profile_updated', { ...requestContext(req), organizerAccountId: profile?.id || req.organizerAccount.id })
+    res.json(profile)
+  } catch (error) {
+    if (error instanceof Error && /required|invalid/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Organizer profile update error', req, error)
+    res.status(500).json({ message: 'Could not update organizer profile' })
+  }
+})
+
 app.get('/api/organizer/invite-eligibility', requireStorage, async (req, res) => {
   try {
     const email = normalizeEmail(req.query.email || '')
@@ -1684,8 +2116,8 @@ app.get('/api/tournament-portals/:id', requireStorage, async (req, res) => {
       viewerRegistration = registrationRows[0] ? mapTournamentRegistrationRow(registrationRows[0]) : null
     }
 
-    logApi('tournament_portal_loaded', { ...requestContext(req), tournamentId: id, registrationCount: portal.registrationCount, viewerRegistered: Boolean(viewerRegistration) })
-    res.json({ ...portal, viewerRegistration, isViewerRegistered: Boolean(viewerRegistration) })
+    logApi('tournament_portal_loaded', { ...requestContext(req), tournamentId: id, registrationCount: portal.registrationCount, registeredTeamCount: portal.registeredTeamCount, verifiedUserCount: portal.verifiedUserCount, teamSlotLimit: portal.teamSlotLimit, openTeamSlotCount: portal.openTeamSlotCount, viewerRegistered: Boolean(viewerRegistration), publicResponseIncludesTeamRoster: false })
+    res.json(publicTournamentPortalResponse(portal, viewerRegistration))
   } catch (error) {
     logRouteError('Tournament portal load error', req, error)
     res.status(500).json({ message: 'Could not load tournament portal' })
@@ -1716,6 +2148,12 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
     }
 
     const registrationTeam = await resolveRegistrationTeam(pool, req.body || {}, req.user)
+    const teamAlreadyRegistered = await tournamentTeamAlreadyRegistered(pool, resolvedTournamentId, registrationTeam)
+    if (!teamAlreadyRegistered && Number(portal.tournament.openTeamSlotCount ?? 0) <= 0) {
+      logApi('tournament_registration_slots_full', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, registeredTeamCount: portal.tournament.registeredTeamCount, teamSlotLimit: portal.tournament.teamSlotLimit, teamId: registrationTeam.teamId || null })
+      return res.status(400).json({ message: 'Tournament team slots are full.' })
+    }
+
     const registrationId = uuidv4()
     await pool.execute(
       `INSERT INTO tournament_registrations (id, tournament_id, auth_user_id, email, name, status, team_id, team_name, team_members_json, correlation_id)
@@ -1748,8 +2186,21 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
     } catch (mailError) {
       logRouteError('Tournament registration confirmation email error', req, mailError)
     }
-    logApi('tournament_registration_completed', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, authUserId: req.user.id, email: normalizeEmail(req.user.email) })
-    res.status(201).json({ ok: true, tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, status: 'registered', registration: { id: registrationId, tournamentId: resolvedTournamentId, authUserId: req.user.id, email: normalizeEmail(req.user.email), name: req.user.name || normalizeEmail(req.user.email), status: 'registered', teamId: registrationTeam.teamId, teamName: registrationTeam.teamName, teamMembers: registrationTeam.teamMembers } })
+    const registeredEmail = normalizeEmail(req.user.email)
+    const responseTeamMembers = (registrationTeam.teamMembers || []).map((member) => {
+      const memberEmail = normalizeEmail(member.email)
+      return {
+        ...member,
+        email: memberEmail,
+        registered: memberEmail === registeredEmail,
+        verified: memberEmail === registeredEmail ? Boolean(req.user.emailVerified) : false,
+        registrationId: memberEmail === registeredEmail ? registrationId : null,
+        registrationAuthUserId: memberEmail === registeredEmail ? req.user.id : null,
+        registeredAt: memberEmail === registeredEmail ? new Date().toISOString() : null,
+      }
+    })
+    logApi('tournament_registration_completed', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, authUserId: req.user.id, email: registeredEmail, teamSlotLimit: portal.tournament.teamSlotLimit, teamAlreadyRegistered, registeredTeamCount: Number(portal.tournament.registeredTeamCount || 0) + (teamAlreadyRegistered ? 0 : 1), openTeamSlotCount: Math.max(Number(portal.tournament.openTeamSlotCount || 0) - (teamAlreadyRegistered ? 0 : 1), 0) })
+    res.status(201).json({ ok: true, tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, status: 'registered', teamAlreadyRegistered, registration: { id: registrationId, tournamentId: resolvedTournamentId, authUserId: req.user.id, email: registeredEmail, name: req.user.name || registeredEmail, status: 'registered', teamId: registrationTeam.teamId, teamName: registrationTeam.teamName, teamMembers: responseTeamMembers } })
   } catch (error) {
     if (error instanceof Error && /team|member|email|players|name|exists/i.test(error.message)) {
       logApi('tournament_registration_validation_failed', { ...requestContext(req), validationError: error.message })

@@ -197,6 +197,10 @@ export async function ensureHostAuthSchema(source) {
     await ensureColumn(db, 'host_accounts', 'password_hash VARCHAR(255) NULL')
     await ensureColumn(db, 'host_accounts', 'invite_id VARCHAR(64) NULL')
     await ensureColumn(db, 'host_accounts', 'reset_email VARCHAR(191) NULL')
+    await ensureColumn(db, 'host_accounts', 'contact_name VARCHAR(191) NULL')
+    await ensureColumn(db, 'host_accounts', 'phone VARCHAR(64) NULL')
+    await ensureColumn(db, 'host_accounts', 'website_url VARCHAR(512) NULL')
+    await ensureColumn(db, 'host_accounts', 'notes TEXT NULL')
     await ensureColumn(db, 'host_accounts', 'is_validated TINYINT(1) NOT NULL DEFAULT 0')
     await ensureColumn(db, 'host_accounts', 'validated_at DATETIME NULL')
   }
@@ -455,7 +459,7 @@ export async function getHostAccountBySession(source, sessionId) {
   const matchValue = matchCol === 'token_hash' ? sha256(sessionId) : sessionId
   const expiryClause = sessionColumns.has('expires_at') ? 'AND s.expires_at > NOW()' : ''
   const [rows] = await db.execute(
-    `SELECT h.id, h.email, h.auth_user_id, h.invite_id, h.reset_email, h.is_validated, h.validated_at, ${selectName} h.created_at, h.updated_at
+    `SELECT h.id, h.email, h.auth_user_id, h.invite_id, h.reset_email, h.contact_name, h.phone, h.website_url, h.notes, h.is_validated, h.validated_at, ${selectName} h.created_at, h.updated_at
      FROM host_sessions s
      JOIN host_accounts h ON h.id = s.${joinCol}
      WHERE s.${matchCol} = ? ${expiryClause}
@@ -548,7 +552,7 @@ export async function getHostPortalData(source, hostAccountId) {
   const nameCol = await resolvePrimaryNameColumn(db)
   const selectName = nameCol ? `${nameCol} AS golf_course_name,` : ''
   const [accounts] = await db.execute(
-    `SELECT id, email, ${selectName} is_validated, validated_at, created_at, updated_at FROM host_accounts WHERE id = ? LIMIT 1`,
+    `SELECT id, email, contact_name, phone, website_url, notes, ${selectName} is_validated, validated_at, created_at, updated_at FROM host_accounts WHERE id = ? LIMIT 1`,
     [hostAccountId],
   )
   return { host: accounts[0] || null }
