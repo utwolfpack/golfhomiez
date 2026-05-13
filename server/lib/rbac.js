@@ -7,6 +7,7 @@ export const ROLE_HOST = 'host'
 export const ROLE_ORGANIZER = 'organizer'
 export const ROLE_ADMIN = 'admin'
 export const SUPPORTED_ROLES = [ROLE_USER, ROLE_HOST, ROLE_ORGANIZER, ROLE_ADMIN]
+const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
 
 function createId() {
   return randomUUID().replace(/-/g, '')
@@ -29,6 +30,12 @@ function buildTournamentIdentifier(name) {
   const base = slugifyTournamentName(name) || 'tournament'
   const suffix = randomBytes(3).toString('hex')
   return `${base}-${suffix}`
+}
+
+function normalizeTournamentTeamSlotLimit(value, fallback = DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(parsed, 9999)
 }
 
 function mapRoleAssignmentRow(row) {
@@ -145,6 +152,7 @@ async function insertTournamentWithAvailableColumns(pool, values) {
   add('template_key', values.templateKey)
   add('template_background_image_url', values.templateBackgroundImageUrl)
   add('template_data', JSON.stringify(values.templateData || {}))
+  add('team_slot_limit', values.teamSlotLimit)
   add('created_by_auth_user_id', values.createdByAuthUserId)
 
   if (!columns.includes('id') || !(columns.includes('name') || columns.includes('title'))) {
@@ -409,6 +417,7 @@ export function sanitizeTournamentPayload(body = {}, options = {}) {
     templateKey,
     templateBackgroundImageUrl: templateBackgroundImageUrl || null,
     templateData: sanitizeTournamentTemplateData(body.templateData),
+    teamSlotLimit: normalizeTournamentTeamSlotLimit(body.teamSlotLimit ?? body.team_slot_limit),
   }
 }
 
@@ -473,6 +482,17 @@ function parseTournamentTemplateData(value) {
   try { return JSON.parse(value) } catch { return null }
 }
 
+
+function sanitizeCurrencyField(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+  const stripped = raw.replace(/[^\d.]/g, '')
+  if (!stripped) return null
+  const numeric = Number(stripped)
+  if (!Number.isFinite(numeric) || numeric < 0) return null
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(numeric)
+}
+
 function sanitizeTournamentTemplateData(value = {}) {
   const source = value && typeof value === 'object' ? value : {}
   const cleanString = (key) => source[key] == null ? null : String(source[key]).trim() || null
@@ -489,7 +509,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
     tournamentFormat: cleanString('tournamentFormat'),
     registrationDeadline: cleanString('registrationDeadline'),
-    entryFee: cleanString('entryFee'),
+    entryFee: sanitizeCurrencyField(source.entryFee),
     feesInclude: cleanString('feesInclude'),
     prizeDetails: cleanString('prizeDetails'),
     holeContestsExtras: cleanString('holeContestsExtras'),
@@ -519,6 +539,7 @@ function mapTournamentRow(row) {
     templateKey: row.template_key || 'classic-flyer',
     templateBackgroundImageUrl: row.template_background_image_url || null,
     templateData: parseTournamentTemplateData(row.template_data),
+    teamSlotLimit: normalizeTournamentTeamSlotLimit(row.team_slot_limit),
     createdByAuthUserId: row.created_by_auth_user_id,
     organizerName: row.organizer_name,
     hostGolfCourseName: row.host_golf_course_name,
@@ -1049,12 +1070,24 @@ export async function createOrganizerTournamentForEmail(pool, organizerEmail, in
   const legacyOrganizerAccount = await getOrganizerAccountByEmail(pool, normalizedEmail)
   const id = createId()
   const tournamentIdentifier = buildTournamentIdentifier(payload.name)
-  await pool.execute(
-    `INSERT INTO tournaments
-      (id, organizer_account_id, host_account_id, tournament_identifier, organizer_email, name, description, start_date, end_date, status, is_public, template_key, template_background_image_url, template_data, created_by_auth_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, legacyOrganizerAccount?.id || null, payload.hostAccountId, tournamentIdentifier, normalizedEmail, payload.name, payload.description, payload.startDate, payload.endDate, payload.status, payload.isPublic ? 1 : 0, payload.templateKey, payload.templateBackgroundImageUrl, JSON.stringify(payload.templateData || {}), `organizer:${normalizedEmail}`],
-  )
+  await insertTournamentWithAvailableColumns(pool, {
+    id,
+    organizerAccountId: legacyOrganizerAccount?.id || null,
+    hostAccountId: payload.hostAccountId,
+    tournamentIdentifier,
+    organizerEmail: normalizedEmail,
+    name: payload.name,
+    description: payload.description,
+    startDate: payload.startDate,
+    endDate: payload.endDate,
+    status: payload.status,
+    isPublic: payload.isPublic,
+    templateKey: payload.templateKey,
+    templateBackgroundImageUrl: payload.templateBackgroundImageUrl,
+    templateData: payload.templateData,
+    teamSlotLimit: payload.teamSlotLimit,
+    createdByAuthUserId: `organizer:${normalizedEmail}`,
+  })
 
   const [rows] = await pool.execute(
     `SELECT t.*, ora.organization_name AS organizer_name, hra.golf_course_name AS host_golf_course_name
@@ -1212,6 +1245,7 @@ export async function createTournament(pool, user, input) {
     templateKey: payload.templateKey,
     templateBackgroundImageUrl: payload.templateBackgroundImageUrl,
     templateData: payload.templateData,
+    teamSlotLimit: payload.teamSlotLimit,
     createdByAuthUserId: user.id,
   })
 
@@ -1250,6 +1284,7 @@ export async function createHostManagedTournament(pool, hostAccountId, input) {
     templateKey: payload.templateKey,
     templateBackgroundImageUrl: payload.templateBackgroundImageUrl,
     templateData: payload.templateData,
+    teamSlotLimit: payload.teamSlotLimit,
     createdByAuthUserId: `host:${resolvedHostAccountId}`,
   })
 

@@ -11,9 +11,98 @@ export type TournamentTemplateFormValue = {
 type Props = {
   value: TournamentTemplateFormValue
   onChange: (next: TournamentTemplateFormValue) => void
+  hideRegistrationDeadline?: boolean
 }
 
-export default function TournamentTemplateFields({ value, onChange }: Props) {
+function normalizeCurrencyInput(rawValue: string): string {
+  const raw = String(rawValue || '')
+  const stripped = raw.replace(/[^\d.]/g, '')
+  if (!stripped) return ''
+  const [wholePart = '', ...decimalParts] = stripped.split('.')
+  const whole = wholePart.replace(/^0+(?=\d)/, '') || '0'
+  const decimals = decimalParts.join('').replace(/\D/g, '').slice(0, 2)
+  return decimalParts.length ? `$${whole}.${decimals}` : `$${whole}`
+}
+
+function formatCurrencyInput(rawValue: string): string {
+  const normalized = normalizeCurrencyInput(rawValue)
+  if (!normalized) return ''
+  const numeric = Number(normalized.replace(/[^\d.]/g, ''))
+  if (!Number.isFinite(numeric)) return ''
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(numeric)
+}
+
+function Tooltip({ children }: { children: string }) {
+  return (
+    <span className="tournament-template-tooltip" tabIndex={0} aria-label={children}>
+      ?
+      <span className="tournament-template-tooltip-content" role="tooltip">{children}</span>
+    </span>
+  )
+}
+
+function lines(value?: string | null) {
+  return String(value || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+}
+
+function BulletedTextarea({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (next: string) => void
+}) {
+  const items = lines(value)
+  const tooltip = `${label}: enter one item per row. Each new row appears as a bullet on the public tournament flyer.`
+  return (
+    <div>
+      <label className="label tournament-template-label-with-tooltip">
+        <span>{label}</span>
+        <Tooltip>{tooltip}</Tooltip>
+      </label>
+      <textarea
+        className="input"
+        rows={3}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Enter one bullet item per row"
+        aria-describedby={`${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-hint`}
+      />
+      <div id={`${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-hint`} className="small" style={{ marginTop: 4 }}>Each row becomes a bullet on the tournament flyer.</div>
+      {items.length ? (
+        <ul className="tournament-template-bullet-preview" aria-label={`${label} bullet preview`}>
+          {items.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
+
+export function TournamentRegistrationDeadlineField({ value, onChange }: Props) {
+  const templateData = { ...emptyTournamentTemplateData(), ...(value.templateData || {}) }
+
+  function updateTemplateData(next: Partial<TournamentTemplateData>) {
+    onChange({ ...value, templateData: { ...templateData, ...next } })
+  }
+
+  return (
+    <div>
+      <label className="label">Registration deadline</label>
+      <input
+        className="input"
+        type="date"
+        value={String(templateData.registrationDeadline || '')}
+        onChange={(e) => updateTemplateData({ registrationDeadline: e.target.value })}
+      />
+      <div className="small" style={{ marginTop: 4 }}>Last day golfers can register for this tournament.</div>
+    </div>
+  )
+}
+
+export default function TournamentTemplateFields({ value, onChange, hideRegistrationDeadline = false }: Props) {
   const templateData = { ...emptyTournamentTemplateData(), ...(value.templateData || {}) }
   const supportingPhotoUrl = templateData.supportingPhotoUrl || ''
   const charityImageUrl = supportingPhotoUrl || DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL
@@ -38,8 +127,6 @@ export default function TournamentTemplateFields({ value, onChange }: Props) {
     ['checkInTime', 'Check-in time', 'time'],
     ['teeTime', 'Tee time', 'time'],
     ['tournamentFormat', 'Tournament format'],
-    ['registrationDeadline', 'Registration deadline', 'date'],
-    ['entryFee', 'Entry fee'],
     ['contactPerson', 'Contact person'],
     ['contactPhone', 'Contact phone'],
     ['contactEmail', 'Contact email', 'email'],
@@ -99,6 +186,24 @@ export default function TournamentTemplateFields({ value, onChange }: Props) {
             <input className="input" type={type || 'text'} value={String(templateData[key] || '')} onChange={(e) => updateTemplateData({ [key]: e.target.value })} />
           </div>
         ))}
+        {!hideRegistrationDeadline ? <TournamentRegistrationDeadlineField value={value} onChange={onChange} /> : null}
+        <div>
+          <label className="label tournament-template-label-with-tooltip">
+            <span>Entry fee</span>
+            <Tooltip>Currency only. Enter dollars and cents, for example $125.00.</Tooltip>
+          </label>
+          <input
+            className="input"
+            type="text"
+            inputMode="decimal"
+            pattern="^\$?\d+(\.\d{0,2})?$"
+            value={String(templateData.entryFee || '')}
+            onChange={(e) => updateTemplateData({ entryFee: normalizeCurrencyInput(e.target.value) })}
+            onBlur={(e) => updateTemplateData({ entryFee: formatCurrencyInput(e.target.value) })}
+            placeholder="$0.00"
+            aria-label="Entry fee currency amount"
+          />
+        </div>
       </div>
 
       <div style={{ marginTop: 14 }}>
@@ -110,17 +215,13 @@ export default function TournamentTemplateFields({ value, onChange }: Props) {
       </div>
 
       <div className="formRow formRow--split" style={{ marginTop: 14 }}>
-        {([
-          ['feesInclude', 'What fees include'],
-          ['prizeDetails', 'Prize details'],
-          ['holeContestsExtras', 'Hole contests/extras'],
-          ['miscNotes', 'Misc Notes'],
-        ] as Array<[keyof TournamentTemplateData, string]>).map(([key, label]) => (
-          <div key={key}>
-            <label className="label">{label}</label>
-            <textarea className="input" rows={3} value={String(templateData[key] || '')} onChange={(e) => updateTemplateData({ [key]: e.target.value })} />
-          </div>
-        ))}
+        <BulletedTextarea label="What fees include" value={String(templateData.feesInclude || '')} onChange={(next) => updateTemplateData({ feesInclude: next })} />
+        <BulletedTextarea label="Prize details" value={String(templateData.prizeDetails || '')} onChange={(next) => updateTemplateData({ prizeDetails: next })} />
+        <BulletedTextarea label="Hole contests/extras" value={String(templateData.holeContestsExtras || '')} onChange={(next) => updateTemplateData({ holeContestsExtras: next })} />
+        <div>
+          <label className="label">Misc Notes</label>
+          <textarea className="input" rows={3} value={String(templateData.miscNotes || '')} onChange={(e) => updateTemplateData({ miscNotes: e.target.value })} />
+        </div>
       </div>
 
       <div style={{ marginTop: 14 }}>
