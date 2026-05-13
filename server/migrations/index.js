@@ -483,6 +483,10 @@ export const APP_MIGRATIONS = [
   name VARCHAR(191) NULL,
   invite_id VARCHAR(191) NULL,
   reset_email VARCHAR(191) NULL,
+  contact_name VARCHAR(191) NULL,
+  phone VARCHAR(64) NULL,
+  website_url VARCHAR(512) NULL,
+  notes TEXT NULL,
   is_validated TINYINT(1) NOT NULL DEFAULT 0,
   validated_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -502,6 +506,10 @@ export const APP_MIGRATIONS = [
             ['name', 'ALTER TABLE host_accounts ADD COLUMN name VARCHAR(191) NULL'],
             ['invite_id', 'ALTER TABLE host_accounts ADD COLUMN invite_id VARCHAR(191) NULL'],
             ['reset_email', 'ALTER TABLE host_accounts ADD COLUMN reset_email VARCHAR(191) NULL'],
+            ['contact_name', 'ALTER TABLE host_accounts ADD COLUMN contact_name VARCHAR(191) NULL'],
+            ['phone', 'ALTER TABLE host_accounts ADD COLUMN phone VARCHAR(64) NULL'],
+            ['website_url', 'ALTER TABLE host_accounts ADD COLUMN website_url VARCHAR(512) NULL'],
+            ['notes', 'ALTER TABLE host_accounts ADD COLUMN notes TEXT NULL'],
             ['is_validated', 'ALTER TABLE host_accounts ADD COLUMN is_validated TINYINT(1) NOT NULL DEFAULT 0'],
             ['validated_at', 'ALTER TABLE host_accounts ADD COLUMN validated_at DATETIME NULL'],
             ['created_at', 'ALTER TABLE host_accounts ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
@@ -1129,6 +1137,46 @@ ON DUPLICATE KEY UPDATE
       return loadMigrationSql('20260508_032_remove_redundant_tournament_template_name.sql')
     },
   },
+
+  {
+    version: '20260513_033',
+    name: 'tournament_team_slot_limit',
+    filename: '20260513_033_tournament_team_slot_limit.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'tournaments'))) return true
+      return await columnExists(db, 'tournaments', 'team_slot_limit')
+    },
+    async getSql(db) {
+      if (!(await tableExists(db, 'tournaments'))) return '-- tournaments table does not exist; baseline migration creates it for fresh installs'
+      if (await columnExists(db, 'tournaments', 'team_slot_limit')) return '-- tournament team slot limit already exists'
+      return loadMigrationSql('20260513_033_tournament_team_slot_limit.sql')
+    },
+  },
+
+  {
+    version: '20260513_034',
+    name: 'host_profile_fields',
+    filename: '20260513_034_host_profile_fields.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'host_accounts'))) return true
+      return (
+        await columnExists(db, 'host_accounts', 'contact_name') &&
+        await columnExists(db, 'host_accounts', 'phone') &&
+        await columnExists(db, 'host_accounts', 'website_url') &&
+        await columnExists(db, 'host_accounts', 'notes')
+      )
+    },
+    async getSql(db) {
+      if (!(await tableExists(db, 'host_accounts'))) return '-- host_accounts table does not exist; baseline migration creates it for fresh installs'
+      const statements = []
+      if (!(await columnExists(db, 'host_accounts', 'contact_name'))) statements.push('ALTER TABLE host_accounts ADD COLUMN contact_name VARCHAR(191) NULL')
+      if (!(await columnExists(db, 'host_accounts', 'phone'))) statements.push('ALTER TABLE host_accounts ADD COLUMN phone VARCHAR(64) NULL')
+      if (!(await columnExists(db, 'host_accounts', 'website_url'))) statements.push('ALTER TABLE host_accounts ADD COLUMN website_url VARCHAR(512) NULL')
+      if (!(await columnExists(db, 'host_accounts', 'notes'))) statements.push('ALTER TABLE host_accounts ADD COLUMN notes TEXT NULL')
+      return statements.join(';\n') || '-- host profile fields already exist'
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {

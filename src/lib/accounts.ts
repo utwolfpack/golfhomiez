@@ -32,10 +32,11 @@ export type TournamentInput = {
   organizerEmail?: string | null
   teamId?: string | null
   teamName?: string | null
-  teamMembers?: Array<{ id?: string; name: string; email: string }> | null
+  teamMembers?: Array<{ id?: string | null; name: string; email: string; registered?: boolean; verified?: boolean; registrationId?: string | null; registrationAuthUserId?: string | null; registeredAt?: string | null }> | null
   templateKey?: string | null
   templateBackgroundImageUrl?: string | null
   templateData?: Record<string, unknown> | null
+  teamSlotLimit?: number | null
 }
 
 
@@ -76,7 +77,7 @@ export type TournamentRegistration = {
   updatedAt?: string | null
   teamId?: string | null
   teamName?: string | null
-  teamMembers?: Array<{ id?: string; name: string; email: string }>
+  teamMembers?: Array<{ id?: string | null; name: string; email: string; registered?: boolean; verified?: boolean; registrationId?: string | null; registrationAuthUserId?: string | null; registeredAt?: string | null }>
 }
 
 export type Tournament = {
@@ -104,9 +105,14 @@ export type Tournament = {
   inviteUrl?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  activityAt?: string | null
   templateKey?: string | null
   templateBackgroundImageUrl?: string | null
   templateData?: Record<string, unknown> | null
+  teamSlotLimit?: number | null
+  registeredTeamCount?: number
+  verifiedUserCount?: number
+  openTeamSlotCount?: number
 }
 
 export type AdminUser = {
@@ -178,7 +184,11 @@ export type OrganizerPortalSummary = {
 
 export type TournamentPortal = {
   tournament: Tournament
-  registrationCount: number
+  registrationCount?: number
+  teamSlotLimit?: number | null
+  registeredTeamCount?: number
+  verifiedUserCount?: number
+  openTeamSlotCount?: number
   registrations?: TournamentRegistration[]
   isViewerRegistered?: boolean
   viewerRegistration?: TournamentRegistration | null
@@ -200,6 +210,7 @@ export type TournamentRegistrationResult = {
   status: string
   alreadyRegistered?: boolean
   registration?: TournamentRegistration | null
+  teamAlreadyRegistered?: boolean
 }
 
 export type OrganizerInviteEligibility = {
@@ -237,6 +248,23 @@ export function fetchOrganizerAccount() {
 export function createOrganizerAccount(input: OrganizerAccountInput) {
   return api<OrganizerAccount>('/api/accounts/organizer', { method: 'POST', body: JSON.stringify(input) })
 }
+
+export function fetchHostProfile() {
+  return api<HostAccount>('/api/host/profile')
+}
+
+export function updateHostProfile(input: Partial<HostAccountInput>) {
+  return api<HostAccount>('/api/host/profile', { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function fetchOrganizerProfile() {
+  return api<OrganizerAccount>('/api/organizer/profile')
+}
+
+export function updateOrganizerProfile(input: Partial<OrganizerAccountInput>) {
+  return api<OrganizerAccount>('/api/organizer/profile', { method: 'PUT', body: JSON.stringify(input) })
+}
+
 
 export function fetchGolfCourses(state?: string) {
   const query = state ? `?state=${encodeURIComponent(state)}` : ''
@@ -288,7 +316,7 @@ export function fetchTournamentPortal(id: string) {
   return api<TournamentPortal>(`/api/tournament-portals/${encodeURIComponent(id)}`)
 }
 
-export function registerForTournament(id: string, input: { teamId?: string | null; teamName?: string | null; teamMembers?: Array<{ id?: string; name: string; email: string }> } = {}) {
+export function registerForTournament(id: string, input: { teamId?: string | null; teamName?: string | null; teamMembers?: Array<{ id?: string | null; name: string; email: string; registered?: boolean; verified?: boolean; registrationId?: string | null; registrationAuthUserId?: string | null; registeredAt?: string | null }> } = {}) {
   return api<TournamentRegistrationResult>(`/api/tournament-portals/${encodeURIComponent(id)}/register`, { method: 'POST', body: JSON.stringify(input) })
 }
 

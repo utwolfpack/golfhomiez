@@ -95,6 +95,18 @@ export default function NavBar() {
               </button>
               {open ? (
                 <div className="navDropdown">
+                  {hostAccount ? (
+                    <>
+                      <NavLink className="navDropdownItem" to="/host/portal" onClick={() => setOpen(false)}>Host portal</NavLink>
+                      <NavLink className="navDropdownItem" to="/host/portal/profile" onClick={() => setOpen(false)}>Host profile</NavLink>
+                    </>
+                  ) : null}
+                  {organizerAccount ? (
+                    <>
+                      <NavLink className="navDropdownItem" to="/organizer/portal" onClick={() => setOpen(false)}>Organizer portal</NavLink>
+                      <NavLink className="navDropdownItem" to="/organizer/portal/profile" onClick={() => setOpen(false)}>Organizer profile</NavLink>
+                    </>
+                  ) : null}
                   {restrictedSession ? null : (
                     <>
                       <NavLink className="navDropdownItem" to="/" onClick={() => setOpen(false)}>Home</NavLink>
