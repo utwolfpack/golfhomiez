@@ -1364,7 +1364,7 @@ export async function buildOrganizerInviteDetails(pool, organizerEmail, tourname
 }
 
 export async function getAdminPortalSummary(pool) {
-  const [users, roleAssignments, hostAccounts, organizerAccounts, tournaments, hostInvites] = await Promise.all([
+  const [users, roleAssignments, hostAccounts, organizerAccounts, tournaments] = await Promise.all([
     listAdminUsers(pool),
     listRoleAssignments(pool),
     listHostAccounts(pool),
@@ -1378,8 +1378,7 @@ export async function getAdminPortalSummary(pool) {
       return rows.map(mapOrganizerAccountRow)
     })(),
     listAllTournaments(pool),
-    listHostInvites(pool),
   ])
 
-  return { users, roleAssignments, hostAccounts, organizerAccounts, tournaments, hostInvites }
+  return { users, roleAssignments, hostAccounts, organizerAccounts, tournaments }
 }

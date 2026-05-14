@@ -25,6 +25,30 @@ async function columnCollation(db, tableName, columnName) {
   return row?.collationName || null
 }
 
+
+async function columnIsNullable(db, tableName, columnName) {
+  const [[row] = []] = await db.execute(
+    `SELECT IS_NULLABLE AS isNullable
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1`,
+    [tableName, columnName],
+  )
+  return !row || row.isNullable === 'YES'
+}
+
+async function blankTextRowCount(db, tableName, columnName) {
+  const [[row = {}] = []] = await db.execute(
+    `SELECT COUNT(*) AS blankCount
+       FROM ${tableName}
+      WHERE ${columnName} IS NOT NULL
+        AND TRIM(${columnName}) = ''`,
+  )
+  return Number(row.blankCount || 0)
+}
+
 export const APP_MIGRATIONS = [
   {
     version: '20260326_001',
@@ -1174,6 +1198,79 @@ ON DUPLICATE KEY UPDATE
       if (!(await columnExists(db, 'host_accounts', 'website_url'))) statements.push('ALTER TABLE host_accounts ADD COLUMN website_url VARCHAR(512) NULL')
       if (!(await columnExists(db, 'host_accounts', 'notes'))) statements.push('ALTER TABLE host_accounts ADD COLUMN notes TEXT NULL')
       return statements.join(';\n') || '-- host profile fields already exist'
+    },
+  },
+
+
+  {
+    version: '20260514_035',
+    name: 'profile_notes_null_defaults',
+    filename: '20260514_035_profile_notes_null_defaults.sql',
+    async isSatisfied(db) {
+      const profileNoteColumns = [
+        ['host_accounts', 'notes'],
+        ['organizer_role_accounts', 'notes'],
+      ]
+      for (const [tableName, columnName] of profileNoteColumns) {
+        if (!(await tableExists(db, tableName))) continue
+        if (!(await columnExists(db, tableName, columnName))) return false
+        if (!(await columnIsNullable(db, tableName, columnName))) return false
+        if ((await blankTextRowCount(db, tableName, columnName)) > 0) return false
+      }
+      return true
+    },
+    async getSql(db) {
+      const statements = []
+      if (await tableExists(db, 'host_accounts')) {
+        if (!(await columnExists(db, 'host_accounts', 'notes'))) {
+          statements.push('ALTER TABLE host_accounts ADD COLUMN notes TEXT NULL')
+        } else {
+          if (!(await columnIsNullable(db, 'host_accounts', 'notes'))) statements.push('ALTER TABLE host_accounts MODIFY COLUMN notes TEXT NULL')
+          statements.push("UPDATE host_accounts SET notes = NULL WHERE notes IS NOT NULL AND TRIM(notes) = ''")
+        }
+      }
+      if (await tableExists(db, 'organizer_role_accounts')) {
+        if (!(await columnExists(db, 'organizer_role_accounts', 'notes'))) {
+          statements.push('ALTER TABLE organizer_role_accounts ADD COLUMN notes TEXT NULL')
+        } else {
+          if (!(await columnIsNullable(db, 'organizer_role_accounts', 'notes'))) statements.push('ALTER TABLE organizer_role_accounts MODIFY COLUMN notes TEXT NULL')
+          statements.push("UPDATE organizer_role_accounts SET notes = NULL WHERE notes IS NOT NULL AND TRIM(notes) = ''")
+        }
+      }
+      return statements.join(';\n') || '-- profile notes already default to NULL'
+    },
+  },
+
+  {
+    version: '20260514_036',
+    name: 'scheduled_jobs_admin',
+    filename: '20260514_036_scheduled_jobs_admin.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'scheduled_jobs') &&
+        await tableExists(db, 'scheduled_job_runs')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260514_036_scheduled_jobs_admin.sql')
+    },
+  },
+
+
+  {
+    version: '20260514_037',
+    name: 'admin_portal_review_and_remove_host_invites',
+    filename: '20260514_037_admin_portal_review_and_remove_host_invites.sql',
+    async isSatisfied(db) {
+      return !(await tableExists(db, 'host_account_invites'))
+    },
+    async getSql(db) {
+      const statements = []
+      if (await tableExists(db, 'host_account_invites')) statements.push('DROP TABLE IF EXISTS host_account_invites')
+      if ((await tableExists(db, 'host_accounts')) && (await columnExists(db, 'host_accounts', 'invite_id'))) {
+        statements.push('ALTER TABLE host_accounts MODIFY COLUMN invite_id VARCHAR(191) NULL')
+      }
+      return statements.join(';\n') || '-- host invite schema already removed'
     },
   },
 

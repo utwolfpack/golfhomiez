@@ -95,16 +95,24 @@ export default function NavBar() {
               </button>
               {open ? (
                 <div className="navDropdown">
+                  {adminUser ? (
+                    <>
+                      <NavLink className="navDropdownItem" to="/golfadmin" onClick={() => setOpen(false)}>Admin portal</NavLink>
+                      <NavLink className="navDropdownItem" to="/golfadmin/scheduled-jobs" onClick={() => setOpen(false)}>Scheduled jobs</NavLink>
+                    </>
+                  ) : null}
                   {hostAccount ? (
                     <>
                       <NavLink className="navDropdownItem" to="/host/portal" onClick={() => setOpen(false)}>Host portal</NavLink>
                       <NavLink className="navDropdownItem" to="/host/portal/profile" onClick={() => setOpen(false)}>Host profile</NavLink>
+                      <NavLink className="navDropdownItem" to="/support" onClick={() => setOpen(false)}>Support</NavLink>
                     </>
                   ) : null}
                   {organizerAccount ? (
                     <>
                       <NavLink className="navDropdownItem" to="/organizer/portal" onClick={() => setOpen(false)}>Organizer portal</NavLink>
                       <NavLink className="navDropdownItem" to="/organizer/portal/profile" onClick={() => setOpen(false)}>Organizer profile</NavLink>
+                      <NavLink className="navDropdownItem" to="/support" onClick={() => setOpen(false)}>Support</NavLink>
                     </>
                   ) : null}
                   {restrictedSession ? null : (
@@ -115,6 +123,7 @@ export default function NavBar() {
                       <NavLink className="navDropdownItem" to="/teams" onClick={() => setOpen(false)}>Teams</NavLink>
                       <NavLink className="navDropdownItem" to="/profile" onClick={() => setOpen(false)}>Profile</NavLink>
                       <NavLink className="navDropdownItem" to="/directions" onClick={() => setOpen(false)}>Directions</NavLink>
+                      <NavLink className="navDropdownItem" to="/support" onClick={() => setOpen(false)}>Support</NavLink>
                       <button type="button" className="navDropdownItem" onClick={() => { setOpen(false); setShowInvite(true) }}>Invite Homie</button>
                     </>
                   )}

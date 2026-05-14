@@ -9,15 +9,6 @@ export type AdminUser = {
   updated_at?: string
 }
 
-export type HostInvite = {
-  id: string
-  email: string
-  inviteeName?: string | null
-  golfCourseName: string
-  securityKey: string
-  registerUrl: string
-}
-
 export async function adminLogin(username: string, password: string) {
   return api<{ adminUser: AdminUser }>('/api/admin/auth/login', {
     method: 'POST',
@@ -38,8 +29,13 @@ export async function fetchAdminPortal() {
     summary: Record<string, number>
     admins: AdminUser[]
     hosts: Array<Record<string, unknown>>
-    invites: Array<Record<string, unknown>>
+    organizers: Array<Record<string, unknown>>
+    tournaments: Array<Record<string, unknown>>
+    tournamentStatusCounts: Array<Record<string, unknown>>
     users: Array<Record<string, unknown>>
+    appUsers: Array<Record<string, unknown>>
+    teams: Array<Record<string, unknown>>
+    scores: Array<Record<string, unknown>>
     requests: Array<Record<string, unknown>>
   }>('/api/admin/portal')
 }
@@ -58,9 +54,15 @@ export async function deleteHostAccountRequest(requestId: string) {
 }
 
 export async function createAdminAccount(username: string, email: string, password: string) {
-  return api<{ adminUser: AdminUser }>('/api/admin/admin-users', {
+  return api<{ adminUser: AdminUser; adminUsers?: AdminUser[] }>('/api/admin/admin-users', {
     method: 'POST',
     body: JSON.stringify({ username, email, password }),
+  })
+}
+
+export async function deleteAdminAccount(adminUserId: string) {
+  return api<{ deleted: true; adminUser: AdminUser; adminUsers?: AdminUser[] }>(`/api/admin/admin-users/${encodeURIComponent(adminUserId)}`, {
+    method: 'DELETE',
   })
 }
 
@@ -78,9 +80,37 @@ export async function resetAdminPassword(token: string, password: string) {
   })
 }
 
-export async function createHostInvite(email: string, inviteeName: string, golfCourseName: string) {
-  return api<{ invite: HostInvite }>('/api/admin/host-invites', {
+
+export type ScheduledJobLastRun = {
+  id: string
+  triggeredBy?: string | null
+  status?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  output?: unknown
+  error?: string | null
+  correlationId?: string | null
+  adminUserEmail?: string | null
+}
+
+export type ScheduledJob = {
+  id: string
+  name: string
+  description?: string | null
+  scheduleLabel?: string | null
+  scheduleTimeZone?: string | null
+  createdAt?: string | null
+  nextRunAt?: string | null
+  updatedAt?: string | null
+  lastRun?: ScheduledJobLastRun | null
+}
+
+export async function fetchScheduledJobs() {
+  return api<{ jobs: ScheduledJob[] }>('/api/admin/scheduled-jobs')
+}
+
+export async function runScheduledJob(jobId: string) {
+  return api<{ result: { jobId: string; runId: string; status: string; output?: unknown; nextRunAt?: string | null }; jobs: ScheduledJob[] }>(`/api/admin/scheduled-jobs/${encodeURIComponent(jobId)}/run`, {
     method: 'POST',
-    body: JSON.stringify({ email, inviteeName, golfCourseName }),
   })
 }
