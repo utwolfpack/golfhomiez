@@ -55,6 +55,7 @@ export default function OrganizerLogin() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btnPrimary" disabled={busy}>{busy ? 'Signing in…' : 'Login to organizer portal'}</button>
             <Link className="btn" to={`/organizer/register${params.toString() ? `?${params.toString()}` : ''}`}>Create organizer access</Link>
+            <Link className="btn" to="/organizer/request-password-reset">Forgot organizer password?</Link>
           </div>
         </form>
       </div>

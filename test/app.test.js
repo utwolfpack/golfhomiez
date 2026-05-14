@@ -1727,3 +1727,202 @@ test('support page routes support messages for golf users, hosts, and organizers
   assert.match(server, /support_message_email_sent/)
   assert.match(server, /'\/support'/)
 })
+
+test('host notifications use the requested mailbox and SMS providers support profile and reset notifications', () => {
+  const adminPortal = fs.readFileSync(new URL('../server/lib/admin-portal.js', import.meta.url), 'utf8')
+  const sms = fs.readFileSync(new URL('../server/sms.js', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const auth = fs.readFileSync(new URL('../server/auth.js', import.meta.url), 'utf8')
+  const hostAuth = fs.readFileSync(new URL('../server/lib/host-auth.js', import.meta.url), 'utf8')
+  const organizerAuth = fs.readFileSync(new URL('../server/lib/organizer-auth.js', import.meta.url), 'utf8')
+  const authApi = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
+
+  assert.match(adminPortal, /HOST_ACCOUNT_REQUEST_NOTIFICATION_EMAIL = 'golfhomiez@outlook\.com'/)
+  assert.match(sms, /import \{ sendMail \} from '\.\/mailer\.js'/)
+  assert.match(sms, /SMS_PROFILE_UPDATE_MESSAGE = 'Your Golf Homiez profile has been updated https:\/\/golfhomiez\.com'/)
+  assert.match(sms, /SMS_PROVIDER/)
+  assert.match(sms, /BREVO_SMS_ENDPOINT/)
+  assert.match(sms, /BREVO_SMS_SENDER/)
+  assert.match(sms, /SMS_DEFAULT_COUNTRY_CODE/)
+  assert.match(sms, /SMS_EMAIL_DOMAIN/)
+  assert.match(sms, /SMS_DEV_FALLBACK/)
+  assert.match(sms, /isValidEmailAddress/)
+  assert.match(sms, /provider: 'brevo-sms'/)
+  assert.match(sms, /sms_send_started/)
+  assert.match(sms, /sms_configuration_error/)
+  assert.match(sms, /sms_dev_fallback/)
+  assert.match(sms, /SMS_EMAIL_DOMAIN must be a valid email-to-SMS gateway domain/)
+  assert.match(server, /profile_phone_sms_notification_started/)
+  assert.match(server, /profile_phone_sms_notification_sent/)
+  assert.match(server, /SMS_PROFILE_UPDATE_MESSAGE/)
+  assert.match(auth, /auth_password_reset_sms_sent/)
+  assert.match(auth, /auth_password_reset_requested/)
+  assert.match(auth, /getHeaderValue\(request, 'x-password-reset-delivery'\)/)
+  assert.match(auth, /getProfilePhoneForPasswordReset/)
+  assert.match(server, /X-Password-Reset-Delivery/)
+  assert.match(authApi, /X-Password-Reset-Delivery/)
+  assert.match(authApi, /getPasswordResetHeaders\(deliveryMethod\)/)
+  assert.match(hostAuth, /deliveryMethod/)
+  assert.match(hostAuth, /host_password_reset_sms_sent/)
+  assert.match(organizerAuth, /organizer_password_reset_tokens/)
+  assert.match(organizerAuth, /createOrganizerPasswordReset/)
+  assert.match(organizerAuth, /resetOrganizerPassword/)
+  assert.match(organizerAuth, /organizer_password_reset_sms_sent/)
+})
+
+
+test('SMTP SMS rejects malformed gateway domains before Brevo delivery', async () => {
+  const previousNodeEnv = process.env.NODE_ENV
+  const previousSmsProvider = process.env.SMS_PROVIDER
+  const previousSmsDomain = process.env.SMS_EMAIL_DOMAIN
+  const previousSmsFallback = process.env.SMS_DEV_FALLBACK
+
+  try {
+    process.env.NODE_ENV = 'production'
+    process.env.SMS_PROVIDER = 'smtp-sms'
+    process.env.SMS_EMAIL_DOMAIN = 'https://golfhomiez.com'
+    process.env.SMS_DEV_FALLBACK = 'false'
+
+    const { sendSms } = await import('../server/sms.js')
+    await assert.rejects(
+      () => sendSms({ to: '+15555551212', body: 'Test SMS body', subject: 'Golf Homiez test' }),
+      /SMS_EMAIL_DOMAIN must be a valid email-to-SMS gateway domain/,
+    )
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previousNodeEnv
+    if (previousSmsProvider === undefined) delete process.env.SMS_PROVIDER
+    else process.env.SMS_PROVIDER = previousSmsProvider
+    if (previousSmsDomain === undefined) delete process.env.SMS_EMAIL_DOMAIN
+    else process.env.SMS_EMAIL_DOMAIN = previousSmsDomain
+    if (previousSmsFallback === undefined) delete process.env.SMS_DEV_FALLBACK
+    else process.env.SMS_DEV_FALLBACK = previousSmsFallback
+  }
+})
+
+test('Brevo SMS provider sends password reset SMS directly to the Brevo Transactional SMS API', async () => {
+  const previousSmsProvider = process.env.SMS_PROVIDER
+  const previousBrevoSmsApiKey = process.env.BREVO_SMS_API_KEY
+  const previousBrevoApiKey = process.env.BREVO_API_KEY
+  const previousBrevoSmsSender = process.env.BREVO_SMS_SENDER
+  const previousDefaultCountryCode = process.env.SMS_DEFAULT_COUNTRY_CODE
+  const previousSmsFallback = process.env.SMS_DEV_FALLBACK
+  const previousFetch = globalThis.fetch
+  let request = null
+
+  try {
+    process.env.SMS_PROVIDER = 'brevo'
+    process.env.BREVO_SMS_API_KEY = 'test-sms-key'
+    delete process.env.BREVO_API_KEY
+    process.env.BREVO_SMS_SENDER = 'GolfHomiez'
+    process.env.SMS_DEFAULT_COUNTRY_CODE = '1'
+    process.env.SMS_DEV_FALLBACK = 'false'
+
+    globalThis.fetch = async (url, options = {}) => {
+      request = {
+        url,
+        options,
+        body: JSON.parse(String(options.body || '{}')),
+      }
+      return new Response(JSON.stringify({ messageId: 'sms-message-1' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    const { sendSms } = await import(`../server/sms.js?brevo-sms-test=${Date.now()}`)
+    const result = await sendSms({
+      to: '8019109951',
+      subject: 'Golf Homiez password reset',
+      body: 'Reset your Golf Homiez password: https://example.test/reset',
+      tag: 'golfhomiez-password-reset',
+    })
+
+    assert.equal(request.url, 'https://api.brevo.com/v3/transactionalSMS/send')
+    assert.equal(request.options.method, 'POST')
+    assert.equal(request.options.headers['api-key'], 'test-sms-key')
+    assert.equal(request.body.sender, 'GolfHomiez')
+    assert.equal(request.body.recipient, '18019109951')
+    assert.equal(request.body.type, 'transactional')
+    assert.equal(request.body.tag, 'golfhomiez-password-reset')
+    assert.equal(result.provider, 'brevo-sms')
+    assert.equal(result.messageId, 'sms-message-1')
+  } finally {
+    if (previousSmsProvider === undefined) delete process.env.SMS_PROVIDER
+    else process.env.SMS_PROVIDER = previousSmsProvider
+    if (previousBrevoSmsApiKey === undefined) delete process.env.BREVO_SMS_API_KEY
+    else process.env.BREVO_SMS_API_KEY = previousBrevoSmsApiKey
+    if (previousBrevoApiKey === undefined) delete process.env.BREVO_API_KEY
+    else process.env.BREVO_API_KEY = previousBrevoApiKey
+    if (previousBrevoSmsSender === undefined) delete process.env.BREVO_SMS_SENDER
+    else process.env.BREVO_SMS_SENDER = previousBrevoSmsSender
+    if (previousDefaultCountryCode === undefined) delete process.env.SMS_DEFAULT_COUNTRY_CODE
+    else process.env.SMS_DEFAULT_COUNTRY_CODE = previousDefaultCountryCode
+    if (previousSmsFallback === undefined) delete process.env.SMS_DEV_FALLBACK
+    else process.env.SMS_DEV_FALLBACK = previousSmsFallback
+    globalThis.fetch = previousFetch
+  }
+})
+
+
+test('golfer profile requires a validated phone number and stores phone schema through migrations', () => {
+  const profilePage = fs.readFileSync(new URL('../src/pages/Profile.tsx', import.meta.url), 'utf8')
+  const profileLib = fs.readFileSync(new URL('../src/lib/profile.ts', import.meta.url), 'utf8')
+  const phoneValidation = fs.readFileSync(new URL('../src/lib/phone-validation.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260514_038_app_user_phone_sms_reset_support.sql', import.meta.url), 'utf8')
+  const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+
+  assert.match(profileLib, /phone: string/)
+  assert.match(profilePage, /type="tel"/)
+  assert.match(profilePage, /required/)
+  assert.match(profilePage, /pattern=\{PHONE_PATTERN\}/)
+  assert.match(profilePage, /validateRequiredPhoneNumber\(form\.phone\)/)
+  assert.match(profilePage, /profile_invalid_phone/)
+  assert.match(profilePage, /profile_phone_sms_notification_requested/)
+  assert.match(phoneValidation, /PHONE_REQUIRED_MESSAGE/)
+  assert.match(phoneValidation, /validateRequiredPhoneNumber/)
+  assert.match(server, /phone = \?/)
+  assert.match(server, /phone_updated_at/)
+  assert.match(server, /Phone number is required\./)
+  assert.match(server, /needsEnrichment: !row\.profile_enriched_at \|\| !row\.phone/)
+  assert.match(migrations, /20260514_038/)
+  assert.match(migrations, /app_user_phone_sms_reset_support/)
+  assert.match(migrationSql, /ALTER TABLE app_users ADD COLUMN phone VARCHAR\(64\) NULL/)
+  assert.match(migrationSql, /ALTER TABLE app_users ADD COLUMN phone_updated_at DATETIME NULL/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS organizer_password_reset_tokens/)
+  assert.match(pkg, /"postinstall": "npm run db:migrate && npm run build"/)
+})
+
+test('email and SMS password reset options are exposed for golf users, hosts, and organizers', () => {
+  const forgot = fs.readFileSync(new URL('../src/pages/ForgotPassword.tsx', import.meta.url), 'utf8')
+  const hostForgot = fs.readFileSync(new URL('../src/pages/HostForgotPassword.tsx', import.meta.url), 'utf8')
+  const organizerForgot = fs.readFileSync(new URL('../src/pages/OrganizerForgotPassword.tsx', import.meta.url), 'utf8')
+  const organizerReset = fs.readFileSync(new URL('../src/pages/OrganizerResetPassword.tsx', import.meta.url), 'utf8')
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const authApi = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
+  const hostApi = fs.readFileSync(new URL('../src/lib/host-auth.ts', import.meta.url), 'utf8')
+  const organizerApi = fs.readFileSync(new URL('../src/lib/organizer-auth.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  for (const source of [forgot, hostForgot, organizerForgot]) {
+    assert.match(source, /Send by email/)
+    assert.match(source, /Send by SMS/)
+    assert.match(source, /deliveryMethod/)
+    assert.match(source, /password-reset/)
+  }
+  assert.match(authApi, /PasswordResetDeliveryMethod = 'email' \| 'sms'/)
+  assert.match(authApi, /deliveryMethod/)
+  assert.match(hostApi, /requestHostPasswordReset\(email: string, deliveryMethod/)
+  assert.match(organizerApi, /requestOrganizerPasswordReset/)
+  assert.match(organizerApi, /resetOrganizerPassword/)
+  assert.match(organizerReset, /Update organizer password/)
+  assert.match(app, /import OrganizerForgotPassword/)
+  assert.match(app, /import OrganizerResetPassword/)
+  assert.match(app, /path="\/organizer\/request-password-reset"/)
+  assert.match(app, /path="\/organizer\/reset-password"/)
+  assert.match(server, /app\.post\('\/api\/organizer\/request-password-reset'/)
+  assert.match(server, /app\.post\('\/api\/organizer\/reset-password'/)
+  assert.match(server, /deliveryMethod = String\(req\.body\?\.deliveryMethod/)
+})
