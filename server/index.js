@@ -11,16 +11,16 @@ import storage from './storage/index.js'
 import { getPool } from './db.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
-import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
+import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, logScheduledJob, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
 import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
 import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
-import { startCancelledTournamentCleanupScheduler } from './lib/cancelled-tournament-cleanup.js'
+import { listScheduledJobs, runScheduledJob, startScheduledJobRunner } from './lib/scheduled-jobs.js'
 import { v4 as uuidv4 } from 'uuid'
-import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, redeemHostInvite, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
+import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
 import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
-import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, createHostInvite, consumeAdminResetToken, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
+import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, consumeAdminResetToken, deleteAdminUser, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
 import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listHostManagedTournaments, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload } from './lib/rbac.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -208,6 +208,56 @@ app.post(['/api/client-logs', '/api/client-log'], (req, res) => {
   }
 })
 
+
+
+app.post('/api/support/messages', async (req, res) => {
+  try {
+    const requester = await getSupportRequester(req)
+    if (!requester) {
+      logApi('support_message_rejected_unauthenticated', { ...requestContext(req) })
+      return res.status(401).json({ message: 'Sign in before sending a support message.' })
+    }
+
+    const subject = sanitizeSupportField(req.body?.subject, SUPPORT_SUBJECT_MAX_LENGTH)
+    const message = sanitizeSupportField(req.body?.message, SUPPORT_MESSAGE_MAX_LENGTH)
+    if (!subject) return res.status(400).json({ message: 'Subject is required.' })
+    if (!message) return res.status(400).json({ message: 'Support message is required.' })
+
+    if (requester.sessionCookie) res.setHeader('Set-Cookie', requester.sessionCookie)
+    logApi('support_message_submit_started', {
+      ...requestContext(req),
+      supportDestination: SUPPORT_DESTINATION_EMAIL,
+      accountType: requester.accountType,
+      accountId: requester.accountId,
+      accountEmail: requester.email,
+      subjectLength: subject.length,
+      messageLength: message.length,
+    })
+
+    const supportEmail = buildSupportEmail(req, requester, subject, message)
+    await sendMail({
+      to: SUPPORT_DESTINATION_EMAIL,
+      subject: supportEmail.subject,
+      text: supportEmail.text,
+      html: supportEmail.html,
+    })
+
+    logApi('support_message_email_sent', {
+      ...requestContext(req),
+      supportDestination: SUPPORT_DESTINATION_EMAIL,
+      accountType: requester.accountType,
+      accountId: requester.accountId,
+      accountEmail: requester.email,
+      emailSubject: supportEmail.subject,
+    })
+    return res.json({ ok: true })
+  } catch (error) {
+    logRouteError('Support message send error', req, error)
+    return res.status(500).json({ message: 'Could not send support message.' })
+  }
+})
+
+
 function logRouteError(message, req, error, extra = {}) {
   logError(message, {
     ...requestContext(req),
@@ -266,6 +316,173 @@ function buildRegisterInviteUrl(req, email) {
   const url = new URL('/register', getClientAppBaseUrl(req))
   url.searchParams.set('email', normalizeEmail(email))
   return url.toString()
+}
+
+function buildAdminPasswordResetUrl(req, token) {
+  const url = new URL('/golfadmin/reset-password', getClientAppBaseUrl(req))
+  url.searchParams.set('token', String(token || ''))
+  return url.toString()
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+
+const SUPPORT_DESTINATION_EMAIL = 'golfhomiez@outlook.com'
+const SUPPORT_SUBJECT_MAX_LENGTH = 160
+const SUPPORT_MESSAGE_MAX_LENGTH = 5000
+
+function parseSupportCookies(cookieHeader = '') {
+  return String(cookieHeader || '').split(';').reduce((acc, part) => {
+    const [rawKey, ...rest] = part.trim().split('=')
+    if (!rawKey) return acc
+    try {
+      acc[rawKey] = decodeURIComponent(rest.join('=') || '')
+    } catch (_) {
+      acc[rawKey] = rest.join('=') || ''
+    }
+    return acc
+  }, {})
+}
+
+function sanitizeSupportField(value, maxLength) {
+  return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, maxLength)
+}
+
+function htmlWithBreaks(value) {
+  return escapeHtml(value).replace(/\n/g, '<br>')
+}
+
+async function getSupportRequester(req) {
+  const cookies = parseSupportCookies(req.headers.cookie || '')
+  const db = getPool()
+
+  const hostSessionId = cookies.golfhomiez_host_session
+  if (hostSessionId) {
+    const hostAccount = await getHostAccountBySession(db, hostSessionId)
+    if (hostAccount) {
+      return {
+        accountType: 'host',
+        accountTypeLabel: 'Host account',
+        accountId: hostAccount.id,
+        email: hostAccount.email || '',
+        name: hostAccount.contact_name || hostAccount.golf_course_name || hostAccount.email || 'Host account',
+        metadata: {
+          golfCourseName: hostAccount.golf_course_name || null,
+          contactName: hostAccount.contact_name || null,
+        },
+        sessionCookie: serializeHostSessionCookie(hostSessionId),
+      }
+    }
+  }
+
+  const organizerSessionId = cookies.golfhomiez_organizer_session
+  if (organizerSessionId) {
+    const organizerAccount = await getOrganizerAccountBySession(db, organizerSessionId)
+    if (organizerAccount) {
+      return {
+        accountType: 'organizer',
+        accountTypeLabel: 'Organizer account',
+        accountId: organizerAccount.id,
+        email: organizerAccount.email || '',
+        name: organizerAccount.contactName || organizerAccount.organizationName || organizerAccount.email || 'Organizer account',
+        metadata: {
+          organizationName: organizerAccount.organizationName || null,
+          contactName: organizerAccount.contactName || null,
+        },
+        sessionCookie: serializeOrganizerSessionCookie(organizerSessionId),
+      }
+    }
+  }
+
+  const user = await getAuthenticatedUserFromRequest(req)
+  if (user) {
+    return {
+      accountType: 'golf_user',
+      accountTypeLabel: 'Golf user account',
+      accountId: user.id,
+      email: user.email || '',
+      name: user.name || user.email || 'Golf user',
+      metadata: {},
+      sessionCookie: null,
+    }
+  }
+
+  return null
+}
+
+function buildSupportEmail(req, requester, subject, message) {
+  const submittedAt = new Date().toISOString()
+  const emailSubject = `[GolfHomiez Support] ${requester.accountTypeLabel}: ${subject}`
+  const metadataLines = Object.entries(requester.metadata || {})
+    .filter(([, value]) => value != null && String(value).trim())
+    .map(([key, value]) => `- ${key}: ${value}`)
+
+  const text = [
+    `Account type: ${requester.accountTypeLabel}`,
+    `Account id: ${requester.accountId || 'not available'}`,
+    `Account email: ${requester.email || 'not available'}`,
+    `Account name: ${requester.name || 'not available'}`,
+    `Correlation id: ${req.correlationId || 'not available'}`,
+    `Submitted at: ${submittedAt}`,
+    ...(metadataLines.length ? ['', 'Account metadata:', ...metadataLines] : []),
+    '',
+    `Subject: ${subject}`,
+    '',
+    'Message:',
+    message,
+  ].join('\n')
+
+  const html = `
+    <h2>GolfHomiez support request</h2>
+    <p><strong>Account type:</strong> ${escapeHtml(requester.accountTypeLabel)}</p>
+    <p><strong>Account id:</strong> ${escapeHtml(requester.accountId || 'not available')}</p>
+    <p><strong>Account email:</strong> ${escapeHtml(requester.email || 'not available')}</p>
+    <p><strong>Account name:</strong> ${escapeHtml(requester.name || 'not available')}</p>
+    <p><strong>Correlation id:</strong> ${escapeHtml(req.correlationId || 'not available')}</p>
+    <p><strong>Submitted at:</strong> ${escapeHtml(submittedAt)}</p>
+    ${metadataLines.length ? `<p><strong>Account metadata:</strong></p><ul>${Object.entries(requester.metadata || {}).filter(([, value]) => value != null && String(value).trim()).map(([key, value]) => `<li><strong>${escapeHtml(key)}:</strong> ${escapeHtml(value)}</li>`).join('')}</ul>` : ''}
+    <p><strong>Subject:</strong> ${escapeHtml(subject)}</p>
+    <p><strong>Message:</strong><br>${htmlWithBreaks(message)}</p>
+  `
+
+  return { subject: emailSubject, text, html }
+}
+
+async function sendAdminPasswordResetEmail(req, adminUser, token) {
+  const resetUrl = buildAdminPasswordResetUrl(req, token)
+  const username = String(adminUser?.username || 'admin').trim() || 'admin'
+  const subject = 'Reset your GolfHomiez admin password'
+  const text = [
+    `Hello ${username},`,
+    '',
+    'A password reset was requested for your GolfHomiez admin account.',
+    'Use the link below to set a new password. This link expires in 60 minutes.',
+    '',
+    resetUrl,
+    '',
+    'If you did not request this reset, you can ignore this email.',
+  ].join('\n')
+  const html = `
+    <p>Hello ${escapeHtml(username)},</p>
+    <p>A password reset was requested for your GolfHomiez admin account.</p>
+    <p><a href="${escapeHtml(resetUrl)}">Reset your admin password</a></p>
+    <p>This link expires in 60 minutes. If you did not request this reset, you can ignore this email.</p>
+  `
+
+  await sendMail({
+    to: adminUser.email,
+    subject,
+    text,
+    html,
+  })
+  return resetUrl
 }
 
 function splitName(name = '', email = '') {
@@ -912,12 +1129,21 @@ function sanitizeProfileText(value, maxLength = 512) {
   return trimmed ? trimmed.slice(0, maxLength) : null
 }
 
-function sanitizeWebsiteUrl(value) {
-  const trimmed = String(value ?? '').trim()
-  if (!trimmed) return null
-  if (/^https?:\/\//i.test(trimmed)) return trimmed.slice(0, 512)
-  return `https://${trimmed}`.slice(0, 512)
+function isValidProfilePhoneNumber(value) {
+  const phone = String(value ?? '').trim()
+  if (!phone) return true
+  if (!/^\+?[1-9][0-9\s().-]{7,19}$/.test(phone)) return false
+  const digitCount = phone.replace(/\D/g, '').length
+  return digitCount >= 10 && digitCount <= 15
 }
+
+function sanitizeProfilePhone(value, maxLength = 64) {
+  const phone = sanitizeProfileText(value, maxLength)
+  if (!phone) return null
+  if (!isValidProfilePhoneNumber(phone)) throw new Error('Phone number is invalid.')
+  return phone
+}
+
 
 function mapHostProfileRow(row) {
   if (!row) return null
@@ -951,8 +1177,7 @@ function sanitizeHostProfilePayload(body = {}) {
   return {
     golfCourseName,
     contactName: sanitizeProfileText(body.contactName ?? body.contact_name, 191),
-    phone: sanitizeProfileText(body.phone, 64),
-    websiteUrl: sanitizeWebsiteUrl(body.websiteUrl ?? body.website_url),
+    phone: sanitizeProfilePhone(body.phone, 64),
     notes: sanitizeProfileText(body.notes, 5000),
   }
 }
@@ -970,7 +1195,6 @@ async function updateHostProfile(pool, hostAccountId, input) {
   for (const column of ['golf_course_name', 'account_name', 'course_name', 'name']) add(column, input.golfCourseName)
   add('contact_name', input.contactName)
   add('phone', input.phone)
-  add('website_url', input.websiteUrl)
   add('notes', input.notes)
   if (columns.has('updated_at')) updates.push('updated_at = CURRENT_TIMESTAMP')
   if (!updates.length) return getHostProfile(pool, hostAccountId)
@@ -1009,8 +1233,7 @@ function sanitizeOrganizerProfilePayload(body = {}) {
   return {
     organizationName,
     contactName: sanitizeProfileText(body.contactName ?? body.contact_name, 191),
-    phone: sanitizeProfileText(body.phone, 64),
-    websiteUrl: sanitizeWebsiteUrl(body.websiteUrl ?? body.website_url),
+    phone: sanitizeProfilePhone(body.phone, 64),
     notes: sanitizeProfileText(body.notes, 5000),
   }
 }
@@ -1029,7 +1252,6 @@ async function updateOrganizerProfile(pool, organizerAccountId, input) {
   add('organizer_name', input.organizationName)
   add('contact_name', input.contactName)
   add('phone', input.phone)
-  add('website_url', input.websiteUrl)
   add('notes', input.notes)
   if (columns.has('updated_at')) updates.push('updated_at = CURRENT_TIMESTAMP')
   if (!updates.length) return getOrganizerProfile(pool, organizerAccountId)
@@ -1197,7 +1419,7 @@ async function listHostPortalTournaments(pool, hostAccount, req = null) {
       WHERE t.host_account_id = ?
          OR LOWER(COALESCE(${hostRoleGolfCourseExpr}, ${hostAccountGolfCourseExpr}, '')) = LOWER(?)
          OR LOWER(COALESCE(host_ura.email, ha.email, '')) = LOWER(?)
-      ORDER BY t.start_date DESC, t.created_at DESC`,
+      ORDER BY t.created_at DESC, t.start_date DESC`,
     [hostAccount?.id || '', hostAccount?.golfCourseName || hostAccount?.golf_course_name || '', hostAccount?.email || ''],
   )
   const rowsWithAddresses = await resolveTournamentGolfCourseAddresses(rows, req)
@@ -1331,7 +1553,7 @@ async function proxyClientApp(req, res, next) {
   }
 }
 
-app.get(['/register', '/login', '/verify-contact', '/golfadmin', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/redeem', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/portal/profile'], async (req, res, next) => {
+app.get(['/register', '/login', '/verify-contact', '/support', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/portal/profile'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
 
@@ -1403,10 +1625,14 @@ app.post('/api/admin/request-password-reset', async (req, res) => {
     if (!identifier) return res.status(400).json({ message: 'Username is required' })
 
     const adminUser = await getAdminUserByUsername(identifier)
-    if (!adminUser) return res.json({ ok: true })
+    if (!adminUser) {
+      logApi('admin_password_reset_requested_unknown_identifier', { ...requestContext(req), identifier })
+      return res.json({ ok: true })
+    }
 
-    await createAdminResetToken(adminUser.id)
-    logApi('admin_password_reset_requested', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username })
+    const resetToken = await createAdminResetToken(adminUser.id)
+    await sendAdminPasswordResetEmail(req, adminUser, resetToken)
+    logApi('admin_password_reset_email_sent', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username, email: adminUser.email })
     res.json({ ok: true })
   } catch (error) {
     logRouteError('Admin password reset request error', req, error)
@@ -1436,10 +1662,50 @@ app.post('/api/admin/reset-password', async (req, res) => {
 app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
   try {
     const data = await listPortalData()
+    logApi('admin_portal_metadata_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, summary: data.summary })
     res.json({ ...data, adminUser: { id: req.adminUser.id, username: req.adminUser.username, email: req.adminUser.email, isActive: !!req.adminUser.is_active } })
   } catch (error) {
     logRouteError('Admin portal load error', req, error)
     res.status(500).json({ message: 'Could not load admin portal' })
+  }
+})
+
+app.get('/api/admin/scheduled-jobs', adminMiddleware, async (req, res) => {
+  try {
+    const jobs = await listScheduledJobs(getPool())
+    logApi('admin_scheduled_jobs_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, jobCount: jobs.length })
+    logScheduledJob('admin_scheduled_jobs_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, jobCount: jobs.length })
+    res.json({ jobs })
+  } catch (error) {
+    logRouteError('Admin scheduled jobs load error', req, error)
+    logScheduledJob('admin_scheduled_jobs_load_failed', { ...requestContext(req), adminUserId: req.adminUser?.id || null, error })
+    res.status(500).json({ message: 'Could not load scheduled jobs' })
+  }
+})
+
+app.post('/api/admin/scheduled-jobs/:id/run', adminMiddleware, async (req, res) => {
+  try {
+    const jobId = String(req.params.id || '').trim()
+    if (!jobId) return res.status(400).json({ message: 'Scheduled job id is required' })
+    logApi('admin_scheduled_job_manual_run_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId })
+    logScheduledJob('admin_scheduled_job_manual_run_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId })
+    const result = await runScheduledJob(getPool(), jobId, {
+      triggeredBy: 'manual',
+      correlationId: req.correlationId,
+      adminUser: req.adminUser,
+      logApi,
+      logError,
+      logScheduledJob,
+    })
+    const jobs = await listScheduledJobs(getPool())
+    res.json({ result: { jobId: result.job.id, runId: result.runId, status: result.status, output: result.output, nextRunAt: result.nextRunAt }, jobs })
+  } catch (error) {
+    if (error instanceof Error && /Scheduled job not found/i.test(error.message)) {
+      return res.status(404).json({ message: error.message })
+    }
+    logRouteError('Admin scheduled job manual run error', req, error)
+    logScheduledJob('admin_scheduled_job_manual_run_failed', { ...requestContext(req), adminUserId: req.adminUser?.id || null, jobId: req.params.id || null, error })
+    res.status(500).json({ message: 'Could not run scheduled job' })
   }
 })
 
@@ -1462,23 +1728,24 @@ app.post('/api/admin/admin-users', adminMiddleware, async (req, res) => {
   }
 })
 
-app.post('/api/admin/host-invites', adminMiddleware, async (req, res) => {
+app.delete('/api/admin/admin-users/:id', adminMiddleware, async (req, res) => {
   try {
-    const email = normalizeEmail(req.body?.email)
-    const inviteeName = String(req.body?.inviteeName || '').trim()
-    const golfCourseName = String(req.body?.golfCourseName || '').trim()
-    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
-    if (!inviteeName) return res.status(400).json({ message: 'Invitee name is required' })
-    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
+    const targetAdminUserId = String(req.params.id || '').trim()
+    if (!targetAdminUserId) return res.status(400).json({ message: 'Admin user id is required' })
 
-    const invite = await createHostInvite({ email, inviteeName, golfCourseName, adminUserId: req.adminUser.id })
-    logApi('host_invite_created', { ...requestContext(req), adminUserId: req.adminUser.id, email, golfCourseName, inviteId: invite.id })
-    res.status(201).json({ invite })
+    const result = await deleteAdminUser({ adminUserId: targetAdminUserId, requestedByAdminUserId: req.adminUser.id })
+    const adminUsers = await listAdminUsers()
+    logApi('admin_user_deleted', { ...requestContext(req), deletedAdminUserId: targetAdminUserId, adminUserId: req.adminUser.id })
+    res.json({ ...result, adminUsers })
   } catch (error) {
-    logRouteError('Create host invite error', req, error)
-    res.status(500).json({ message: 'Could not create host invite' })
+    if (error instanceof Error && /not found|own admin|last active/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Delete admin user error', req, error)
+    res.status(500).json({ message: 'Could not delete admin user' })
   }
 })
+
 app.post('/api/admin/host-account-requests/:id/approve', adminMiddleware, async (req, res) => {
   try {
     const requestId = String(req.params.id || '').trim()
@@ -1587,31 +1854,6 @@ app.post('/api/host/account-requests', async (req, res) => {
   }
 })
 
-app.post('/api/host/register', async (req, res) => {
-  try {
-    const email = normalizeEmail(req.body?.email)
-    const golfCourseName = String(req.body?.golfCourseName || '').trim()
-    const securityKey = String(req.body?.securityKey || '').trim()
-    const password = String(req.body?.password || '')
-    if (!isEmail(email)) return res.status(400).json({ message: 'A valid invite email is required' })
-    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
-    if (!securityKey) return res.status(400).json({ message: 'Security key is required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
-
-    const db = getPool()
-    const hostAccount = await redeemHostInvite(db, { email, golfCourseName, securityKey, password })
-    const session = await createHostSession(db, hostAccount.id)
-    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.id, session.expiresAt))
-    logApi('host_register_completed', { ...requestContext(req), email, golfCourseName, hostAccountId: hostAccount.id })
-    res.status(201).json({ hostAccount })
-  } catch (error) {
-    if (error instanceof Error && /invite email and security key/i.test(error.message)) {
-      return res.status(400).json({ message: error.message })
-    }
-    logRouteError('Host register error', req, error)
-    res.status(500).json({ message: 'Could not create golf-course account' })
-  }
-})
 
 app.post('/api/host/login', async (req, res) => {
   try {
@@ -1709,12 +1951,14 @@ app.get('/api/host/profile', hostAuthMiddleware, async (req, res) => {
 
 app.put('/api/host/profile', hostAuthMiddleware, async (req, res) => {
   try {
+    logApi('host_profile_update_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, hasNotes: Boolean(String(req.body?.notes ?? '').trim()) })
     const input = sanitizeHostProfilePayload(req.body || {})
     const profile = await updateHostProfile(getPool(), req.hostAccount.id, input)
     logApi('host_profile_updated', { ...requestContext(req), hostAccountId: profile?.id || req.hostAccount.id })
     res.json(profile)
   } catch (error) {
     if (error instanceof Error && /required|invalid/i.test(error.message)) {
+      logApi('host_profile_update_rejected', { ...requestContext(req), hostAccountId: req.hostAccount.id, reason: error.message })
       return res.status(400).json({ message: error.message })
     }
     logRouteError('Host profile update error', req, error)
@@ -2017,12 +2261,14 @@ app.get('/api/organizer/profile', requireStorage, organizerAuthMiddleware, async
 
 app.put('/api/organizer/profile', requireStorage, organizerAuthMiddleware, async (req, res) => {
   try {
+    logApi('organizer_profile_update_started', { ...requestContext(req), organizerAccountId: req.organizerAccount.id, hasNotes: Boolean(String(req.body?.notes ?? '').trim()) })
     const input = sanitizeOrganizerProfilePayload(req.body || {})
     const profile = await updateOrganizerProfile(getPool(), req.organizerAccount.id, input)
     logApi('organizer_profile_updated', { ...requestContext(req), organizerAccountId: profile?.id || req.organizerAccount.id })
     res.json(profile)
   } catch (error) {
     if (error instanceof Error && /required|invalid/i.test(error.message)) {
+      logApi('organizer_profile_update_rejected', { ...requestContext(req), organizerAccountId: req.organizerAccount.id, reason: error.message })
       return res.status(400).json({ message: error.message })
     }
     logRouteError('Organizer profile update error', req, error)
@@ -2614,10 +2860,14 @@ app.post('/api/admin/request-password-reset', async (req, res) => {
     if (!identifier) return res.status(400).json({ message: 'Username is required' })
 
     const adminUser = await getAdminUserByUsername(identifier)
-    if (!adminUser) return res.json({ ok: true })
+    if (!adminUser) {
+      logApi('admin_password_reset_requested_unknown_identifier', { ...requestContext(req), identifier })
+      return res.json({ ok: true })
+    }
 
-    await createAdminResetToken(adminUser.id)
-    logApi('admin_password_reset_requested', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username })
+    const resetToken = await createAdminResetToken(adminUser.id)
+    await sendAdminPasswordResetEmail(req, adminUser, resetToken)
+    logApi('admin_password_reset_email_sent', { ...requestContext(req), adminUserId: adminUser.id, username: adminUser.username, email: adminUser.email })
     res.json({ ok: true })
   } catch (error) {
     logRouteError('Admin password reset request error', req, error)
@@ -2647,6 +2897,7 @@ app.post('/api/admin/reset-password', async (req, res) => {
 app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
   try {
     const data = await listPortalData()
+    logApi('admin_portal_metadata_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, summary: data.summary })
     res.json({ ...data, adminUser: { id: req.adminUser.id, username: req.adminUser.username, email: req.adminUser.email, isActive: !!req.adminUser.is_active } })
   } catch (error) {
     logRouteError('Admin portal load error', req, error)
@@ -2673,23 +2924,24 @@ app.post('/api/admin/admin-users', adminMiddleware, async (req, res) => {
   }
 })
 
-app.post('/api/admin/host-invites', adminMiddleware, async (req, res) => {
+app.delete('/api/admin/admin-users/:id', adminMiddleware, async (req, res) => {
   try {
-    const email = normalizeEmail(req.body?.email)
-    const inviteeName = String(req.body?.inviteeName || '').trim()
-    const golfCourseName = String(req.body?.golfCourseName || '').trim()
-    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
-    if (!inviteeName) return res.status(400).json({ message: 'Invitee name is required' })
-    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
+    const targetAdminUserId = String(req.params.id || '').trim()
+    if (!targetAdminUserId) return res.status(400).json({ message: 'Admin user id is required' })
 
-    const invite = await createHostInvite({ email, inviteeName, golfCourseName, adminUserId: req.adminUser.id })
-    logApi('host_invite_created', { ...requestContext(req), adminUserId: req.adminUser.id, email, golfCourseName, inviteId: invite.id })
-    res.status(201).json({ invite })
+    const result = await deleteAdminUser({ adminUserId: targetAdminUserId, requestedByAdminUserId: req.adminUser.id })
+    const adminUsers = await listAdminUsers()
+    logApi('admin_user_deleted', { ...requestContext(req), deletedAdminUserId: targetAdminUserId, adminUserId: req.adminUser.id })
+    res.json({ ...result, adminUsers })
   } catch (error) {
-    logRouteError('Create host invite error', req, error)
-    res.status(500).json({ message: 'Could not create host invite' })
+    if (error instanceof Error && /not found|own admin|last active/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Delete admin user error', req, error)
+    res.status(500).json({ message: 'Could not delete admin user' })
   }
 })
+
 
 
 app.delete('/api/admin/host-account-requests/:id', adminMiddleware, async (req, res) => {
@@ -2740,31 +2992,6 @@ app.get('/api/host/session', async (req, res) => {
   }
 })
 
-app.post('/api/host/register', async (req, res) => {
-  try {
-    const email = normalizeEmail(req.body?.email)
-    const golfCourseName = String(req.body?.golfCourseName || '').trim()
-    const securityKey = String(req.body?.securityKey || '').trim()
-    const password = String(req.body?.password || '')
-    if (!isEmail(email)) return res.status(400).json({ message: 'A valid invite email is required' })
-    if (!golfCourseName) return res.status(400).json({ message: 'Golf-course name is required' })
-    if (!securityKey) return res.status(400).json({ message: 'Security key is required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
-
-    const db = getPool()
-    const hostAccount = await redeemHostInvite(db, { email, golfCourseName, securityKey, password })
-    const session = await createHostSession(db, hostAccount.id)
-    res.setHeader('Set-Cookie', serializeHostSessionCookie(session.id, session.expiresAt))
-    logApi('host_register_completed', { ...requestContext(req), email, golfCourseName, hostAccountId: hostAccount.id })
-    res.status(201).json({ hostAccount })
-  } catch (error) {
-    if (error instanceof Error && /invite email and security key/i.test(error.message)) {
-      return res.status(400).json({ message: error.message })
-    }
-    logRouteError('Host register error', req, error)
-    res.status(500).json({ message: 'Could not create golf-course account' })
-  }
-})
 
 app.post('/api/host/login', async (req, res) => {
   try {
@@ -2862,7 +3089,7 @@ async function bootstrap() {
     const backend = await storage.getBackendName()
     logInfo('Storage backend initialized', { backend, storageReady, ...logPaths })
     if (!cancelledTournamentCleanupScheduler) {
-      cancelledTournamentCleanupScheduler = startCancelledTournamentCleanupScheduler(() => getPool(), { logApi, logError, logInfo })
+      cancelledTournamentCleanupScheduler = startScheduledJobRunner(() => getPool(), { logApi, logError, logInfo, logScheduledJob })
     }
   } catch (error) {
     storageReady = false

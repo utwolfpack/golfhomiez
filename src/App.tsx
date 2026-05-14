@@ -6,6 +6,8 @@ import { HostAuthProvider, useHostAuth } from './context/HostAuthContext'
 import { AdminAuthProvider, useAdminAuth } from './context/AdminAuthContext'
 import { OrganizerAuthProvider, useOrganizerAuth } from './context/OrganizerAuthContext'
 import AdminPortal from './pages/AdminPortal'
+import AdminScheduledJobs from './pages/AdminScheduledJobs'
+import AdminResetPassword from './pages/AdminResetPassword'
 import Home from './pages/Home'
 import Login from './pages/Login'
 const Register = lazy(() => import('./pages/Register'))
@@ -24,12 +26,12 @@ import OrganizerLogin from './pages/OrganizerLogin'
 import OrganizerRegister from './pages/OrganizerRegister'
 import OrganizerTournaments from './pages/OrganizerTournaments'
 import OrganizerProfile from './pages/OrganizerProfile'
-import RedeemHostInvite from './pages/RedeemHostInvite'
 import HostLogin from './pages/HostLogin'
 import HostForgotPassword from './pages/HostForgotPassword'
 import HostResetPassword from './pages/HostResetPassword'
 import HostPortal from './pages/HostPortal'
 import HostProfile from './pages/HostProfile'
+import Support from './pages/Support'
 import TournamentPortal from './pages/TournamentPortal'
 import ProtectedRoute from './components/ProtectedRoute'
 import HostProtectedRoute from './components/HostProtectedRoute'
@@ -100,6 +102,16 @@ function AdminEntryRoute({ children }: { children: JSX.Element }) {
   return children
 }
 
+function SupportAccessRoute({ children }: { children: JSX.Element }) {
+  const { user, loading } = useAuth()
+  const { hostAccount, loading: hostLoading } = useHostAuth()
+  const { organizerAccount, loading: organizerLoading } = useOrganizerAuth()
+
+  if (loading || hostLoading || organizerLoading) return <LoadingCard />
+  if (user || hostAccount || organizerAccount) return children
+  return <Navigate to="/login" replace />
+}
+
 export default function App() {
   useEffect(() => {
     emitFrontendStage('app_mounted')
@@ -120,6 +132,7 @@ export default function App() {
               <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               <Route path="/directions" element={<Directions />} />
+              <Route path="/support" element={<SupportAccessRoute><Support /></SupportAccessRoute>} />
               <Route path="/login" element={<LoginEntryRoute mode="user"><Login /></LoginEntryRoute>} />
               <Route path="/register" element={<Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading…</div></div>}><Register /></Suspense>} />
               <Route path="/verify-contact" element={<VerifyContact />} />
@@ -128,7 +141,6 @@ export default function App() {
               <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
               <Route path="/my-tournaments" element={<ProtectedRoute><MyTournaments /></ProtectedRoute>} />
               <Route path="/host/register" element={<CreateHostAccount />} />
-              <Route path="/host/redeem" element={<RedeemHostInvite />} />
               <Route path="/host/login" element={<LoginEntryRoute mode="host"><HostLogin /></LoginEntryRoute>} />
               <Route path="/host/request-password-reset" element={<HostForgotPassword />} />
               <Route path="/host/reset-password" element={<HostResetPassword />} />
@@ -140,6 +152,9 @@ export default function App() {
               <Route path="/organizer/portal/profile" element={<OrganizerProtectedRoute><OrganizerProfile /></OrganizerProtectedRoute>} />
               <Route path="/tournaments/:id" element={<TournamentPortal />} />
               <Route path="/golfadmin" element={<AdminEntryRoute><AdminPortal /></AdminEntryRoute>} />
+              <Route path="/golfadmin/forgot-password" element={<AdminResetPassword />} />
+              <Route path="/golfadmin/reset-password" element={<AdminResetPassword />} />
+              <Route path="/golfadmin/scheduled-jobs" element={<AdminEntryRoute><AdminScheduledJobs /></AdminEntryRoute>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </HostAuthProvider>

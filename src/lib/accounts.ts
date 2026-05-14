@@ -10,7 +10,6 @@ export type HostAccountInput = {
   state?: string | null
   postalCode?: string | null
   notes?: string | null
-  securityKey?: string | null
 }
 
 export type OrganizerAccountInput = {
@@ -40,13 +39,7 @@ export type TournamentInput = {
 }
 
 
-export type HostInviteInput = {
-  email: string
-  message?: string | null
-  expiresInDays?: number
-}
-
-export type HostAccount = Omit<HostAccountInput, 'securityKey'> & {
+export type HostAccount = HostAccountInput & {
   id: string
   roleAssignmentId: string
   authUserId: string
@@ -141,21 +134,6 @@ export type RoleAssignment = {
   updatedAt?: string | null
 }
 
-export type HostInvite = {
-  id: string
-  email: string
-  inviteType: string
-  inviteUrl?: string | null
-  invitedByAuthUserId?: string | null
-  invitedByEmail?: string | null
-  status: string
-  expiresAt?: string | null
-  consumedAt?: string | null
-  createdAt?: string | null
-  updatedAt?: string | null
-  securityKey?: string
-}
-
 export type OrganizerTournamentInvite = {
   id: string
   tournamentId: string
@@ -174,7 +152,6 @@ export type AdminPortalSummary = {
   hostAccounts: HostAccount[]
   organizerAccounts: OrganizerAccount[]
   tournaments: Tournament[]
-  hostInvites: HostInvite[]
 }
 
 export type OrganizerPortalSummary = {
@@ -328,6 +305,3 @@ export function fetchAdminPortal() {
   return api<AdminPortalSummary>('/api/admin/portal')
 }
 
-export function createHostInviteRecord(input: HostInviteInput) {
-  return api<HostInvite>('/api/admin/host-invites', { method: 'POST', body: JSON.stringify(input) })
-}
