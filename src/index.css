@@ -75,8 +75,61 @@ button.card{
 .grid{display:grid;gap:16px;}
 .grid2{grid-template-columns:repeat(2,minmax(0,1fr));}
 .grid3{grid-template-columns:repeat(3,minmax(0,1fr));}
+.grid4{grid-template-columns:repeat(4,minmax(0,1fr));}
 @media (max-width: 800px){.grid2{grid-template-columns:1fr;}}
+@media (max-width: 1000px){.grid4{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media (max-width: 900px){.grid3{grid-template-columns:1fr;}}
+@media (max-width: 640px){.grid4{grid-template-columns:1fr;}}
+
+/* Admin portal compact review layout */
+.adminPortalContainer{
+  max-width:min(1440px, 100vw);
+  padding-top:8px;
+  padding-bottom:8px;
+}
+.adminPortalShell{
+  gap:10px;
+  padding:14px;
+  max-height:calc(100vh - 96px);
+  overflow:hidden;
+}
+.adminPortalHeader{display:grid;gap:8px;}
+.adminPortalHeader .pageHeroTitle{font-size:clamp(1.25rem,1.65vw,1.7rem);}
+.adminPortalHeader .pageHeroSubtitle{margin-top:4px;line-height:1.25;}
+.adminSummaryGrid{gap:10px;}
+.adminSummaryButton{
+  width:100%;
+  text-align:left;
+  padding:14px;
+  min-height:92px;
+}
+.adminPortalReviewGrid{
+  display:grid;
+  grid-template-columns:minmax(340px,.9fr) minmax(520px,1.35fr);
+  gap:10px;
+  min-height:0;
+  overflow:hidden;
+}
+.adminReviewColumn{display:grid;gap:10px;min-height:0;align-content:start;}
+.adminPanel{min-height:0;}
+.adminSectionHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
+.adminTableScroll{max-height:260px;overflow:auto;border-radius:12px;}
+.adminRequestTableScroll{max-height:220px;}
+.adminTournamentTableScroll{max-height:260px;}
+.adminCompactTable th,.adminCompactTable td{padding:7px 8px;font-size:12px;}
+.adminAccountMetricGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+.adminStatusGrid{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+.adminStatusPill{cursor:pointer;font:inherit;}
+.adminMetadataModal{max-height:calc(100vh - 48px);display:grid;grid-template-rows:auto minmax(0,1fr);}
+.adminMetadataModal .adminTableScroll{max-height:none;}
+.adminCompactForms{gap:10px;}
+@media (max-width: 1100px){
+  .adminPortalShell{max-height:none;overflow:visible;}
+  .adminPortalReviewGrid{grid-template-columns:1fr;overflow:visible;}
+}
+@media (max-width: 700px){
+  .adminAccountMetricGrid{grid-template-columns:1fr;}
+}
 
 .nav{
   display:grid;

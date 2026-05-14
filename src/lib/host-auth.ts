@@ -34,17 +34,6 @@ export async function requestHostAccount(payload: HostAccountRequestPayload) {
   })
 }
 
-export async function registerHostAccount(payload: { email: string; golfCourseName: string; securityKey: string; password: string }) {
-  return requestJson<{ hostAccount: HostAccount }>('/api/host/register', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-
-export async function redeemHostInviteAccount(payload: { email: string; golfCourseName: string; securityKey: string; password: string }) {
-  return registerHostAccount(payload)
-}
 
 export async function loginHostAccount(payload: { email: string; password: string }) {
   return requestJson<{ hostAccount: HostAccount }>('/api/host/login', {

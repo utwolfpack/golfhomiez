@@ -41,7 +41,6 @@ export default function HostLogin() {
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btnPrimary" disabled={busy}>{busy ? 'Signing in…' : 'Host login'}</button>
-            <Link className="btn" to="/host/redeem">Redeem invite</Link>
           </div>
           <div className="small"><Link to="/host/request-password-reset">Forgot host password?</Link></div>
         </form>

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { getHostSession, HostAccount, loginHostAccount, logoutHostAccount, redeemHostInviteAccount } from '../lib/host-auth'
+import { getHostSession, HostAccount, loginHostAccount, logoutHostAccount } from '../lib/host-auth'
 import { logFrontendEvent } from '../lib/frontend-logger'
 
 type HostAuthState = {
@@ -7,7 +7,6 @@ type HostAuthState = {
   loading: boolean
   refreshHostSession: () => Promise<void>
   loginHost: (email: string, password: string) => Promise<void>
-  registerHost: (payload: { email: string; golfCourseName: string; securityKey: string; password: string }) => Promise<void>
   logoutHost: () => Promise<void>
 }
 
@@ -57,11 +56,6 @@ export function HostAuthProvider({ children }: { children: React.ReactNode }) {
     async loginHost(email, password) {
       const result = await loginHostAccount({ email, password })
       if (!result.response.ok) throw new Error(result.data && 'message' in (result.data as any) ? (result.data as any).message : 'Host login failed')
-      setHostAccount(result.data?.hostAccount || null)
-    },
-    async registerHost(payload) {
-      const result = await redeemHostInviteAccount(payload)
-      if (!result.response.ok) throw new Error(result.data && 'message' in (result.data as any) ? (result.data as any).message : 'Host registration failed')
       setHostAccount(result.data?.hostAccount || null)
     },
     async logoutHost() {

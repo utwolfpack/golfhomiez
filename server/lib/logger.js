@@ -9,6 +9,7 @@ const ERROR_LOG_PATH = path.join(LOG_DIR, 'error.log')
 const FRONTEND_LOG_PATH = path.join(LOG_DIR, 'frontend.log')
 const API_LOG_PATH = path.join(LOG_DIR, 'api.log')
 const SMTP_LOG_PATH = path.join(LOG_DIR, 'smtp.log')
+const SCHEDULED_JOBS_LOG_PATH = path.join(LOG_DIR, 'scheduled-jobs.log')
 const REDACT_KEYS = new Set(['password', 'passwordhash', 'token', 'authorization', 'cookie', 'secret', 'smtp_pass', 'smtp_key'])
 
 function ensureLogDir() {
@@ -25,6 +26,7 @@ const errorStream = createStream(ERROR_LOG_PATH)
 const frontendStream = createStream(FRONTEND_LOG_PATH)
 const apiStream = createStream(API_LOG_PATH)
 const smtpStream = createStream(SMTP_LOG_PATH)
+const scheduledJobsStream = createStream(SCHEDULED_JOBS_LOG_PATH)
 
 const requestStore = new AsyncLocalStorage()
 
@@ -73,6 +75,7 @@ export function getLogPaths() {
     frontendLogPath: FRONTEND_LOG_PATH,
     apiLogPath: API_LOG_PATH,
     smtpLogPath: SMTP_LOG_PATH,
+    scheduledJobsLogPath: SCHEDULED_JOBS_LOG_PATH,
   }
 }
 
@@ -130,6 +133,17 @@ export function logApi(message, details = {}) {
   writeLine(apiStream, payload)
 }
 
+
+export function logScheduledJob(message, details = {}) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level: details.level || 'info',
+    correlationId: details.correlationId || getCorrelationId() || null,
+    message,
+    ...normalizeDetails(details),
+  }
+  writeLine(scheduledJobsStream, payload)
+}
 
 export function logSmtp(message, details = {}) {
   const payload = {

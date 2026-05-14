@@ -1,85 +1,127 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
-import GolfCourseInput from '../components/GolfCourseInput'
 import {
   approveHostAccountRequest,
   createAdminAccount,
+  deleteAdminAccount,
   deleteHostAccountRequest,
-  createHostInvite,
   fetchAdminPortal,
   requestAdminPasswordReset,
 } from '../lib/admin'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { formatFriendlyDateTime } from '../lib/time-format'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
-type AdminIdentity = { id: string; username: string; email: string }
 type RowRecord = Record<string, unknown>
+type DetailColumn = { key: string; label: string }
+type DetailModalState = { title: string; rows: RowRecord[]; columns: DetailColumn[] } | null
 
 function isDateKey(key?: string) {
-  return Boolean(key && /(^|_)(created|updated|expires|consumed|validated)_?at$|createdAt|updatedAt|expiresAt|consumedAt/i.test(key))
+  return Boolean(key && /(^|_)(created|updated|expires|consumed|validated|reviewed|started|completed)_?at$|createdAt|updatedAt|expiresAt|consumedAt/i.test(key))
 }
 
 function formatValue(value: unknown, key?: string) {
   if (value == null || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (isDateKey(key)) return formatFriendlyDateTime(String(value))
+  if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
 
-function SummaryCards({ summary }: { summary: Record<string, number> }) {
+function DetailModal({ modal, onClose }: { modal: DetailModalState; onClose: () => void }) {
+  if (!modal) return null
+  return (
+    <div className="modalOverlay" role="dialog" aria-modal="true" aria-label={modal.title} onClick={onClose}>
+      <section className="modalCard adminMetadataModal" onClick={(event) => event.stopPropagation()}>
+        <div className="adminSectionHeader">
+          <div>
+            <h2 style={{ margin: 0 }}>{modal.title}</h2>
+            <p className="small" style={{ margin: '6px 0 0' }}>{modal.rows.length} records available for review.</p>
+          </div>
+          <button className="btn" type="button" onClick={onClose}>Close</button>
+        </div>
+        <div className="adminTableScroll">
+          <table className="table adminCompactTable">
+            <thead>
+              <tr>
+                {modal.columns.map((column) => <th key={column.key}>{column.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {modal.rows.length ? modal.rows.map((row, index) => (
+                <tr key={String(row.id ?? row.email ?? row.name ?? `${modal.title}-${index}`)}>
+                  {modal.columns.map((column) => <td key={column.key}>{formatValue(row[column.key], column.key)}</td>)}
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan={modal.columns.length} className="small" style={{ padding: '18px 10px' }}>No records available.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function MetricButton({ label, value, onClick }: { label: string; value: number; onClick: () => void }) {
+  return (
+    <button className="card cardClickable adminSummaryButton" type="button" onClick={onClick} aria-label={`Review ${label} records`}>
+      <div className="small" style={{ fontSize: 13 }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 800, marginTop: 8 }}>{value}</div>
+    </button>
+  )
+}
+
+function SummaryCards({ portal, onOpenDetails }: { portal: PortalState | null; onOpenDetails: (title: string, rows: RowRecord[], columns: DetailColumn[]) => void }) {
+  const summary = portal?.summary ?? {}
   const items = [
-    { label: 'Users', value: summary.userCount ?? 0 },
-    { label: 'App users', value: summary.appUserCount ?? 0 },
-    { label: 'Teams', value: summary.teamCount ?? 0 },
-    { label: 'Scores', value: summary.scoreCount ?? 0 },
-    { label: 'Hosts', value: summary.hostCount ?? 0 },
-    { label: 'Invites', value: summary.inviteCount ?? 0 },
-    { label: 'Pending requests', value: summary.hostAccountRequestCount ?? 0 },
+    { label: 'Users', value: summary.userCount ?? 0, rows: portal?.users ?? [], columns: userColumns },
+    { label: 'App users', value: summary.appUserCount ?? 0, rows: portal?.appUsers ?? [], columns: appUserColumns },
+    { label: 'Teams', value: summary.teamCount ?? 0, rows: portal?.teams ?? [], columns: teamColumns },
+    { label: 'Scores', value: summary.scoreCount ?? 0, rows: portal?.scores ?? [], columns: scoreColumns },
+    { label: 'Hosts', value: summary.hostCount ?? 0, rows: portal?.hosts ?? [], columns: hostColumns },
+    { label: 'Organizers', value: summary.organizerCount ?? 0, rows: portal?.organizers ?? [], columns: organizerColumns },
+    { label: 'Tournaments', value: summary.tournamentCount ?? 0, rows: portal?.tournaments ?? [], columns: tournamentColumns },
+    { label: 'Pending requests', value: summary.hostAccountRequestCount ?? 0, rows: portal?.requests ?? [], columns: requestColumns },
   ]
 
   return (
-    <div className="grid grid3">
+    <div className="grid grid4 adminSummaryGrid">
       {items.map((item) => (
-        <div key={item.label} className="card" style={{ padding: 18 }}>
-          <div className="small" style={{ fontSize: 13 }}>{item.label}</div>
-          <div style={{ fontSize: 30, fontWeight: 800, marginTop: 8 }}>{item.value}</div>
-        </div>
+        <MetricButton
+          key={item.label}
+          label={item.label}
+          value={Number(item.value || 0)}
+          onClick={() => onOpenDetails(`${item.label} metadata`, item.rows as RowRecord[], item.columns)}
+        />
       ))}
     </div>
   )
 }
 
-function DataTable({ title, rows, columns }: { title: string; rows: RowRecord[]; columns: Array<{ key: string; label: string }> }) {
+function DataTable({ title, rows, columns, emptyMessage = 'No data available.' }: { title: string; rows: RowRecord[]; columns: DetailColumn[]; emptyMessage?: string }) {
   return (
-    <section className="card" style={{ padding: 18, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+    <section className="card adminPanel" style={{ padding: 14, overflow: 'hidden' }}>
+      <div className="adminSectionHeader">
         <h2 style={{ margin: 0 }}>{title}</h2>
         <span className="pill">{rows.length} total</span>
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table className="table">
+      <div className="adminTableScroll">
+        <table className="table adminCompactTable">
           <thead>
-            <tr>
-              {columns.map((column) => (
-                <th key={column.key}>{column.label}</th>
-              ))}
-            </tr>
+            <tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr>
           </thead>
           <tbody>
             {rows.length ? rows.map((row, index) => (
               <tr key={String(row.id ?? row.username ?? row.email ?? `${title}-${index}`)}>
-                {columns.map((column) => (
-                  <td key={column.key}>{formatValue(row[column.key], column.key)}</td>
-                ))}
+                {columns.map((column) => <td key={column.key}>{formatValue(row[column.key], column.key)}</td>)}
               </tr>
             )) : (
-              <tr>
-                <td colSpan={columns.length} className="small" style={{ padding: '18px 10px' }}>
-                  No data available.
-                </td>
-              </tr>
+              <tr><td colSpan={columns.length} className="small" style={{ padding: '18px 10px' }}>{emptyMessage}</td></tr>
             )}
           </tbody>
         </table>
@@ -90,24 +132,20 @@ function DataTable({ title, rows, columns }: { title: string; rows: RowRecord[];
 
 function RequestTable({ rows, approvingRequestId, deletingRequestId, onApprove, onDelete }: { rows: RowRecord[]; approvingRequestId: string | null; deletingRequestId: string | null; onApprove: (requestId: string) => Promise<void>; onDelete: (requestId: string) => Promise<void> }) {
   return (
-    <section className="card" style={{ padding: 18, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+    <section className="card adminPanel" style={{ padding: 14, overflow: 'hidden' }}>
+      <div className="adminSectionHeader">
         <h2 style={{ margin: 0 }}>Golf-course account requests</h2>
         <span className="pill">{rows.length} total</span>
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table className="table">
+      <div className="adminTableScroll adminRequestTableScroll">
+        <table className="table adminCompactTable">
           <thead>
             <tr>
               <th>Created</th>
-              <th>First name</th>
-              <th>Last name</th>
+              <th>Name</th>
               <th>Email</th>
-              <th>State</th>
               <th>Golf course</th>
-              <th>Representative details</th>
               <th>Status</th>
-              <th>Reviewed by</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -119,36 +157,62 @@ function RequestTable({ rows, approvingRequestId, deletingRequestId, onApprove, 
               return (
                 <tr key={requestId}>
                   <td>{formatValue(row.created_at, 'created_at')}</td>
-                  <td>{formatValue(row.first_name)}</td>
-                  <td>{formatValue(row.last_name)}</td>
+                  <td>{`${formatValue(row.first_name)} ${formatValue(row.last_name)}`.trim()}</td>
                   <td>{formatValue(row.email)}</td>
-                  <td>{formatValue(row.state_name)}</td>
                   <td>{formatValue(row.golf_course_name)}</td>
-                  <td style={{ minWidth: 260 }}>{formatValue(row.representative_details)}</td>
                   <td>{formatValue(row.status)}</td>
-                  <td>{formatValue(row.reviewed_by_email)}</td>
                   <td>
                     {pending ? (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button className="btn btnPrimary" type="button" disabled={busy} onClick={() => onApprove(requestId)}>
-                          {approvingRequestId === requestId ? 'Approving…' : 'Approve request'}
-                        </button>
-                        <button className="btn" type="button" disabled={busy} onClick={() => onDelete(requestId)}>
-                          {deletingRequestId === requestId ? 'Deleting…' : 'Delete request'}
-                        </button>
+                        <button className="btn btnPrimary" type="button" disabled={busy} onClick={() => onApprove(requestId)}>{approvingRequestId === requestId ? 'Approving…' : 'Approve request'}</button>
+                        <button className="btn" type="button" disabled={busy} onClick={() => onDelete(requestId)}>{deletingRequestId === requestId ? 'Deleting…' : 'Delete request'}</button>
                       </div>
-                    ) : (
-                      <span className="small">No action required</span>
-                    )}
+                    ) : <span className="small">No action required</span>}
                   </td>
                 </tr>
               )
             }) : (
-              <tr>
-                <td colSpan={10} className="small" style={{ padding: '18px 10px' }}>
-                  No golf-course account requests available.
-                </td>
-              </tr>
+              <tr><td colSpan={6} className="small" style={{ padding: '18px 10px' }}>No golf-course account requests available.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function AdminUsersTable({ rows, currentAdminUserId, deletingAdminUserId, onDelete }: { rows: RowRecord[]; currentAdminUserId?: string | null; deletingAdminUserId: string | null; onDelete: (adminUserId: string) => Promise<void> }) {
+  return (
+    <section className="card adminPanel" style={{ padding: 14, overflow: 'hidden' }}>
+      <div className="adminSectionHeader">
+        <div>
+          <h2 style={{ margin: 0 }}>Admins</h2>
+          <p className="small" style={{ margin: '6px 0 0' }}>Create or delete dedicated golfadmin portal users.</p>
+        </div>
+        <span className="pill">{rows.length} total</span>
+      </div>
+      <div className="adminTableScroll">
+        <table className="table adminCompactTable">
+          <thead>
+            <tr>{adminColumns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {rows.length ? rows.map((row, index) => {
+              const adminUserId = String(row.id ?? `admin-${index}`)
+              const isCurrent = adminUserId === currentAdminUserId
+              const busy = deletingAdminUserId === adminUserId
+              return (
+                <tr key={adminUserId}>
+                  {adminColumns.map((column) => <td key={column.key}>{formatValue(row[column.key], column.key)}</td>)}
+                  <td>
+                    <button className="btn" type="button" disabled={isCurrent || busy} onClick={() => onDelete(adminUserId)}>
+                      {busy ? 'Deleting…' : isCurrent ? 'Current user' : 'Delete admin'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            }) : (
+              <tr><td colSpan={adminColumns.length + 1} className="small" style={{ padding: '18px 10px' }}>No admin users available.</td></tr>
             )}
           </tbody>
         </table>
@@ -159,8 +223,8 @@ function RequestTable({ rows, approvingRequestId, deletingRequestId, onApprove, 
 
 function FormCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <section className="card" style={{ padding: 18 }}>
-      <div style={{ marginBottom: 14 }}>
+    <section className="card adminPanel" style={{ padding: 14 }}>
+      <div style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>{title}</h2>
         {subtitle ? <p className="small" style={{ margin: '6px 0 0' }}>{subtitle}</p> : null}
       </div>
@@ -168,6 +232,125 @@ function FormCard({ title, subtitle, children }: { title: string; subtitle?: str
     </section>
   )
 }
+
+function AccountSummarySection({ portal, onOpenDetails }: { portal: PortalState | null; onOpenDetails: (title: string, rows: RowRecord[], columns: DetailColumn[]) => void }) {
+  const summary = portal?.summary ?? {}
+  return (
+    <section className="card adminPanel" style={{ padding: 14 }}>
+      <div className="adminSectionHeader">
+        <div>
+          <h2 style={{ margin: 0 }}>Host and organizer accounts</h2>
+          <p className="small" style={{ margin: '6px 0 0' }}>Account counts by type with metadata review.</p>
+        </div>
+      </div>
+      <div className="adminAccountMetricGrid">
+        <MetricButton label="Host accounts" value={Number(summary.hostCount || 0)} onClick={() => onOpenDetails('Host account metadata', (portal?.hosts ?? []) as RowRecord[], hostColumns)} />
+        <MetricButton label="Organizer accounts" value={Number(summary.organizerCount || 0)} onClick={() => onOpenDetails('Organizer account metadata', (portal?.organizers ?? []) as RowRecord[], organizerColumns)} />
+      </div>
+    </section>
+  )
+}
+
+function TournamentSection({ portal, onOpenDetails }: { portal: PortalState | null; onOpenDetails: (title: string, rows: RowRecord[], columns: DetailColumn[]) => void }) {
+  const counts = (portal?.tournamentStatusCounts ?? []) as RowRecord[]
+  const tournaments = (portal?.tournaments ?? []) as RowRecord[]
+  return (
+    <section className="card adminPanel" style={{ padding: 14 }}>
+      <div className="adminSectionHeader">
+        <div>
+          <h2 style={{ margin: 0 }}>Tournament information</h2>
+          <p className="small" style={{ margin: '6px 0 0' }}>Created tournament totals, creators, creation date, and golf-course metadata.</p>
+        </div>
+        <button className="btn" type="button" onClick={() => onOpenDetails('Tournament metadata', tournaments, tournamentColumns)}>Review all</button>
+      </div>
+      <div className="adminStatusGrid">
+        {counts.length ? counts.map((row) => {
+          const status = String(row.status || 'unknown')
+          const filtered = tournaments.filter((tournament) => String(tournament.status || 'unknown') === status)
+          return (
+            <button className="pill adminStatusPill" type="button" key={status} onClick={() => onOpenDetails(`${status} tournament metadata`, filtered, tournamentColumns)}>
+              <strong>{status}</strong> {formatValue(row.count)}
+            </button>
+          )
+        }) : <span className="small">No tournaments created yet.</span>}
+      </div>
+      <div className="adminTableScroll adminTournamentTableScroll">
+        <table className="table adminCompactTable">
+          <thead>
+            <tr>{tournamentColumns.map((column) => <th key={column.key}>{column.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {tournaments.length ? tournaments.slice(0, 12).map((row, index) => (
+              <tr key={String(row.id ?? `tournament-${index}`)}>
+                {tournamentColumns.map((column) => <td key={column.key}>{formatValue(row[column.key], column.key)}</td>)}
+              </tr>
+            )) : <tr><td colSpan={tournamentColumns.length} className="small" style={{ padding: '18px 10px' }}>No tournament metadata available.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+const userColumns: DetailColumn[] = [
+  { key: 'email', label: 'Email' },
+  { key: 'name', label: 'Name' },
+  { key: 'emailVerified', label: 'Verified' },
+  { key: 'createdAt', label: 'Created' },
+]
+const appUserColumns: DetailColumn[] = [
+  { key: 'email', label: 'Email' },
+  { key: 'display_name', label: 'Display name' },
+  { key: 'primary_state', label: 'State' },
+  { key: 'created_at', label: 'Created' },
+]
+const teamColumns: DetailColumn[] = [
+  { key: 'name', label: 'Team' },
+  { key: 'created_by_email', label: 'Created by' },
+  { key: 'created_at', label: 'Created' },
+  { key: 'updated_at', label: 'Updated' },
+]
+const scoreColumns: DetailColumn[] = [
+  { key: 'mode', label: 'Mode' },
+  { key: 'course', label: 'Golf course' },
+  { key: 'created_by_email', label: 'Created by' },
+  { key: 'created_at', label: 'Created' },
+]
+const hostColumns: DetailColumn[] = [
+  { key: 'email', label: 'Email' },
+  { key: 'account_name', label: 'Golf course' },
+  { key: 'contact_name', label: 'Contact' },
+  { key: 'created_at', label: 'Created' },
+]
+const organizerColumns: DetailColumn[] = [
+  { key: 'email', label: 'Email' },
+  { key: 'organization_name', label: 'Organization' },
+  { key: 'contact_name', label: 'Contact' },
+  { key: 'created_at', label: 'Created' },
+]
+const tournamentColumns: DetailColumn[] = [
+  { key: 'name', label: 'Tournament' },
+  { key: 'status', label: 'Status' },
+  { key: 'creator', label: 'Created by' },
+  { key: 'created_at', label: 'Created' },
+  { key: 'golf_course_name', label: 'Golf course' },
+]
+const requestColumns: DetailColumn[] = [
+  { key: 'created_at', label: 'Created' },
+  { key: 'first_name', label: 'First name' },
+  { key: 'last_name', label: 'Last name' },
+  { key: 'email', label: 'Email' },
+  { key: 'state_name', label: 'State' },
+  { key: 'golf_course_name', label: 'Golf course' },
+  { key: 'status', label: 'Status' },
+  { key: 'reviewed_by_email', label: 'Reviewed by' },
+]
+const adminColumns: DetailColumn[] = [
+  { key: 'username', label: 'Username' },
+  { key: 'email', label: 'Email' },
+  { key: 'is_active', label: 'Active' },
+  { key: 'created_at', label: 'Created' },
+]
 
 export default function AdminPortal() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
@@ -177,15 +360,18 @@ export default function AdminPortal() {
   const [portal, setPortal] = useState<PortalState | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [inviteForm, setInviteForm] = useState({ email: '', inviteeName: '', golfCourseName: '' })
   const [newAdminForm, setNewAdminForm] = useState({ username: '', email: '', password: '' })
   const [resetIdentifier, setResetIdentifier] = useState('')
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null)
   const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null)
+  const [deletingAdminUserId, setDeletingAdminUserId] = useState<string | null>(null)
+  const [detailModal, setDetailModal] = useState<DetailModalState>(null)
 
   async function loadPortal() {
+    logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_load_started' })
     const portalData = await fetchAdminPortal()
     setPortal(portalData)
+    logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_loaded', data: { summary: portalData.summary } })
   }
 
   useEffect(() => {
@@ -195,6 +381,11 @@ export default function AdminPortal() {
     }
     void loadPortal()
   }, [adminUser])
+
+  function openDetails(title: string, rows: RowRecord[], columns: DetailColumn[]) {
+    logFrontendEvent({ category: 'admin.portal.metadata', message: 'admin_metadata_modal_opened', data: { title, recordCount: rows.length } })
+    setDetailModal({ title, rows, columns })
+  }
 
   async function onLogin(e: FormEvent) {
     e.preventDefault()
@@ -217,25 +408,12 @@ export default function AdminPortal() {
     navigate('/golfadmin', { replace: true })
   }
 
-  async function onCreateInvite(e: FormEvent) {
-    e.preventDefault()
-    setMessage(null)
-    setError(null)
-    try {
-      const result = await createHostInvite(inviteForm.email, inviteForm.inviteeName, inviteForm.golfCourseName)
-      setMessage(`Invite created for ${result.invite.email}. Security key: ${result.invite.securityKey}. Registration link: ${result.invite.registerUrl}`)
-      setInviteForm({ email: '', inviteeName: '', golfCourseName: '' })
-      await loadPortal()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create invite.')
-    }
-  }
-
   async function onCreateAdmin(e: FormEvent) {
     e.preventDefault()
     setMessage(null)
     setError(null)
     try {
+      logFrontendEvent({ category: 'admin.portal.admin_user', message: 'admin_user_create_started', data: { email: newAdminForm.email } })
       const result = await createAdminAccount(newAdminForm.username, newAdminForm.email, newAdminForm.password)
       setMessage(`Admin user ${result.adminUser.username} created.`)
       setNewAdminForm({ username: '', email: '', password: '' })
@@ -245,16 +423,40 @@ export default function AdminPortal() {
     }
   }
 
+  async function onDeleteAdmin(adminUserId: string) {
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm('Delete this admin user? This cannot be undone.')
+      if (!confirmed) return
+    }
+    setDeletingAdminUserId(adminUserId)
+    setMessage(null)
+    setError(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.admin_user', message: 'admin_user_delete_started', data: { adminUserId } })
+      await deleteAdminAccount(adminUserId)
+      setMessage('Admin user deleted.')
+      await loadPortal()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete admin account.')
+    } finally {
+      setDeletingAdminUserId(null)
+    }
+  }
+
   async function onResetRequest(e: FormEvent) {
     e.preventDefault()
     setMessage(null)
     setError(null)
     try {
+      logFrontendEvent({ category: 'admin.portal.password_reset', message: 'admin_password_reset_request_started', data: { identifier: resetIdentifier } })
       await requestAdminPasswordReset(resetIdentifier)
+      logFrontendEvent({ category: 'admin.portal.password_reset', message: 'admin_password_reset_request_completed' })
       setMessage('If that admin account exists, a reset link has been emailed from no-reply@golfhomiez.com.')
       setResetIdentifier('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not request a reset link.')
+      const message = err instanceof Error ? err.message : 'Could not request a reset link.'
+      logFrontendEvent({ category: 'admin.portal.password_reset', level: 'error', message: 'admin_password_reset_request_failed', data: { error: message } })
+      setError(message)
     }
   }
 
@@ -272,7 +474,6 @@ export default function AdminPortal() {
       setApprovingRequestId(null)
     }
   }
-
 
   async function onDeleteRequest(requestId: string) {
     if (typeof window !== 'undefined') {
@@ -294,9 +495,6 @@ export default function AdminPortal() {
   }
 
   const adminRows = useMemo(() => (portal?.admins ?? []) as RowRecord[], [portal])
-  const hostRows = useMemo(() => (portal?.hosts ?? []) as RowRecord[], [portal])
-  const inviteRows = useMemo(() => (portal?.invites ?? []) as RowRecord[], [portal])
-  const userRows = useMemo(() => (portal?.users ?? []) as RowRecord[], [portal])
   const requestRows = useMemo(() => (portal?.requests ?? []) as RowRecord[], [portal])
 
   if (adminLoading) {
@@ -345,66 +543,50 @@ export default function AdminPortal() {
   }
 
   return (
-    <div className="container pageStack" style={{ paddingTop: 28, paddingBottom: 28 }}>
-      <div className="card pageCardShell" style={{ padding: 24 }}>
-        <PageHero eyebrow="Administration" title="GolfHomiez admin portal" subtitle="Manage golf-course host invites, review account requests, and keep the platform roster in sync." />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div className="small">Signed in as <strong>{adminUser.username}</strong> ({adminUser.email})</div>
-          <button className="btn" type="button" onClick={onLogout}>Sign out</button>
+    <div className="container pageStack adminPortalContainer">
+      <div className="card pageCardShell adminPortalShell">
+        <div className="adminPortalHeader">
+          <PageHero eyebrow="Administration" title="GolfHomiez admin portal" subtitle="Review platform records, tournaments, account requests, scheduled jobs, and admin users from one compact dashboard." />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div className="small">Signed in as <strong>{adminUser.username}</strong> ({adminUser.email})</div>
+            <button className="btn" type="button" onClick={onLogout}>Sign out</button>
+          </div>
+          {message ? <p className="statusMessage statusSuccess">{message}</p> : null}
+          {error ? <p className="statusMessage statusError">{error}</p> : null}
+          <SummaryCards portal={portal} onOpenDetails={openDetails} />
         </div>
-        {message ? <p className="statusMessage statusSuccess">{message}</p> : null}
-        {error ? <p className="statusMessage statusError">{error}</p> : null}
-        <SummaryCards summary={portal?.summary ?? {}} />
-        <RequestTable rows={requestRows} approvingRequestId={approvingRequestId} deletingRequestId={deletingRequestId} onApprove={onApproveRequest} onDelete={onDeleteRequest} />
-        <div className="grid grid2" style={{ alignItems: 'start' }}>
-          <FormCard title="Create host invite" subtitle="Manual invites remain available when you want to onboard a course contact directly.">
-            <form className="formStack" onSubmit={onCreateInvite}>
-              <div>
-                <label className="label">Invitee email</label>
-                <input className="input" type="email" value={inviteForm.email} onChange={(e) => setInviteForm((s) => ({ ...s, email: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Invitee name</label>
-                <input className="input" value={inviteForm.inviteeName} onChange={(e) => setInviteForm((s) => ({ ...s, inviteeName: e.target.value }))} />
-              </div>
-              <GolfCourseInput
-                label="Golf-course account name"
-                value={inviteForm.golfCourseName}
-                onChange={(value) => setInviteForm((s) => ({ ...s, golfCourseName: value }))}
-                datalistId="admin-portal-host-invite-courses"
-                helperText="Search the imported golf course catalog and select the course for the host account."
-              />
-              <button className="btnPrimary" type="submit">Create host invite</button>
-            </form>
-          </FormCard>
 
-          <FormCard title="Create admin user" subtitle="Provision another admin for the dedicated portal.">
-            <form className="formStack" onSubmit={onCreateAdmin}>
-              <div>
-                <label className="label">Username</label>
-                <input className="input" value={newAdminForm.username} onChange={(e) => setNewAdminForm((s) => ({ ...s, username: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Email</label>
-                <input className="input" type="email" value={newAdminForm.email} onChange={(e) => setNewAdminForm((s) => ({ ...s, email: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Password</label>
-                <input className="input" type="password" value={newAdminForm.password} onChange={(e) => setNewAdminForm((s) => ({ ...s, password: e.target.value }))} />
-              </div>
-              <button className="btnPrimary" type="submit">Create admin user</button>
-            </form>
-          </FormCard>
-        </div>
-        <div className="grid grid2" style={{ alignItems: 'start' }}>
-          <DataTable title="Admins" rows={adminRows} columns={[{ key: 'username', label: 'Username' }, { key: 'email', label: 'Email' }, { key: 'is_active', label: 'Active' }, { key: 'created_at', label: 'Created' }]} />
-          <DataTable title="Golf-course accounts" rows={hostRows} columns={[{ key: 'email', label: 'Email' }, { key: 'account_name', label: 'Golf course' }, { key: 'created_at', label: 'Created' }]} />
-        </div>
-        <div className="grid grid2" style={{ alignItems: 'start' }}>
-          <DataTable title="Host invites" rows={inviteRows} columns={[{ key: 'invitee_email', label: 'Invitee email' }, { key: 'invitee_name', label: 'Invitee name' }, { key: 'golf_course_name', label: 'Golf course' }, { key: 'expires_at', label: 'Expires' }, { key: 'consumed_at', label: 'Consumed' }]} />
-          <DataTable title="Recent users" rows={userRows} columns={[{ key: 'email', label: 'Email' }, { key: 'name', label: 'Name' }, { key: 'emailVerified', label: 'Verified' }, { key: 'createdAt', label: 'Created' }]} />
+        <div className="adminPortalReviewGrid">
+          <div className="adminReviewColumn">
+            <AccountSummarySection portal={portal} onOpenDetails={openDetails} />
+            <RequestTable rows={requestRows} approvingRequestId={approvingRequestId} deletingRequestId={deletingRequestId} onApprove={onApproveRequest} onDelete={onDeleteRequest} />
+          </div>
+          <div className="adminReviewColumn">
+            <TournamentSection portal={portal} onOpenDetails={openDetails} />
+            <div className="grid grid2 adminCompactForms" style={{ alignItems: 'start' }}>
+              <FormCard title="Create admin user" subtitle="Provision another admin for the dedicated portal.">
+                <form className="formStack" onSubmit={onCreateAdmin}>
+                  <div>
+                    <label className="label">Username</label>
+                    <input className="input" value={newAdminForm.username} onChange={(e) => setNewAdminForm((s) => ({ ...s, username: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="label">Email</label>
+                    <input className="input" type="email" value={newAdminForm.email} onChange={(e) => setNewAdminForm((s) => ({ ...s, email: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="label">Password</label>
+                    <input className="input" type="password" value={newAdminForm.password} onChange={(e) => setNewAdminForm((s) => ({ ...s, password: e.target.value }))} />
+                  </div>
+                  <button className="btnPrimary" type="submit">Create admin user</button>
+                </form>
+              </FormCard>
+              <AdminUsersTable rows={adminRows} currentAdminUserId={adminUser.id} deletingAdminUserId={deletingAdminUserId} onDelete={onDeleteAdmin} />
+            </div>
+          </div>
         </div>
       </div>
+      <DetailModal modal={detailModal} onClose={() => setDetailModal(null)} />
     </div>
   )
 }
