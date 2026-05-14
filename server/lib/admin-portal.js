@@ -10,7 +10,7 @@ const ADMIN_EMAIL_FROM = 'GolfHomiez Admin <no-reply@golfhomiez.com>'
 const ADMIN_RESET_ROUTE = '/golfadmin/reset-password'
 const ADMIN_LOGIN_ROUTE = '/golfadmin'
 const HOST_LOGIN_ROUTE = '/host/login'
-const HOST_ACCOUNT_REQUEST_NOTIFICATION_EMAIL = 'seanoldroyd.golfhomiez@outlook.com'
+const HOST_ACCOUNT_REQUEST_NOTIFICATION_EMAIL = 'golfhomiez@outlook.com'
 
 function hashHostAccountPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex')

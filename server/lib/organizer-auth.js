@@ -1,8 +1,12 @@
 import crypto from 'crypto'
+import { sendMail } from '../mailer.js'
+import { sendSms } from '../sms.js'
 import { getPool } from '../db.js'
+import { getCorrelationId, logApi } from './logger.js'
 import { normalizeEmail } from './team-utils.js'
 
 const ORGANIZER_SESSION_COOKIE = 'golfhomiez_organizer_session'
+const ORGANIZER_RESET_TTL_MS = 1000 * 60 * 60
 export const ORGANIZER_SESSION_TTL_MS = 1000 * 60 * 60 * 24
 
 function getDb(source) {
@@ -91,6 +95,18 @@ export async function ensureOrganizerAuthSchema(source) {
   await ensureColumn(db, 'organizer_role_accounts', 'role_assignment_id VARCHAR(64) NULL')
   await ensureColumn(db, 'organizer_role_accounts', 'password_hash VARCHAR(255) NULL')
   await ensureColumn(db, 'organizer_role_accounts', 'reset_email VARCHAR(191) NULL')
+  await ensureColumn(db, 'organizer_role_accounts', 'phone VARCHAR(64) NULL')
+  await db.query(`CREATE TABLE IF NOT EXISTS organizer_password_reset_tokens (
+    id VARCHAR(64) NOT NULL PRIMARY KEY,
+    organizer_account_id VARCHAR(64) NOT NULL,
+    token_hash VARCHAR(255) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_organizer_reset_account (organizer_account_id),
+    INDEX idx_organizer_reset_token_hash (token_hash),
+    INDEX idx_organizer_reset_expires (expires_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`)
   await db.query(`CREATE TABLE IF NOT EXISTS organizer_sessions (
     id VARCHAR(64) NOT NULL PRIMARY KEY,
     organizer_account_id VARCHAR(64) NOT NULL,
@@ -106,6 +122,9 @@ export async function ensureOrganizerAuthSchema(source) {
   await ensureIndex(db, 'organizer_sessions', 'idx_organizer_sessions_token_hash', 'CREATE INDEX idx_organizer_sessions_token_hash ON organizer_sessions (token_hash)')
   await ensureIndex(db, 'organizer_sessions', 'idx_organizer_sessions_account', 'CREATE INDEX idx_organizer_sessions_account ON organizer_sessions (organizer_account_id)')
   await ensureIndex(db, 'organizer_sessions', 'idx_organizer_sessions_expires', 'CREATE INDEX idx_organizer_sessions_expires ON organizer_sessions (expires_at)')
+  await ensureIndex(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_account', 'CREATE INDEX idx_organizer_reset_account ON organizer_password_reset_tokens (organizer_account_id)')
+  await ensureIndex(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_token_hash', 'CREATE INDEX idx_organizer_reset_token_hash ON organizer_password_reset_tokens (token_hash)')
+  await ensureIndex(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_expires', 'CREATE INDEX idx_organizer_reset_expires ON organizer_password_reset_tokens (expires_at)')
   await ensureIndex(db, 'organizer_role_accounts', 'idx_organizer_role_accounts_email_direct', 'CREATE INDEX idx_organizer_role_accounts_email_direct ON organizer_role_accounts (email)')
   if (await columnExists(db, 'organizer_role_accounts', 'role_assignment_id')) {
     await ensureIndex(db, 'organizer_role_accounts', 'idx_organizer_role_accounts_role_assignment', 'CREATE INDEX idx_organizer_role_accounts_role_assignment ON organizer_role_accounts (role_assignment_id)')
@@ -215,6 +234,96 @@ export async function authenticateOrganizerLogin(source, { email, password }) {
   const organizer = await getOrganizerAccountByEmailDirect(source, normalizeEmail(email))
   if (!organizer || !verifyPassword(password, organizer.password_hash)) return null
   return mapOrganizerAccount(organizer)
+}
+
+export async function createOrganizerPasswordReset(source, payload = {}) {
+  const db = getDb(source)
+  await ensureOrganizerAuthSchema(db)
+  const email = normalizeEmail(payload.email || payload.identifier || '')
+  const deliveryMethod = String(payload.deliveryMethod || '').trim().toLowerCase() === 'sms' ? 'sms' : 'email'
+  const resetUrlBase = String(payload.resetUrlBase || '').trim()
+  const organizer = await getOrganizerAccountByEmailDirect(db, email)
+  if (!organizer) return { ok: true }
+
+  const token = randomId(32)
+  const tokenHash = sha256(token)
+  const id = randomId(32)
+  const expiresAt = new Date(Date.now() + ORGANIZER_RESET_TTL_MS)
+
+  await db.execute(
+    `INSERT INTO organizer_password_reset_tokens (id, organizer_account_id, token_hash, expires_at)
+     VALUES (?, ?, ?, ?)`,
+    [id, organizer.id, tokenHash, expiresAt],
+  )
+
+  const appOrigin = resetUrlBase || process.env.APP_ORIGIN || process.env.CLIENT_ORIGIN || process.env.BETTER_AUTH_URL || ''
+  const resetUrl = `${appOrigin.replace(/\/$/, '')}/organizer/reset-password?token=${encodeURIComponent(token)}`
+
+  if (deliveryMethod === 'sms') {
+    const phone = String(organizer.phone || '').trim()
+    if (phone) {
+      const smsResult = await sendSms({
+        to: phone,
+        subject: 'GolfHomiez organizer password reset',
+        body: `Reset your GolfHomiez organizer password: ${resetUrl}`,
+        tag: 'golfhomiez-organizer-password-reset',
+      })
+      logApi(smsResult?.fallback ? 'organizer_password_reset_sms_fallback' : 'organizer_password_reset_sms_sent', {
+        correlationId: getCorrelationId(),
+        organizerAccountId: organizer.id,
+        email: organizer.email || email,
+        provider: smsResult?.provider || null,
+        reason: smsResult?.reason || null,
+        messageId: smsResult?.messageId || null,
+      })
+    } else {
+      logApi('organizer_password_reset_sms_skipped_missing_phone', {
+        correlationId: getCorrelationId(),
+        organizerAccountId: organizer.id,
+        email: organizer.email || email,
+      })
+    }
+    return { ok: true }
+  }
+
+  await sendMail({
+    to: organizer.reset_email || organizer.email || email,
+    subject: 'Reset your GolfHomiez organizer password',
+    text: `Reset your organizer password: ${resetUrl}`,
+    html: `<p>Reset your organizer password:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
+  })
+  logApi('organizer_password_reset_email_sent', {
+    correlationId: getCorrelationId(),
+    organizerAccountId: organizer.id,
+    email: organizer.email || email,
+  })
+  return { ok: true }
+}
+
+export async function resetOrganizerPassword(source, { token, password }) {
+  const db = getDb(source)
+  await ensureOrganizerAuthSchema(db)
+  const tokenHash = sha256(String(token || '').trim())
+  const [rows] = await db.execute(
+    `SELECT *
+       FROM organizer_password_reset_tokens
+      WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW()
+      LIMIT 1`,
+    [tokenHash],
+  )
+  const reset = rows[0]
+  if (!reset) throw new Error('Invalid or expired reset token')
+
+  await db.execute(
+    'UPDATE organizer_role_accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [hashPassword(password), reset.organizer_account_id],
+  )
+  await db.execute('UPDATE organizer_password_reset_tokens SET used_at = NOW() WHERE id = ?', [reset.id])
+  logApi('organizer_password_reset_completed', {
+    correlationId: getCorrelationId(),
+    organizerAccountId: reset.organizer_account_id,
+  })
+  return { ok: true }
 }
 
 export async function createOrganizerSession(source, organizerAccountId) {

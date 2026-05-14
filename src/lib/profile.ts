@@ -4,6 +4,8 @@ export type UserProfile = {
   id: string
   email: string
   name?: string | null
+  phone: string
+  phoneUpdatedAt?: string | null
   primaryCity: string
   primaryState: string
   primaryZipCode: string
@@ -17,6 +19,7 @@ export type UserProfile = {
 }
 
 export type ProfileInput = {
+  phone: string
   primaryCity: string
   primaryState: string
   primaryZipCode: string
