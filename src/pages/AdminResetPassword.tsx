@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { requestAdminPasswordReset, resetAdminPassword } from '../lib/admin'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 export default function AdminResetPassword() {
   const [params] = useSearchParams()
@@ -17,10 +18,14 @@ export default function AdminResetPassword() {
     setMessage(null)
     setError(null)
     try {
+      logFrontendEvent({ category: 'admin.password_reset', message: 'admin_password_reset_request_started', data: { identifier } })
       await requestAdminPasswordReset(identifier)
+      logFrontendEvent({ category: 'admin.password_reset', message: 'admin_password_reset_request_completed' })
       setMessage('If that admin account exists, a reset link has been emailed from no-reply@golfhomiez.com.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not request reset email.')
+      const message = err instanceof Error ? err.message : 'Could not request reset email.'
+      logFrontendEvent({ category: 'admin.password_reset', level: 'error', message: 'admin_password_reset_request_failed', data: { error: message } })
+      setError(message)
     }
   }
 
@@ -32,10 +37,14 @@ export default function AdminResetPassword() {
       if (!token) throw new Error('Reset token missing from the URL.')
       if (password.length < 8) throw new Error('Password must be at least 8 characters.')
       if (password !== confirmPassword) throw new Error('Passwords do not match.')
+      logFrontendEvent({ category: 'admin.password_reset', message: 'admin_password_reset_submit_started' })
       await resetAdminPassword(token, password)
+      logFrontendEvent({ category: 'admin.password_reset', message: 'admin_password_reset_submit_completed' })
       setMessage('Admin password updated. Return to /golfadmin and sign in with the new password.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reset password.')
+      const message = err instanceof Error ? err.message : 'Could not reset password.'
+      logFrontendEvent({ category: 'admin.password_reset', level: 'error', message: 'admin_password_reset_submit_failed', data: { error: message } })
+      setError(message)
     }
   }
 

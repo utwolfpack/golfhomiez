@@ -5,14 +5,14 @@ import PageHero from '../components/PageHero'
 import { useHostAuth } from '../context/HostAuthContext'
 import { fetchHostProfile, updateHostProfile, type HostAccount, type HostAccountInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
 
 function toForm(account: HostAccount | null): HostAccountInput {
   return {
     golfCourseName: account?.golfCourseName || '',
     contactName: account?.contactName || '',
     phone: account?.phone || '',
-    websiteUrl: account?.websiteUrl || '',
-    notes: account?.notes || '',
+    notes: account?.notes || null,
   }
 }
 
@@ -24,6 +24,14 @@ export default function HostProfile() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+
+  function setPhoneValue(value: string) {
+    setForm((prev) => ({ ...prev, phone: sanitizePhoneInput(value) }))
+  }
+
+  function setNotesValue(value: string) {
+    setForm((prev) => ({ ...prev, notes: value.trim() ? value : null }))
+  }
 
   useEffect(() => {
     let active = true
@@ -47,10 +55,17 @@ export default function HostProfile() {
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
+    const phoneValidationError = validateOptionalPhoneNumber(form.phone)
+    if (phoneValidationError) {
+      setError(phoneValidationError)
+      logFrontendEvent({ category: 'host.profile', level: 'error', message: 'host_profile_invalid_phone', data: { hostAccountId: account?.id || null } })
+      return
+    }
     setSaving(true)
     setError(null)
     setSuccess(null)
     try {
+      logFrontendEvent({ category: 'host.profile', message: 'host_profile_update_started', data: { hostAccountId: account?.id || null, hasNotes: Boolean(form.notes && form.notes.trim()), hasPhone: Boolean(form.phone && form.phone.trim()) } })
       const saved = await updateHostProfile(form)
       setAccount(saved)
       setForm(toForm(saved))
@@ -82,19 +97,14 @@ export default function HostProfile() {
             <label className="label">Contact name</label>
             <input className="input" value={form.contactName || ''} onChange={(e) => setForm((prev) => ({ ...prev, contactName: e.target.value }))} />
           </div>
-          <div className="formRow formRow--split">
-            <div>
-              <label className="label">Phone</label>
-              <input className="input" value={form.phone || ''} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">Website URL</label>
-              <input className="input" type="url" value={form.websiteUrl || ''} onChange={(e) => setForm((prev) => ({ ...prev, websiteUrl: e.target.value }))} />
-            </div>
+          <div>
+            <label className="label">Phone</label>
+            <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} aria-invalid={Boolean(form.phone && validateOptionalPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setPhoneValue(e.target.value)} />
+            <div className="small">Use 10 to 15 digits. Spaces, dashes, periods, parentheses, and a leading + are allowed.</div>
           </div>
           <div>
             <label className="label">Notes</label>
-            <textarea className="input" rows={4} value={form.notes || ''} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
+            <textarea className="input" rows={4} value={form.notes ?? ''} onChange={(e) => setNotesValue(e.target.value)} />
           </div>
           <div className="small"><strong>Email:</strong> {account?.email || 'Not available'}</div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

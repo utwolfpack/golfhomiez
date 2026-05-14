@@ -9,7 +9,6 @@ export const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24
 const ADMIN_EMAIL_FROM = 'GolfHomiez Admin <no-reply@golfhomiez.com>'
 const ADMIN_RESET_ROUTE = '/golfadmin/reset-password'
 const ADMIN_LOGIN_ROUTE = '/golfadmin'
-const HOST_REGISTER_ROUTE = '/host/redeem'
 const HOST_LOGIN_ROUTE = '/host/login'
 const HOST_ACCOUNT_REQUEST_NOTIFICATION_EMAIL = 'seanoldroyd.golfhomiez@outlook.com'
 
@@ -122,43 +121,6 @@ async function ensureHostAccountRequestTableCompatibility() {
   }
 }
 
-async function ensureInviteTableCompatibility() {
-  if (!await tableExists('host_account_invites')) return
-  const columns = await getTableColumns('host_account_invites')
-
-  await addColumnIfMissing('host_account_invites', 'revoked_at', 'DATETIME NULL', { ignoreDuplicate: true })
-  await addColumnIfMissing('host_account_invites', 'updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP', { ignoreDuplicate: true })
-  await addColumnIfMissing('host_account_invites', 'invitee_email', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
-  await addColumnIfMissing('host_account_invites', 'invitee_name', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
-  await addColumnIfMissing('host_account_invites', 'golf_course_name', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
-  await addColumnIfMissing('host_account_invites', 'security_key_hash', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
-  await addColumnIfMissing('host_account_invites', 'invited_by_admin_id', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
-
-  const refreshed = await getTableColumns('host_account_invites')
-  if (refreshed.has('email') && refreshed.has('invitee_email')) {
-    await pool().query('UPDATE host_account_invites SET invitee_email = COALESCE(invitee_email, email) WHERE invitee_email IS NULL OR invitee_email = ""')
-  }
-  if (refreshed.has('name') && refreshed.has('invitee_name')) {
-    await pool().query('UPDATE host_account_invites SET invitee_name = COALESCE(invitee_name, name) WHERE invitee_name IS NULL OR invitee_name = ""')
-  }
-  if (refreshed.has('account_name') && refreshed.has('golf_course_name')) {
-    await pool().query('UPDATE host_account_invites SET golf_course_name = COALESCE(golf_course_name, account_name) WHERE golf_course_name IS NULL OR golf_course_name = ""')
-  }
-  if (refreshed.has('course_name') && refreshed.has('golf_course_name')) {
-    await pool().query('UPDATE host_account_invites SET golf_course_name = COALESCE(golf_course_name, course_name) WHERE golf_course_name IS NULL OR golf_course_name = ""')
-  }
-  if (refreshed.has('security_key') && refreshed.has('security_key_hash')) {
-    await pool().query('UPDATE host_account_invites SET security_key_hash = COALESCE(security_key_hash, SHA2(security_key, 256)) WHERE (security_key_hash IS NULL OR security_key_hash = "") AND security_key IS NOT NULL AND security_key <> ""')
-  }
-
-  if (!await indexExists('host_account_invites', 'idx_host_invites_email')) {
-    try {
-      await pool().query('CREATE INDEX idx_host_invites_email ON host_account_invites (invitee_email, expires_at)')
-    } catch {}
-  }
-}
-
-
 function getAppBaseUrl() {
   const explicit =
     process.env.APP_BASE_URL ||
@@ -173,12 +135,6 @@ function getAppBaseUrl() {
   return trimmed ? trimmed.replace(/\/$/, '') : (process.env.CLIENT_ORIGIN || process.env.BETTER_AUTH_URL || '')
 }
 
-function buildHostRegisterUrl(email) {
-  const base = getAppBaseUrl()
-  const url = new URL(HOST_REGISTER_ROUTE, `${base}/`)
-  if (email) url.searchParams.set('email', email)
-  return url.toString()
-}
 function buildHostLoginUrl() {
   const base = getAppBaseUrl()
   return new URL(HOST_LOGIN_ROUTE, `${base}/`).toString()
@@ -340,50 +296,6 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, passwo
   return hostAccountId
 }
 
-async function sendHostInviteEmail({ email, inviteeName, golfCourseName, securityKey }) {
-  const registerUrl = buildHostRegisterUrl(email)
-  const greetingName = String(inviteeName || '').trim() || 'there'
-  const subject = `Your GolfHomiez golf-course invite for ${golfCourseName}`
-  const text = [
-    `Hello ${greetingName},`,
-    '',
-    `You have been invited to create a golf-course account for ${golfCourseName} on GolfHomiez.`,
-    '',
-    `Complete your registration here: ${registerUrl}`,
-    `Security key: ${securityKey}`,
-    '',
-    'You must sign in with the invited email address and enter this security key on the host registration page.',
-    '',
-    'If you were not expecting this invite, you can ignore this email.',
-  ].join('\n')
-
-  const html = `
-    <p>Hello ${greetingName},</p>
-    <p>You have been invited to create a golf-course account for <strong>${golfCourseName}</strong> on GolfHomiez.</p>
-    <p><a href="${registerUrl}">Complete your registration</a></p>
-    <p><strong>Security key:</strong> ${securityKey}</p>
-    <p>You must sign in with the invited email address and enter this security key on the host registration page.</p>
-    <p>If you were not expecting this invite, you can ignore this email.</p>
-  `
-
-  await sendMail({
-    to: email,
-    subject,
-    text,
-    html,
-  })
-
-  return registerUrl
-}
-
-function pickInviteColumn(columns, candidates, fallback) {
-  for (const candidate of candidates) {
-    if (columns.has(candidate)) return candidate
-  }
-  return fallback
-}
-
-
 async function ensureAdminPortalSchema() {
   if (adminSchemaReady) return
   const db = pool()
@@ -434,26 +346,6 @@ await db.query(`
     INDEX idx_host_account_requests_email (email)
   )
 `)
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS host_account_invites (
-      id VARCHAR(191) PRIMARY KEY,
-      invitee_email VARCHAR(191) NOT NULL,
-      invitee_name VARCHAR(191) NULL,
-      golf_course_name VARCHAR(191) NOT NULL,
-      security_key_hash VARCHAR(191) NOT NULL,
-      invited_by_admin_id VARCHAR(191) NOT NULL,
-      expires_at DATETIME NOT NULL,
-      consumed_at DATETIME NULL,
-      revoked_at DATETIME NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_host_invites_email (invitee_email, expires_at),
-      CONSTRAINT fk_host_invites_admin FOREIGN KEY (invited_by_admin_id) REFERENCES admin_users(id) ON DELETE CASCADE
-    )
-  `)
-
-  await ensureInviteTableCompatibility()
   await ensureHostAccountRequestTableCompatibility()
 
   await db.query(`
@@ -589,12 +481,13 @@ export function clearAdminSessionCookie() {
 
 export async function getAdminUserByUsername(username) {
   await ensureAdminPortalSchema()
+  const identifier = String(username || '').trim().toLowerCase()
   const [rows] = await pool().execute(
     `SELECT id, username, email, password_salt, password_hash, is_active, created_at, updated_at
        FROM admin_users
-      WHERE username = ?
+      WHERE username = ? OR email = ?
       LIMIT 1`,
-    [String(username || '').trim().toLowerCase()],
+    [identifier, identifier],
   )
   return rows[0] || null
 }
@@ -629,7 +522,6 @@ export function getPortalUrls(req) {
   return {
     adminLoginUrl: new URL(ADMIN_LOGIN_ROUTE, origin).toString(),
     adminResetUrl: new URL(ADMIN_RESET_ROUTE, origin).toString(),
-    hostRegisterUrl: new URL(HOST_REGISTER_ROUTE, origin).toString(),
   }
 }
 
@@ -658,6 +550,33 @@ export async function listAdminUsers() {
       ORDER BY created_at ASC`,
   )
   return rows
+}
+
+export async function deleteAdminUser({ adminUserId, requestedByAdminUserId }) {
+  await ensureAdminPortalSchema()
+  const targetId = String(adminUserId || '').trim()
+  if (!targetId) throw new Error('Admin user id is required.')
+  if (targetId === String(requestedByAdminUserId || '').trim()) {
+    throw new Error('You cannot delete your own admin account.')
+  }
+
+  const [rows] = await pool().execute(
+    `SELECT id, username, email, is_active, created_at, updated_at
+       FROM admin_users
+      WHERE id = ?
+      LIMIT 1`,
+    [targetId],
+  )
+  const target = rows[0]
+  if (!target) throw new Error('Admin user not found.')
+
+  if (Number(target.is_active)) {
+    const [[{ activeCount = 0 } = {}]] = await pool().query('SELECT COUNT(*) AS activeCount FROM admin_users WHERE is_active = 1')
+    if (Number(activeCount) <= 1) throw new Error('You cannot delete the last active admin account.')
+  }
+
+  await pool().execute('DELETE FROM admin_users WHERE id = ?', [targetId])
+  return { deleted: true, adminUser: target }
 }
 
 export async function createAdminResetToken(adminUserId) {
@@ -692,64 +611,6 @@ export async function consumeAdminResetToken(rawToken, nextPassword) {
   await pool().execute(`UPDATE admin_users SET password_salt = ?, password_hash = ? WHERE id = ?`, [salt, hash, row.admin_user_id])
   await pool().execute(`UPDATE admin_password_reset_tokens SET consumed_at = UTC_TIMESTAMP() WHERE id = ?`, [row.id])
   return getAdminUserById(row.admin_user_id)
-}
-
-export async function createHostInvite({ email, inviteeName, golfCourseName, adminUserId }) {
-  await ensureAdminPortalSchema()
-  const normalized = normalizeEmail(email)
-  if (!isEmail(normalized)) throw new Error('A valid invite email is required.')
-  const normalizedInviteeName = String(inviteeName || '').trim() || null
-  const normalizedGolfCourseName = String(golfCourseName || '').trim()
-  if (!normalizedGolfCourseName) throw new Error('Golf course name is required.')
-
-  const id = crypto.randomUUID().replace(/-/g, '')
-  const securityKey = crypto.randomBytes(8).toString('hex')
-  const columns = await getTableColumns('host_account_invites')
-
-  const insertMap = new Map()
-  insertMap.set('id', id)
-
-  if (columns.has('invitee_email')) insertMap.set('invitee_email', normalized)
-  if (columns.has('email')) insertMap.set('email', normalized)
-
-  if (columns.has('invitee_name')) insertMap.set('invitee_name', normalizedInviteeName)
-  if (columns.has('name')) insertMap.set('name', normalizedInviteeName)
-
-  if (columns.has('golf_course_name')) insertMap.set('golf_course_name', normalizedGolfCourseName)
-  if (columns.has('account_name')) insertMap.set('account_name', normalizedGolfCourseName)
-  if (columns.has('course_name')) insertMap.set('course_name', normalizedGolfCourseName)
-
-  if (columns.has('security_key_hash')) insertMap.set('security_key_hash', sha256(securityKey))
-  if (columns.has('security_key')) insertMap.set('security_key', securityKey)
-
-  if (columns.has('invited_by_admin_id')) insertMap.set('invited_by_admin_id', adminUserId)
-  if (columns.has('admin_user_id')) insertMap.set('admin_user_id', adminUserId)
-
-  const orderedColumns = [...insertMap.keys()]
-  const placeholders = orderedColumns.map(() => '?')
-  orderedColumns.push('expires_at')
-  placeholders.push('DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY)')
-
-  await pool().execute(
-    `INSERT INTO host_account_invites (${orderedColumns.map((column) => escapeIdentifier(column)).join(', ')}) VALUES (${placeholders.join(', ')})`,
-    [...insertMap.values()],
-  )
-
-  const registerUrl = await sendHostInviteEmail({
-    email: normalized,
-    inviteeName: normalizedInviteeName,
-    golfCourseName: normalizedGolfCourseName,
-    securityKey,
-  })
-
-  return {
-    id,
-    email: normalized,
-    inviteeName: normalizedInviteeName,
-    golfCourseName: normalizedGolfCourseName,
-    securityKey,
-    registerUrl,
-  }
 }
 
 export async function createHostAccountRequest({ firstName, lastName, email, stateCode, stateName, golfCourseName, representativeDetails, password }) {
@@ -900,76 +761,129 @@ export async function deleteHostAccountRequest({ requestId, adminUserId, adminEm
   }
 }
 
-export async function registerHostAccount({ authUserId = null, email, accountName, securityKey }) {
-  await ensureAdminPortalSchema()
-  const normalized = normalizeEmail(email)
-  if (!isEmail(normalized)) throw new Error('A valid invite email is required.')
-  const securityKeyHash = sha256(securityKey)
-  const columns = await getTableColumns('host_account_invites')
-  const emailColumn = pickInviteColumn(columns, ['invitee_email', 'email'], 'invitee_email')
-  const courseColumn = pickInviteColumn(columns, ['golf_course_name', 'account_name', 'course_name'], 'golf_course_name')
-  const keyColumn = pickInviteColumn(columns, ['security_key_hash', 'security_key'], 'security_key_hash')
-  const hasRevokedAt = columns.has('revoked_at')
-  const keyValue = keyColumn === 'security_key' ? String(securityKey || '') : securityKeyHash
-  const [inviteRows] = await pool().execute(
-    `SELECT id, ${escapeIdentifier(courseColumn)} AS golf_course_name
-       FROM host_account_invites
-      WHERE ${escapeIdentifier(emailColumn)} = ?
-        AND ${escapeIdentifier(keyColumn)} = ?
-        AND consumed_at IS NULL
-        ${hasRevokedAt ? 'AND revoked_at IS NULL' : ''}
-        AND expires_at > UTC_TIMESTAMP()
-      ORDER BY created_at DESC
-      LIMIT 1`,
-    [normalized, keyValue],
-  )
-  const invite = inviteRows[0]
-  if (!invite) throw new Error('Security key is invalid or expired.')
-
-  const [existingRows] = await pool().execute(`SELECT id FROM host_accounts WHERE email = ? LIMIT 1`, [normalized])
-  if (existingRows[0]) throw new Error('A golf-course account already exists for this email.')
-
-  const id = crypto.randomUUID().replace(/-/g, '')
-  const finalName = String(accountName || '').trim() || invite.golf_course_name
-  const effectiveAuthUserId = String(authUserId || `hostinvite:${normalized}`)
-  await pool().execute(
-    `INSERT INTO host_accounts (id, auth_user_id, email, account_name, invite_id, is_validated, validated_at)
-     VALUES (?, ?, ?, ?, ?, 1, UTC_TIMESTAMP())`,
-    [id, effectiveAuthUserId, normalized, finalName, invite.id],
-  )
-  await pool().execute(`UPDATE host_account_invites SET consumed_at = UTC_TIMESTAMP() WHERE id = ?`, [invite.id])
-  const [rows] = await pool().execute(`SELECT id, auth_user_id, email, account_name, invite_id, is_validated, validated_at, created_at, updated_at FROM host_accounts WHERE id = ?`, [id])
-  return rows[0]
-}
-
 export async function listPortalData() {
   await ensureAdminPortalSchema()
   const db = pool()
-  const inviteColumns = await getTableColumns('host_account_invites')
-  const inviteHasRevokedAt = inviteColumns.has('revoked_at')
-  const activeInviteFilter = inviteHasRevokedAt
-    ? 'consumed_at IS NULL AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()'
-    : 'consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()'
-  const inviteEmailColumn = pickInviteColumn(inviteColumns, ['invitee_email', 'email'], 'invitee_email')
-  const inviteNameColumn = pickInviteColumn(inviteColumns, ['invitee_name', 'name'], 'invitee_name')
-  const inviteCourseColumn = pickInviteColumn(inviteColumns, ['golf_course_name', 'account_name', 'course_name'], 'golf_course_name')
   const [[{ userCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS userCount FROM `user`')
   const [[{ appUserCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS appUserCount FROM app_users')
   const [[{ teamCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS teamCount FROM teams')
   const [[{ scoreCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS scoreCount FROM scores')
   const [[{ hostCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS hostCount FROM host_accounts')
-  const [[{ inviteCount = 0 } = {}]] = await db.query(`SELECT COUNT(*) AS inviteCount FROM host_account_invites WHERE ${activeInviteFilter}`)
+  const [[{ organizerCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS organizerCount FROM organizer_role_accounts')
+  const [[{ tournamentCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS tournamentCount FROM tournaments')
+  const [[{ hostAccountRequestCount = 0 } = {}]] = await db.query("SELECT COUNT(*) AS hostAccountRequestCount FROM host_account_requests WHERE status = 'pending'")
+
+  const selectColumn = (columns, tableAlias, candidates, alias, fallback = 'NULL') => {
+    const columnName = candidates.find((candidate) => columns.has(candidate))
+    return columnName
+      ? `${tableAlias}.${escapeIdentifier(columnName)} AS ${escapeIdentifier(alias)}`
+      : `${fallback} AS ${escapeIdentifier(alias)}`
+  }
+  const nullableColumnRef = (columns, tableAlias, columnName) => columns.has(columnName) ? `NULLIF(${tableAlias}.${escapeIdentifier(columnName)}, '')` : null
+
+  const hostColumns = await getTableColumns('host_accounts')
+  const organizerColumns = await getTableColumns('organizer_role_accounts')
+  const appUserColumns = await getTableColumns('app_users')
+  const teamColumns = await getTableColumns('teams')
+  const scoreColumns = await getTableColumns('scores')
+  const tournamentColumns = await getTableColumns('tournaments')
+  const hostRoleColumns = await getTableColumns('host_role_accounts')
   const requestColumns = await getTableColumns('host_account_requests')
+
   const requestStateCodeColumn = requestColumns.has('state_code') ? 'state_code' : null
   const requestStateNameColumn = requestColumns.has('state_name') ? 'state_name' : null
   const requestReviewedByEmailColumn = requestColumns.has('reviewed_by_email') ? 'reviewed_by_email' : null
   const requestReviewedAtColumn = requestColumns.has('reviewed_at') ? 'reviewed_at' : null
   const requestApprovedHostAccountIdColumn = requestColumns.has('approved_host_account_id') ? 'approved_host_account_id' : null
-  const [[{ hostAccountRequestCount = 0 } = {}]] = await db.query("SELECT COUNT(*) AS hostAccountRequestCount FROM host_account_requests WHERE status = 'pending'")
+
   const admins = await listAdminUsers()
-  const [hosts] = await db.query('SELECT id, email, account_name, created_at FROM host_accounts ORDER BY created_at DESC LIMIT 25')
-  const [invites] = await db.query(`SELECT id, ${escapeIdentifier(inviteEmailColumn)} AS invitee_email, ${escapeIdentifier(inviteNameColumn)} AS invitee_name, ${escapeIdentifier(inviteCourseColumn)} AS golf_course_name, expires_at, consumed_at, created_at FROM host_account_invites ORDER BY created_at DESC LIMIT 25`)
-  const [users] = await db.query('SELECT id, email, name, emailVerified, createdAt FROM `user` ORDER BY createdAt DESC LIMIT 25')
+  const [hosts] = await db.query(`SELECT ${[
+    selectColumn(hostColumns, 'ha', ['id'], 'id'),
+    selectColumn(hostColumns, 'ha', ['email'], 'email'),
+    selectColumn(hostColumns, 'ha', ['account_name', 'golf_course_name', 'course_name', 'name'], 'account_name'),
+    selectColumn(hostColumns, 'ha', ['contact_name'], 'contact_name'),
+    selectColumn(hostColumns, 'ha', ['phone'], 'phone'),
+    selectColumn(hostColumns, 'ha', ['notes'], 'notes'),
+    selectColumn(hostColumns, 'ha', ['is_validated'], 'is_validated'),
+    selectColumn(hostColumns, 'ha', ['validated_at'], 'validated_at'),
+    selectColumn(hostColumns, 'ha', ['created_at'], 'created_at'),
+    selectColumn(hostColumns, 'ha', ['updated_at'], 'updated_at'),
+  ].join(', ')} FROM host_accounts ha ORDER BY ha.created_at DESC LIMIT 50`)
+  const [organizers] = await db.query(`SELECT ${[
+    selectColumn(organizerColumns, 'ora', ['id'], 'id'),
+    selectColumn(organizerColumns, 'ora', ['email'], 'email'),
+    selectColumn(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name'], 'organization_name'),
+    selectColumn(organizerColumns, 'ora', ['organizer_name'], 'organizer_name'),
+    selectColumn(organizerColumns, 'ora', ['contact_name'], 'contact_name'),
+    selectColumn(organizerColumns, 'ora', ['phone'], 'phone'),
+    selectColumn(organizerColumns, 'ora', ['notes'], 'notes'),
+    selectColumn(organizerColumns, 'ora', ['created_at'], 'created_at'),
+    selectColumn(organizerColumns, 'ora', ['updated_at'], 'updated_at'),
+  ].join(', ')} FROM organizer_role_accounts ora ORDER BY ora.created_at DESC LIMIT 50`)
+  const [users] = await db.query('SELECT id, email, name, emailVerified, createdAt, updatedAt FROM `user` ORDER BY createdAt DESC LIMIT 50')
+  const [appUsers] = await db.query(`SELECT ${[
+    selectColumn(appUserColumns, 'au', ['id'], 'id'),
+    selectColumn(appUserColumns, 'au', ['email'], 'email'),
+    selectColumn(appUserColumns, 'au', ['display_name', 'name'], 'display_name'),
+    selectColumn(appUserColumns, 'au', ['primary_state'], 'primary_state'),
+    selectColumn(appUserColumns, 'au', ['primary_city'], 'primary_city'),
+    selectColumn(appUserColumns, 'au', ['created_at'], 'created_at'),
+    selectColumn(appUserColumns, 'au', ['updated_at'], 'updated_at'),
+  ].join(', ')} FROM app_users au ORDER BY au.created_at DESC LIMIT 50`)
+  const [teams] = await db.query(`SELECT ${[
+    selectColumn(teamColumns, 'tm', ['id'], 'id'),
+    selectColumn(teamColumns, 'tm', ['name'], 'name'),
+    selectColumn(teamColumns, 'tm', ['created_by_email'], 'created_by_email'),
+    selectColumn(teamColumns, 'tm', ['created_at'], 'created_at'),
+    selectColumn(teamColumns, 'tm', ['updated_at'], 'updated_at'),
+  ].join(', ')} FROM teams tm ORDER BY tm.created_at DESC LIMIT 50`)
+  const [scores] = await db.query(`SELECT ${[
+    selectColumn(scoreColumns, 's', ['id'], 'id'),
+    selectColumn(scoreColumns, 's', ['mode'], 'mode'),
+    selectColumn(scoreColumns, 's', ['course'], 'course'),
+    selectColumn(scoreColumns, 's', ['created_by_email'], 'created_by_email'),
+    selectColumn(scoreColumns, 's', ['created_at'], 'created_at'),
+    selectColumn(scoreColumns, 's', ['updated_at'], 'updated_at'),
+  ].join(', ')} FROM scores s ORDER BY s.created_at DESC LIMIT 50`)
+  const [tournamentStatusCounts] = await db.query("SELECT COALESCE(NULLIF(status, ''), 'unknown') AS status, COUNT(*) AS count FROM tournaments GROUP BY COALESCE(NULLIF(status, ''), 'unknown') ORDER BY count DESC, status ASC")
+
+  const tournamentNameExpr = tournamentColumns.has('title')
+    ? "COALESCE(NULLIF(t.name, ''), NULLIF(t.title, ''), CONCAT('Tournament ', t.id))"
+    : "COALESCE(NULLIF(t.name, ''), CONCAT('Tournament ', t.id))"
+  const creatorParts = [
+    nullableColumnRef(tournamentColumns, 't', 'organizer_email'),
+    nullableColumnRef(organizerColumns, 'ora', 'email'),
+    nullableColumnRef(hostColumns, 'ha', 'email'),
+    nullableColumnRef(hostRoleColumns, 'hra', 'email'),
+    tournamentColumns.has('created_by_auth_user_id') ? 't.created_by_auth_user_id' : null,
+  ].filter(Boolean)
+  const golfCourseParts = [
+    nullableColumnRef(hostRoleColumns, 'hra', 'golf_course_name'),
+    nullableColumnRef(hostRoleColumns, 'hra', 'account_name'),
+    nullableColumnRef(hostColumns, 'ha', 'account_name'),
+    nullableColumnRef(hostColumns, 'ha', 'golf_course_name'),
+    nullableColumnRef(hostColumns, 'ha', 'course_name'),
+    nullableColumnRef(hostColumns, 'ha', 'name'),
+  ].filter(Boolean)
+  const createdBySelect = tournamentColumns.has('created_by_auth_user_id') ? 't.created_by_auth_user_id' : 'NULL AS created_by_auth_user_id'
+  const [tournaments] = await db.query(`
+    SELECT
+      t.id,
+      ${tournamentNameExpr} AS name,
+      COALESCE(NULLIF(t.status, ''), 'unknown') AS status,
+      t.created_at,
+      t.updated_at,
+      ${createdBySelect},
+      COALESCE(${creatorParts.join(', ') || 'NULL'}) AS creator,
+      COALESCE(${golfCourseParts.join(', ') || 'NULL'}) AS golf_course_name
+    FROM tournaments t
+    LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
+    LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
+    LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
+    ORDER BY t.created_at DESC
+    LIMIT 50
+  `)
+
   const requestSelectColumns = [
     'id',
     'first_name',
@@ -986,5 +900,18 @@ export async function listPortalData() {
     'created_at',
   ]
   const [requests] = await db.query(`SELECT ${requestSelectColumns.join(', ')} FROM host_account_requests ORDER BY created_at DESC LIMIT 50`)
-  return { summary: { userCount, appUserCount, teamCount, scoreCount, hostCount, inviteCount, hostAccountRequestCount }, admins, hosts, invites, users, requests }
+
+  return {
+    summary: { userCount, appUserCount, teamCount, scoreCount, hostCount, organizerCount, tournamentCount, hostAccountRequestCount },
+    admins,
+    hosts,
+    organizers,
+    tournaments,
+    tournamentStatusCounts,
+    users,
+    appUsers,
+    teams,
+    scores,
+    requests,
+  }
 }

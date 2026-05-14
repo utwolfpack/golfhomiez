@@ -37,6 +37,15 @@ function tournamentStats(tournament: Tournament) {
   }
 }
 
+function tournamentCreatedTimestamp(tournament: Tournament) {
+  const parsed = Date.parse(String(tournament.createdAt || ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function sortTournamentsByCreatedDescending(tournaments: Tournament[] = []) {
+  return [...tournaments].sort((left, right) => tournamentCreatedTimestamp(right) - tournamentCreatedTimestamp(left))
+}
+
 function TournamentCapacitySummary({ tournament }: { tournament: Tournament }) {
   const stats = tournamentStats(tournament)
   return (
@@ -153,6 +162,7 @@ export default function HostPortal() {
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
   const [sendingInviteId, setSendingInviteId] = useState<string | null>(null)
+  const [createTournamentOpen, setCreateTournamentOpen] = useState(false)
 
   async function loadPortal() {
     const result = await fetchHostPortal()
@@ -208,6 +218,7 @@ export default function HostPortal() {
         setSuccess(`Tournament created with identifier ${created.tournament.tournamentIdentifier}.`)
       }
       setForm(EMPTY_FORM)
+      setCreateTournamentOpen(false)
       await loadPortal()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not create tournament.'
@@ -260,6 +271,8 @@ export default function HostPortal() {
     }
   }
 
+  const hostedTournaments = sortTournamentsByCreatedDescending(portalData?.tournaments || [])
+
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
@@ -277,30 +290,53 @@ export default function HostPortal() {
               <div style={{ marginTop: 10 }}><Link className="btn" to="/host/portal/profile">Update host profile</Link></div>
             </div>
 
-            <form onSubmit={onCreateTournament} className="formStack">
-              <div>
-                <label className="label">Tournament name</label>
-                <input className="input" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Spring Member Classic" />
+            <section className="card" style={{ padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div>
+                  <strong>Create tournament</strong>
+                  <div className="small">The create tournament panel starts minimized when you enter the host portal.</div>
+                </div>
+                <button
+                  className="btn btnPrimary"
+                  type="button"
+                  aria-expanded={createTournamentOpen}
+                  aria-controls="host-create-tournament-panel"
+                  onClick={() => {
+                    const nextOpen = !createTournamentOpen
+                    setCreateTournamentOpen(nextOpen)
+                    logFrontendEvent({ category: 'host.portal', message: nextOpen ? 'host_tournament_create_panel_opened' : 'host_tournament_create_panel_minimized' })
+                  }}
+                >
+                  {createTournamentOpen ? 'Minimize create tournament' : 'Create tournament'}
+                </button>
               </div>
-              <div>
-                <label className="label">Tournament organizer email</label>
-                <input className="input" type="email" value={form.organizerEmail || ''} onChange={(e) => setForm((prev) => ({ ...prev, organizerEmail: e.target.value }))} placeholder="organizer@example.com" />
-              </div>
-              <div>
-                <label className="label">Number of teams to play in the tournament</label>
-                <input className="input" type="number" min={1} step={1} value={form.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setForm((prev) => ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }))} />
-              </div>
-              <TournamentTemplateFields value={form} onChange={(next) => setForm((prev) => ({ ...prev, ...next }))} />
-              <div>
-                <button className="btn btnPrimary" disabled={saving}>{saving ? 'Creating…' : 'Create tournament'}</button>
-              </div>
-            </form>
+              {createTournamentOpen ? (
+                <form id="host-create-tournament-panel" onSubmit={onCreateTournament} className="formStack" style={{ marginTop: 16 }}>
+                  <div>
+                    <label className="label">Tournament name</label>
+                    <input className="input" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Spring Member Classic" />
+                  </div>
+                  <div>
+                    <label className="label">Tournament organizer email</label>
+                    <input className="input" type="email" value={form.organizerEmail || ''} onChange={(e) => setForm((prev) => ({ ...prev, organizerEmail: e.target.value }))} placeholder="organizer@example.com" />
+                  </div>
+                  <div>
+                    <label className="label">Number of teams to play in the tournament</label>
+                    <input className="input" type="number" min={1} step={1} value={form.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setForm((prev) => ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }))} />
+                  </div>
+                  <TournamentTemplateFields value={form} onChange={(next) => setForm((prev) => ({ ...prev, ...next }))} />
+                  <div>
+                    <button className="btn btnPrimary" disabled={saving}>{saving ? 'Creating…' : 'Create tournament'}</button>
+                  </div>
+                </form>
+              ) : null}
+            </section>
 
             <div>
               <strong>Tournaments hosted here</strong>
               <div className="small">Click a tile to modify the tournament. Published tournaments show a golfer registration URL.</div>
               <div className="formStack" style={{ marginTop: 12 }}>
-                {(portalData.tournaments || []).length === 0 ? <div className="small">No tournaments created yet.</div> : (portalData.tournaments || []).map((tournament) => (
+                {hostedTournaments.length === 0 ? <div className="small">No tournaments created yet.</div> : hostedTournaments.map((tournament) => (
                   <div key={tournament.id} className="card" role="button" tabIndex={0} onClick={() => editingId === tournament.id ? undefined : startEditing(tournament)} onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && editingId !== tournament.id) startEditing(tournament) }} style={{ padding: 16, cursor: editingId === tournament.id ? 'default' : 'pointer' }}>
                     {editingId === tournament.id && editForm ? (
                       <form onSubmit={onSaveTournament} className="formStack" onClick={(e) => e.stopPropagation()}>

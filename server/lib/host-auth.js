@@ -135,25 +135,6 @@ async function resolvePrimaryNameColumn(db) {
 
 export async function ensureHostAuthSchema(source) {
   const db = getDb(source)
-  await db.query(`CREATE TABLE IF NOT EXISTS host_account_invites (
-    id VARCHAR(64) NOT NULL PRIMARY KEY,
-    email VARCHAR(191) NOT NULL,
-    invitee_email VARCHAR(191) NULL,
-    name VARCHAR(191) NULL,
-    invitee_name VARCHAR(191) NULL,
-    account_name VARCHAR(191) NULL,
-    course_name VARCHAR(191) NULL,
-    golf_course_name VARCHAR(191) NULL,
-    security_key VARCHAR(255) NULL,
-    security_key_hash VARCHAR(255) NULL,
-    admin_user_id VARCHAR(64) NULL,
-    invited_by_admin_id VARCHAR(64) NULL,
-    consumed_at DATETIME NULL,
-    revoked_at DATETIME NULL,
-    expires_at DATETIME NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
 
   await db.query(`CREATE TABLE IF NOT EXISTS host_accounts (
     id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -209,26 +190,6 @@ export async function ensureHostAuthSchema(source) {
   return true
 }
 
-async function findActiveInvite(db, email, securityKey) {
-  const columns = await getColumns(db, 'host_account_invites')
-  const emailCol = columns.has('invitee_email') ? 'invitee_email' : 'email'
-  const keyCol = columns.has('security_key_hash') ? 'security_key_hash' : (columns.has('security_key') ? 'security_key' : null)
-  const activeClauses = ['consumed_at IS NULL']
-  if (columns.has('revoked_at')) activeClauses.push('revoked_at IS NULL')
-  if (columns.has('expires_at')) activeClauses.push('(expires_at IS NULL OR expires_at > NOW())')
-  const [rows] = await db.execute(
-    `SELECT * FROM host_account_invites WHERE ${emailCol} = ? AND ${activeClauses.join(' AND ')} ORDER BY created_at DESC LIMIT 10`,
-    [email],
-  )
-  const hashed = sha256(securityKey)
-  return rows.find((row) => {
-    if (!keyCol) return false
-    const stored = row[keyCol]
-    return stored === securityKey || stored === hashed
-  }) || null
-}
-
-
 async function buildInsertParts(db, tableName, assignments) {
   const rows = await getColumnRows(db, tableName)
   const rowMap = new Map(rows.map((row) => [row.COLUMN_NAME, row]))
@@ -255,81 +216,6 @@ async function buildInsertParts(db, tableName, assignments) {
   return { rows, rowMap, columns, values, params, missingRequired }
 }
 
-export async function redeemHostInvite(source, payload = {}) {
-  const db = getDb(source)
-  await ensureHostAuthSchema(db)
-  const email = String(payload.email || '').trim().toLowerCase()
-  const securityKey = String(payload.securityKey || payload.security_key || '').trim()
-  const accountName = String(payload.golfCourseName || payload.accountName || payload.courseName || payload.name || '').trim()
-  const password = String(payload.password || '')
-  if (!email || !securityKey || !accountName || !password) throw new Error('Missing required host registration fields')
-
-  const invite = await findActiveInvite(db, email, securityKey)
-  if (!invite) throw new Error('Invalid invite email or security key')
-
-  const accountColumns = await getColumns(db, 'host_accounts')
-  const nameCols = ['golf_course_name', 'account_name', 'course_name', 'name'].filter((c) => accountColumns.has(c))
-  const hostId = randomId(32)
-  const authUserId = `host:${email}`
-  const passwordHash = hashPassword(password)
-  const insertCols = []
-  const insertVals = []
-  const insertParams = []
-
-  insertCols.push('id'); insertVals.push('?'); insertParams.push(hostId)
-  if (accountColumns.has('email')) { insertCols.push('email'); insertVals.push('?'); insertParams.push(email) }
-  if (accountColumns.has('auth_user_id')) { insertCols.push('auth_user_id'); insertVals.push('?'); insertParams.push(authUserId) }
-  if (accountColumns.has('password_hash')) { insertCols.push('password_hash'); insertVals.push('?'); insertParams.push(passwordHash) }
-  if (accountColumns.has('invite_id')) { insertCols.push('invite_id'); insertVals.push('?'); insertParams.push(invite.id) }
-  if (accountColumns.has('reset_email')) { insertCols.push('reset_email'); insertVals.push('?'); insertParams.push(email) }
-  if (accountColumns.has('is_validated')) { insertCols.push('is_validated'); insertVals.push('?'); insertParams.push(1) }
-  if (accountColumns.has('validated_at')) { insertCols.push('validated_at'); insertVals.push('NOW()') }
-  for (const col of nameCols) {
-    insertCols.push(col)
-    insertVals.push('?')
-    insertParams.push(accountName)
-  }
-
-  const updateAssignments = []
-  if (accountColumns.has('password_hash')) updateAssignments.push('password_hash = VALUES(password_hash)')
-  if (accountColumns.has('invite_id')) updateAssignments.push('invite_id = VALUES(invite_id)')
-  if (accountColumns.has('reset_email')) updateAssignments.push('reset_email = VALUES(reset_email)')
-  if (accountColumns.has('auth_user_id')) updateAssignments.push('auth_user_id = VALUES(auth_user_id)')
-  if (accountColumns.has('is_validated')) updateAssignments.push('is_validated = 1')
-  if (accountColumns.has('validated_at')) updateAssignments.push('validated_at = NOW()')
-  for (const col of nameCols) updateAssignments.push(`${col} = VALUES(${col})`)
-  if (accountColumns.has('updated_at')) updateAssignments.push('updated_at = CURRENT_TIMESTAMP')
-
-  const hasEmailColumn = accountColumns.has('email')
-  if (hasEmailColumn && updateAssignments.length) {
-    await db.execute(
-      `INSERT INTO host_accounts (${insertCols.join(', ')}) VALUES (${insertVals.join(', ')}) ON DUPLICATE KEY UPDATE ${updateAssignments.join(', ')}`,
-      insertParams,
-    )
-  } else {
-    await db.execute(`INSERT INTO host_accounts (${insertCols.join(', ')}) VALUES (${insertVals.join(', ')})`, insertParams)
-  }
-
-  const inviteColumns = await getColumns(db, 'host_account_invites')
-  const updates = []
-  if (inviteColumns.has('consumed_at')) updates.push('consumed_at = NOW()')
-  if (inviteColumns.has('updated_at')) updates.push('updated_at = CURRENT_TIMESTAMP')
-  if (updates.length) await db.execute(`UPDATE host_account_invites SET ${updates.join(', ')} WHERE id = ?`, [invite.id])
-
-  const hostAccount = await getHostAccountByEmail(db, email)
-  const resolvedHostAccount = hostAccount || {
-    id: hostId,
-    email,
-    auth_user_id: authUserId,
-    invite_id: invite.id,
-    reset_email: email,
-    is_validated: 1,
-    validated_at: new Date(),
-    golf_course_name: accountName,
-  }
-  const session = await createHostSession(db, resolvedHostAccount.id || hostId)
-  return { hostAccount: resolvedHostAccount, session }
-}
 
 export async function getHostAccountByEmail(source, email) {
   const db = getDb(source)
@@ -337,7 +223,7 @@ export async function getHostAccountByEmail(source, email) {
   const nameCol = await resolvePrimaryNameColumn(db)
   const selectName = nameCol ? `${nameCol} AS golf_course_name,` : ''
   const [rows] = await db.execute(
-    `SELECT id, email, auth_user_id, password_hash, invite_id, reset_email, is_validated, validated_at, ${selectName} created_at, updated_at FROM host_accounts WHERE email = ? LIMIT 1`,
+    `SELECT id, email, auth_user_id, password_hash, invite_id, reset_email, contact_name, phone, website_url, notes, is_validated, validated_at, ${selectName} created_at, updated_at FROM host_accounts WHERE email = ? LIMIT 1`,
     [email],
   )
   return rows[0] || null
