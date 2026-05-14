@@ -1274,6 +1274,45 @@ ON DUPLICATE KEY UPDATE
     },
   },
 
+  {
+    version: '20260514_038',
+    name: 'app_user_phone_sms_reset_support',
+    filename: '20260514_038_app_user_phone_sms_reset_support.sql',
+    async isSatisfied(db) {
+      const appUsersReady = !(await tableExists(db, 'app_users')) || (
+        await columnExists(db, 'app_users', 'phone') &&
+        await columnExists(db, 'app_users', 'phone_updated_at')
+      )
+      return appUsersReady && await tableExists(db, 'organizer_password_reset_tokens')
+    },
+    async getSql(db) {
+      const statements = []
+      if (await tableExists(db, 'app_users')) {
+        if (!(await columnExists(db, 'app_users', 'phone'))) statements.push('ALTER TABLE app_users ADD COLUMN phone VARCHAR(64) NULL AFTER name')
+        if (!(await columnExists(db, 'app_users', 'phone_updated_at'))) statements.push('ALTER TABLE app_users ADD COLUMN phone_updated_at DATETIME NULL AFTER phone')
+      }
+      if (!(await tableExists(db, 'organizer_password_reset_tokens'))) {
+        statements.push(`CREATE TABLE organizer_password_reset_tokens (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  organizer_account_id VARCHAR(64) NOT NULL,
+  token_hash VARCHAR(255) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_organizer_reset_account (organizer_account_id),
+  INDEX idx_organizer_reset_token_hash (token_hash),
+  INDEX idx_organizer_reset_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`)
+      }
+      if (await tableExists(db, 'organizer_password_reset_tokens')) {
+        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_account'))) statements.push('CREATE INDEX idx_organizer_reset_account ON organizer_password_reset_tokens (organizer_account_id)')
+        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_token_hash'))) statements.push('CREATE INDEX idx_organizer_reset_token_hash ON organizer_password_reset_tokens (token_hash)')
+        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_expires'))) statements.push('CREATE INDEX idx_organizer_reset_expires ON organizer_password_reset_tokens (expires_at)')
+      }
+      return statements.join(';\n') || '-- app user phone and organizer reset support already installed'
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {
