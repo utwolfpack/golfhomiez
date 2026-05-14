@@ -15,11 +15,12 @@ import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInf
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
 import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
 import { sendMail } from './mailer.js'
+import { sendSms, SMS_PROFILE_UPDATE_MESSAGE } from './sms.js'
 import { generateQrSvg } from './lib/qr-code.js'
 import { listScheduledJobs, runScheduledJob, startScheduledJobRunner } from './lib/scheduled-jobs.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
-import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
+import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerPasswordReset, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, resetOrganizerPassword, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
 import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, consumeAdminResetToken, deleteAdminUser, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
 import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listHostManagedTournaments, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload } from './lib/rbac.js'
 
@@ -72,7 +73,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id', 'X-Request-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Timezone', 'X-Correlation-Id', 'X-Request-Id', 'X-Password-Reset-Delivery'],
 }))
 app.options('*', cors())
 app.use(requestCorrelationMiddleware)
@@ -502,6 +503,7 @@ function normalizeProfileValue(value) {
 }
 
 function sanitizeProfilePayload(body = {}) {
+  const phone = sanitizeProfilePhone(body.phone, 64)
   const primaryCity = normalizeProfileValue(body.primaryCity)
   const primaryState = normalizeProfileValue(body.primaryState)
   const primaryZipCode = normalizeProfileValue(body.primaryZipCode)
@@ -509,6 +511,9 @@ function sanitizeProfilePayload(body = {}) {
   const cannabisPreference = normalizeProfileValue(body.cannabisPreference) || ''
   const sobrietyPreference = normalizeProfileValue(body.sobrietyPreference) || ''
 
+  if (!phone) {
+    throw new Error('Phone number is required.')
+  }
   if (!primaryCity || !primaryState || !primaryZipCode) {
     throw new Error('City, state, and zip code are required.')
   }
@@ -520,6 +525,7 @@ function sanitizeProfilePayload(body = {}) {
   }
 
   return {
+    phone,
     primaryCity,
     primaryState,
     primaryZipCode,
@@ -541,7 +547,7 @@ async function ensureAppUserProfileRow(user) {
   )
 
   const [rows] = await pool.execute(
-    `SELECT id, auth_user_id, email, name,
+    `SELECT id, auth_user_id, email, name, phone, phone_updated_at,
             primary_city, primary_state, primary_zip_code,
             alcohol_preference, cannabis_preference, sobriety_preference,
             profile_enriched_at, created_at, updated_at
@@ -559,6 +565,8 @@ function mapProfileRow(row) {
     id: row.id,
     email: row.email,
     name: row.name,
+    phone: row.phone || '',
+    phoneUpdatedAt: row.phone_updated_at || null,
     primaryCity: row.primary_city || '',
     primaryState: row.primary_state || '',
     primaryZipCode: row.primary_zip_code || '',
@@ -566,7 +574,7 @@ function mapProfileRow(row) {
     cannabisPreference: row.cannabis_preference || '',
     sobrietyPreference: row.sobriety_preference || '',
     profileEnrichedAt: row.profile_enriched_at || null,
-    needsEnrichment: !row.profile_enriched_at,
+    needsEnrichment: !row.profile_enriched_at || !row.phone,
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
   }
@@ -1553,7 +1561,7 @@ async function proxyClientApp(req, res, next) {
   }
 }
 
-app.get(['/register', '/login', '/verify-contact', '/support', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/portal/profile'], async (req, res, next) => {
+app.get(['/register', '/login', '/verify-contact', '/support', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/request-password-reset', '/organizer/reset-password', '/organizer/portal/profile'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
 
@@ -1893,9 +1901,10 @@ app.post('/api/host/request-password-reset', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email)
     if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const deliveryMethod = String(req.body?.deliveryMethod || '').trim().toLowerCase() === 'sms' ? 'sms' : 'email'
     const db = getPool()
-    await createHostPasswordReset(db, { email, resetUrlBase: getHostAppBaseUrl(req) })
-    logApi('host_password_reset_requested', { ...requestContext(req), email })
+    await createHostPasswordReset(db, { email, resetUrlBase: getHostAppBaseUrl(req), deliveryMethod })
+    logApi('host_password_reset_requested', { ...requestContext(req), email, deliveryMethod })
     res.json({ ok: true })
   } catch (error) {
     logRouteError('Host password reset request error', req, error)
@@ -2211,6 +2220,40 @@ app.post('/api/organizer/login', requireStorage, async (req, res) => {
   }
 })
 
+app.post('/api/organizer/request-password-reset', requireStorage, async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const deliveryMethod = String(req.body?.deliveryMethod || '').trim().toLowerCase() === 'sms' ? 'sms' : 'email'
+    if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const db = getPool()
+    await createOrganizerPasswordReset(db, { email, resetUrlBase: getHostAppBaseUrl(req), deliveryMethod })
+    logApi('organizer_password_reset_requested', { ...requestContext(req), email, deliveryMethod })
+    res.json({ ok: true })
+  } catch (error) {
+    logRouteError('Organizer password reset request error', req, error)
+    res.status(500).json({ message: 'Could not start organizer password reset' })
+  }
+})
+
+app.post('/api/organizer/reset-password', requireStorage, async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim()
+    const password = String(req.body?.password || '')
+    if (!token) return res.status(400).json({ message: 'Reset token required' })
+    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    const db = getPool()
+    await resetOrganizerPassword(db, { token, password })
+    logApi('organizer_password_reset_completed_route', { ...requestContext(req) })
+    res.json({ ok: true })
+  } catch (error) {
+    if (error instanceof Error && /invalid or expired/i.test(error.message)) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Organizer password reset error', req, error)
+    res.status(500).json({ message: 'Could not reset organizer password' })
+  }
+})
+
 app.post('/api/organizer/logout', requireStorage, async (req, res) => {
   try {
     const cookies = Object.fromEntries(
@@ -2514,7 +2557,7 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
 app.get('/api/profile', requireStorage, authMiddleware, async (req, res) => {
   try {
     const row = await ensureAppUserProfileRow(req.user)
-    logApi('profile_fetch_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at })
+    logApi('profile_fetch_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone })
     res.json(mapProfileRow(row))
   } catch (error) {
     logRouteError('Profile fetch error', req, error)
@@ -2526,12 +2569,16 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
   try {
     const profile = sanitizeProfilePayload(req.body || {})
     logApi('profile_save_started', { ...requestContext(req), profile })
-    await ensureAppUserProfileRow(req.user)
+    const existingRow = await ensureAppUserProfileRow(req.user)
+    const previousPhone = String(existingRow?.phone || '').trim()
+    const phoneChanged = previousPhone !== profile.phone
     const pool = getPool()
     await pool.execute(
       `UPDATE app_users
           SET email = ?,
               name = ?,
+              phone = ?,
+              phone_updated_at = CASE WHEN COALESCE(phone, '') <> ? THEN NOW() ELSE phone_updated_at END,
               primary_city = ?,
               primary_state = ?,
               primary_zip_code = ?,
@@ -2543,6 +2590,8 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
       [
         normalizeEmail(req.user.email),
         req.user.name || null,
+        profile.phone,
+        profile.phone,
         profile.primaryCity,
         profile.primaryState,
         profile.primaryZipCode,
@@ -2553,10 +2602,30 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
       ],
     )
     const row = await ensureAppUserProfileRow(req.user)
-    logApi('profile_save_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at, profile: mapProfileRow(row) })
+    if (profile.phone && phoneChanged) {
+      try {
+        logApi('profile_phone_sms_notification_started', { ...requestContext(req), authUserId: req.user.id })
+        const smsResult = await sendSms({
+          to: profile.phone,
+          subject: 'Golf Homiez profile updated',
+          body: SMS_PROFILE_UPDATE_MESSAGE,
+          tag: 'golfhomiez-profile-updated',
+        })
+        logApi(smsResult?.fallback ? 'profile_phone_sms_notification_fallback' : 'profile_phone_sms_notification_sent', {
+          ...requestContext(req),
+          authUserId: req.user.id,
+          provider: smsResult?.provider || null,
+          reason: smsResult?.reason || null,
+          messageId: smsResult?.messageId || null,
+        })
+      } catch (smsError) {
+        logRouteError('Profile phone SMS notification error', req, smsError, { authUserId: req.user.id })
+      }
+    }
+    logApi('profile_save_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone, profile: mapProfileRow(row) })
     res.json(mapProfileRow(row))
   } catch (error) {
-    if (error instanceof Error && /required|Select|Sober golf/.test(error.message)) {
+    if (error instanceof Error && /required|Select|Sober golf|Phone number/i.test(error.message)) {
       logApi('profile_save_validation_failed', { ...requestContext(req), validationError: error.message })
       return res.status(400).json({ message: error.message })
     }
@@ -3031,9 +3100,10 @@ app.post('/api/host/request-password-reset', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email)
     if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
+    const deliveryMethod = String(req.body?.deliveryMethod || '').trim().toLowerCase() === 'sms' ? 'sms' : 'email'
     const db = getPool()
-    await createHostPasswordReset(db, { email, resetUrlBase: getHostAppBaseUrl(req) })
-    logApi('host_password_reset_requested', { ...requestContext(req), email })
+    await createHostPasswordReset(db, { email, resetUrlBase: getHostAppBaseUrl(req), deliveryMethod })
+    logApi('host_password_reset_requested', { ...requestContext(req), email, deliveryMethod })
     res.json({ ok: true })
   } catch (error) {
     logRouteError('Host password reset request error', req, error)
