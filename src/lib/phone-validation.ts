@@ -1,6 +1,5 @@
 export const PHONE_PATTERN = '^\\+?[1-9][0-9\\s().-]{7,19}$'
 export const PHONE_VALIDATION_MESSAGE = 'Enter a valid phone number using digits, spaces, dashes, periods, parentheses, and an optional leading +.'
-export const PHONE_REQUIRED_MESSAGE = 'Phone number is required.'
 
 export function sanitizePhoneInput(value: string) {
   return value
@@ -28,6 +27,6 @@ export function validateOptionalPhoneNumber(value?: string | null) {
 
 export function validateRequiredPhoneNumber(value?: string | null) {
   const phone = normalizeOptionalPhone(value)
-  if (!phone) return PHONE_REQUIRED_MESSAGE
+  if (!phone) return 'Phone number is required.'
   return isValidPhoneNumber(phone) ? null : PHONE_VALIDATION_MESSAGE
 }

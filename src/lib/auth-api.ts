@@ -154,20 +154,12 @@ export async function getSessionAuth() {
   }, 'auth_get_session')
 }
 
-export type PasswordResetDeliveryMethod = 'email' | 'sms'
-
-function getPasswordResetHeaders(deliveryMethod: PasswordResetDeliveryMethod) {
-  const headers = getCommonHeaders()
-  headers.set('X-Password-Reset-Delivery', deliveryMethod)
-  return headers
-}
-
-export async function forgotPassword(email: string, redirectTo: string, deliveryMethod: PasswordResetDeliveryMethod = 'email') {
+export async function forgotPassword(email: string, redirectTo: string) {
   return authFetch<{ ok?: boolean }>(`${AUTH_BASE}/request-password-reset`, {
     method: 'POST',
-    headers: getPasswordResetHeaders(deliveryMethod),
-    body: JSON.stringify({ email, redirectTo, deliveryMethod }),
-  }, `auth_request_password_reset_${deliveryMethod}`)
+    headers: getCommonHeaders(),
+    body: JSON.stringify({ email, redirectTo }),
+  }, 'auth_request_password_reset')
 }
 
 export async function resetPassword(token: string, newPassword: string) {
