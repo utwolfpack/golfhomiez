@@ -23,10 +23,16 @@ export async function logoutOrganizerAccount() {
   return requestJson<null>('/api/organizer/logout', { method: 'POST' })
 }
 
-export async function requestOrganizerPasswordReset(email: string) {
+export async function fetchOrganizerSessionPortal() {
+  return requestJson<OrganizerPortalSummary>('/api/organizer/portal')
+}
+
+export type PasswordResetDeliveryMethod = 'email' | 'sms'
+
+export async function requestOrganizerPasswordReset(email: string, deliveryMethod: PasswordResetDeliveryMethod = 'email') {
   return requestJson<{ ok: boolean }>('/api/organizer/request-password-reset', {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, deliveryMethod }),
   })
 }
 
@@ -35,8 +41,4 @@ export async function resetOrganizerPassword(token: string, password: string) {
     method: 'POST',
     body: JSON.stringify({ token, password }),
   })
-}
-
-export async function fetchOrganizerSessionPortal() {
-  return requestJson<OrganizerPortalSummary>('/api/organizer/portal')
 }

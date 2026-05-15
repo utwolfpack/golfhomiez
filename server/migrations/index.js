@@ -1275,53 +1275,41 @@ ON DUPLICATE KEY UPDATE
   },
 
   {
-    version: '20260515_038',
-    name: 'user_profile_phone_and_organizer_password_resets',
-    filename: '20260515_038_user_profile_phone_and_organizer_password_resets.sql',
+    version: '20260514_038',
+    name: 'app_user_phone_sms_reset_support',
+    filename: '20260514_038_app_user_phone_sms_reset_support.sql',
     async isSatisfied(db) {
-      return (
-        await tableExists(db, 'app_users') &&
+      const appUsersReady = !(await tableExists(db, 'app_users')) || (
         await columnExists(db, 'app_users', 'phone') &&
-        await tableExists(db, 'organizer_password_reset_tokens') &&
-        await columnExists(db, 'organizer_password_reset_tokens', 'organizer_account_id') &&
-        await columnExists(db, 'organizer_password_reset_tokens', 'token_hash') &&
-        await columnExists(db, 'organizer_password_reset_tokens', 'expires_at') &&
-        await columnExists(db, 'organizer_password_reset_tokens', 'used_at') &&
-        await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_password_reset_token')
+        await columnExists(db, 'app_users', 'phone_updated_at')
       )
+      return appUsersReady && await tableExists(db, 'organizer_password_reset_tokens')
     },
     async getSql(db) {
       const statements = []
       if (await tableExists(db, 'app_users')) {
         if (!(await columnExists(db, 'app_users', 'phone'))) statements.push('ALTER TABLE app_users ADD COLUMN phone VARCHAR(64) NULL AFTER name')
-      } else {
-        statements.push('-- app_users table does not exist; earlier app_user_profiles migration creates it for fresh installs')
+        if (!(await columnExists(db, 'app_users', 'phone_updated_at'))) statements.push('ALTER TABLE app_users ADD COLUMN phone_updated_at DATETIME NULL AFTER phone')
       }
       if (!(await tableExists(db, 'organizer_password_reset_tokens'))) {
-        statements.push(`CREATE TABLE IF NOT EXISTS organizer_password_reset_tokens (
+        statements.push(`CREATE TABLE organizer_password_reset_tokens (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   organizer_account_id VARCHAR(64) NOT NULL,
   token_hash VARCHAR(255) NOT NULL,
   expires_at DATETIME NOT NULL,
   used_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_organizer_password_reset_account (organizer_account_id),
-  INDEX idx_organizer_password_reset_token (token_hash),
-  INDEX idx_organizer_password_reset_expires (expires_at)
+  INDEX idx_organizer_reset_account (organizer_account_id),
+  INDEX idx_organizer_reset_token_hash (token_hash),
+  INDEX idx_organizer_reset_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`)
-      } else {
-        if (!(await columnExists(db, 'organizer_password_reset_tokens', 'organizer_account_id'))) statements.push('ALTER TABLE organizer_password_reset_tokens ADD COLUMN organizer_account_id VARCHAR(64) NOT NULL AFTER id')
-        if (!(await columnExists(db, 'organizer_password_reset_tokens', 'token_hash'))) statements.push('ALTER TABLE organizer_password_reset_tokens ADD COLUMN token_hash VARCHAR(255) NOT NULL AFTER organizer_account_id')
-        if (!(await columnExists(db, 'organizer_password_reset_tokens', 'expires_at'))) statements.push('ALTER TABLE organizer_password_reset_tokens ADD COLUMN expires_at DATETIME NOT NULL AFTER token_hash')
-        if (!(await columnExists(db, 'organizer_password_reset_tokens', 'used_at'))) statements.push('ALTER TABLE organizer_password_reset_tokens ADD COLUMN used_at DATETIME NULL AFTER expires_at')
-        if (!(await columnExists(db, 'organizer_password_reset_tokens', 'created_at'))) statements.push('ALTER TABLE organizer_password_reset_tokens ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER used_at')
-        if (!(await columnExists(db, 'organizer_password_reset_tokens', 'updated_at'))) statements.push('ALTER TABLE organizer_password_reset_tokens ADD COLUMN updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP AFTER created_at')
-        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_password_reset_account'))) statements.push('CREATE INDEX idx_organizer_password_reset_account ON organizer_password_reset_tokens (organizer_account_id)')
-        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_password_reset_token'))) statements.push('CREATE INDEX idx_organizer_password_reset_token ON organizer_password_reset_tokens (token_hash)')
-        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_password_reset_expires'))) statements.push('CREATE INDEX idx_organizer_password_reset_expires ON organizer_password_reset_tokens (expires_at)')
       }
-      return statements.join(';\n') || '-- user profile phone and organizer password reset schema already exists'
+      if (await tableExists(db, 'organizer_password_reset_tokens')) {
+        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_account'))) statements.push('CREATE INDEX idx_organizer_reset_account ON organizer_password_reset_tokens (organizer_account_id)')
+        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_token_hash'))) statements.push('CREATE INDEX idx_organizer_reset_token_hash ON organizer_password_reset_tokens (token_hash)')
+        if (!(await indexExists(db, 'organizer_password_reset_tokens', 'idx_organizer_reset_expires'))) statements.push('CREATE INDEX idx_organizer_reset_expires ON organizer_password_reset_tokens (expires_at)')
+      }
+      return statements.join(';\n') || '-- app user phone and organizer reset support already installed'
     },
   },
 

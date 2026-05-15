@@ -2,7 +2,6 @@ import { FormEvent, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { resetOrganizerPassword } from '../lib/organizer-auth'
-import { logFrontendEvent } from '../lib/frontend-logger'
 
 export default function OrganizerResetPassword() {
   const [params] = useSearchParams()
@@ -23,16 +22,12 @@ export default function OrganizerResetPassword() {
       if (!token) throw new Error('Reset token missing from the URL')
       if (password.length < 8) throw new Error('Password must be at least 8 characters')
       if (password !== confirmPassword) throw new Error('Passwords do not match')
-      logFrontendEvent({ category: 'organizer.password_reset', message: 'organizer_password_reset_submit_started', data: { hasToken: Boolean(token) } })
       const result = await resetOrganizerPassword(token, password)
       if (!result.response.ok) throw new Error((result.data as any)?.message || 'Could not reset organizer password')
       setMessage('Organizer password updated. Redirecting to organizer login…')
-      logFrontendEvent({ category: 'organizer.password_reset', message: 'organizer_password_reset_submit_succeeded', data: { hasToken: Boolean(token) } })
       setTimeout(() => navigate('/organizer/login', { replace: true }), 1200)
     } catch (err: any) {
-      const errMessage = err?.message || 'Could not reset organizer password'
-      setError(errMessage)
-      logFrontendEvent({ category: 'organizer.password_reset', level: 'error', message: 'organizer_password_reset_submit_failed', data: { hasToken: Boolean(token), error: errMessage } })
+      setError(err?.message || 'Could not reset organizer password')
     } finally {
       setBusy(false)
     }
@@ -45,11 +40,11 @@ export default function OrganizerResetPassword() {
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">New password</label>
-            <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a new organizer password" required minLength={8} />
+            <input className="input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Create a new organizer password" />
           </div>
           <div>
             <label className="label">Confirm password</label>
-            <input className="input" type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter the organizer password" required minLength={8} />
+            <input className="input" type="password" autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter the organizer password" />
           </div>
           {message ? <div className="small" style={{ color: '#166534' }}>{message}</div> : null}
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}

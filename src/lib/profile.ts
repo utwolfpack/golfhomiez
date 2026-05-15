@@ -5,6 +5,7 @@ export type UserProfile = {
   email: string
   name?: string | null
   phone: string
+  phoneUpdatedAt?: string | null
   primaryCity: string
   primaryState: string
   primaryZipCode: string
