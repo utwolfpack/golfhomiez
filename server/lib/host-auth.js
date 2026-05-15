@@ -1,8 +1,6 @@
 import crypto from 'crypto'
 import { sendMail } from '../mailer.js'
-import { sendSms } from '../sms.js'
 import { getPool } from '../db.js'
-import { getCorrelationId, logApi } from './logger.js'
 
 const HOST_SESSION_COOKIE = 'golfhomiez_host_session'
 const HOST_RESET_TTL_MS = 1000 * 60 * 60
@@ -380,7 +378,6 @@ export async function createHostPasswordReset(source, identifier) {
     ? String(identifier || '').trim().toLowerCase()
     : String(identifier?.email || identifier?.identifier || '').trim().toLowerCase()
   const resetUrlBase = typeof identifier === 'object' && identifier ? String(identifier.resetUrlBase || '').trim() : ''
-  const deliveryMethod = typeof identifier === 'object' && identifier && String(identifier.deliveryMethod || '').trim().toLowerCase() === 'sms' ? 'sms' : 'email'
   const host = await getHostAccountByEmail(db, normalizedIdentifier)
   if (!host) return { ok: true }
   const token = randomId(32)
@@ -405,44 +402,11 @@ export async function createHostPasswordReset(source, identifier) {
   await db.execute(`INSERT INTO host_password_reset_tokens (${columns.join(', ')}) VALUES (${values.join(', ')})`, params)
   const appOrigin = resetUrlBase || process.env.APP_ORIGIN || process.env.CLIENT_ORIGIN || (process.env.BETTER_AUTH_URL || '')
   const resetUrl = `${appOrigin.replace(/\/$/, '')}/host/reset-password?token=${encodeURIComponent(token)}`
-
-  if (deliveryMethod === 'sms') {
-    const phone = String(host.phone || '').trim()
-    if (phone) {
-      const smsResult = await sendSms({
-        to: phone,
-        subject: 'GolfHomiez host password reset',
-        body: `Reset your GolfHomiez host password: ${resetUrl}`,
-        tag: 'golfhomiez-host-password-reset',
-      })
-      logApi(smsResult?.fallback ? 'host_password_reset_sms_fallback' : 'host_password_reset_sms_sent', {
-        correlationId: getCorrelationId(),
-        hostAccountId: host.id,
-        email: host.email,
-        provider: smsResult?.provider || null,
-        reason: smsResult?.reason || null,
-        messageId: smsResult?.messageId || null,
-      })
-    } else {
-      logApi('host_password_reset_sms_skipped_missing_phone', {
-        correlationId: getCorrelationId(),
-        hostAccountId: host.id,
-        email: host.email,
-      })
-    }
-    return { ok: true }
-  }
-
   await sendMail({
     to: host.reset_email || host.email,
     subject: 'Reset your GolfHomiez host password',
     text: `Reset your host password: ${resetUrl}`,
     html: `<p>Reset your host password:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
-  })
-  logApi('host_password_reset_email_sent', {
-    correlationId: getCorrelationId(),
-    hostAccountId: host.id,
-    email: host.email,
   })
   return { ok: true }
 }

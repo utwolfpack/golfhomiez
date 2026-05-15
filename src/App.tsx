@@ -24,10 +24,10 @@ import Profile from './pages/Profile'
 import CreateHostAccount from './pages/CreateHostAccount'
 import OrganizerLogin from './pages/OrganizerLogin'
 import OrganizerRegister from './pages/OrganizerRegister'
-import OrganizerTournaments from './pages/OrganizerTournaments'
-import OrganizerProfile from './pages/OrganizerProfile'
 import OrganizerForgotPassword from './pages/OrganizerForgotPassword'
 import OrganizerResetPassword from './pages/OrganizerResetPassword'
+import OrganizerTournaments from './pages/OrganizerTournaments'
+import OrganizerProfile from './pages/OrganizerProfile'
 import HostLogin from './pages/HostLogin'
 import HostForgotPassword from './pages/HostForgotPassword'
 import HostResetPassword from './pages/HostResetPassword'
@@ -150,7 +150,7 @@ export default function App() {
               <Route path="/host/portal/profile" element={<HostProtectedRoute><HostProfile /></HostProtectedRoute>} />
               <Route path="/organizer/register" element={<LoginEntryRoute mode="organizer"><Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading…</div></div>}><OrganizerRegister /></Suspense></LoginEntryRoute>} />
               <Route path="/organizer/login" element={<LoginEntryRoute mode="organizer"><OrganizerLogin /></LoginEntryRoute>} />
-              <Route path="/organizer/request-password-reset" element={<OrganizerForgotPassword />} />
+              <Route path="/organizer/forgot-password" element={<OrganizerForgotPassword />} />
               <Route path="/organizer/reset-password" element={<OrganizerResetPassword />} />
               <Route path="/organizer/portal" element={<OrganizerProtectedRoute><OrganizerTournaments /></OrganizerProtectedRoute>} />
               <Route path="/organizer/portal/profile" element={<OrganizerProtectedRoute><OrganizerProfile /></OrganizerProtectedRoute>} />

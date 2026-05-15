@@ -54,9 +54,8 @@ export default function OrganizerLogin() {
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btnPrimary" disabled={busy}>{busy ? 'Signing in…' : 'Login to organizer portal'}</button>
-            <Link className="btn" to={`/organizer/register${params.toString() ? `?${params.toString()}` : ''}`}>Create organizer access</Link>
-            <Link className="btn" to="/organizer/request-password-reset">Forgot organizer password?</Link>
           </div>
+          <div className="small"><Link to="/organizer/forgot-password">Forgot organizer password?</Link></div>
         </form>
       </div>
     </div>
