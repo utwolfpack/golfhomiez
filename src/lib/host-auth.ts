@@ -46,12 +46,10 @@ export async function logoutHostAccount() {
   return requestJson<null>('/api/host/logout', { method: 'POST' })
 }
 
-export type PasswordResetDeliveryMethod = 'email' | 'sms'
-
-export async function requestHostPasswordReset(email: string, deliveryMethod: PasswordResetDeliveryMethod = 'email') {
+export async function requestHostPasswordReset(email: string) {
   return requestJson<{ ok: boolean }>('/api/host/request-password-reset', {
     method: 'POST',
-    body: JSON.stringify({ email, deliveryMethod }),
+    body: JSON.stringify({ email }),
   })
 }
 

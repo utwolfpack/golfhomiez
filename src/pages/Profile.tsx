@@ -5,8 +5,8 @@ import PageHero from '../components/PageHero'
 import ProtectedRoute from '../components/ProtectedRoute'
 import UseMyLocationButton from '../components/UseMyLocationButton'
 import { fetchProfile, saveProfile, type ProfileInput } from '../lib/profile'
-import { logFrontendEvent } from '../lib/frontend-logger'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateRequiredPhoneNumber } from '../lib/phone-validation'
+import { logFrontendEvent } from '../lib/frontend-logger'
 import beerImg from '../assets/profile/beer-friendly.svg'
 import friendly420Img from '../assets/profile/friendly-420.svg'
 import soberGolfImg from '../assets/profile/sober-golf.svg'
@@ -132,22 +132,24 @@ function ProfileInner() {
     logFrontendEvent({ category: 'profile.location', message: 'profile_location_prefilled', data: { city: locationData.city, stateName: locationData.stateName, postalCode: locationData.postalCode || null } })
   }
 
+  function setPhoneValue(value: string) {
+    patch('phone', sanitizePhoneInput(value))
+  }
+
   async function handleSave() {
     setSaving(true)
     setError(null)
     setStatus(null)
     try {
-      const phoneError = validateRequiredPhoneNumber(form.phone)
-      if (phoneError) {
-        setError(phoneError)
-        logFrontendEvent({ category: 'profile.save', level: 'warn', message: 'profile_invalid_phone', data: { phoneSet: Boolean(form.phone) } })
-        return
+      const phoneValidationError = validateRequiredPhoneNumber(form.phone)
+      if (phoneValidationError) {
+        logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_invalid_phone', data: { hasPhone: Boolean(form.phone && form.phone.trim()) } })
+        throw new Error(phoneValidationError)
       }
       const payload = isPreferenceRestricted ? { ...form, alcoholPreference: '', cannabisPreference: '', sobrietyPreference: '' } : form
-      logFrontendEvent({ category: 'profile.save', message: 'profile_phone_sms_notification_requested', data: { phoneSet: Boolean(payload.phone) } })
       const saved = await saveProfile(payload)
       setNeedsEnrichment(Boolean(saved.needsEnrichment))
-      setStatus('Profile saved. SMS notification sent if your number changed.')
+      setStatus('Profile saved.')
       logFrontendEvent({ category: 'profile.save', message: 'profile_saved', data: { needsEnrichment: saved.needsEnrichment } })
       await refreshProfileStatus()
       if (isGuidedEnrichment) {
@@ -185,20 +187,9 @@ function ProfileInner() {
           </div>
 
           <div>
-            <label className="label">Phone number</label>
-            <input
-              className="input"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              required
-              pattern={PHONE_PATTERN}
-              title={PHONE_VALIDATION_MESSAGE}
-              value={form.phone}
-              onChange={(e) => patch('phone', sanitizePhoneInput(e.target.value))}
-              placeholder="+1 801 555 0100"
-            />
-            <div className="small" style={{ marginTop: 6 }}>Required after first sign-in. Used for account SMS notifications and password reset SMS delivery.</div>
+            <label className="label">Phone</label>
+            <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} required aria-invalid={Boolean(validateRequiredPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setPhoneValue(e.target.value)} placeholder="801-555-0123" autoComplete="tel" />
+            <div className="small" style={{ marginTop: 6 }}>Required for golfer profile setup. Used for account and tournament coordination.</div>
           </div>
 
           <div className="grid" style={{ gridTemplateColumns: '1.4fr 1fr 0.8fr', gap: 12 }}>
