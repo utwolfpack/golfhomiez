@@ -730,7 +730,8 @@ test('organizer login exposes password reset and does not expose create organize
   const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260515_038_user_profile_phone_and_organizer_password_resets.sql', import.meta.url), 'utf8')
 
   assert.doesNotMatch(organizerLogin, /Create organizer access/)
-  assert.match(organizerLogin, /to="\/organizer\/forgot-password"/)
+  assert.match(organizerLogin, /<div className="small"><Link to="\/organizer\/forgot-password">Forgot organizer password\?<\/Link><\/div>/)
+  assert.doesNotMatch(organizerLogin, /className="btn" to="\/organizer\/forgot-password"/)
   assert.match(organizerLogin, /Forgot organizer password\?/)
   assert.match(app, /path="\/organizer\/forgot-password"/)
   assert.match(app, /path="\/organizer\/reset-password"/)
