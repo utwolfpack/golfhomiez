@@ -370,3 +370,230 @@ export async function deleteScoreById(id) {
     throw error
   }
 }
+
+
+function parseJsonArray(value) {
+  if (!value) return null
+  if (Array.isArray(value)) return value
+  if (Buffer.isBuffer(value)) value = value.toString('utf8')
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : null
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+function mapInboxMessage(row) {
+  return {
+    id: row.id,
+    threadId: row.thread_id || row.id,
+    parentMessageId: row.parent_message_id || null,
+    messageType: row.message_type,
+    senderUserId: row.sender_user_id,
+    senderEmail: row.sender_email,
+    senderName: row.sender_name,
+    recipientUserId: row.recipient_user_id,
+    recipientEmail: row.recipient_email,
+    proposerTeamId: row.proposer_team_id || null,
+    proposerTeamName: row.proposer_team_name || null,
+    challengedTeamId: row.challenged_team_id || null,
+    challengedTeamName: row.challenged_team_name || null,
+    challengeStatus: row.challenge_status || null,
+    challengeDate: toIso(row.challenge_date)?.slice(0, 10) || null,
+    challengeState: row.challenge_state || null,
+    challengeCourse: row.challenge_course || null,
+    proposerTeamScore: row.proposer_team_score ?? null,
+    challengedTeamScore: row.challenged_team_score ?? null,
+    proposerTeamHoles: parseJsonArray(row.proposer_team_holes_json),
+    challengedTeamHoles: parseJsonArray(row.challenged_team_holes_json),
+    individualChallengeParticipants: parseJsonArray(row.individual_participants_json) || [],
+    body: row.message_body,
+    readAt: toIso(row.read_at),
+    createdAt: toIso(row.created_at),
+  }
+}
+
+async function getInboxUserTeamIds(user) {
+  const normalizedEmail = normalizeEmail(user?.email)
+  if (!normalizedEmail) return new Set()
+  const teams = await listTeams()
+  return new Set(teams.filter((team) => (team.members || []).some((member) => normalizeEmail(member.email) === normalizedEmail)).map((team) => String(team.id)))
+}
+
+function isInboxDirectRecipient(message, user, normalizedEmail) {
+  return String(message.recipientUserId || '') === String(user?.id || '') || normalizeEmail(message.recipientEmail) === normalizedEmail
+}
+
+function isInboxDirectSender(message, user, normalizedEmail) {
+  return String(message.senderUserId || '') === String(user?.id || '') || normalizeEmail(message.senderEmail) === normalizedEmail
+}
+
+function isInboxTeamChallenge(message) {
+  return message.messageType === 'challenge_request'
+}
+
+function isInboxIndividualChallenge(message) {
+  return message.messageType === 'individual_challenge'
+}
+
+function isInboxIndividualChallengeParticipant(message, user, normalizedEmail) {
+  return (message.individualChallengeParticipants || []).some((participant) =>
+    String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail)
+}
+
+function canReadInboxMessage(message, user, normalizedEmail, userTeamIds) {
+  return isInboxDirectRecipient(message, user, normalizedEmail) ||
+    (isInboxTeamChallenge(message) && userTeamIds.has(String(message.challengedTeamId || ''))) ||
+    (isInboxIndividualChallenge(message) && isInboxIndividualChallengeParticipant(message, user, normalizedEmail))
+}
+
+function canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds) {
+  return isInboxDirectSender(message, user, normalizedEmail) ||
+    (isInboxTeamChallenge(message) && userTeamIds.has(String(message.proposerTeamId || ''))) ||
+    (isInboxIndividualChallenge(message) && isInboxIndividualChallengeParticipant(message, user, normalizedEmail))
+}
+
+function canParticipateInInboxMessage(message, user, normalizedEmail, userTeamIds) {
+  return isInboxDirectRecipient(message, user, normalizedEmail) ||
+    isInboxDirectSender(message, user, normalizedEmail) ||
+    (isInboxTeamChallenge(message) && (userTeamIds.has(String(message.proposerTeamId || '')) || userTeamIds.has(String(message.challengedTeamId || '')))) ||
+    (isInboxIndividualChallenge(message) && isInboxIndividualChallengeParticipant(message, user, normalizedEmail))
+}
+
+export async function listInboxMessagesForUser(user) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [rows] = await db.execute('SELECT * FROM inbox_messages ORDER BY created_at DESC')
+  return rows.map(mapInboxMessage).filter((message) => canReadInboxMessage(message, user, normalizedEmail, userTeamIds))
+}
+
+export async function listSentInboxMessagesForUser(user) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [rows] = await db.execute('SELECT * FROM inbox_messages ORDER BY created_at DESC')
+  return rows.map(mapInboxMessage).filter((message) => canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds))
+}
+
+export async function getInboxMessageForParticipant(messageId, user) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  const message = rows[0] ? mapInboxMessage(rows[0]) : null
+  return message && canParticipateInInboxMessage(message, user, normalizedEmail, userTeamIds) ? message : null
+}
+
+export async function getInboxSummaryForUser(user) {
+  const messages = await listInboxMessagesForUser(user)
+  return { unreadCount: messages.filter((message) => !message.readAt).length }
+}
+
+export async function createInboxMessage({ sender, recipient, messageType, body, threadId, parentMessageId, teamContext = null }) {
+  const db = getPool()
+  const id = uuidv4()
+  const resolvedThreadId = threadId || id
+  await db.execute(
+    `INSERT INTO inbox_messages
+      (id, thread_id, parent_message_id, message_type, sender_user_id, sender_email, sender_name, recipient_user_id, recipient_email, proposer_team_id, proposer_team_name, challenged_team_id, challenged_team_name, challenge_status, challenge_date, challenge_state, challenge_course, proposer_team_score, challenged_team_score, proposer_team_holes_json, challenged_team_holes_json, individual_participants_json, message_body, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [
+      id,
+      resolvedThreadId,
+      parentMessageId || null,
+      messageType || 'message',
+      sender?.id || null,
+      normalizeEmail(sender?.email),
+      sender?.name || null,
+      recipient?.id || null,
+      normalizeEmail(recipient?.email),
+      teamContext?.proposerTeamId || null,
+      teamContext?.proposerTeamName || null,
+      teamContext?.challengedTeamId || null,
+      teamContext?.challengedTeamName || null,
+      teamContext?.challengeStatus || null,
+      teamContext?.challengeDate || null,
+      teamContext?.challengeState || null,
+      teamContext?.challengeCourse || null,
+      teamContext?.proposerTeamScore ?? null,
+      teamContext?.challengedTeamScore ?? null,
+      teamContext?.proposerTeamHoles ? JSON.stringify(teamContext.proposerTeamHoles) : null,
+      teamContext?.challengedTeamHoles ? JSON.stringify(teamContext.challengedTeamHoles) : null,
+      teamContext?.individualChallengeParticipants ? JSON.stringify(teamContext.individualChallengeParticipants) : null,
+      body,
+    ],
+  )
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [id])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
+export async function markInboxMessageRead(messageId, user) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canReadInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  await db.execute(
+    `UPDATE inbox_messages
+        SET read_at = COALESCE(read_at, NOW())
+      WHERE id = ?`,
+    [String(messageId || '')],
+  )
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
+export async function updateInboxChallengeStatus(messageId, user, status) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'challenge_request'])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  await db.execute('UPDATE inbox_messages SET challenge_status = ? WHERE thread_id = ? AND message_type = ?', [status, existing.threadId || existing.id, 'challenge_request'])
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
+export async function updateInboxChallengeScore(messageId, user, side, score, holes = []) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'challenge_request'])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (side === 'proposer' && !userTeamIds.has(String(existing.proposerTeamId || ''))) return null
+  if (side === 'challenged' && !userTeamIds.has(String(existing.challengedTeamId || ''))) return null
+  const column = side === 'proposer' ? 'proposer_team_score' : 'challenged_team_score'
+  const holesColumn = side === 'proposer' ? 'proposer_team_holes_json' : 'challenged_team_holes_json'
+  await db.execute(`UPDATE inbox_messages SET ${column} = ?, ${holesColumn} = ? WHERE thread_id = ? AND message_type = ?`, [score, Array.isArray(holes) && holes.length ? JSON.stringify(holes) : null, existing.threadId || existing.id, 'challenge_request'])
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
+
+export async function updateInboxIndividualChallengeScore(messageId, user, score, holes = [], options = {}) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'individual_challenge'])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  let userCanEditOwnScore = false
+  const participants = (existing.individualChallengeParticipants || []).map((participant) => {
+    const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail
+    if (!isCurrentParticipant) return participant
+    userCanEditOwnScore = true
+    return { ...participant, score, holes: Array.isArray(holes) && holes.length ? holes : [], soloScoreId: options?.soloScoreId || participant.soloScoreId || null }
+  })
+  if (!userCanEditOwnScore) return null
+  await db.execute('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?', [JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge'])
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}

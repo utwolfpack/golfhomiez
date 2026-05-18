@@ -164,7 +164,7 @@ function TeamsInner() {
 
         {myTeams.length === 0 ? (
           <div className="small" style={{ marginTop: 12 }}>
-            You are not listed as a member of any team yet. Use the Create Team button on the Team Logger page to add one with your email on the roster.
+            You are not listed as a member of any team yet. Create or edit teams here so they can be selected for Inbox Team Challenges.
           </div>
         ) : (
           <div className="grid grid3" style={{ marginTop: 14 }}>

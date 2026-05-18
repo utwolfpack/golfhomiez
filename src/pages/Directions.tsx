@@ -25,11 +25,11 @@ export default function Directions() {
             <h3 style={{ marginTop: 0 }}>Quick tips</h3>
             <ul style={{ lineHeight: 1.6, margin: 0, paddingLeft: 18 }}>
               <li>Rotate who tees first to keep everyone involved.</li>
-              <li>Enter team rounds from the Team Logger right after the match.</li>
+              <li>Use Inbox Team Challenges to propose challenges, track team dialogue, and enter team scores.</li>
               <li>Use the Teams page to keep rosters clean before the next event.</li>
             </ul>
             <div className="small" style={{ marginTop: 10 }}>
-              Tip: Add your round in <strong>Golf Logger</strong> and track wins over time.
+              Tip: Use <strong>Team Challenges</strong> for team scoring and <strong>Log a Round</strong> for solo scores.
             </div>
           </div>
         </div>
