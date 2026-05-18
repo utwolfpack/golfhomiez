@@ -9,6 +9,8 @@ export type HoleScoreDetail = {
 
 export type HoleScores = number[] | HoleScoreDetail[]
 
+export type ScoreRecordSource = 'score' | 'team_challenge'
+
 export type TeamScoreEntry = {
   id: string
   mode: 'team'
@@ -28,6 +30,9 @@ export type TeamScoreEntry = {
   coursePar?: number | null
   createdByUserId?: string
   createdByEmail?: string
+  source?: ScoreRecordSource
+  sourceMessageId?: string | null
+  challengeStatus?: string | null
   createdAt: string
 }
 
@@ -46,6 +51,7 @@ export type SoloScoreEntry = {
   coursePar?: number | null
   createdByUserId?: string
   createdByEmail?: string
+  source?: ScoreRecordSource
   createdAt: string
 }
 

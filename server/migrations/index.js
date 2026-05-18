@@ -1407,6 +1407,198 @@ ON DUPLICATE KEY UPDATE
     },
   },
 
+
+  {
+    version: '20260518_043',
+    name: 'golf_user_inbox_messages',
+    filename: '20260518_043_golf_user_inbox_messages.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'message_type') &&
+        await columnExists(db, 'inbox_messages', 'recipient_user_id') &&
+        await columnExists(db, 'inbox_messages', 'recipient_email') &&
+        await columnExists(db, 'inbox_messages', 'message_body') &&
+        await columnExists(db, 'inbox_messages', 'read_at') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_recipient_user_read') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_recipient_email_read')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260518_043_golf_user_inbox_messages.sql')
+    },
+  },
+
+
+  {
+    version: '20260518_044',
+    name: 'golf_user_inbox_threads_and_sent_sections',
+    filename: '20260518_044_golf_user_inbox_threads_and_sent_sections.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'thread_id') &&
+        await columnExists(db, 'inbox_messages', 'parent_message_id') &&
+        !(await columnIsNullable(db, 'inbox_messages', 'thread_id')) &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_thread_created') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_parent') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_sender_type_created')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      const hasThreadId = await columnExists(db, 'inbox_messages', 'thread_id')
+      const hasParentMessageId = await columnExists(db, 'inbox_messages', 'parent_message_id')
+
+      if (!hasThreadId) statements.push('ALTER TABLE inbox_messages ADD COLUMN thread_id VARCHAR(191) NULL AFTER id')
+      if (!hasParentMessageId) statements.push('ALTER TABLE inbox_messages ADD COLUMN parent_message_id VARCHAR(191) NULL AFTER thread_id')
+      statements.push("UPDATE inbox_messages SET thread_id = id WHERE thread_id IS NULL OR thread_id = ''")
+      if (!hasThreadId || await columnIsNullable(db, 'inbox_messages', 'thread_id')) statements.push('ALTER TABLE inbox_messages MODIFY thread_id VARCHAR(191) NOT NULL')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_thread_created'))) statements.push('CREATE INDEX idx_inbox_messages_thread_created ON inbox_messages(thread_id, created_at)')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_parent'))) statements.push('CREATE INDEX idx_inbox_messages_parent ON inbox_messages(parent_message_id)')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_sender_type_created'))) statements.push('CREATE INDEX idx_inbox_messages_sender_type_created ON inbox_messages(sender_user_id, message_type, created_at)')
+      return statements.join(';\n')
+    },
+  },
+
+
+  {
+    version: '20260518_045',
+    name: 'team_challenge_inbox_visibility',
+    filename: '20260518_045_team_challenge_inbox_visibility.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'proposer_team_id') &&
+        await columnExists(db, 'inbox_messages', 'proposer_team_name') &&
+        await columnExists(db, 'inbox_messages', 'challenged_team_id') &&
+        await columnExists(db, 'inbox_messages', 'challenged_team_name') &&
+        await columnExists(db, 'inbox_messages', 'challenge_status') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_proposer_team_created') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_challenged_team_read') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_challenge_status')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'inbox_messages', 'proposer_team_id'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN proposer_team_id VARCHAR(191) NULL AFTER parent_message_id')
+      if (!(await columnExists(db, 'inbox_messages', 'proposer_team_name'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN proposer_team_name VARCHAR(255) NULL AFTER proposer_team_id')
+      if (!(await columnExists(db, 'inbox_messages', 'challenged_team_id'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenged_team_id VARCHAR(191) NULL AFTER proposer_team_name')
+      if (!(await columnExists(db, 'inbox_messages', 'challenged_team_name'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenged_team_name VARCHAR(255) NULL AFTER challenged_team_id')
+      if (!(await columnExists(db, 'inbox_messages', 'challenge_status'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenge_status VARCHAR(32) NULL AFTER challenged_team_name')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_proposer_team_created'))) statements.push('CREATE INDEX idx_inbox_messages_proposer_team_created ON inbox_messages(proposer_team_id, created_at)')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_challenged_team_read'))) statements.push('CREATE INDEX idx_inbox_messages_challenged_team_read ON inbox_messages(challenged_team_id, read_at, created_at)')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_challenge_status'))) statements.push('CREATE INDEX idx_inbox_messages_challenge_status ON inbox_messages(message_type, challenge_status, created_at)')
+      return statements.join(';\n') || '-- team challenge inbox visibility schema already exists'
+    },
+  },
+
+
+  {
+    version: '20260518_046',
+    name: 'team_challenge_scores',
+    filename: '20260518_046_team_challenge_scores.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'proposer_team_score') &&
+        await columnExists(db, 'inbox_messages', 'challenged_team_score') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_scores')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'inbox_messages', 'proposer_team_score'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN proposer_team_score INT NULL AFTER challenge_status')
+      if (!(await columnExists(db, 'inbox_messages', 'challenged_team_score'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenged_team_score INT NULL AFTER proposer_team_score')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_scores'))) statements.push('CREATE INDEX idx_inbox_messages_team_challenge_scores ON inbox_messages(message_type, proposer_team_id, challenged_team_id, challenge_status)')
+      return statements.join(';\n') || '-- team challenge score schema already exists'
+    },
+  },
+
+  {
+    version: '20260518_047',
+    name: 'team_challenge_hole_scorecards',
+    filename: '20260518_047_team_challenge_hole_scorecards.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'proposer_team_holes_json') &&
+        await columnExists(db, 'inbox_messages', 'challenged_team_holes_json') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_hole_scorecards')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'inbox_messages', 'proposer_team_holes_json'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN proposer_team_holes_json JSON NULL AFTER proposer_team_score')
+      if (!(await columnExists(db, 'inbox_messages', 'challenged_team_holes_json'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenged_team_holes_json JSON NULL AFTER challenged_team_score')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_hole_scorecards'))) statements.push('CREATE INDEX idx_inbox_messages_team_challenge_hole_scorecards ON inbox_messages(message_type, thread_id, proposer_team_id, challenged_team_id)')
+      return statements.join(';\n') || '-- team challenge hole scorecard schema already exists'
+    },
+  },
+
+
+  {
+    version: '20260518_048',
+    name: 'team_challenge_course_context',
+    filename: '20260518_048_team_challenge_course_context.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'challenge_date') &&
+        await columnExists(db, 'inbox_messages', 'challenge_state') &&
+        await columnExists(db, 'inbox_messages', 'challenge_course') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_course_context')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'inbox_messages', 'challenge_date'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenge_date DATE NULL AFTER challenge_status')
+      if (!(await columnExists(db, 'inbox_messages', 'challenge_state'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenge_state VARCHAR(64) NULL AFTER challenge_date')
+      if (!(await columnExists(db, 'inbox_messages', 'challenge_course'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenge_course VARCHAR(255) NULL AFTER challenge_state')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_course_context'))) statements.push('CREATE INDEX idx_inbox_messages_team_challenge_course_context ON inbox_messages(message_type, challenge_date, challenge_state, challenge_course)')
+      return statements.join(';\n') || '-- team challenge course context schema already exists'
+    },
+  },
+
+
+  {
+    version: '20260518_049',
+    name: 'individual_challenge_inbox_scores',
+    filename: '20260518_049_individual_challenge_inbox_scores.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'inbox_messages'))) return false
+      const [[typeRow = {}] = []] = await db.execute(`
+        SELECT COLUMN_TYPE AS columnType
+          FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'inbox_messages'
+           AND COLUMN_NAME = 'message_type'
+         LIMIT 1
+      `)
+      return (
+        String(typeRow.columnType || '').includes('individual_challenge') &&
+        await columnExists(db, 'inbox_messages', 'individual_participants_json') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_individual_challenge_participants')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      const [[typeRow = {}] = []] = await db.execute(`
+        SELECT COLUMN_TYPE AS columnType
+          FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'inbox_messages'
+           AND COLUMN_NAME = 'message_type'
+         LIMIT 1
+      `)
+      if (!String(typeRow.columnType || '').includes('individual_challenge')) statements.push("ALTER TABLE inbox_messages MODIFY message_type ENUM('message','challenge_request','individual_challenge') NOT NULL DEFAULT 'message'")
+      if (!(await columnExists(db, 'inbox_messages', 'individual_participants_json'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN individual_participants_json JSON NULL AFTER challenged_team_holes_json')
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_individual_challenge_participants'))) statements.push('CREATE INDEX idx_inbox_messages_individual_challenge_participants ON inbox_messages(message_type, thread_id, created_at)')
+      return statements.join(';\n') || '-- individual challenge inbox score schema already exists'
+    },
+  },
+
+
 ]
 
 export function sortMigrations(migrations) {

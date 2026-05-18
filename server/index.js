@@ -24,6 +24,7 @@ import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset,
 import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerPasswordReset, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, resetOrganizerPassword, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
 import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, consumeAdminResetToken, deleteAdminUser, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
 import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listHostManagedTournaments, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload } from './lib/rbac.js'
+import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles } from './lib/inbox-service.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -2640,6 +2641,669 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
   }
 })
 
+
+
+function userIsMemberOfTeam(team, user) {
+  const requesterEmail = normalizeEmail(user?.email)
+  return Boolean(team && requesterEmail && (team.members || []).some((member) => normalizeEmail(member.email) === requesterEmail))
+}
+
+function firstTeamMemberEmail(team) {
+  const member = (team?.members || []).find((item) => normalizeEmail(item.email))
+  return normalizeEmail(member?.email)
+}
+
+function teamMemberEmailSet(team) {
+  return new Set((team?.members || []).map((member) => normalizeEmail(member.email)).filter(Boolean))
+}
+
+function teamChallengeOverlappingMembers(proposerTeam, challengedTeam) {
+  const proposerEmails = teamMemberEmailSet(proposerTeam)
+  return (challengedTeam?.members || [])
+    .map((member) => normalizeEmail(member.email))
+    .filter((email) => email && proposerEmails.has(email))
+}
+
+function userTeamChallengeSide(message, userTeamIds) {
+  if (userTeamIds.has(String(message?.proposerTeamId || ''))) return 'proposer'
+  if (userTeamIds.has(String(message?.challengedTeamId || ''))) return 'challenged'
+  return null
+}
+
+function parseTeamChallengeScoreValue(value) {
+  if (value === null || value === undefined || value === '') return null
+  const score = Number(value)
+  return Number.isFinite(score) ? Math.trunc(score) : null
+}
+
+function hasTeamChallengeScoreRecord(message) {
+  return parseTeamChallengeScoreValue(message?.proposerTeamScore) !== null ||
+    parseTeamChallengeScoreValue(message?.challengedTeamScore) !== null ||
+    (Array.isArray(message?.proposerTeamHoles) && message.proposerTeamHoles.length > 0) ||
+    (Array.isArray(message?.challengedTeamHoles) && message.challengedTeamHoles.length > 0)
+}
+
+function teamChallengeRecordDate(message) {
+  if (message?.challengeDate) return String(message.challengeDate).slice(0, 10)
+  const createdAt = message?.createdAt ? new Date(message.createdAt) : null
+  return createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)
+}
+
+function selectLatestTeamChallengeMessage(existing, candidate) {
+  if (!existing) return candidate
+  const existingTime = existing.createdAt ? new Date(existing.createdAt).getTime() : 0
+  const candidateTime = candidate.createdAt ? new Date(candidate.createdAt).getTime() : 0
+  return candidateTime >= existingTime ? candidate : existing
+}
+
+function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds) {
+  const byThread = new Map()
+  for (const message of messages || []) {
+    if (message?.messageType !== 'challenge_request') continue
+    const threadId = String(message.threadId || message.id || '').trim()
+    if (!threadId) continue
+    byThread.set(threadId, selectLatestTeamChallengeMessage(byThread.get(threadId), message))
+  }
+
+  return Array.from(byThread.entries()).flatMap(([threadId, message]) => {
+    if (!hasTeamChallengeScoreRecord(message)) return []
+    const side = userTeamChallengeSide(message, userTeamIds)
+    if (!side) return []
+
+    const teamIsProposer = side === 'proposer'
+    const teamTotal = parseTeamChallengeScoreValue(teamIsProposer ? message.proposerTeamScore : message.challengedTeamScore)
+    const opponentTotal = parseTeamChallengeScoreValue(teamIsProposer ? message.challengedTeamScore : message.proposerTeamScore)
+    const won = teamTotal === null || opponentTotal === null ? null : (teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null))
+
+    return [{
+      id: `team-challenge-${threadId}`,
+      source: 'team_challenge',
+      sourceMessageId: message.id,
+      mode: 'team',
+      date: teamChallengeRecordDate(message),
+      state: message.challengeState || '',
+      course: message.challengeCourse || 'Team Challenge',
+      team: teamIsProposer ? message.proposerTeamName : message.challengedTeamName,
+      opponentTeam: teamIsProposer ? message.challengedTeamName : message.proposerTeamName,
+      teamTotal,
+      opponentTotal,
+      won,
+      holes: teamIsProposer ? (message.proposerTeamHoles || null) : (message.challengedTeamHoles || null),
+      opponentHoles: teamIsProposer ? (message.challengedTeamHoles || null) : (message.proposerTeamHoles || null),
+      challengeStatus: message.challengeStatus || null,
+      createdByUserId: message.senderUserId || null,
+      createdByEmail: message.senderEmail || null,
+      createdAt: message.createdAt || null,
+    }]
+  })
+}
+
+async function resolveUserTeamIds(user) {
+  const requesterEmail = normalizeEmail(user?.email)
+  if (!requesterEmail) return new Set()
+  const teams = await storage.listTeams()
+  return new Set(teams.filter((team) => (team.members || []).some((member) => normalizeEmail(member.email) === requesterEmail)).map((team) => String(team.id)))
+}
+
+async function resolveTeamMemberRecipient(team) {
+  const email = firstTeamMemberEmail(team)
+  if (!email) throw new Error('Team must have at least one member with an email.')
+  return await storage.findUserByEmail(email) || { id: null, email, name: team?.name || email }
+}
+
+async function resolveTeamChallengeForNewMessage(req, payload) {
+  const proposerTeam = await storage.getTeamById(payload.proposerTeamId)
+  if (!proposerTeam) {
+    logApi('team_challenge_proposer_team_not_found', { ...requestContext(req), proposerTeamId: payload.proposerTeamId })
+    return { status: 404, body: { message: 'Selected team does not exist.', proposerTeamId: payload.proposerTeamId } }
+  }
+  if (!userIsMemberOfTeam(proposerTeam, req.user)) {
+    logApi('team_challenge_proposer_not_member', { ...requestContext(req), proposerTeamId: proposerTeam.id, proposerTeamName: proposerTeam.name })
+    return { status: 403, body: { message: 'You must be a member of the proposing team.' } }
+  }
+
+  const challengedTeam = await storage.getTeamByName(payload.challengedTeamName)
+  if (!challengedTeam) {
+    logApi('team_challenge_team_not_found', { ...requestContext(req), challengedTeamName: payload.challengedTeamName, proposerTeamId: proposerTeam.id })
+    return { status: 404, body: { message: 'Team does not exist.', teamNotFound: true, challengedTeamName: payload.challengedTeamName } }
+  }
+  if (String(challengedTeam.id) === String(proposerTeam.id)) {
+    logApi('team_challenge_same_team_rejected', { ...requestContext(req), proposerTeamId: proposerTeam.id, challengedTeamId: challengedTeam.id })
+    return { status: 400, body: { message: 'Choose a different team to challenge.' } }
+  }
+
+  const overlappingMemberEmails = teamChallengeOverlappingMembers(proposerTeam, challengedTeam)
+  if (overlappingMemberEmails.length > 0) {
+    logApi('team_challenge_overlapping_members_rejected', { ...requestContext(req), proposerTeamId: proposerTeam.id, challengedTeamId: challengedTeam.id, overlappingMemberCount: overlappingMemberEmails.length })
+    return { status: 400, body: { message: 'A Team Challenge cannot be created when any member belongs to both teams involved.' } }
+  }
+
+  const recipient = await resolveTeamMemberRecipient(challengedTeam)
+  return {
+    status: 200,
+    recipient,
+    teamContext: {
+      proposerTeamId: proposerTeam.id,
+      proposerTeamName: proposerTeam.name,
+      challengedTeamId: challengedTeam.id,
+      challengedTeamName: challengedTeam.name,
+      challengeStatus: 'proposed',
+      challengeDate: payload.challengeDate,
+      challengeState: payload.challengeState,
+      challengeCourse: payload.challengeCourse,
+    },
+  }
+}
+
+async function resolveTeamChallengeForReply(req, parentMessage) {
+  const proposerTeam = parentMessage?.proposerTeamId ? await storage.getTeamById(parentMessage.proposerTeamId) : null
+  const challengedTeam = parentMessage?.challengedTeamId ? await storage.getTeamById(parentMessage.challengedTeamId) : null
+  const userOnProposerTeam = userIsMemberOfTeam(proposerTeam, req.user)
+  const userOnChallengedTeam = userIsMemberOfTeam(challengedTeam, req.user)
+  if (!userOnProposerTeam && !userOnChallengedTeam) {
+    logApi('team_challenge_reply_not_participant', { ...requestContext(req), parentMessageId: parentMessage?.id, proposerTeamId: parentMessage?.proposerTeamId || null, challengedTeamId: parentMessage?.challengedTeamId || null })
+    return { status: 403, body: { message: 'Only members of the Team Challenge teams can reply.' } }
+  }
+
+  const recipientTeam = userOnProposerTeam ? challengedTeam : proposerTeam
+  if (!recipientTeam) return { status: 404, body: { message: 'Team Challenge participant team was not found.' } }
+  const recipient = await resolveTeamMemberRecipient(recipientTeam)
+  return {
+    status: 200,
+    recipient,
+    teamContext: {
+      proposerTeamId: parentMessage.proposerTeamId || null,
+      proposerTeamName: parentMessage.proposerTeamName || proposerTeam?.name || null,
+      challengedTeamId: parentMessage.challengedTeamId || null,
+      challengedTeamName: parentMessage.challengedTeamName || challengedTeam?.name || null,
+      challengeStatus: parentMessage.challengeStatus || 'proposed',
+      challengeDate: parentMessage.challengeDate || null,
+      challengeState: parentMessage.challengeState || null,
+      challengeCourse: parentMessage.challengeCourse || null,
+      proposerTeamScore: parentMessage.proposerTeamScore ?? null,
+      challengedTeamScore: parentMessage.challengedTeamScore ?? null,
+      proposerTeamHoles: parentMessage.proposerTeamHoles || null,
+      challengedTeamHoles: parentMessage.challengedTeamHoles || null,
+    },
+  }
+}
+
+function individualChallengeParticipantMatchesUser(participant, user) {
+  const participantEmail = normalizeEmail(participant?.email)
+  const userEmail = normalizeEmail(user?.email)
+  return Boolean((participant?.userId && String(participant.userId) === String(user?.id || '')) || (participantEmail && participantEmail === userEmail))
+}
+
+function individualChallengeParticipantForUser(message, user) {
+  return (message?.individualChallengeParticipants || []).find((participant) => individualChallengeParticipantMatchesUser(participant, user)) || null
+}
+
+function buildIndividualChallengeParticipants(sender, users) {
+  const byEmail = new Map()
+  const addUser = (record) => {
+    const email = normalizeEmail(record?.email)
+    if (!email || byEmail.has(email)) return
+    byEmail.set(email, {
+      userId: record?.id || null,
+      email,
+      name: record?.name || null,
+      score: null,
+      holes: [],
+    })
+  }
+  addUser(sender)
+  users.forEach(addUser)
+  return Array.from(byEmail.values())
+}
+
+async function resolveIndividualChallengeForNewMessage(req, payload) {
+  const resolvedUsers = []
+  for (const email of payload.individualParticipantEmails || []) {
+    const user = await storage.findUserByEmail(email)
+    if (!user) {
+      logApi('individual_challenge_recipient_not_found', { ...requestContext(req), recipientEmail: email, inviteRequired: true })
+      return { status: 404, body: { message: 'Recipient does not exist in Golf Homiez. Send them an invite to join.', recipientEmail: email, inviteRequired: true } }
+    }
+    resolvedUsers.push(user)
+  }
+  const participants = buildIndividualChallengeParticipants(req.user, resolvedUsers)
+  if (participants.length > 25) {
+    logApi('individual_challenge_too_many_golfers', { ...requestContext(req), participantCount: participants.length })
+    return { status: 400, body: { message: 'Individual Challenge supports up to 25 golfers.' } }
+  }
+  const recipient = resolvedUsers.find((item) => normalizeEmail(item.email) !== normalizeEmail(req.user?.email)) || resolvedUsers[0] || req.user
+  return {
+    status: 200,
+    recipient,
+    teamContext: {
+      challengeStatus: 'proposed',
+      challengeDate: payload.challengeDate,
+      challengeState: payload.challengeState,
+      challengeCourse: payload.challengeCourse,
+      individualChallengeParticipants: participants,
+    },
+  }
+}
+
+
+async function createOrUpdateIndividualChallengeSoloScore(message, user, score, holes, participant = null) {
+  const normalizedHoles = Array.isArray(holes) && holes.length ? holes : null
+  const scoreEntry = {
+    mode: 'solo',
+    date: teamChallengeRecordDate(message),
+    state: String(message?.challengeState || '').trim().toUpperCase(),
+    course: String(message?.challengeCourse || '').trim() || 'Individual Challenge',
+    roundScore: score,
+    holes: normalizedHoles,
+    createdByUserId: user?.id || participant?.userId || null,
+    createdByEmail: normalizeEmail(user?.email || participant?.email),
+    source: 'individual_challenge',
+    sourceMessageId: message?.threadId || message?.id || null,
+  }
+
+  const existingSoloScoreId = String(participant?.soloScoreId || '').trim()
+  if (existingSoloScoreId) {
+    const existingScore = await storage.getScoreById(existingSoloScoreId)
+    const ownsExistingScore = existingScore && (
+      String(existingScore.createdByUserId || '') === String(user?.id || '') ||
+      normalizeEmail(existingScore.createdByEmail) === normalizeEmail(user?.email)
+    )
+    if (ownsExistingScore) {
+      const updatedScore = await storage.updateScoreById(existingSoloScoreId, { ...existingScore, ...scoreEntry })
+      logApi('individual_challenge_solo_score_updated', {
+        userId: user?.id || null,
+        userEmail: normalizeEmail(user?.email),
+        messageId: message?.id || null,
+        threadId: message?.threadId || message?.id || null,
+        scoreId: updatedScore?.id || existingSoloScoreId,
+        roundScore: score,
+        holeCount: normalizedHoles?.length || 0,
+      })
+      return updatedScore || { id: existingSoloScoreId }
+    }
+  }
+
+  const createdScore = await storage.createScore(scoreEntry)
+  logApi('individual_challenge_solo_score_created', {
+    userId: user?.id || null,
+    userEmail: normalizeEmail(user?.email),
+    messageId: message?.id || null,
+    threadId: message?.threadId || message?.id || null,
+    scoreId: createdScore?.id || null,
+    roundScore: score,
+    holeCount: normalizedHoles?.length || 0,
+  })
+  return createdScore
+}
+
+async function resolveIndividualChallengeForReply(req, parentMessage) {
+  const participant = individualChallengeParticipantForUser(parentMessage, req.user)
+  if (!participant) {
+    logApi('individual_challenge_reply_not_participant', { ...requestContext(req), parentMessageId: parentMessage?.id })
+    return { status: 403, body: { message: 'Only golfers in the Individual Challenge can reply.' } }
+  }
+  const otherParticipant = (parentMessage.individualChallengeParticipants || []).find((item) => !individualChallengeParticipantMatchesUser(item, req.user)) || participant
+  const recipient = await storage.findUserByEmail(otherParticipant.email) || { id: otherParticipant.userId || null, email: otherParticipant.email, name: otherParticipant.name || otherParticipant.email }
+  return {
+    status: 200,
+    recipient,
+    teamContext: {
+      challengeStatus: parentMessage.challengeStatus || 'proposed',
+      challengeDate: parentMessage.challengeDate || null,
+      challengeState: parentMessage.challengeState || null,
+      challengeCourse: parentMessage.challengeCourse || null,
+      individualChallengeParticipants: parentMessage.individualChallengeParticipants || [],
+    },
+  }
+}
+
+app.get('/api/inbox/summary', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const summary = await storage.getInboxSummaryForUser(req.user)
+    logApi('inbox_summary_loaded', { ...requestContext(req), unreadCount: summary.unreadCount })
+    res.json(summary)
+  } catch (error) {
+    logRouteError('Inbox summary error', req, error)
+    res.status(500).json({ message: 'Could not load inbox summary' })
+  }
+})
+
+app.get('/api/inbox/messages', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const messages = await storage.listInboxMessagesForUser(req.user)
+    const unreadCount = messages.filter((message) => !message.readAt).length
+    logApi('inbox_messages_loaded', { ...requestContext(req), messageCount: messages.length, unreadCount })
+    res.json({ messages, unreadCount })
+  } catch (error) {
+    logRouteError('Inbox messages load error', req, error)
+    res.status(500).json({ message: 'Could not load inbox messages' })
+  }
+})
+
+app.get('/api/inbox/sent', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const messages = await storage.listSentInboxMessagesForUser(req.user)
+    const sentMessages = messages.filter((message) => message.messageType === 'message')
+    const sentChallenges = messages.filter((message) => message.messageType === 'challenge_request' || message.messageType === 'individual_challenge')
+    logApi('inbox_sent_messages_loaded', {
+      ...requestContext(req),
+      sentCount: messages.length,
+      sentMessageCount: sentMessages.length,
+      sentChallengeCount: sentChallenges.length,
+    })
+    res.json({ messages, sentMessages, sentChallenges })
+  } catch (error) {
+    logRouteError('Sent inbox messages load error', req, error)
+    res.status(500).json({ message: 'Could not load sent inbox messages' })
+  }
+})
+
+app.get('/api/inbox/team-challenge-scores', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const [receivedMessages, sentMessages] = await Promise.all([
+      storage.listInboxMessagesForUser(req.user),
+      storage.listSentInboxMessagesForUser(req.user),
+    ])
+    const userTeamIds = await resolveUserTeamIds(req.user)
+    const scores = buildTeamChallengeScoreRecordsForUser([...receivedMessages, ...sentMessages], userTeamIds)
+    logApi('team_challenge_score_records_loaded', {
+      ...requestContext(req),
+      teamChallengeScoreCount: scores.length,
+      participatingTeamCount: userTeamIds.size,
+    })
+    res.json({ scores })
+  } catch (error) {
+    logRouteError('Team Challenge score records load error', req, error)
+    res.status(500).json({ message: 'Could not load Team Challenge score records' })
+  }
+})
+
+app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const payload = normalizeInboxMessagePayload(req.body || {})
+    let recipientEmail = payload.recipientEmail
+    let recipient = null
+    let parentMessage = null
+    let threadId = null
+    let parentMessageId = null
+    let messageType = payload.messageType
+    let teamContext = null
+
+    logApi('inbox_message_send_started', {
+      ...requestContext(req),
+      recipientEmail,
+      challengedTeamName: payload.challengedTeamName || null,
+      proposerTeamId: payload.proposerTeamId || null,
+      challengeDate: payload.challengeDate || null,
+      challengeState: payload.challengeState || null,
+      challengeCourse: payload.challengeCourse || null,
+      messageType: payload.messageType,
+      replyToMessageId: payload.replyToMessageId,
+      bodyLength: payload.body.length,
+    })
+
+    if (payload.replyToMessageId) {
+      parentMessage = await storage.getInboxMessageForParticipant(payload.replyToMessageId, req.user)
+      if (!parentMessage) {
+        logApi('inbox_reply_thread_not_found', { ...requestContext(req), replyToMessageId: payload.replyToMessageId })
+        return res.status(404).json({ message: 'Message thread not found.' })
+      }
+
+      threadId = parentMessage.threadId || parentMessage.id
+      parentMessageId = parentMessage.id
+      messageType = parentMessage.messageType === 'challenge_request' ? 'challenge_request' : (parentMessage.messageType === 'individual_challenge' ? 'individual_challenge' : 'message')
+
+      if (messageType === 'challenge_request') {
+        const resolvedChallenge = await resolveTeamChallengeForReply(req, parentMessage)
+        if (resolvedChallenge.status !== 200) return res.status(resolvedChallenge.status).json(resolvedChallenge.body)
+        recipient = resolvedChallenge.recipient
+        recipientEmail = normalizeEmail(recipient.email)
+        teamContext = resolvedChallenge.teamContext
+        logApi('team_challenge_reply_recipient_resolved', {
+          ...requestContext(req),
+          replyToMessageId: payload.replyToMessageId,
+          threadId,
+          parentMessageId,
+          recipientEmail,
+          proposerTeamId: teamContext?.proposerTeamId || null,
+          challengedTeamId: teamContext?.challengedTeamId || null,
+        })
+      } else if (messageType === 'individual_challenge') {
+        const resolvedChallenge = await resolveIndividualChallengeForReply(req, parentMessage)
+        if (resolvedChallenge.status !== 200) return res.status(resolvedChallenge.status).json(resolvedChallenge.body)
+        recipient = resolvedChallenge.recipient
+        recipientEmail = normalizeEmail(recipient.email)
+        teamContext = resolvedChallenge.teamContext
+        logApi('individual_challenge_reply_recipient_resolved', {
+          ...requestContext(req),
+          replyToMessageId: payload.replyToMessageId,
+          threadId,
+          parentMessageId,
+          recipientEmail,
+          participantCount: teamContext?.individualChallengeParticipants?.length || 0,
+        })
+      } else {
+        const currentUserEmail = normalizeEmail(req.user?.email)
+        const currentUserIsSender = String(parentMessage.senderUserId || '') === String(req.user?.id || '') || normalizeEmail(parentMessage.senderEmail) === currentUserEmail
+        recipientEmail = currentUserIsSender ? parentMessage.recipientEmail : parentMessage.senderEmail
+        logApi('inbox_reply_recipient_resolved', {
+          ...requestContext(req),
+          replyToMessageId: payload.replyToMessageId,
+          threadId,
+          parentMessageId,
+          recipientEmail,
+        })
+      }
+    } else if (payload.messageType === 'challenge_request') {
+      const resolvedChallenge = await resolveTeamChallengeForNewMessage(req, payload)
+      if (resolvedChallenge.status !== 200) return res.status(resolvedChallenge.status).json(resolvedChallenge.body)
+      recipient = resolvedChallenge.recipient
+      recipientEmail = normalizeEmail(recipient.email)
+      teamContext = resolvedChallenge.teamContext
+      logApi('team_challenge_recipient_resolved', {
+        ...requestContext(req),
+        proposerTeamId: teamContext?.proposerTeamId || null,
+        proposerTeamName: teamContext?.proposerTeamName || null,
+        challengedTeamId: teamContext?.challengedTeamId || null,
+        challengedTeamName: teamContext?.challengedTeamName || null,
+        challengeDate: teamContext?.challengeDate || null,
+        challengeState: teamContext?.challengeState || null,
+        challengeCourse: teamContext?.challengeCourse || null,
+        recipientEmail,
+      })
+    } else if (payload.messageType === 'individual_challenge') {
+      const resolvedChallenge = await resolveIndividualChallengeForNewMessage(req, payload)
+      if (resolvedChallenge.status !== 200) return res.status(resolvedChallenge.status).json(resolvedChallenge.body)
+      recipient = resolvedChallenge.recipient
+      recipientEmail = normalizeEmail(recipient.email)
+      teamContext = resolvedChallenge.teamContext
+      logApi('individual_challenge_recipient_resolved', {
+        ...requestContext(req),
+        participantCount: teamContext?.individualChallengeParticipants?.length || 0,
+        participantEmails: (teamContext?.individualChallengeParticipants || []).map((participant) => participant.email),
+        challengeDate: teamContext?.challengeDate || null,
+        challengeState: teamContext?.challengeState || null,
+        challengeCourse: teamContext?.challengeCourse || null,
+        recipientEmail,
+      })
+    }
+
+    if (!recipient) {
+      recipient = await storage.findUserByEmail(recipientEmail)
+      if (!recipient) {
+        logApi('inbox_message_recipient_not_found', { ...requestContext(req), recipientEmail, inviteRequired: true, replyToMessageId: payload.replyToMessageId })
+        return res.status(404).json({
+          message: 'Recipient does not exist in Golf Homiez. Send them an invite to join.',
+          recipientEmail,
+          inviteRequired: true,
+        })
+      }
+    }
+
+    const message = await storage.createInboxMessage({
+      sender: req.user,
+      recipient,
+      messageType,
+      body: payload.body,
+      threadId,
+      parentMessageId,
+      teamContext,
+    })
+    logApi(messageType === 'challenge_request' ? 'team_challenge_message_sent' : (messageType === 'individual_challenge' ? 'individual_challenge_message_sent' : 'inbox_message_sent'), {
+      ...requestContext(req),
+      messageId: message?.id || null,
+      recipientEmail: recipient.email,
+      recipientUserId: recipient.id,
+      messageType,
+      threadId: message?.threadId || threadId || null,
+      parentMessageId,
+      replyToMessageId: payload.replyToMessageId,
+      proposerTeamId: message?.proposerTeamId || teamContext?.proposerTeamId || null,
+      challengedTeamId: message?.challengedTeamId || teamContext?.challengedTeamId || null,
+      challengeStatus: message?.challengeStatus || teamContext?.challengeStatus || null,
+      challengeDate: message?.challengeDate || teamContext?.challengeDate || null,
+      challengeState: message?.challengeState || teamContext?.challengeState || null,
+      challengeCourse: message?.challengeCourse || teamContext?.challengeCourse || null,
+      individualParticipantCount: message?.individualChallengeParticipants?.length || teamContext?.individualChallengeParticipants?.length || 0,
+    })
+    res.status(201).json({ ok: true, message, notice: messageType === 'challenge_request' ? 'Your Team Challenge was sent successfully.' : (messageType === 'individual_challenge' ? 'Your Individual Challenge was sent successfully.' : 'Your message was sent successfully.') })
+  } catch (error) {
+    if (error instanceof Error && /valid recipient email|required|characters or less|thread reference|team|selected|date|state|course|invalid|Individual Challenge|participant|golfers/i.test(error.message)) {
+      logApi('inbox_message_validation_failed', { ...requestContext(req), validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Inbox message send error', req, error)
+    res.status(500).json({ message: 'Could not send inbox message' })
+  }
+})
+
+
+app.patch('/api/inbox/messages/:id/challenge-status', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const status = normalizeChallengeStatus(req.body?.status)
+    const message = await storage.updateInboxChallengeStatus(req.params.id, req.user, status)
+    if (!message) {
+      logApi('team_challenge_status_not_found', { ...requestContext(req), messageId: req.params.id, requestedStatus: status })
+      return res.status(404).json({ message: 'Team Challenge not found' })
+    }
+    logApi('team_challenge_status_updated', {
+      ...requestContext(req),
+      messageId: message.id,
+      threadId: message.threadId || null,
+      proposerTeamId: message.proposerTeamId || null,
+      challengedTeamId: message.challengedTeamId || null,
+      challengeStatus: message.challengeStatus || status,
+    })
+    res.json(message)
+  } catch (error) {
+    if (error instanceof Error && /status/i.test(error.message)) {
+      logApi('team_challenge_status_validation_failed', { ...requestContext(req), validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Team Challenge status update error', req, error)
+    res.status(500).json({ message: 'Could not update Team Challenge' })
+  }
+})
+
+app.patch('/api/inbox/messages/:id/team-score', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const score = normalizeTeamChallengeScore(req.body?.score)
+    const holes = normalizeTeamChallengeHoles(req.body?.holes)
+    const participantMessage = await storage.getInboxMessageForParticipant(req.params.id, req.user)
+    if (!participantMessage || participantMessage.messageType !== 'challenge_request') {
+      logApi('team_challenge_score_not_found', { ...requestContext(req), messageId: req.params.id })
+      return res.status(404).json({ message: 'Team Challenge not found' })
+    }
+    const userTeamIds = await resolveUserTeamIds(req.user)
+    const side = userTeamChallengeSide(participantMessage, userTeamIds)
+    if (!side) {
+      logApi('team_challenge_score_update_forbidden', { ...requestContext(req), messageId: req.params.id, proposerTeamId: participantMessage.proposerTeamId || null, challengedTeamId: participantMessage.challengedTeamId || null })
+      return res.status(403).json({ message: 'Only members of a Team Challenge team can update that team score.' })
+    }
+    const message = await storage.updateInboxChallengeScore(req.params.id, req.user, side, score, holes)
+    if (!message) {
+      logApi('team_challenge_score_update_missing', { ...requestContext(req), messageId: req.params.id, side, score })
+      return res.status(404).json({ message: 'Team Challenge not found' })
+    }
+    logApi('team_challenge_score_updated', {
+      ...requestContext(req),
+      messageId: message.id,
+      threadId: message.threadId || null,
+      side,
+      score,
+      holeCount: Array.isArray(holes) ? holes.length : 0,
+      proposerTeamId: message.proposerTeamId || null,
+      challengedTeamId: message.challengedTeamId || null,
+      proposerTeamScore: message.proposerTeamScore ?? null,
+      challengedTeamScore: message.challengedTeamScore ?? null,
+    })
+    res.json(message)
+  } catch (error) {
+    if (error instanceof Error && /score|number|zero|holes|hole/i.test(error.message)) {
+      logApi('team_challenge_score_validation_failed', { ...requestContext(req), validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Team Challenge score update error', req, error)
+    res.status(500).json({ message: 'Could not update Team Challenge score' })
+  }
+})
+
+
+app.patch('/api/inbox/messages/:id/individual-score', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const score = normalizeIndividualChallengeScore(req.body?.score)
+    const holes = normalizeTeamChallengeHoles(req.body?.holes)
+    const participantMessage = await storage.getInboxMessageForParticipant(req.params.id, req.user)
+    if (!participantMessage || participantMessage.messageType !== 'individual_challenge') {
+      logApi('individual_challenge_score_not_found', { ...requestContext(req), messageId: req.params.id })
+      return res.status(404).json({ message: 'Individual Challenge not found' })
+    }
+    const participant = individualChallengeParticipantForUser(participantMessage, req.user)
+    if (!participant) {
+      logApi('individual_challenge_score_update_forbidden', { ...requestContext(req), messageId: req.params.id })
+      return res.status(403).json({ message: 'Only golfers in an Individual Challenge can update their own score.' })
+    }
+    const soloScore = await createOrUpdateIndividualChallengeSoloScore(participantMessage, req.user, score, holes, participant)
+    const message = await storage.updateInboxIndividualChallengeScore(req.params.id, req.user, score, holes, { soloScoreId: soloScore?.id || participant.soloScoreId || null })
+    if (!message) {
+      logApi('individual_challenge_score_update_missing', { ...requestContext(req), messageId: req.params.id, score })
+      return res.status(404).json({ message: 'Individual Challenge not found' })
+    }
+    logApi('individual_challenge_score_updated', {
+      ...requestContext(req),
+      messageId: message.id,
+      threadId: message.threadId || null,
+      score,
+      holeCount: Array.isArray(holes) ? holes.length : 0,
+      participantCount: message.individualChallengeParticipants?.length || 0,
+      soloScoreId: soloScore?.id || null,
+    })
+    res.json(message)
+  } catch (error) {
+    if (error instanceof Error && /score|number|zero|holes|hole/i.test(error.message)) {
+      logApi('individual_challenge_score_validation_failed', { ...requestContext(req), validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Individual Challenge score update error', req, error)
+    res.status(500).json({ message: 'Could not update Individual Challenge score' })
+  }
+})
+
+app.patch('/api/inbox/messages/:id/read', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const message = await storage.markInboxMessageRead(req.params.id, req.user)
+    if (!message) {
+      logApi('inbox_message_read_not_found', { ...requestContext(req), messageId: req.params.id })
+      return res.status(404).json({ message: 'Inbox message not found' })
+    }
+    logApi('inbox_message_read', { ...requestContext(req), messageId: message.id, senderEmail: message.senderEmail, messageType: message.messageType, threadId: message.threadId || null })
+    res.json(message)
+  } catch (error) {
+    logRouteError('Inbox message read error', req, error)
+    res.status(500).json({ message: 'Could not update inbox message' })
+  }
+})
+
 app.get('/api/users/lookup', requireStorage, authMiddleware, async (req, res) => {
   try {
     const email = String(req.query.email || '').trim()
@@ -2874,6 +3538,41 @@ function coerceScoreNumber(value, fieldName) {
   return numberValue
 }
 
+function coerceOptionalScoreNumber(value, fieldName) {
+  if (value === undefined || value === null || value === '') return null
+  return coerceScoreNumber(value, fieldName)
+}
+
+function sameTeamName(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+}
+
+function findMatchingTeamRound(scores, { date, state, course, team, opponentTeam }) {
+  const normalizedState = String(state || '').trim().toUpperCase()
+  const normalizedCourse = String(course || '').trim().toLowerCase()
+  return (scores || []).find((entry) => {
+    if (entry?.mode !== 'team') return false
+    if (String(entry.date || '') !== String(date || '')) return false
+    if (String(entry.state || '').trim().toUpperCase() !== normalizedState) return false
+    if (String(entry.course || '').trim().toLowerCase() !== normalizedCourse) return false
+    const normal = sameTeamName(entry.team, team) && sameTeamName(entry.opponentTeam, opponentTeam)
+    const reversed = sameTeamName(entry.team, opponentTeam) && sameTeamName(entry.opponentTeam, team)
+    return normal || reversed
+  }) || null
+}
+
+function viewerTeamRoundProjection(entry, { team, opponentTeam }) {
+  if (!entry) return { score: null, teamTotal: null, opponentTotal: null, teamHoles: null, opponentHoles: null }
+  const normal = sameTeamName(entry.team, team) && sameTeamName(entry.opponentTeam, opponentTeam)
+  return {
+    score: entry,
+    teamTotal: normal ? entry.teamTotal ?? null : entry.opponentTotal ?? null,
+    opponentTotal: normal ? entry.opponentTotal ?? null : entry.teamTotal ?? null,
+    teamHoles: normal ? entry.holes ?? null : entry.opponentHoles ?? null,
+    opponentHoles: normal ? entry.opponentHoles ?? null : entry.holes ?? null,
+  }
+}
+
 async function loadScorecardDraftFallback(req, contextInput, scoringSide) {
   try {
     const context = normalizeDraftContext({ ...contextInput, scoringSide }, req.user)
@@ -2960,14 +3659,19 @@ async function buildUpdatedScorePayload(existing, body, req) {
 
   const myTeam = await findTeamByName(team)
   if (!myTeam) throw new Error('Your team must be a known team (create it first)')
-  if (!(await isUserOnTeam(team, req.user.email)) && !isScoreCreator(existing, req.user)) throw new Error('You are not a member of the selected team')
+  const userOnTeam = await isUserOnTeam(team, req.user.email)
+  if (!userOnTeam && !isScoreCreator(existing, req.user)) throw new Error('You are not a member of the selected team')
 
   const oppTeamObj = await findTeamByName(opponentTeam)
   if (!oppTeamObj) throw new Error('Opponent team must be a known team (create it first)')
+  const userOnOpponentTeam = await isUserOnTeam(opponentTeam, req.user.email)
+  if ((body.teamTotal !== undefined || body.holes !== undefined) && !userOnTeam) throw new Error('Only members of the selected team can modify that team score')
+  if ((body.opponentTotal !== undefined || body.opponentHoles !== undefined) && !userOnOpponentTeam) throw new Error('Only members of the opponent team can modify the opponent score')
 
-  const teamTotal = coerceScoreNumber(body.teamTotal ?? existing.teamTotal, 'teamTotal')
-  const opponentTotal = coerceScoreNumber(body.opponentTotal ?? existing.opponentTotal, 'opponentTotal')
-  const won = teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null)
+  const teamTotal = coerceOptionalScoreNumber(body.teamTotal ?? existing.teamTotal, 'teamTotal')
+  const opponentTotal = coerceOptionalScoreNumber(body.opponentTotal ?? existing.opponentTotal, 'opponentTotal')
+  if (teamTotal === null) throw new Error('teamTotal must be a number')
+  const won = opponentTotal === null ? null : (teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null))
 
   return {
     ...existing,
@@ -2985,6 +3689,42 @@ async function buildUpdatedScorePayload(existing, body, req) {
     opponentHoles: body.opponentHoles === undefined ? existing.opponentHoles : normalizeHoleScorePayload(body.opponentHoles),
   }
 }
+
+app.get('/api/team-round-score', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const context = {
+      date: String(req.query.date || '').trim(),
+      state: String(req.query.state || '').trim().toUpperCase(),
+      course: String(req.query.course || '').trim(),
+      team: String(req.query.team || '').trim(),
+      opponentTeam: String(req.query.opponentTeam || '').trim(),
+    }
+    if (!context.date || !context.state || !context.course || !context.team || !context.opponentTeam) {
+      return res.status(400).json({ message: 'date, state, course, team, and opponentTeam are required' })
+    }
+    if (!(await isUserOnTeam(context.team, req.user.email)) && !(await isUserOnTeam(context.opponentTeam, req.user.email))) {
+      logApi('team_round_score_lookup_forbidden', { ...requestContext(req), ...context })
+      return res.status(403).json({ message: 'Only members of the teams involved can view this team round score.' })
+    }
+    const matchedCourse = await findGolfCourseForState(context.state, context.course)
+    if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
+    const scores = await storage.listScores()
+    const entry = findMatchingTeamRound(scores, { ...context, course: matchedCourse.name })
+    const projection = viewerTeamRoundProjection(entry, { team: context.team, opponentTeam: context.opponentTeam })
+    logApi('team_round_score_lookup_loaded', {
+      ...requestContext(req),
+      ...context,
+      course: matchedCourse.name,
+      scoreId: entry?.id || null,
+      hasTeamTotal: projection.teamTotal !== null && projection.teamTotal !== undefined,
+      hasOpponentTotal: projection.opponentTotal !== null && projection.opponentTotal !== undefined,
+    })
+    res.json(projection)
+  } catch (error) {
+    logRouteError('Team round score lookup error', req, error)
+    res.status(500).json({ message: 'Could not load team round score' })
+  }
+})
 
 app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
   try {
@@ -3052,19 +3792,24 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
     if (String(opponentTeam).trim().toLowerCase() === String(team).trim().toLowerCase()) {
       return res.status(400).json({ message: 'Opponent team must be different from your team' })
     }
-    if (typeof teamTotal !== 'number' || Number.isNaN(teamTotal)) return res.status(400).json({ message: 'teamTotal must be a number' })
-    if (typeof opponentTotal !== 'number' || Number.isNaN(opponentTotal)) return res.status(400).json({ message: 'opponentTotal must be a number' })
-    if (teamTotal < 0 || opponentTotal < 0) return res.status(400).json({ message: 'Scores must be zero or greater' })
+    const normalizedTeamTotal = coerceOptionalScoreNumber(teamTotal, 'teamTotal')
+    const normalizedOpponentTotal = coerceOptionalScoreNumber(opponentTotal, 'opponentTotal')
+    if (normalizedTeamTotal === null) return res.status(400).json({ message: 'teamTotal must be a number' })
 
     const matchedCourse = await findGolfCourseForState(state, course)
     if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
     const myTeam = await findTeamByName(team)
     if (!myTeam) return res.status(400).json({ message: 'Your team must be a known team (create it first)' })
-    if (!(await isUserOnTeam(team, req.user.email))) return res.status(403).json({ message: 'You are not a member of the selected team' })
+    const userOnTeam = await isUserOnTeam(team, req.user.email)
+    if (!userOnTeam) return res.status(403).json({ message: 'You are not a member of the selected team' })
 
     const oppTeamObj = await findTeamByName(opponentTeam)
     if (!oppTeamObj) return res.status(400).json({ message: 'Opponent team must be a known team (create it first)' })
+    const userOnOpponentTeam = await isUserOnTeam(opponentTeam, req.user.email)
+    if ((opponentTotal !== undefined && opponentTotal !== null && opponentTotal !== '') || (opponentHoles !== undefined && opponentHoles !== null)) {
+      if (!userOnOpponentTeam) return res.status(403).json({ message: 'Only members of the opponent team can modify the opponent score' })
+    }
 
     const { normalizedHoles, normalizedOpponentHoles } = await resolveTeamHolePayloads(req, {
       date,
@@ -3073,11 +3818,12 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       team,
       opponentTeam: String(opponentTeam).trim(),
       holes,
-      opponentHoles,
+      opponentHoles: userOnOpponentTeam ? opponentHoles : null,
     })
+    const persistedOpponentHoles = userOnOpponentTeam ? normalizedOpponentHoles : null
     const holeScoreTotal = calculateHoleScoreTotal(normalizedHoles)
-    const opponentHoleScoreTotal = calculateHoleScoreTotal(normalizedOpponentHoles)
-    const won = teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null)
+    const opponentHoleScoreTotal = calculateHoleScoreTotal(persistedOpponentHoles)
+    const won = normalizedOpponentTotal === null ? null : (normalizedTeamTotal < normalizedOpponentTotal ? true : (normalizedTeamTotal > normalizedOpponentTotal ? false : null))
 
     const entry = await storage.createScore({
       mode: 'team',
@@ -3086,21 +3832,21 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       course: matchedCourse.name,
       team,
       opponentTeam: String(opponentTeam).trim(),
-      teamTotal,
-      opponentTotal,
+      teamTotal: normalizedTeamTotal,
+      opponentTotal: normalizedOpponentTotal,
       won,
       holes: normalizedHoles,
-      opponentHoles: normalizedOpponentHoles,
+      opponentHoles: persistedOpponentHoles,
       createdByUserId: req.user.id,
       createdByEmail: req.user.email,
     })
-    if (normalizedHoles?.length || normalizedOpponentHoles?.length) {
+    if (normalizedHoles?.length || persistedOpponentHoles?.length) {
       try {
         const baseDraftContext = { mode: 'team', date, state: String(state).toUpperCase(), course: matchedCourse.name, team, opponentTeam: String(opponentTeam).trim() }
         const teamDraftContext = normalizeDraftContext({ ...baseDraftContext, scoringSide: 'team' }, req.user)
-        const opponentDraftContext = normalizeDraftContext({ ...baseDraftContext, scoringSide: 'opponent' }, req.user)
+        const opponentDraftContext = userOnOpponentTeam ? normalizeDraftContext({ ...baseDraftContext, scoringSide: 'opponent' }, req.user) : null
         const clearedTeamDraftHoles = await clearScorecardDraftHoles(getPool(), teamDraftContext)
-        const clearedOpponentDraftHoles = await clearScorecardDraftHoles(getPool(), opponentDraftContext)
+        const clearedOpponentDraftHoles = opponentDraftContext ? await clearScorecardDraftHoles(getPool(), opponentDraftContext) : 0
         logApi('scorecard_draft_cleared', { ...requestContext(req), mode: 'team', scoreId: entry.id, clearedDraftHoles: clearedTeamDraftHoles + clearedOpponentDraftHoles, clearedTeamDraftHoles, clearedOpponentDraftHoles })
       } catch (draftError) {
         logError('Failed to clear team scorecard draft after score creation', { error: draftError, scoreId: entry.id, userId: req.user.id })
@@ -3112,12 +3858,12 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       course: matchedCourse.name,
       team,
       opponentTeam: String(opponentTeam).trim(),
-      teamTotal,
-      opponentTotal,
+      teamTotal: normalizedTeamTotal,
+      opponentTotal: normalizedOpponentTotal,
       holeCount: normalizedHoles?.length || 0,
-      opponentHoleCount: normalizedOpponentHoles?.length || 0,
+      opponentHoleCount: persistedOpponentHoles?.length || 0,
       holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
-      opponentHoleScoreTotal: normalizedOpponentHoles ? opponentHoleScoreTotal : null,
+      opponentHoleScoreTotal: persistedOpponentHoles ? opponentHoleScoreTotal : null,
       won,
     })
     res.status(201).json(entry)

@@ -15,6 +15,14 @@ import { buildClientDefaultHoleScorecard, holeScoreTotal, missingHoleScoreNumber
 
 type DraftMember = { firstName: string; lastName: string; email: string; invited?: boolean }
 
+type TeamRoundScoreLookup = {
+  score: ScoreEntry | null
+  teamTotal: number | null
+  opponentTotal: number | null
+  teamHoles?: HoleScoreDetail[] | null
+  opponentHoles?: HoleScoreDetail[] | null
+}
+
 function splitUserName(name: string | null | undefined, email: string | null | undefined) {
   const trimmed = String(name || '').trim()
   if (!trimmed) return { firstName: String(email || '').split('@')[0] || '', lastName: '' }
@@ -67,6 +75,8 @@ function GolfLoggerInner() {
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteMessage, setInviteMessage] = useState<string | null>(null)
+  const [existingTeamRoundScoreId, setExistingTeamRoundScoreId] = useState<string | null>(null)
+  const [opponentScoreStatus, setOpponentScoreStatus] = useState<string | null>(null)
 
   async function loadTeams() {
     try {
@@ -132,22 +142,53 @@ function GolfLoggerInner() {
   const missingOpponentHoleNumbers = useMemo(() => missingHoleScoreNumbers(opponentHoles), [opponentHoles])
   const teamScoreProvidedCount = useMemo(() => holes.filter((hole) => hole.scoreProvided).length, [holes])
   const opponentScoreProvidedCount = useMemo(() => opponentHoles.filter((hole) => hole.scoreProvided).length, [opponentHoles])
-  const teamRoundContextLocked = useMemo(() => useHoles && (teamScoreProvidedCount > 0 || opponentScoreProvidedCount > 0), [useHoles, teamScoreProvidedCount, opponentScoreProvidedCount])
+  const teamRoundContextLocked = useMemo(() => useHoles && teamScoreProvidedCount > 0, [useHoles, teamScoreProvidedCount])
   const scorecardContextReady = useMemo(() => Boolean(useHoles && date && stateAbbr && course && team.trim() && opponentTeam.trim() && team.trim().toLowerCase() !== opponentTeam.trim().toLowerCase()), [useHoles, date, stateAbbr, course, team, opponentTeam])
 
   useEffect(() => {
     if (!useHoles) return
     setTeamTotal(String(holesTotal))
-    setOpponentTotal(String(opponentHolesTotal))
-  }, [useHoles, holesTotal, opponentHolesTotal])
+  }, [useHoles, holesTotal])
   const [courseOptions, setCourseOptions] = useState<string[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadExistingTeamRoundScore() {
+      if (!date || !stateAbbr || !course || !team.trim() || !opponentTeam.trim() || team.trim().toLowerCase() === opponentTeam.trim().toLowerCase()) {
+        setExistingTeamRoundScoreId(null)
+        setOpponentScoreStatus(null)
+        return
+      }
+
+      const params = new URLSearchParams({ date, state: stateAbbr, course, team, opponentTeam })
+      try {
+        const result = await api<TeamRoundScoreLookup>(`/api/team-round-score?${params.toString()}`)
+        if (cancelled) return
+        setExistingTeamRoundScoreId(result.score?.id || null)
+        setOpponentTotal(result.opponentTotal === null || result.opponentTotal === undefined ? '' : String(result.opponentTotal))
+        setOpponentHoles(Array.isArray(result.opponentHoles) ? result.opponentHoles : buildClientDefaultHoleScorecard(stateAbbr, course))
+        if ((teamTotal === '' || teamTotal === '0') && Number.isFinite(Number(result.teamTotal))) setTeamTotal(String(result.teamTotal))
+        setOpponentScoreStatus(result.opponentTotal === null || result.opponentTotal === undefined ? 'Opponent score pending. Only the opponent team can update it.' : 'Opponent score loaded as read-only.')
+        logFrontendEvent({ category: 'team.round.scoreLookup', message: 'loaded', data: { date, stateAbbr, course, team, opponentTeam, scoreId: result.score?.id || null, hasOpponentTotal: result.opponentTotal !== null && result.opponentTotal !== undefined } })
+      } catch (error) {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : 'Could not load opponent score.'
+        setExistingTeamRoundScoreId(null)
+        setOpponentScoreStatus('Opponent score pending. Only the opponent team can update it.')
+        logFrontendEvent({ category: 'team.round.scoreLookup', level: 'warn', message: 'failed', data: { date, stateAbbr, course, team, opponentTeam, error: message } })
+      }
+    }
+    void loadExistingTeamRoundScore()
+    return () => { cancelled = true }
+  }, [date, stateAbbr, course, team, opponentTeam])
 
   const totals = useMemo(() => {
     const your = Number(teamTotal)
     const opp = Number(opponentTotal)
-    const valid = teamTotal !== '' && opponentTotal !== '' && Number.isFinite(your) && Number.isFinite(opp)
-    const result = !valid ? '' : (your < opp ? 'Win' : your > opp ? 'Loss' : 'Tie')
-    return { your, opp, valid, result }
+    const valid = teamTotal !== '' && Number.isFinite(your)
+    const opponentValid = opponentTotal !== '' && Number.isFinite(opp)
+    const result = !valid ? '' : (!opponentValid ? 'Pending opponent score' : (your < opp ? 'Win' : your > opp ? 'Loss' : 'Tie'))
+    return { your, opp, valid, opponentValid, result }
   }, [teamTotal, opponentTotal])
 
   const resultClass = totals.result === 'Win' ? 'eventWin' : totals.result === 'Loss' ? 'eventLoss' : totals.result === 'Tie' ? 'eventTie' : ''
@@ -162,9 +203,8 @@ function GolfLoggerInner() {
     if (!opponentTeam.trim()) missing.push('Opponent team')
     if (team.trim() && opponentTeam.trim() && team.trim().toLowerCase() === opponentTeam.trim().toLowerCase()) missing.push('Opponent team must be different from your team')
     if (teamTotal === '' || !Number.isFinite(Number(teamTotal))) missing.push('Your team round score')
-    if (opponentTotal === '' || !Number.isFinite(Number(opponentTotal))) missing.push('Opponent round score')
     return missing
-  }, [date, today, stateAbbr, course, team, opponentTeam, teamTotal, opponentTotal])
+  }, [date, today, stateAbbr, course, team, opponentTeam, teamTotal])
 
   const cleanedNewMembers = useMemo(() => {
     return newMembers
@@ -229,6 +269,8 @@ function GolfLoggerInner() {
     setUseHoles(false)
     setHoles(buildClientDefaultHoleScorecard('UT', ''))
     setOpponentHoles(buildClientDefaultHoleScorecard('UT', ''))
+    setExistingTeamRoundScoreId(null)
+    setOpponentScoreStatus(null)
     setActiveScorecardSide(null)
     setMsg(null)
     setErr(null)
@@ -248,12 +290,7 @@ function GolfLoggerInner() {
     })
     const teamParams = new URLSearchParams(baseParams)
     teamParams.set('scoringSide', 'team')
-    const opponentParams = new URLSearchParams(baseParams)
-    opponentParams.set('scoringSide', 'opponent')
-    await Promise.all([
-      api(`/api/scorecard-drafts?${teamParams.toString()}`, { method: 'DELETE' }),
-      api(`/api/scorecard-drafts?${opponentParams.toString()}`, { method: 'DELETE' }),
-    ])
+    await api(`/api/scorecard-drafts?${teamParams.toString()}`, { method: 'DELETE' })
   }
 
   async function handleCancelRound() {
@@ -284,6 +321,11 @@ function GolfLoggerInner() {
       setErr('Select a date, state, course, your team, and opponent team before entering hole-by-hole scores.')
       return
     }
+    if (side === 'opponent') {
+      setErr('Opponent score is read-only. Only members of the opponent team can modify that score.')
+      logFrontendEvent({ category: 'team.scorecard.modal', level: 'warn', message: 'opponent_score_read_only_blocked', data: { side, date, stateAbbr, course, team, opponentTeam } })
+      return
+    }
     setActiveScorecardSide(side)
     logFrontendEvent({ category: 'team.scorecard.modal', message: 'opened', data: { side, date, stateAbbr, course, team, opponentTeam } })
   }
@@ -294,13 +336,15 @@ function GolfLoggerInner() {
   }
 
   function scorecardButtonSummary(side: 'team' | 'opponent') {
-    const provided = side === 'team' ? teamScoreProvidedCount : opponentScoreProvidedCount
-    const total = side === 'team' ? holesTotal : opponentHolesTotal
+    if (side === 'opponent') return opponentTotal ? `Read-only opponent score ${opponentTotal}` : 'Opponent score pending'
+    const provided = teamScoreProvidedCount
+    const total = holesTotal
     return `${provided} of 18 holes entered • Current score ${total}`
   }
 
   function scorecardButtonHelp(side: 'team' | 'opponent') {
-    const missing = side === 'team' ? missingHoleNumbers : missingOpponentHoleNumbers
+    if (side === 'opponent') return 'Read-only opponent score. Only that team can update it.'
+    const missing = missingHoleNumbers
     if (!scorecardContextReady) return 'Complete round setup first, then tap here to enter hole scores.'
     if (!missing.length) return 'Tap to review or update saved hole scores.'
     return `Tap to enter hole-by-hole scores. Needs holes ${missing.join(', ')}.`
@@ -500,7 +544,8 @@ function GolfLoggerInner() {
               </div>
               <div>
                 <label className="label">{opponentTeam ? `${opponentTeam} Round Score` : 'Opponent Round Score'}</label>
-                <input className="input" type="number" value={opponentTotal} onChange={e => setOpponentTotal(e.target.value)} />
+                <input className="input inputReadOnly" type="number" value={opponentTotal} readOnly placeholder="Opponent score pending" />
+                <div className="small" style={{ marginTop: 6 }}>{opponentScoreStatus || 'Only members of the opponent team can update this score.'}</div>
               </div>
             </>
           ) : (
@@ -516,8 +561,8 @@ function GolfLoggerInner() {
               </div>
               <div>
                 <label className="label">{opponentTeam ? `${opponentTeam} Score` : 'Opponent Team Score'}</label>
-                <button type="button" className="teamScorecardOpenButton teamScorecardInputButton" onClick={() => openScorecardModal('opponent')} disabled={!scorecardContextReady}>
-                  <span className="teamScorecardInputBadge">Tap to enter score</span>
+                <button type="button" className="teamScorecardOpenButton teamScorecardInputButton teamScorecardInputButton--readonly" onClick={() => openScorecardModal('opponent')} disabled={!scorecardContextReady}>
+                  <span className="teamScorecardInputBadge">Read-only score</span>
                   <strong>{scorecardButtonLabel('opponent')}</strong>
                   <span>{scorecardButtonSummary('opponent')}</span>
                   <span>{scorecardButtonHelp('opponent')}</span>
@@ -571,8 +616,8 @@ function GolfLoggerInner() {
             </div>
             <div>
               <span>{opponentTeam ? `${opponentTeam} Round Score` : 'Opponent Round Score'}</span>
-              <button type="button" className="lockedScorecardButton" onClick={() => openScorecardModal('opponent')}>
-                <strong>{opponentTotal || String(opponentHolesTotal)}</strong>
+              <button type="button" className="lockedScorecardButton lockedScorecardButton--readonly" onClick={() => openScorecardModal('opponent')}>
+                <strong>{opponentTotal || 'Pending'}</strong>
                 <small>{scorecardButtonHelp('opponent')}</small>
               </button>
             </div>
@@ -602,13 +647,10 @@ function GolfLoggerInner() {
                 logFrontendEvent({ category: 'team.round.save', level: 'warn', message: 'validation_failed', data: { correlationId, missingFields } })
                 return
               }
-              if (useHoles && (missingHoleNumbers.length || missingOpponentHoleNumbers.length)) {
-                const parts = []
-                if (missingHoleNumbers.length) parts.push(`your team holes: ${missingHoleNumbers.join(', ')}`)
-                if (missingOpponentHoleNumbers.length) parts.push(`opponent team holes: ${missingOpponentHoleNumbers.join(', ')}`)
-                const message = `Finish entering scores for ${parts.join('; ')}.`
+              if (useHoles && missingHoleNumbers.length) {
+                const message = `Finish entering scores for your team holes: ${missingHoleNumbers.join(', ')}.`
                 setErr(message)
-                logFrontendEvent({ category: 'team.round.save', level: 'warn', message: 'hole_scores_incomplete', data: { correlationId, missingHoleNumbers, missingOpponentHoleNumbers } })
+                logFrontendEvent({ category: 'team.round.save', level: 'warn', message: 'hole_scores_incomplete', data: { correlationId, missingHoleNumbers } })
                 return
               }
               setBusy(true)
@@ -625,7 +667,7 @@ function GolfLoggerInner() {
                 if (!trimmedOpp) throw new Error('Opponent team is required')
                 if (trimmedTeam.toLowerCase() === trimmedOpp.toLowerCase()) throw new Error('Opponent team must be different from your team')
                 if (!course.trim()) throw new Error('Course is required')
-                if (!totals.valid) throw new Error('Please enter both round scores')
+                if (!totals.valid) throw new Error('Please enter your team round score')
 
                 const body: Partial<ScoreEntry> & any = {
                   date,
@@ -634,13 +676,13 @@ function GolfLoggerInner() {
                   team: trimmedTeam,
                   opponentTeam: trimmedOpp,
                   teamTotal: useHoles ? holesTotal : totals.your,
-                  opponentTotal: useHoles ? opponentHolesTotal : totals.opp,
-                  holes: useHoles ? holes : null,
-                  opponentHoles: useHoles ? opponentHoles : null
+                  holes: useHoles ? holes : null
                 }
-                await api<ScoreEntry>('/api/scores', { method: 'POST', body: JSON.stringify(body) })
-                logFrontendEvent({ category: 'team.round.save', message: 'succeeded', data: { correlationId, team: trimmedTeam, opponentTeam: trimmedOpp, course, result: totals.result, useHoles, cumulativeScore: useHoles ? holesTotal : null, opponentCumulativeScore: useHoles ? opponentHolesTotal : null } })
-                setMsg('Round saved.')
+                const savePath = existingTeamRoundScoreId ? `/api/scores/${encodeURIComponent(existingTeamRoundScoreId)}` : '/api/scores'
+                const saveMethod = existingTeamRoundScoreId ? 'PATCH' : 'POST'
+                await api<ScoreEntry>(savePath, { method: saveMethod, body: JSON.stringify(body) })
+                logFrontendEvent({ category: 'team.round.save', message: 'succeeded', data: { correlationId, team: trimmedTeam, opponentTeam: trimmedOpp, course, result: totals.result, useHoles, cumulativeScore: useHoles ? holesTotal : null, existingTeamRoundScoreId, opponentScoreReadOnly: true } })
+                setMsg('Round saved. Opponent score remains read-only for the opponent team.')
                 setCourse('')
                 setTeam(myTeams[0] || '')
                 setOpponentTeam('')
@@ -648,6 +690,8 @@ function GolfLoggerInner() {
                 setOpponentTotal('')
                 setHoles(buildClientDefaultHoleScorecard(stateAbbr, course))
                 setOpponentHoles(buildClientDefaultHoleScorecard(stateAbbr, course))
+                setExistingTeamRoundScoreId(null)
+                setOpponentScoreStatus(null)
                 setShowRoundValidation(false)
                 navigate('/')
               } catch (e: any) {

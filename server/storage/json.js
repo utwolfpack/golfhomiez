@@ -223,3 +223,240 @@ export async function deleteScoreById(id) {
   const scores = readJson(scoresPath, [])
   writeJson(scoresPath, scores.filter((s) => String(s.id) !== String(id)))
 }
+
+const inboxMessagesPath = path.join(dataDir, 'inbox_messages.json')
+
+function ensureInboxMessagesFile() {
+  ensureDataFiles()
+  if (!fs.existsSync(inboxMessagesPath)) writeJson(inboxMessagesPath, [])
+}
+
+function hydrateInboxMessage(message) {
+  return {
+    ...message,
+    threadId: message.threadId || message.id,
+    parentMessageId: message.parentMessageId || null,
+    proposerTeamId: message.proposerTeamId || null,
+    proposerTeamName: message.proposerTeamName || null,
+    challengedTeamId: message.challengedTeamId || null,
+    challengedTeamName: message.challengedTeamName || null,
+    challengeStatus: message.challengeStatus || null,
+    challengeDate: message.challengeDate || null,
+    challengeState: message.challengeState || null,
+    challengeCourse: message.challengeCourse || null,
+    proposerTeamScore: message.proposerTeamScore ?? null,
+    challengedTeamScore: message.challengedTeamScore ?? null,
+    proposerTeamHoles: Array.isArray(message.proposerTeamHoles) ? message.proposerTeamHoles : null,
+    challengedTeamHoles: Array.isArray(message.challengedTeamHoles) ? message.challengedTeamHoles : null,
+    individualChallengeParticipants: Array.isArray(message.individualChallengeParticipants) ? message.individualChallengeParticipants : [],
+  }
+}
+
+async function getInboxUserTeamIds(user) {
+  const normalizedEmail = normalizeEmail(user?.email)
+  if (!normalizedEmail) return new Set()
+  const teams = await listTeams()
+  return new Set(teams.filter((team) => (team.members || []).some((member) => normalizeEmail(member.email) === normalizedEmail)).map((team) => String(team.id)))
+}
+
+function isInboxDirectRecipient(message, user, normalizedEmail) {
+  return String(message.recipientUserId || '') === String(user?.id || '') || normalizeEmail(message.recipientEmail) === normalizedEmail
+}
+
+function isInboxDirectSender(message, user, normalizedEmail) {
+  return String(message.senderUserId || '') === String(user?.id || '') || normalizeEmail(message.senderEmail) === normalizedEmail
+}
+
+function isInboxTeamChallenge(message) {
+  return message.messageType === 'challenge_request'
+}
+
+function isInboxIndividualChallenge(message) {
+  return message.messageType === 'individual_challenge'
+}
+
+function isInboxIndividualChallengeParticipant(message, user, normalizedEmail) {
+  return (message.individualChallengeParticipants || []).some((participant) =>
+    String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail)
+}
+
+function canReadInboxMessage(message, user, normalizedEmail, userTeamIds) {
+  return isInboxDirectRecipient(message, user, normalizedEmail) ||
+    (isInboxTeamChallenge(message) && userTeamIds.has(String(message.challengedTeamId || ''))) ||
+    (isInboxIndividualChallenge(message) && isInboxIndividualChallengeParticipant(message, user, normalizedEmail))
+}
+
+function canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds) {
+  return isInboxDirectSender(message, user, normalizedEmail) ||
+    (isInboxTeamChallenge(message) && userTeamIds.has(String(message.proposerTeamId || ''))) ||
+    (isInboxIndividualChallenge(message) && isInboxIndividualChallengeParticipant(message, user, normalizedEmail))
+}
+
+function canParticipateInInboxMessage(message, user, normalizedEmail, userTeamIds) {
+  return isInboxDirectRecipient(message, user, normalizedEmail) ||
+    isInboxDirectSender(message, user, normalizedEmail) ||
+    (isInboxTeamChallenge(message) && (userTeamIds.has(String(message.proposerTeamId || '')) || userTeamIds.has(String(message.challengedTeamId || '')))) ||
+    (isInboxIndividualChallenge(message) && isInboxIndividualChallengeParticipant(message, user, normalizedEmail))
+}
+
+export async function listInboxMessagesForUser(user) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  return readJson(inboxMessagesPath, [])
+    .map(hydrateInboxMessage)
+    .filter((message) => canReadInboxMessage(message, user, normalizedEmail, userTeamIds))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+}
+
+export async function listSentInboxMessagesForUser(user) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  return readJson(inboxMessagesPath, [])
+    .map(hydrateInboxMessage)
+    .filter((message) => canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+}
+
+export async function getInboxMessageForParticipant(messageId, user) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const message = readJson(inboxMessagesPath, [])
+    .map(hydrateInboxMessage)
+    .find((item) => String(item.id) === String(messageId))
+  return message && canParticipateInInboxMessage(message, user, normalizedEmail, userTeamIds) ? message : null
+}
+
+export async function getInboxSummaryForUser(user) {
+  const messages = await listInboxMessagesForUser(user)
+  return { unreadCount: messages.filter((message) => !message.readAt).length }
+}
+
+export async function createInboxMessage({ sender, recipient, messageType, body, threadId, parentMessageId, teamContext = null }) {
+  ensureInboxMessagesFile()
+  const messages = readJson(inboxMessagesPath, [])
+  const id = uuidv4()
+  const message = {
+    id,
+    threadId: threadId || id,
+    parentMessageId: parentMessageId || null,
+    messageType: messageType || 'message',
+    senderUserId: sender?.id || null,
+    senderEmail: normalizeEmail(sender?.email),
+    senderName: sender?.name || null,
+    recipientUserId: recipient?.id || null,
+    recipientEmail: normalizeEmail(recipient?.email),
+    proposerTeamId: teamContext?.proposerTeamId || null,
+    proposerTeamName: teamContext?.proposerTeamName || null,
+    challengedTeamId: teamContext?.challengedTeamId || null,
+    challengedTeamName: teamContext?.challengedTeamName || null,
+    challengeStatus: teamContext?.challengeStatus || null,
+    challengeDate: teamContext?.challengeDate || null,
+    challengeState: teamContext?.challengeState || null,
+    challengeCourse: teamContext?.challengeCourse || null,
+    proposerTeamScore: teamContext?.proposerTeamScore ?? null,
+    challengedTeamScore: teamContext?.challengedTeamScore ?? null,
+    proposerTeamHoles: teamContext?.proposerTeamHoles || null,
+    challengedTeamHoles: teamContext?.challengedTeamHoles || null,
+    individualChallengeParticipants: teamContext?.individualChallengeParticipants || [],
+    body,
+    readAt: null,
+    createdAt: new Date().toISOString(),
+  }
+  messages.unshift(message)
+  writeJson(inboxMessagesPath, messages)
+  return message
+}
+
+export async function markInboxMessageRead(messageId, user) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const messages = readJson(inboxMessagesPath, [])
+  const idx = messages.findIndex((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    return String(hydrated.id) === String(messageId) && canReadInboxMessage(hydrated, user, normalizedEmail, userTeamIds)
+  })
+  if (idx < 0) return null
+  messages[idx] = { ...messages[idx], readAt: messages[idx].readAt || new Date().toISOString() }
+  writeJson(inboxMessagesPath, messages)
+  return hydrateInboxMessage(messages[idx])
+}
+
+export async function updateInboxChallengeStatus(messageId, user, status) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const messages = readJson(inboxMessagesPath, [])
+  const idx = messages.findIndex((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    return String(hydrated.id) === String(messageId) && hydrated.messageType === 'challenge_request' && canParticipateInInboxMessage(hydrated, user, normalizedEmail, userTeamIds)
+  })
+  if (idx < 0) return null
+  const targetThreadId = hydrateInboxMessage(messages[idx]).threadId || messages[idx].id
+  const nextMessages = messages.map((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    if (hydrated.messageType === 'challenge_request' && String(hydrated.threadId || hydrated.id) === String(targetThreadId)) {
+      return { ...message, challengeStatus: status }
+    }
+    return message
+  })
+  writeJson(inboxMessagesPath, nextMessages)
+  return hydrateInboxMessage(nextMessages[idx])
+}
+
+export async function updateInboxChallengeScore(messageId, user, side, score, holes = []) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const messages = readJson(inboxMessagesPath, [])
+  const idx = messages.findIndex((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    return String(hydrated.id) === String(messageId) && hydrated.messageType === 'challenge_request' && canParticipateInInboxMessage(hydrated, user, normalizedEmail, userTeamIds)
+  })
+  if (idx < 0) return null
+  const existing = hydrateInboxMessage(messages[idx])
+  if (side === 'proposer' && !userTeamIds.has(String(existing.proposerTeamId || ''))) return null
+  if (side === 'challenged' && !userTeamIds.has(String(existing.challengedTeamId || ''))) return null
+  const targetThreadId = existing.threadId || existing.id
+  const scoreKey = side === 'proposer' ? 'proposerTeamScore' : 'challengedTeamScore'
+  const holesKey = side === 'proposer' ? 'proposerTeamHoles' : 'challengedTeamHoles'
+  const nextMessages = messages.map((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    if (hydrated.messageType === 'challenge_request' && String(hydrated.threadId || hydrated.id) === String(targetThreadId)) {
+      return { ...message, [scoreKey]: score, [holesKey]: Array.isArray(holes) && holes.length ? holes : null }
+    }
+    return message
+  })
+  writeJson(inboxMessagesPath, nextMessages)
+  return hydrateInboxMessage(nextMessages[idx])
+}
+
+
+export async function updateInboxIndividualChallengeScore(messageId, user, score, holes = [], options = {}) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const messages = readJson(inboxMessagesPath, [])
+  const hydratedMessages = messages.map(hydrateInboxMessage)
+  const target = hydratedMessages.find((message) => String(message.id) === String(messageId || '') && message.messageType === 'individual_challenge')
+  if (!target || !canParticipateInInboxMessage(target, user, normalizedEmail, userTeamIds)) return null
+  const threadId = target.threadId || target.id
+  let userCanEditOwnScore = false
+  const nextMessages = messages.map((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    if (hydrated.messageType !== 'individual_challenge' || String(hydrated.threadId || hydrated.id) !== String(threadId)) return message
+    const participants = (hydrated.individualChallengeParticipants || []).map((participant) => {
+      const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail
+      if (!isCurrentParticipant) return participant
+      userCanEditOwnScore = true
+      return { ...participant, score, holes: Array.isArray(holes) && holes.length ? holes : [], soloScoreId: options?.soloScoreId || participant.soloScoreId || null }
+    })
+    return { ...message, individualChallengeParticipants: participants }
+  })
+  if (!userCanEditOwnScore) return null
+  writeJson(inboxMessagesPath, nextMessages)
+  return hydrateInboxMessage(nextMessages.find((message) => String(message.id) === String(messageId || '')))
+}

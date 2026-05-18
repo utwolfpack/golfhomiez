@@ -253,6 +253,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   if (!round) return null
 
   const displayMode = getDisplayRoundMode(round)
+  const isTeamChallengeRound = (round as any).source === 'team_challenge'
+  const roundTypeLabel = displayMode === 'solo' ? 'Solo round' : isTeamChallengeRound ? 'Team Challenge' : 'Team round'
   const teamLabel = displayName((round as any).team, 'Team')
   const opponentLabel = displayName((round as any).opponentTeam, 'Opponent Team')
   const roundRecord = round as unknown as Record<string, unknown>
@@ -277,7 +279,9 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const canOpenOpponentScoreView = displayMode === 'team'
   const showingTeamHoles = displayMode === 'team' && detailView === 'team'
   const showingOpponentHoles = displayMode === 'team' && detailView === 'opponent'
-  const insight = compareRoundToHistory({ ...(round as any), mode: displayMode }, allScores as any)
+  const detailTeamScore = `${(round as any).teamTotal == null ? 'Pending' : (round as any).teamTotal} - ${(round as any).opponentTotal == null ? 'Pending' : (round as any).opponentTotal}`
+  const detailTeamResult = (round as any).teamTotal == null || (round as any).opponentTotal == null ? 'Pending' : ((round as any).won === true ? 'Win' : (round as any).won === false ? 'Loss' : 'Tie')
+  const insight = isTeamChallengeRound ? 'This Team Challenge score record is maintained from the Inbox Team Challenges section.' : compareRoundToHistory({ ...(round as any), mode: displayMode }, allScores as any)
 
   const updateEditField = (field: keyof RoundEditForm, value: string) => {
     setEditForm((current) => ({ ...current, [field]: value }))
@@ -506,12 +510,16 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
           <div>
             <h3 id="round-detail-title" style={{ margin: '4px 0 0' }}>{round.course}</h3>
             <div className="small" style={{ marginTop: 4 }}>
-              {formatFriendlyDateTime(round.date)} • {String((round as any).state || '').toUpperCase()} • {displayMode === 'solo' ? 'Solo round' : 'Team round'}
+              {formatFriendlyDateTime(round.date)} • {String((round as any).state || '').toUpperCase()} • {roundTypeLabel}
             </div>
           </div>
           <div className="roundDetailHeaderActions">
-            <button type="button" className="btn btnSmall" onClick={() => { if (isEditing) resetEditState(); else { setIsEditing(true); setActionError(null); setActiveEditScorecardSide(null); setEditForm(buildRoundEditForm(round)); setEditSoloHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json'])); setEditTeamHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json'])); setEditOpponentHoles(buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json'])); } }}>{isEditing ? 'Cancel Edit' : 'Edit'}</button>
-            <button type="button" className="btn btnSmall btnDanger" onClick={handleDeleteRound} disabled={isDeleting}>{isDeleting ? 'Deleting…' : 'Delete'}</button>
+            {!isTeamChallengeRound ? (
+              <>
+                <button type="button" className="btn btnSmall" onClick={() => { if (isEditing) resetEditState(); else { setIsEditing(true); setActionError(null); setActiveEditScorecardSide(null); setEditForm(buildRoundEditForm(round)); setEditSoloHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json'])); setEditTeamHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json'])); setEditOpponentHoles(buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json'])); } }}>{isEditing ? 'Cancel Edit' : 'Edit'}</button>
+                <button type="button" className="btn btnSmall btnDanger" onClick={handleDeleteRound} disabled={isDeleting}>{isDeleting ? 'Deleting…' : 'Delete'}</button>
+              </>
+            ) : null}
             <button type="button" className="btn btnSmall" onClick={onClose}>Close</button>
           </div>
         </div>
@@ -524,8 +532,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
               <div className="detailList" style={{ marginTop: 10 }}>
                 <div><strong>Team:</strong> {renderTeamSummaryValue(teamLabel, canOpenTeamScoreView, showingTeamHoles, () => setDetailView('team'))}</div>
                 <div><strong>Opponent:</strong> {renderTeamSummaryValue(opponentLabel, canOpenOpponentScoreView, showingOpponentHoles, () => setDetailView('opponent'))}</div>
-                <div><strong>Score:</strong> {(round as any).teamTotal} - {(round as any).opponentTotal}</div>
-                <div><strong>Result:</strong> {(round as any).won === true ? 'Win' : (round as any).won === false ? 'Loss' : 'Tie'}</div>
+                <div><strong>Score:</strong> {detailTeamScore}</div>
+                <div><strong>Result:</strong> {detailTeamResult}</div>
                 <div><strong>Logged at:</strong> {formatFriendlyDateTime((round as any).createdAt)}</div>
                 <div>
                   {showingOpponentHoles ? (
