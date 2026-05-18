@@ -31,9 +31,9 @@ function mapScoreRow(row) {
     teamTotal: row.team_total,
     opponentTotal: row.opponent_total,
     roundScore: row.round_score,
-    money: row.money == null ? null : Number(row.money),
     won: row.won == null ? null : Boolean(row.won),
     holes: row.holes_json ? JSON.parse(row.holes_json) : null,
+    opponentHoles: row.opponent_holes_json ? JSON.parse(row.opponent_holes_json) : null,
     createdByUserId: row.created_by_user_id,
     createdByEmail: row.created_by_email,
     createdAt: toIso(row.created_at),
@@ -134,8 +134,8 @@ export async function createScore(entry) {
   db.prepare(`
     INSERT INTO scores (
       id, mode, date, state, course, team, opponent_team,
-      team_total, opponent_total, round_score, money, won,
-      holes_json, created_by_user_id, created_by_email, created_at
+      team_total, opponent_total, round_score, won,
+      holes_json, opponent_holes_json, created_by_user_id, created_by_email, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     score.id,
@@ -148,15 +148,44 @@ export async function createScore(entry) {
     score.teamTotal ?? null,
     score.opponentTotal ?? null,
     score.roundScore ?? null,
-    score.money ?? null,
     score.won === true ? 1 : score.won === false ? 0 : null,
     score.holes ? JSON.stringify(score.holes) : null,
+    score.opponentHoles ? JSON.stringify(score.opponentHoles) : null,
     score.createdByUserId,
     score.createdByEmail,
     score.createdAt,
   )
 
   return score
+}
+
+
+export async function updateScoreById(id, entry) {
+  const db = getSqliteDb()
+  const score = { ...entry, id }
+  db.prepare(`
+    UPDATE scores
+       SET mode = ?, date = ?, state = ?, course = ?, team = ?, opponent_team = ?,
+           team_total = ?, opponent_total = ?, round_score = ?, won = ?,
+           holes_json = ?, opponent_holes_json = ?
+     WHERE id = ?
+  `).run(
+    score.mode,
+    score.date,
+    score.state,
+    score.course,
+    score.team ?? null,
+    score.opponentTeam ?? null,
+    score.teamTotal ?? null,
+    score.opponentTotal ?? null,
+    score.roundScore ?? null,
+    score.won === true ? 1 : score.won === false ? 0 : null,
+    score.holes ? JSON.stringify(score.holes) : null,
+    score.opponentHoles ? JSON.stringify(score.opponentHoles) : null,
+    id,
+  )
+
+  return getScoreById(id)
 }
 
 export async function deleteScoreById(id) {

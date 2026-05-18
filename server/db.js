@@ -72,11 +72,57 @@ async function ensureAppTables(db) {
       money DECIMAL(10,2) NULL,
       won TINYINT NULL,
       holes_json JSON NULL,
+      opponent_holes_json JSON NULL,
       created_by_user_id VARCHAR(191) NOT NULL,
       created_by_email VARCHAR(191) NOT NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_scores_created_by (created_by_user_id),
       INDEX idx_scores_date (date)
+    );
+
+
+    CREATE TABLE IF NOT EXISTS golf_course_hole_scorecards (
+      id VARCHAR(64) NOT NULL PRIMARY KEY,
+      golf_course_id VARCHAR(191) NULL,
+      state VARCHAR(8) NOT NULL,
+      course_name VARCHAR(191) NOT NULL,
+      hole_number TINYINT UNSIGNED NOT NULL,
+      par TINYINT UNSIGNED NULL,
+      yards SMALLINT UNSIGNED NULL,
+      stroke_index TINYINT UNSIGNED NULL,
+      source VARCHAR(64) NOT NULL DEFAULT 'api',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY ux_golf_course_hole_scorecards_course_hole (state, course_name, hole_number),
+      INDEX idx_golf_course_hole_scorecards_course_id (golf_course_id),
+      INDEX idx_golf_course_hole_scorecards_state_course (state, course_name)
+    );
+
+
+    CREATE TABLE IF NOT EXISTS scorecard_hole_drafts (
+      id VARCHAR(64) NOT NULL PRIMARY KEY,
+      created_by_user_id VARCHAR(191) NOT NULL,
+      created_by_email VARCHAR(191) NOT NULL,
+      mode ENUM('team','solo') NOT NULL,
+      scoring_side VARCHAR(16) NOT NULL DEFAULT 'team',
+      date DATE NOT NULL,
+      state VARCHAR(8) NOT NULL,
+      course VARCHAR(191) NOT NULL,
+      team VARCHAR(191) NULL,
+      opponent_team VARCHAR(191) NULL,
+      team_key VARCHAR(191) NOT NULL DEFAULT '',
+      opponent_team_key VARCHAR(191) NOT NULL DEFAULT '',
+      hole_number TINYINT UNSIGNED NOT NULL,
+      par TINYINT UNSIGNED NULL,
+      yards SMALLINT UNSIGNED NULL,
+      stroke_index TINYINT UNSIGNED NULL,
+      score INT NOT NULL,
+      score_provided TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_scorecard_hole_drafts_context_lookup (created_by_user_id, mode, scoring_side, date, state, course(160), team_key(160), opponent_team_key(160)),
+      INDEX idx_scorecard_hole_drafts_user_date (created_by_user_id, date),
+      INDEX idx_scorecard_hole_drafts_course (state, course)
     );
   `)
 }

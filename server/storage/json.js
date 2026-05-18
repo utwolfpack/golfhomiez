@@ -208,6 +208,17 @@ export async function createScore(entry) {
   return score
 }
 
+
+export async function updateScoreById(id, entry) {
+  const scores = readJson(scoresPath, [])
+  const idx = scores.findIndex((s) => String(s.id) === String(id))
+  if (idx < 0) return null
+  const updated = { ...scores[idx], ...entry, id: scores[idx].id, createdAt: scores[idx].createdAt }
+  scores[idx] = updated
+  writeJson(scoresPath, scores)
+  return updated
+}
+
 export async function deleteScoreById(id) {
   const scores = readJson(scoresPath, [])
   writeJson(scoresPath, scores.filter((s) => String(s.id) !== String(id)))

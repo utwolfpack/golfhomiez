@@ -1325,6 +1325,88 @@ ON DUPLICATE KEY UPDATE
     },
   },
 
+
+  {
+    version: '20260516_039',
+    name: 'golf_course_hole_scorecards',
+    filename: '20260516_039_golf_course_hole_scorecards.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'golf_course_hole_scorecards') &&
+        await columnExists(db, 'golf_course_hole_scorecards', 'hole_number') &&
+        await columnExists(db, 'golf_course_hole_scorecards', 'par') &&
+        await columnExists(db, 'golf_course_hole_scorecards', 'yards') &&
+        await indexExists(db, 'golf_course_hole_scorecards', 'ux_golf_course_hole_scorecards_course_hole') &&
+        await indexExists(db, 'golf_course_hole_scorecards', 'idx_golf_course_hole_scorecards_state_course')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260516_039_golf_course_hole_scorecards.sql')
+    },
+  },
+  {
+    version: '20260516_040',
+    name: 'golf_course_hole_scorecards_stroke_index',
+    filename: '20260516_040_golf_course_hole_scorecards_stroke_index.sql',
+    async isSatisfied(db) {
+      return (
+        !(await tableExists(db, 'golf_course_hole_scorecards')) ||
+        await columnExists(db, 'golf_course_hole_scorecards', 'stroke_index')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260516_040_golf_course_hole_scorecards_stroke_index.sql')
+    },
+  },
+  {
+    version: '20260516_041',
+    name: 'scorecard_hole_drafts',
+    filename: '20260516_041_scorecard_hole_drafts.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'scorecard_hole_drafts') &&
+        await columnExists(db, 'scorecard_hole_drafts', 'created_by_user_id') &&
+        await columnExists(db, 'scorecard_hole_drafts', 'hole_number') &&
+        await columnExists(db, 'scorecard_hole_drafts', 'score') &&
+        await columnExists(db, 'scorecard_hole_drafts', 'score_provided') &&
+        await indexExists(db, 'scorecard_hole_drafts', 'idx_scorecard_hole_drafts_context_lookup')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260516_041_scorecard_hole_drafts.sql')
+    },
+  },
+
+  {
+    version: '20260516_042',
+    name: 'team_scorecard_sides_and_opponent_holes',
+    filename: '20260516_042_team_scorecard_sides_and_opponent_holes.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'scorecard_hole_drafts') &&
+        await columnExists(db, 'scorecard_hole_drafts', 'scoring_side') &&
+        await columnExists(db, 'scores', 'opponent_holes_json') &&
+        await indexExists(db, 'scorecard_hole_drafts', 'idx_scorecard_hole_drafts_context_lookup')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if ((await tableExists(db, 'scorecard_hole_drafts')) && !(await columnExists(db, 'scorecard_hole_drafts', 'scoring_side'))) {
+        statements.push("ALTER TABLE scorecard_hole_drafts ADD COLUMN scoring_side VARCHAR(16) NOT NULL DEFAULT 'team' AFTER mode")
+      }
+      if (await tableExists(db, 'scorecard_hole_drafts')) {
+        if (await indexExists(db, 'scorecard_hole_drafts', 'idx_scorecard_hole_drafts_context_lookup')) {
+          statements.push('ALTER TABLE scorecard_hole_drafts DROP INDEX idx_scorecard_hole_drafts_context_lookup')
+        }
+        statements.push('CREATE INDEX idx_scorecard_hole_drafts_context_lookup ON scorecard_hole_drafts (created_by_user_id, mode, scoring_side, date, state, course(160), team_key(160), opponent_team_key(160))')
+      }
+      if ((await tableExists(db, 'scores')) && !(await columnExists(db, 'scores', 'opponent_holes_json'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN opponent_holes_json JSON NULL AFTER holes_json')
+      }
+      return statements.join(';\n') || '-- team scorecard side and opponent holes schema already exists'
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {

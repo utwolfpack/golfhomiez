@@ -26,6 +26,13 @@ a{color:inherit;text-decoration:none;}
 .container{max-width:1120px;margin:0 auto;padding:14px 16px 18px;}
 .pageStack{display:grid;gap:14px;}
 .pageCardShell{display:grid;gap:14px;}
+.pageSimpleTitle{
+  margin:0;
+  color:#0b3d1d;
+  font-size:clamp(26px, 4vw, 40px);
+  line-height:1.05;
+  font-weight:900;
+}
 .formStack{display:grid;gap:12px;}
 
 .card{
@@ -805,4 +812,859 @@ button.navDropdownItem{font:inherit;}
   .tournament-flyer-top-right-emblem{top:8px;right:8px;width:68px;height:68px;}
   .tournament-team-member-status-list li{grid-template-columns:1fr;}
   .tournament-member-status{grid-column:1;grid-row:auto;justify-self:start;white-space:normal;}
+}
+
+.holeInputPanel{
+  background:linear-gradient(180deg,#ffffff,#f7fbf8);
+}
+
+.holeInputLoadWarning{
+  margin-bottom:12px;
+  color:#92400e;
+  text-align:center;
+}
+
+.holeInputPhone{
+  width:min(100%, 560px);
+  margin:0 auto;
+  padding:26px 22px 24px;
+  border:1px solid rgba(215,234,220,.95);
+  border-radius:34px;
+  background:#fff;
+  box-shadow:0 24px 60px rgba(9,46,24,.14);
+}
+
+.holeInputCourseHeader{
+  display:grid;
+  place-items:center;
+  gap:6px;
+  color:#064e20;
+  text-align:center;
+}
+
+.holeInputFlagMark{
+  position:relative;
+  width:68px;
+  height:54px;
+}
+
+.holeInputFlagPole{
+  position:absolute;
+  left:34px;
+  top:4px;
+  width:4px;
+  height:35px;
+  border-radius:999px;
+  background:#06611f;
+}
+
+.holeInputFlag{
+  position:absolute;
+  left:36px;
+  top:5px;
+  width:26px;
+  height:18px;
+  background:#0b7a2a;
+  clip-path:polygon(0 0,100% 50%,0 100%);
+}
+
+.holeInputCup{
+  position:absolute;
+  left:18px;
+  bottom:8px;
+  width:46px;
+  height:18px;
+  border-radius:50%;
+  background:#0b7a2a;
+}
+
+.holeInputCup::after{
+  content:'';
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  background:#fff;
+  transform:translate(-50%,-50%);
+}
+
+.holeInputCourseName{
+  font-family:Georgia, 'Times New Roman', serif;
+  font-size:22px;
+  font-weight:800;
+}
+
+.holeInputHero{
+  text-align:center;
+  margin:44px 0 22px;
+}
+
+.holeInputHero h3{
+  margin:0;
+  color:#065f22;
+  font-size:clamp(64px, 15vw, 96px);
+  line-height:.94;
+  letter-spacing:-.06em;
+  text-shadow:0 3px 0 rgba(6,95,34,.12);
+}
+
+.holeInputHero p{
+  margin:18px 0 0;
+  color:#3f3f46;
+  font-size:24px;
+  font-weight:700;
+}
+
+.holeInputOptions{
+  display:grid;
+  gap:14px;
+}
+
+.holeInputOption{
+  min-height:72px;
+  width:100%;
+  display:grid;
+  grid-template-columns:88px 1fr;
+  align-items:center;
+  gap:12px;
+  padding:12px 24px;
+  border:2px solid rgba(0,0,0,.10);
+  border-radius:22px;
+  color:#fff;
+  font-size:clamp(30px, 8vw, 48px);
+  font-weight:900;
+  line-height:1;
+  text-align:left;
+  text-shadow:0 2px 5px rgba(0,0,0,.25);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.28), 0 12px 20px rgba(9,46,24,.12);
+  cursor:pointer;
+}
+
+.holeInputOption:hover{
+  filter:brightness(1.02);
+  transform:translateY(-1px);
+}
+
+.holeInputOption--selected{
+  outline:4px solid rgba(255,255,255,.85);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.30), 0 0 0 4px rgba(9,46,24,.22), 0 12px 20px rgba(9,46,24,.14);
+}
+
+.holeInputOptionIcon{
+  width:60px;
+  height:60px;
+  display:grid;
+  place-items:center;
+  border:3px solid rgba(255,255,255,.94);
+  border-radius:50%;
+  font-size:30px;
+  font-weight:900;
+  line-height:1;
+  justify-self:center;
+}
+
+.holeInputOption--birdie{background:linear-gradient(180deg,#59bd3d,#16822c);}
+.holeInputOption--par{background:linear-gradient(180deg,#3c9ff0,#0b62ad);}
+.holeInputOption--bogey{background:linear-gradient(180deg,#ffad25,#fb6d00);}
+.holeInputOption--doubleBogey{background:linear-gradient(180deg,#f35c4d,#c9281d);}
+.holeInputOption--other{background:linear-gradient(180deg,#9b69d0,#5a31a3);}
+
+.holeInputFooter{
+  margin-top:18px;
+  border-top:1px solid rgba(215,234,220,.95);
+  padding-top:16px;
+}
+
+.holeInputMetadata{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+  color:#27272a;
+  font-size:18px;
+  font-weight:700;
+}
+
+.holeInputPin{
+  color:#06611f;
+  font-size:32px;
+  line-height:1;
+}
+
+.holeInputNavigation{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:18px;
+  margin-top:18px;
+}
+
+.holeInputNavButton{
+  min-height:66px;
+  border-radius:18px;
+  font-size:20px;
+  font-weight:900;
+  gap:10px;
+}
+
+.holeInputNavButton:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+  filter:grayscale(.25);
+}
+
+.scoreAdjustModal{
+  width:min(460px, 100%);
+}
+
+.scoreStepper{
+  display:grid;
+  grid-template-columns:80px minmax(0, 1fr) 80px;
+  gap:12px;
+  align-items:center;
+}
+
+.scoreStepperValue{
+  min-height:64px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(215,234,220,.95);
+  border-radius:16px;
+  background:rgba(255,255,255,.92);
+  font-size:34px;
+  font-weight:900;
+}
+
+.holeInputCompletionIndicator{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+  padding:8px 10px;
+  border:1px solid rgba(6,95,34,.14);
+  border-radius:14px;
+  background:rgba(240,253,244,.78);
+}
+
+.holeInputCompletionSummary{
+  font-size:12px;
+  font-weight:900;
+  color:#064e20;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+
+.holeInputMissingList{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  flex-wrap:wrap;
+}
+
+.holeInputMissingChip{
+  min-width:24px;
+  min-height:24px;
+  border:1px solid #f59e0b;
+  border-radius:999px;
+  background:#fffbeb;
+  color:#92400e;
+  font-size:12px;
+  font-weight:900;
+  cursor:pointer;
+}
+
+.holeInputMissingChip:hover{
+  background:#fef3c7;
+}
+
+.holeInputCompleteBadge{
+  display:inline-flex;
+  align-items:center;
+  min-height:24px;
+  border-radius:999px;
+  padding:2px 10px;
+  background:#dcfce7;
+  color:#166534;
+  font-size:12px;
+}
+
+.holeInputPageTotals{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:12px auto 0;
+  width:min(100%, 560px);
+}
+
+.holeInputPageTotals div{
+  display:grid;
+  gap:4px;
+  padding:10px 12px;
+  border:1px solid rgba(6,95,34,.14);
+  border-radius:16px;
+  background:#f0fdf4;
+  text-align:center;
+}
+
+.holeInputPageTotals span{
+  color:#31533c;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
+}
+
+.holeInputPageTotals strong{
+  color:#064e20;
+  font-size:24px;
+}
+
+.holeInputScorePageCard{
+  display:grid;
+  gap:14px;
+  padding:16px;
+  border:1px solid rgba(215,234,220,.95);
+  border-radius:24px;
+  background:linear-gradient(180deg,#ffffff,#f8fcf9);
+  box-shadow:0 12px 30px rgba(9,46,24,.10);
+}
+
+.holeInputScoreLabel{
+  color:#064e20;
+  font-size:13px;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-align:center;
+  text-transform:uppercase;
+}
+
+.holeInputPageStepper{
+  grid-template-columns:76px minmax(0, 1fr) 76px;
+}
+
+.holeInputOutcome{
+  margin-top:8px;
+  text-align:center;
+  color:#064e20;
+  font-size:20px;
+  font-weight:900;
+}
+
+.holeInputPresetGrid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:8px;
+}
+
+.holeInputPreset{
+  min-height:42px;
+  border:1px solid rgba(9,46,24,.16);
+  border-radius:14px;
+  color:#0f172a;
+  background:#fff;
+  font-weight:900;
+  cursor:pointer;
+}
+
+.holeInputPreset--selected{
+  outline:3px solid rgba(6,95,34,.22);
+  border-color:#065f22;
+}
+
+.holeInputPreset--birdie{background:#dbeafe;}
+.holeInputPreset--par{background:#dcfce7;}
+.holeInputPreset--bogey{background:#fce7f3;}
+.holeInputPreset--doubleBogey{background:#fee2e2;}
+
+.holeInputSaveButton{
+  min-height:54px;
+  border-radius:16px;
+  font-size:18px;
+  font-weight:900;
+}
+
+.holeInputSaveStatus{
+  min-height:18px;
+  text-align:center;
+  color:#31533c;
+}
+
+.roundHoleDetailGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(96px, 1fr));
+  gap:6px;
+}
+
+.roundHoleDetailPill{
+  display:grid;
+  gap:2px;
+  min-width:0;
+  padding:6px 7px;
+  border:1px solid rgba(215,234,220,.95);
+  border-radius:11px;
+  background:rgba(255,255,255,.72);
+  font-size:12px;
+  line-height:1.25;
+}
+
+.roundHoleDetailPill strong{
+  font-size:13px;
+  line-height:1.15;
+}
+
+.roundHoleDetailScore{
+  font-weight:900;
+  font-size:13px;
+}
+
+.roundHoleDetailOwner{
+  display:inline-flex;
+  align-items:center;
+  width:max-content;
+  max-width:100%;
+  padding:1px 6px;
+  border-radius:999px;
+  background:rgba(255,255,255,.75);
+  color:#0f3d2e;
+  font-size:10px;
+  font-weight:800;
+  line-height:1.2;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.roundHoleDetailPill--eagleBetter{
+  background:#ccfbf1;
+  border-color:#5eead4;
+}
+
+.roundHoleDetailPill--birdie{
+  background:#dbeafe;
+  border-color:#93c5fd;
+}
+
+.roundHoleDetailPill--par{
+  background:#dcfce7;
+  border-color:#86efac;
+}
+
+.roundHoleDetailPill--bogey{
+  background:#fce7f3;
+  border-color:#f9a8d4;
+}
+
+.roundHoleDetailPill--doubleBogey{
+  background:#fee2e2;
+  border-color:#fca5a5;
+}
+
+.roundHoleDetailPill--tripleBogeyPlus{
+  background:#fecaca;
+  border-color:#ef4444;
+  color:#7f1d1d;
+}
+
+.roundHoleDetailPill--unknown{
+  background:#f4f4f5;
+  border-color:#d4d4d8;
+}
+
+
+.roundHoleCompareGrid{
+  display:grid;
+  gap:6px;
+}
+
+.roundHoleCompareRow{
+  display:grid;
+  grid-template-columns:minmax(74px, .35fr) minmax(0, 1.65fr);
+  gap:6px;
+  align-items:stretch;
+  padding:5px;
+  border:1px solid rgba(215,234,220,.95);
+  border-radius:13px;
+  background:linear-gradient(180deg,#ffffff,#fbfefc);
+}
+
+.roundHoleCompareMeta{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:2px;
+  min-width:0;
+  padding:6px 7px;
+  border-radius:10px;
+  background:rgba(255,255,255,.78);
+}
+
+.roundHoleCompareMeta strong{
+  color:#0b3d1d;
+  font-size:14px;
+  line-height:1.05;
+}
+
+.roundHoleCompareMeta span{
+  color:#31533c;
+  font-size:10px;
+  line-height:1.25;
+}
+
+.roundHoleCompareScores{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 30px minmax(0,1fr);
+  align-items:center;
+  gap:0;
+  min-width:0;
+}
+
+.roundHoleCompareCell{
+  min-height:60px;
+  display:grid;
+  place-items:center;
+  align-content:center;
+  gap:1px;
+  padding:6px 7px;
+  border:1px solid rgba(215,234,220,.95);
+  text-align:center;
+}
+
+.roundHoleCompareCell:first-child{
+  border-radius:14px 0 0 14px;
+}
+
+.roundHoleCompareCell:last-child{
+  border-radius:0 14px 14px 0;
+}
+
+.roundHoleCompareLabel{
+  max-width:100%;
+  color:#0b2b16;
+  font-size:11px;
+  font-weight:900;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.roundHoleCompareOutcome{
+  font-size:17px;
+  line-height:1.05;
+  font-weight:950;
+}
+
+.roundHoleCompareStrokes{
+  color:#31533c;
+  font-size:11px;
+  font-weight:700;
+}
+
+.roundHoleCompareVs{
+  position:relative;
+  z-index:1;
+  display:grid;
+  place-items:center;
+  justify-self:center;
+  width:30px;
+  height:30px;
+  margin:0 -1px;
+  border:1px solid rgba(215,234,220,.95);
+  border-radius:999px;
+  background:#fff;
+  color:#0b3d1d;
+  font-size:10px;
+  font-weight:950;
+  box-shadow:0 4px 12px rgba(9,46,24,.08);
+}
+
+@media (max-width: 640px){
+  .roundHoleCompareRow{grid-template-columns:minmax(70px,.35fr) minmax(0,1.65fr);gap:5px;}
+  .roundHoleCompareMeta{padding:5px 6px;}
+  .roundHoleCompareScores{grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr);}
+  .roundHoleCompareCell{min-height:52px;padding:5px 4px;}
+  .roundHoleCompareOutcome{font-size:15px;}
+  .roundHoleCompareVs{width:26px;height:26px;font-size:9px;}
+}
+
+@media (max-width: 540px){
+  .holeInputPhone{padding:22px 16px 20px;border-radius:28px;}
+  .holeInputHero{margin:34px 0 18px;}
+  .holeInputHero p{font-size:21px;}
+  .holeInputOption{grid-template-columns:66px 1fr;padding:10px 16px;min-height:64px;font-size:clamp(26px, 9vw, 38px);}
+  .holeInputOptionIcon{width:52px;height:52px;font-size:24px;}
+  .holeInputNavigation{grid-template-columns:1fr;gap:10px;}
+  .holeInputNavButton{min-height:60px;font-size:18px;}
+  .holeInputMetadata{font-size:16px;gap:8px;}
+  .scoreStepper{grid-template-columns:64px minmax(0, 1fr) 64px;}
+}
+
+.soloLockedRoundSummary{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin-top:12px;
+  padding:10px;
+  border:1px solid rgba(20,83,45,.16);
+  border-radius:14px;
+  background:#f8fcf9;
+}
+.soloLockedRoundSummary div{
+  min-width:0;
+  padding:8px 10px;
+  border-radius:12px;
+  background:#fff;
+  box-shadow:inset 0 0 0 1px rgba(20,83,45,.08);
+}
+.soloLockedRoundSummary span{
+  display:block;
+  color:#56715f;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.soloLockedRoundSummary strong{
+  display:block;
+  overflow:hidden;
+  color:#0b3d1d;
+  font-size:14px;
+  line-height:1.25;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.teamLockedRoundSummary{
+  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+}
+.compactRoundSummaryInput{
+  margin-top:5px;
+  min-height:34px;
+  padding:7px 9px;
+  font-size:14px;
+}
+.soloLockedRoundSummary .compactRoundSummaryInput{
+  width:100%;
+}
+
+.holeInputTeamLabel{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  max-width:100%;
+  padding:4px 12px;
+  border:1px solid rgba(6,95,34,.16);
+  border-radius:999px;
+  background:#f0fdf4;
+  color:#064e20;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+
+.teamScorecardOpenButton{
+  width:100%;
+  min-height:58px;
+  display:grid;
+  gap:4px;
+  align-content:center;
+  justify-items:start;
+  padding:10px 12px;
+  border:1px solid rgba(20,83,45,.18);
+  border-radius:14px;
+  background:#f8fcf9;
+  color:#0b3d1d;
+  cursor:pointer;
+  text-align:left;
+  box-shadow:inset 0 0 0 1px rgba(20,83,45,.06);
+}
+.teamScorecardOpenButton:hover{background:#f0fdf4;}
+.teamScorecardOpenButton:disabled{opacity:.62;cursor:not-allowed;}
+.teamScorecardOpenButton strong{font-size:14px;line-height:1.25;}
+.teamScorecardOpenButton span{color:#56715f;font-size:12px;}
+.teamScorecardInputButton{
+  min-height:86px;
+  border:2px solid rgba(20,83,45,.38);
+  background:linear-gradient(180deg,#ffffff,#ecfdf5);
+  box-shadow:0 10px 22px rgba(20,83,45,.10), inset 0 0 0 1px rgba(20,83,45,.10);
+}
+.teamScorecardInputButton:hover{
+  border-color:rgba(20,83,45,.62);
+  transform:translateY(-1px);
+}
+.teamScorecardInputBadge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#0f6b2f;
+  color:#ffffff !important;
+  font-size:11px !important;
+  font-weight:900;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+
+.lockedScorecardButton{
+  width:100%;
+  display:grid;
+  gap:3px;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+  text-align:left;
+}
+.lockedScorecardButton:hover strong{text-decoration:underline;}
+.lockedScorecardButton small{
+  color:#56715f;
+  font-size:11px;
+  font-weight:700;
+  line-height:1.2;
+  white-space:normal;
+}
+
+.teamScorecardModalCard{
+  width:min(720px, 100%);
+  background:linear-gradient(180deg,#ffffff,#f7fbf8);
+}
+.teamScorecardModalHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.teamScorecardModalHeader h2{
+  margin:4px 0 0;
+  color:#0b3d1d;
+  font-size:22px;
+}
+.teamScorecardModalCard .holeInputPanel{
+  margin-top:0 !important;
+  padding:0;
+  border:0;
+  background:transparent;
+  box-shadow:none;
+}
+
+.roundDetailPanelHeader{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.roundDetailTab,
+.roundDetailLink{
+  border:0;
+  background:transparent;
+  color:#0b3d1d;
+  cursor:pointer;
+  font-size:12px;
+  font-weight:900;
+  padding:4px 0;
+  text-align:left;
+}
+.roundDetailTabActive{
+  cursor:default;
+}
+.roundDetailLink{
+  color:#1d4ed8;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.roundDetailLinkActive{
+  color:#0b3d1d;
+  text-decoration:none;
+}
+
+.roundDetailInlineTeamLink{
+  appearance:none;
+  border:0;
+  background:transparent;
+  color:#0f6a3a;
+  font:inherit;
+  font-weight:800;
+  padding:0;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+
+.roundDetailInlineTeamLink:hover,
+.roundDetailInlineTeamLink:focus-visible{
+  color:#064e3b;
+  outline:none;
+  text-decoration-thickness:2px;
+}
+
+.roundDetailInlineTeamLinkActive{
+  color:#064e3b;
+}
+
+.roundDetailHeaderActions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.btnDanger{
+  border-color:#fecaca !important;
+  background:#fff5f5 !important;
+  color:#991b1b !important;
+}
+.btnDanger:hover:not(:disabled){
+  background:#fee2e2 !important;
+}
+
+.roundDetailActionError{
+  margin-top:12px;
+  padding:10px 12px;
+  border:1px solid #fecaca;
+  border-radius:12px;
+  background:#fff5f5;
+  color:#991b1b;
+  font-size:13px;
+  font-weight:700;
+}
+
+.roundDetailEditForm{
+  display:grid;
+  gap:12px;
+  margin-top:6px;
+}
+
+.roundDetailEditGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px;
+}
+
+.roundDetailEditGrid .label{
+  display:grid;
+  gap:5px;
+}
+
+.roundDetailEditScorecardField{
+  display:grid;
+  gap:5px;
+}
+
+.roundDetailEditActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.roundDetailEditReadonlySummary{
+  grid-column:1 / -1;
+  margin-top:0;
 }

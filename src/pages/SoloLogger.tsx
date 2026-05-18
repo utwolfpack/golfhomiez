@@ -3,11 +3,12 @@ import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { US_STATES } from '../data/usStates'
 import { useNavigate } from 'react-router-dom'
-import PageHero from '../components/PageHero'
 import UseMyLocationButton from '../components/UseMyLocationButton'
 import { getUserTodayISO } from '../lib/date'
-
-const NUM_HOLES = 18
+import HoleByHoleScorecard from '../components/HoleByHoleScorecard'
+import { buildClientDefaultHoleScorecard, holeScoreTotal, missingHoleScoreNumbers } from '../lib/hole-scorecard'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import type { HoleScoreDetail } from '../types'
 
 export default function SoloLogger() {
   const { user } = useAuth()
@@ -19,15 +20,23 @@ export default function SoloLogger() {
   const [course, setCourse] = useState('')
   const [roundScore, setRoundScore] = useState<string>('')
   const [useHoles, setUseHoles] = useState(false)
-  const [holes, setHoles] = useState<number[]>(Array(NUM_HOLES).fill(0))
+  const [holes, setHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('UT', ''))
 
   const [saving, setSaving] = useState(false)
+  const [canceling, setCanceling] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [locationMessage, setLocationMessage] = useState<string | null>(null)
   const [showValidation, setShowValidation] = useState(false)
 
   const [courses, setCourses] = useState<string[]>([])
-  const holesTotal = useMemo(() => holes.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0), [holes])
+  const holesTotal = useMemo(() => holeScoreTotal(holes), [holes])
+  const missingHoleNumbers = useMemo(() => missingHoleScoreNumbers(holes), [holes])
+  const roundContextLocked = useMemo(() => useHoles && holes.some((hole) => hole.scoreProvided), [useHoles, holes])
+
+  useEffect(() => {
+    if (!useHoles) return
+    setRoundScore(String(holesTotal))
+  }, [useHoles, holesTotal])
   useEffect(() => {
     let cancelled = false
 
@@ -60,13 +69,54 @@ export default function SoloLogger() {
     return missing
   }, [date, today, state, course, roundScore])
 
+  function resetSoloLoggerPage() {
+    setDate(getUserTodayISO())
+    setState('UT')
+    setCourse('')
+    setRoundScore('')
+    setUseHoles(false)
+    setHoles(buildClientDefaultHoleScorecard('UT', ''))
+    setError(null)
+    setLocationMessage(null)
+    setShowValidation(false)
+  }
+
+  async function handleCancelRound() {
+    const correlationId = getCorrelationId()
+    setCanceling(true)
+    setError(null)
+    logFrontendEvent({ category: 'solo.round.cancel', message: 'started', data: { correlationId, date, state, course, useHoles, savedHoleCount: holes.filter((hole) => hole.scoreProvided).length } })
+    try {
+      if (useHoles && date && state && course) {
+        const params = new URLSearchParams({ mode: 'solo', date, state, course })
+        await api(`/api/scorecard-drafts?${params.toString()}`, { method: 'DELETE' })
+      }
+      resetSoloLoggerPage()
+      logFrontendEvent({ category: 'solo.round.cancel', message: 'succeeded', data: { correlationId } })
+    } catch (e: any) {
+      const message = e?.message || 'Could not cancel this round.'
+      logFrontendEvent({ category: 'solo.round.cancel', level: 'error', message: 'failed', data: { correlationId, error: message } })
+      setError(message)
+    } finally {
+      setCanceling(false)
+    }
+  }
+
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     setShowValidation(true)
+    const correlationId = getCorrelationId()
     if (missingFields.length) {
       setError(`Please complete: ${missingFields.join(', ')}`)
+      logFrontendEvent({ category: 'solo.round.save', level: 'warn', message: 'validation_failed', data: { correlationId, missingFields, useHoles } })
+      return
+    }
+    if (useHoles && missingHoleNumbers.length) {
+      const message = `Finish entering scores for holes: ${missingHoleNumbers.join(', ')}.`
+      setError(message)
+      logFrontendEvent({ category: 'solo.round.save', level: 'warn', message: 'hole_scores_incomplete', data: { correlationId, missingHoleNumbers } })
       return
     }
     if (!user) {
@@ -82,6 +132,7 @@ export default function SoloLogger() {
     if (scoreNum < 0) return setError('Round Score must be zero or greater.')
 
     setSaving(true)
+    logFrontendEvent({ category: 'solo.round.save', message: 'started', data: { correlationId, date, state, course, roundScore: scoreNum, useHoles, cumulativeScore: useHoles ? holesTotal : null } })
     try {
       await api('/api/scores', {
         method: 'POST',
@@ -91,13 +142,16 @@ export default function SoloLogger() {
           date,
           state,
           course,
-          roundScore: scoreNum,
+          roundScore: useHoles ? holesTotal : scoreNum,
           holes: useHoles ? holes : null
         })
       })
+      logFrontendEvent({ category: 'solo.round.save', message: 'succeeded', data: { correlationId, course, roundScore: useHoles ? holesTotal : scoreNum, useHoles } })
       nav('/')
     } catch (e: any) {
-      setError(e?.message || 'Failed to save.')
+      const message = e?.message || 'Failed to save.'
+      logFrontendEvent({ category: 'solo.round.save', level: 'error', message: 'failed', data: { correlationId, course, error: message, useHoles } })
+      setError(message)
     } finally {
       setSaving(false)
     }
@@ -106,12 +160,7 @@ export default function SoloLogger() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero
-          eyebrow="Single-player rounds"
-          title="Log a solo score without the clutter"
-          subtitle="Pick the state, pick the course, save your round, and keep your personal scoring history tight."
-        />
-
+        <h1 className="pageSimpleTitle">Solo Round</h1>
         {!user ? (
           <div className="small" style={{ marginTop: 10 }}>
             You’re not logged in. Please login to log rounds.
@@ -119,73 +168,88 @@ export default function SoloLogger() {
         ) : null}
 
         <form onSubmit={onSubmit} style={{ marginTop: 14 }}>
-          <div className="grid grid3" style={{ gap: 12 }}>
-            <div>
-              <label className="label">Date</label>
-              <input className="input" type="date" max={today} value={date} onChange={e => setDate(e.target.value)} />
-            </div>
+          {roundContextLocked ? null : (
+            <div className="grid grid3" style={{ gap: 12 }}>
+              <div>
+                <label className="label">Date</label>
+                <input className="input" type="date" max={today} value={date} onChange={e => setDate(e.target.value)} />
+              </div>
 
-            <div>
-              <label className="label">State</label>
-              <select className="input" value={state} onChange={e => { setState(e.target.value); setCourse('') }}>
-                {US_STATES.map(s => (
-                  <option key={s.abbr} value={s.abbr}>{s.name}</option>
-                ))}
-              </select>
-            </div>
+              <div>
+                <label className="label">State</label>
+                <select className="input" value={state} onChange={e => { setState(e.target.value); setCourse('') }}>
+                  {US_STATES.map(s => (
+                    <option key={s.abbr} value={s.abbr}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
 
-            <div>
-              <label className="label">Course</label>
-              <select className="input" value={course} onChange={e => setCourse(e.target.value)} disabled={!courses.length}>
-                {!courses.length ? <option value="">No courses available</option> : null}
-                {courses.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <UseMyLocationButton
-                  onResolved={(location) => {
-                    setState(location.stateCode)
-                    setCourse('')
-                    setLocationMessage(`Location set to ${location.label}.`)
-                  }}
-                  onStatus={setLocationMessage}
-                />
-                {locationMessage ? <span className="small">{locationMessage}</span> : null}
+              <div>
+                <label className="label">Course</label>
+                <select className="input" value={course} onChange={e => setCourse(e.target.value)} disabled={!courses.length}>
+                  {!courses.length ? <option value="">No courses available</option> : null}
+                  {courses.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <UseMyLocationButton
+                    onResolved={(location) => {
+                      setState(location.stateCode)
+                      setCourse('')
+                      setLocationMessage(`Location set to ${location.label}.`)
+                    }}
+                    onStatus={setLocationMessage}
+                  />
+                  {locationMessage ? <span className="small">{locationMessage}</span> : null}
+                </div>
+              </div>
+
+              {!useHoles ? (
+                <div>
+                  <label className="label">Round Score</label>
+                  <input
+                    className="input"
+                    type="number"
+                    inputMode="numeric"
+                    value={roundScore}
+                    onChange={e => setRoundScore(e.target.value)}
+                    placeholder="e.g. 82"
+                    min={0}
+                  />
+                </div>
+              ) : null}
+
+              <div>
+                <label className="label">Hole-by-hole entry</label>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <input type="checkbox" checked={useHoles} onChange={e => setUseHoles(e.target.checked)} />
+                  <span className="small">Enable scorecard input</span>
+                </div>
               </div>
             </div>
+          )}
 
-            <div>
-              <label className="label">Round Score</label>
-              <input
-                className="input"
-                type="number"
-                inputMode="numeric"
-                value={roundScore}
-                onChange={e => setRoundScore(e.target.value)}
-                placeholder="e.g. 82"
-                min={0}
-              />
-            </div>
+          <HoleByHoleScorecard
+            enabled={useHoles}
+            stateCode={state}
+            course={course}
+            holes={holes}
+            onChange={setHoles}
+            draftContext={{ mode: 'solo', date }}
+          />
 
-            <div>
-              <label className="label">Per-hole entry (future-friendly)</label>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <input type="checkbox" checked={useHoles} onChange={e => setUseHoles(e.target.checked)} />
-                <span className="small">Enable 18-hole inputs (optional)</span>
+          {roundContextLocked ? (
+            <div className="soloLockedRoundSummary" aria-label="Locked round details">
+              <div>
+                <span>Date</span>
+                <strong>{date}</strong>
               </div>
-              {useHoles ? <div className="small" style={{ marginTop: 6 }}>Per-hole total: <strong>{holesTotal}</strong></div> : null}
-            </div>
-          </div>
-
-          {useHoles ? (
-            <div className="card" style={{ marginTop: 16, background: '#fafbff' }}>
-              <div style={{ fontWeight: 700, marginBottom: 10 }}>Hole Scores (Course specific)</div>
-              <div className="grid" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 10 }}>
-                {holes.map((v, idx) => (
-                  <div key={idx}>
-                    <label className="label">Hole {idx + 1}</label>
-                    <input className="input" type="number" value={v} onChange={e => { const next = holes.slice(); next[idx] = Number(e.target.value); setHoles(next) }} />
-                  </div>
-                ))}
+              <div>
+                <span>State</span>
+                <strong>{state}</strong>
+              </div>
+              <div>
+                <span>Course</span>
+                <strong>{course || 'Selected course'}</strong>
               </div>
             </div>
           ) : null}
@@ -194,9 +258,14 @@ export default function SoloLogger() {
           {error ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>{error}</div> : null}
 
           <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-            <button className="btnPrimary" type="submit" disabled={saving || !user}>
+            <button className="btnPrimary" type="submit" disabled={saving || canceling || !user}>
               {saving ? 'Saving…' : 'Save Round'}
             </button>
+            {useHoles ? (
+              <button className="btn" type="button" disabled={saving || canceling} onClick={handleCancelRound}>
+                {canceling ? 'Canceling…' : 'Cancel Round'}
+              </button>
+            ) : null}
           </div>
         </form>
       </div>
