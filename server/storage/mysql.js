@@ -14,7 +14,7 @@ async function getScoreTableColumns() {
          FROM information_schema.columns
         WHERE table_schema = DATABASE()
           AND table_name = 'scores'`,
-    ).then(([rows]) => new Set(rows.map((row) => row.column_name)))
+    ).then(([rows]) => new Set(rows.map((row) => row.column_name ?? row.COLUMN_NAME).filter(Boolean)))
       .catch((error) => {
         scoreTableColumnsPromise = null
         throw error
@@ -79,9 +79,9 @@ function mapScore(row) {
     teamTotal: row.team_total,
     opponentTotal: row.opponent_total,
     roundScore: row.round_score,
-    money: row.money == null ? null : Number(row.money),
     won: row.won == null ? null : Boolean(row.won),
     holes: row.holes_json ? (typeof row.holes_json === 'string' ? JSON.parse(row.holes_json) : row.holes_json) : null,
+    opponentHoles: hasColumn(row, 'opponent_holes_json') && row.opponent_holes_json ? (typeof row.opponent_holes_json === 'string' ? JSON.parse(row.opponent_holes_json) : row.opponent_holes_json) : null,
     createdByUserId: row.created_by_user_id,
     createdByEmail: row.created_by_email,
     createdAt: toIso(row.created_at),
@@ -249,7 +249,6 @@ export async function createScore(entry) {
     'team_total',
     'opponent_total',
     'round_score',
-    'money',
     'won',
     'holes_json',
     'created_by_user_id',
@@ -267,7 +266,6 @@ export async function createScore(entry) {
     score.teamTotal ?? null,
     score.opponentTotal ?? null,
     score.roundScore ?? null,
-    score.money ?? null,
     score.won === true ? 1 : score.won === false ? 0 : null,
     score.holes ? JSON.stringify(score.holes) : null,
     score.createdByUserId,
@@ -279,6 +277,7 @@ export async function createScore(entry) {
     const scoreColumns = await getScoreTableColumns()
 
     const optionalColumnEntries = [
+      ['opponent_holes_json', score.opponentHoles ? JSON.stringify(score.opponentHoles) : null],
       ['golf_course_id', score.golfCourseId ?? null],
       ['course_rating', score.courseRating ?? null],
       ['slope_rating', score.slopeRating ?? null],
@@ -314,6 +313,49 @@ export async function createScore(entry) {
       createdByUserId: score.createdByUserId,
       createdByEmail: score.createdByEmail,
     })
+    throw error
+  }
+}
+
+
+export async function updateScoreById(id, entry) {
+  const db = getPool()
+  const score = { ...entry, id }
+  const columns = [
+    ['mode', score.mode],
+    ['date', score.date],
+    ['state', score.state],
+    ['course', score.course],
+    ['team', score.team ?? null],
+    ['opponent_team', score.opponentTeam ?? null],
+    ['team_total', score.teamTotal ?? null],
+    ['opponent_total', score.opponentTotal ?? null],
+    ['round_score', score.roundScore ?? null],
+    ['won', score.won === true ? 1 : score.won === false ? 0 : null],
+    ['holes_json', score.holes ? JSON.stringify(score.holes) : null],
+  ]
+
+  try {
+    const scoreColumns = await getScoreTableColumns()
+    const optionalColumnEntries = [
+      ['opponent_holes_json', score.opponentHoles ? JSON.stringify(score.opponentHoles) : null],
+      ['golf_course_id', score.golfCourseId ?? null],
+      ['course_rating', score.courseRating ?? null],
+      ['slope_rating', score.slopeRating ?? null],
+      ['course_par', score.coursePar ?? null],
+    ]
+
+    for (const [columnName, value] of optionalColumnEntries) {
+      if (scoreColumns.has(columnName)) columns.push([columnName, value])
+    }
+
+    const assignments = columns.map(([columnName]) => `${columnName} = ?`).join(', ')
+    const values = columns.map(([, value]) => value)
+    await db.execute(`UPDATE scores SET ${assignments} WHERE id = ?`, [...values, id])
+    logInfo('Updated score', { scoreId: id, mode: score.mode, createdByUserId: score.createdByUserId, createdByEmail: score.createdByEmail })
+    return getScoreById(id)
+  } catch (error) {
+    logError('Failed to update score in MySQL storage', { error, scoreId: id, mode: score.mode })
     throw error
   }
 }

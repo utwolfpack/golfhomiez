@@ -1,3 +1,14 @@
+export type HoleScoreDetail = {
+  hole: number
+  par: number
+  yards: number
+  strokeIndex: number
+  score: number
+  scoreProvided?: boolean
+}
+
+export type HoleScores = number[] | HoleScoreDetail[]
+
 export type TeamScoreEntry = {
   id: string
   mode: 'team'
@@ -8,9 +19,9 @@ export type TeamScoreEntry = {
   opponentTeam: string
   teamTotal: number
   opponentTotal: number
-  money: number // + won, - lost
   won: true | false | null // null = tie
-  holes: number[] | null
+  holes: HoleScores | null
+  opponentHoles?: HoleScores | null
   golfCourseId?: string | null
   courseRating?: number | null
   slopeRating?: number | null
@@ -27,7 +38,8 @@ export type SoloScoreEntry = {
   state: string
   course: string
   roundScore: number
-  holes: number[] | null
+  holes: HoleScores | null
+  opponentHoles?: HoleScores | null
   golfCourseId?: string | null
   courseRating?: number | null
   slopeRating?: number | null

@@ -9,15 +9,15 @@ const DEMO_TEAM = 'Homie Hustlers'
 
 const sampleRounds = [
   { mode: 'solo', date: '2026-03-21', state: 'UT', course: 'Bonneville Golf Course', roundScore: 82 },
-  { mode: 'team', date: '2026-03-20', state: 'UT', course: 'Wasatch Mountain (Lake)', team: DEMO_TEAM, opponentTeam: 'Fairway Friends', teamTotal: 61, opponentTotal: 64, money: 3, won: 1 },
+  { mode: 'team', date: '2026-03-20', state: 'UT', course: 'Wasatch Mountain (Lake)', team: DEMO_TEAM, opponentTeam: 'Fairway Friends', teamTotal: 61, opponentTotal: 64, won: 1 },
   { mode: 'solo', date: '2026-03-18', state: 'UT', course: 'Soldier Hollow (Silver)', roundScore: 85 },
-  { mode: 'team', date: '2026-03-16', state: 'UT', course: 'Sand Hollow Golf Course', team: DEMO_TEAM, opponentTeam: 'Birdie Club', teamTotal: 63, opponentTotal: 62, money: -1, won: 0 },
+  { mode: 'team', date: '2026-03-16', state: 'UT', course: 'Sand Hollow Golf Course', team: DEMO_TEAM, opponentTeam: 'Birdie Club', teamTotal: 63, opponentTotal: 62, won: 0 },
   { mode: 'solo', date: '2026-03-14', state: 'UT', course: 'Bonneville Golf Course', roundScore: 80 },
-  { mode: 'team', date: '2026-03-12', state: 'UT', course: 'Sunbrook Golf Course', team: DEMO_TEAM, opponentTeam: 'Course Crushers', teamTotal: 60, opponentTotal: 60, money: 0, won: null },
+  { mode: 'team', date: '2026-03-12', state: 'UT', course: 'Sunbrook Golf Course', team: DEMO_TEAM, opponentTeam: 'Course Crushers', teamTotal: 60, opponentTotal: 60, won: null },
   { mode: 'solo', date: '2026-03-10', state: 'UT', course: 'Soldier Hollow (Gold)', roundScore: 87 },
-  { mode: 'team', date: '2026-03-09', state: 'UT', course: 'Bonneville Golf Course', team: DEMO_TEAM, opponentTeam: 'Weekend Wagglers', teamTotal: 59, opponentTotal: 63, money: 4, won: 1 },
+  { mode: 'team', date: '2026-03-09', state: 'UT', course: 'Bonneville Golf Course', team: DEMO_TEAM, opponentTeam: 'Weekend Wagglers', teamTotal: 59, opponentTotal: 63, won: 1 },
   { mode: 'solo', date: '2026-03-06', state: 'UT', course: 'Wasatch Mountain (Lake)', roundScore: 84 },
-  { mode: 'team', date: '2026-03-05', state: 'UT', course: 'Sunbrook Golf Course', team: DEMO_TEAM, opponentTeam: 'Back Nine Bandits', teamTotal: 58, opponentTotal: 61, money: 5, won: 1 },
+  { mode: 'team', date: '2026-03-05', state: 'UT', course: 'Sunbrook Golf Course', team: DEMO_TEAM, opponentTeam: 'Back Nine Bandits', teamTotal: 58, opponentTotal: 61, won: 1 },
 ]
 
 function buildHoleScores(total, holes = 18, par = 4) {
@@ -118,9 +118,9 @@ async function seedRounds(conn, userId) {
 
     await conn.execute(
       `INSERT INTO scores (
-        id, mode, date, state, course, team, opponent_team, team_total, opponent_total, money, won,
+        id, mode, date, state, course, team, opponent_team, team_total, opponent_total, won,
         holes_json, created_by_user_id, created_by_email, created_at
-      ) VALUES (?, 'team', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, 'team', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         randomUUID(),
         round.date,
@@ -130,7 +130,6 @@ async function seedRounds(conn, userId) {
         round.opponentTeam,
         round.teamTotal,
         round.opponentTotal,
-        round.money,
         round.won,
         JSON.stringify(buildHoleScores(round.teamTotal)),
         userId,

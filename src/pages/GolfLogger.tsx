@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import ProtectedRoute from '../components/ProtectedRoute'
-import type { ScoreEntry, TeamMember } from '../types'
+import type { HoleScoreDetail, ScoreEntry, TeamMember } from '../types'
 import { US_STATES } from '../data/usStates'
 import { createTeam, fetchTeams, lookupUserByEmail, sendHomieInvite } from '../lib/teams'
 import { getUserTodayISO } from '../lib/date'
 import { useAuth } from '../context/AuthContext'
-import PageHero from '../components/PageHero'
 import UseMyLocationButton from '../components/UseMyLocationButton'
 import InviteHomieModal from '../components/InviteHomieModal'
 import { useNavigate } from 'react-router-dom'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import HoleByHoleScorecard from '../components/HoleByHoleScorecard'
+import { buildClientDefaultHoleScorecard, holeScoreTotal, missingHoleScoreNumbers } from '../lib/hole-scorecard'
 
-const NUM_HOLES = 18
 type DraftMember = { firstName: string; lastName: string; email: string; invited?: boolean }
 
 function splitUserName(name: string | null | undefined, email: string | null | undefined) {
@@ -44,8 +44,11 @@ function GolfLoggerInner() {
   const [teamTotal, setTeamTotal] = useState<string>('')
   const [opponentTotal, setOpponentTotal] = useState<string>('')
   const [useHoles, setUseHoles] = useState(false)
-  const [holes, setHoles] = useState<number[]>(Array(NUM_HOLES).fill(0))
+  const [holes, setHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('UT', ''))
+  const [opponentHoles, setOpponentHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('UT', ''))
+  const [activeScorecardSide, setActiveScorecardSide] = useState<'team' | 'opponent' | null>(null)
   const [busy, setBusy] = useState(false)
+  const [canceling, setCanceling] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [locationMessage, setLocationMessage] = useState<string | null>(null)
@@ -123,7 +126,20 @@ function GolfLoggerInner() {
     return () => { cancelled = true }
   }, [stateAbbr])
 
-  const holesTotal = useMemo(() => holes.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0), [holes])
+  const holesTotal = useMemo(() => holeScoreTotal(holes), [holes])
+  const opponentHolesTotal = useMemo(() => holeScoreTotal(opponentHoles), [opponentHoles])
+  const missingHoleNumbers = useMemo(() => missingHoleScoreNumbers(holes), [holes])
+  const missingOpponentHoleNumbers = useMemo(() => missingHoleScoreNumbers(opponentHoles), [opponentHoles])
+  const teamScoreProvidedCount = useMemo(() => holes.filter((hole) => hole.scoreProvided).length, [holes])
+  const opponentScoreProvidedCount = useMemo(() => opponentHoles.filter((hole) => hole.scoreProvided).length, [opponentHoles])
+  const teamRoundContextLocked = useMemo(() => useHoles && (teamScoreProvidedCount > 0 || opponentScoreProvidedCount > 0), [useHoles, teamScoreProvidedCount, opponentScoreProvidedCount])
+  const scorecardContextReady = useMemo(() => Boolean(useHoles && date && stateAbbr && course && team.trim() && opponentTeam.trim() && team.trim().toLowerCase() !== opponentTeam.trim().toLowerCase()), [useHoles, date, stateAbbr, course, team, opponentTeam])
+
+  useEffect(() => {
+    if (!useHoles) return
+    setTeamTotal(String(holesTotal))
+    setOpponentTotal(String(opponentHolesTotal))
+  }, [useHoles, holesTotal, opponentHolesTotal])
   const [courseOptions, setCourseOptions] = useState<string[]>([])
 
   const totals = useMemo(() => {
@@ -131,12 +147,9 @@ function GolfLoggerInner() {
     const opp = Number(opponentTotal)
     const valid = teamTotal !== '' && opponentTotal !== '' && Number.isFinite(your) && Number.isFinite(opp)
     const result = !valid ? '' : (your < opp ? 'Win' : your > opp ? 'Loss' : 'Tie')
-    const diff = !valid ? 0 : Math.abs(opp - your)
-    const money = !valid ? 0 : (your < opp ? diff : your > opp ? -diff : 0)
-    return { your, opp, valid, result, money }
+    return { your, opp, valid, result }
   }, [teamTotal, opponentTotal])
 
-  const moneyText = useMemo(() => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totals.money), [totals.money])
   const resultClass = totals.result === 'Win' ? 'eventWin' : totals.result === 'Loss' ? 'eventLoss' : totals.result === 'Tie' ? 'eventTie' : ''
 
   const missingFields = useMemo(() => {
@@ -203,13 +216,100 @@ function GolfLoggerInner() {
     }
   }
 
+
+
+  function resetGolfLoggerPage() {
+    setDate(getUserTodayISO())
+    setStateAbbr('UT')
+    setCourse('')
+    setTeam(myTeams[0] || '')
+    setOpponentTeam('')
+    setTeamTotal('')
+    setOpponentTotal('')
+    setUseHoles(false)
+    setHoles(buildClientDefaultHoleScorecard('UT', ''))
+    setOpponentHoles(buildClientDefaultHoleScorecard('UT', ''))
+    setActiveScorecardSide(null)
+    setMsg(null)
+    setErr(null)
+    setLocationMessage(null)
+    setShowRoundValidation(false)
+  }
+
+  async function clearTeamScorecardDrafts() {
+    if (!useHoles || !date || !stateAbbr || !course || !team.trim() || !opponentTeam.trim()) return
+    const baseParams = new URLSearchParams({
+      mode: 'team',
+      date,
+      state: stateAbbr,
+      course,
+      team,
+      opponentTeam,
+    })
+    const teamParams = new URLSearchParams(baseParams)
+    teamParams.set('scoringSide', 'team')
+    const opponentParams = new URLSearchParams(baseParams)
+    opponentParams.set('scoringSide', 'opponent')
+    await Promise.all([
+      api(`/api/scorecard-drafts?${teamParams.toString()}`, { method: 'DELETE' }),
+      api(`/api/scorecard-drafts?${opponentParams.toString()}`, { method: 'DELETE' }),
+    ])
+  }
+
+  async function handleCancelRound() {
+    const correlationId = getCorrelationId()
+    setCanceling(true)
+    setErr(null)
+    logFrontendEvent({
+      category: 'team.round.cancel',
+      message: 'started',
+      data: { correlationId, date, stateAbbr, course, team, opponentTeam, useHoles, teamScoreProvidedCount, opponentScoreProvidedCount },
+    })
+    try {
+      await clearTeamScorecardDrafts()
+      resetGolfLoggerPage()
+      logFrontendEvent({ category: 'team.round.cancel', message: 'succeeded', data: { correlationId } })
+    } catch (e: any) {
+      const message = e?.message || 'Could not cancel this round.'
+      logFrontendEvent({ category: 'team.round.cancel', level: 'error', message: 'failed', data: { correlationId, error: message } })
+      setErr(message)
+    } finally {
+      setCanceling(false)
+    }
+  }
+
+  function openScorecardModal(side: 'team' | 'opponent') {
+    setErr(null)
+    if (!scorecardContextReady) {
+      setErr('Select a date, state, course, your team, and opponent team before entering hole-by-hole scores.')
+      return
+    }
+    setActiveScorecardSide(side)
+    logFrontendEvent({ category: 'team.scorecard.modal', message: 'opened', data: { side, date, stateAbbr, course, team, opponentTeam } })
+  }
+
+  function scorecardButtonLabel(side: 'team' | 'opponent') {
+    const label = side === 'team' ? (team || 'Your Team') : (opponentTeam || 'Opponent Team')
+    return `Score input for ${label}`
+  }
+
+  function scorecardButtonSummary(side: 'team' | 'opponent') {
+    const provided = side === 'team' ? teamScoreProvidedCount : opponentScoreProvidedCount
+    const total = side === 'team' ? holesTotal : opponentHolesTotal
+    return `${provided} of 18 holes entered • Current score ${total}`
+  }
+
+  function scorecardButtonHelp(side: 'team' | 'opponent') {
+    const missing = side === 'team' ? missingHoleNumbers : missingOpponentHoleNumbers
+    if (!scorecardContextReady) return 'Complete round setup first, then tap here to enter hole scores.'
+    if (!missing.length) return 'Tap to review or update saved hole scores.'
+    return `Tap to enter hole-by-hole scores. Needs holes ${missing.join(', ')}.`
+  }
+
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero
-          eyebrow="Team scramble"
-          title="Log a Team Round"
-        />
+        <h1 className="pageSimpleTitle">Team Round</h1>
 
         <div style={{ marginTop: 10 }}>
           <button type="button" className="btn" onClick={() => { setShowCreateTeam(v => !v); setErr(null); setMsg(null) }}>
@@ -328,7 +428,8 @@ function GolfLoggerInner() {
           }}
         />
 
-        <div className="grid grid2" style={{ marginTop: 14 }}>
+        {teamRoundContextLocked ? null : (
+          <div className="grid grid2" style={{ marginTop: 14 }}>
           <div>
             <label className="label">Date</label>
             <input className="input" type="date" max={today} value={date} onChange={e => setDate(e.target.value)} />
@@ -391,43 +492,93 @@ function GolfLoggerInner() {
             </datalist>
             <div className="small" style={{ marginTop: 6 }}>Opponent is required and must be different from your team.</div>
           </div>
-          <div>
-            <label className="label">{team ? `${team} Round Score` : 'Your Team Round Score'}</label>
-            <input className="input" type="number" value={teamTotal} onChange={e => setTeamTotal(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">{opponentTeam ? `${opponentTeam} Round Score` : 'Opponent Round Score'}</label>
-            <input className="input" type="number" value={opponentTotal} onChange={e => setOpponentTotal(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Money Won / Lost</label>
-            <input className={`input inputReadOnly ${resultClass}`} readOnly value={totals.valid ? moneyText : ''} />
-            <div className="small" style={{ marginTop: 6 }}>Automatically calculated using standard golf scoring (lower score wins).</div>
-          </div>
+          {!useHoles ? (
+            <>
+              <div>
+                <label className="label">{team ? `${team} Round Score` : 'Your Team Round Score'}</label>
+                <input className="input" type="number" value={teamTotal} onChange={e => setTeamTotal(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">{opponentTeam ? `${opponentTeam} Round Score` : 'Opponent Round Score'}</label>
+                <input className="input" type="number" value={opponentTotal} onChange={e => setOpponentTotal(e.target.value)} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="label">{team ? `${team} Score` : 'Your Team Score'}</label>
+                <button type="button" className="teamScorecardOpenButton teamScorecardInputButton" onClick={() => openScorecardModal('team')} disabled={!scorecardContextReady}>
+                  <span className="teamScorecardInputBadge">Tap to enter score</span>
+                  <strong>{scorecardButtonLabel('team')}</strong>
+                  <span>{scorecardButtonSummary('team')}</span>
+                  <span>{scorecardButtonHelp('team')}</span>
+                </button>
+              </div>
+              <div>
+                <label className="label">{opponentTeam ? `${opponentTeam} Score` : 'Opponent Team Score'}</label>
+                <button type="button" className="teamScorecardOpenButton teamScorecardInputButton" onClick={() => openScorecardModal('opponent')} disabled={!scorecardContextReady}>
+                  <span className="teamScorecardInputBadge">Tap to enter score</span>
+                  <strong>{scorecardButtonLabel('opponent')}</strong>
+                  <span>{scorecardButtonSummary('opponent')}</span>
+                  <span>{scorecardButtonHelp('opponent')}</span>
+                </button>
+              </div>
+            </>
+          )}
           <div>
             <label className="label">Result</label>
             <input className={`input inputReadOnly ${resultClass}`} readOnly value={totals.result} />
           </div>
           <div>
-            <label className="label">Per-hole entry (future-friendly)</label>
+            <label className="label">Hole-by-hole entry</label>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <input type="checkbox" checked={useHoles} onChange={e => setUseHoles(e.target.checked)} />
-              <span className="small">Enable 18-hole inputs (optional)</span>
+              <span className="small">Enable scorecard input</span>
             </div>
-            {useHoles ? <div className="small" style={{ marginTop: 6 }}>Per-hole total: <strong>{holesTotal}</strong></div> : null}
           </div>
         </div>
+        )}
 
-        {useHoles ? (
-          <div className="card" style={{ marginTop: 16, background: '#fafbff' }}>
-            <div style={{ fontWeight: 700, marginBottom: 10 }}>Hole Scores (Course specific)</div>
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 10 }}>
-              {holes.map((v, idx) => (
-                <div key={idx}>
-                  <label className="label">Hole {idx + 1}</label>
-                  <input className="input" type="number" value={v} onChange={e => { const next = holes.slice(); next[idx] = Number(e.target.value); setHoles(next) }} />
-                </div>
-              ))}
+
+        {teamRoundContextLocked ? (
+          <div className="soloLockedRoundSummary teamLockedRoundSummary" aria-label="Locked team round details">
+            <div>
+              <span>Date</span>
+              <strong>{date}</strong>
+            </div>
+            <div>
+              <span>State</span>
+              <strong>{stateAbbr}</strong>
+            </div>
+            <div>
+              <span>Course</span>
+              <strong>{course || 'Selected course'}</strong>
+            </div>
+            <div>
+              <span>Your Team</span>
+              <strong>{team || 'Selected team'}</strong>
+            </div>
+            <div>
+              <span>Opponent Team</span>
+              <strong>{opponentTeam || 'Opponent team'}</strong>
+            </div>
+            <div>
+              <span>{team ? `${team} Round Score` : 'Your Team Round Score'}</span>
+              <button type="button" className="lockedScorecardButton" onClick={() => openScorecardModal('team')}>
+                <strong>{teamTotal || String(holesTotal)}</strong>
+                <small>{scorecardButtonHelp('team')}</small>
+              </button>
+            </div>
+            <div>
+              <span>{opponentTeam ? `${opponentTeam} Round Score` : 'Opponent Round Score'}</span>
+              <button type="button" className="lockedScorecardButton" onClick={() => openScorecardModal('opponent')}>
+                <strong>{opponentTotal || String(opponentHolesTotal)}</strong>
+                <small>{scorecardButtonHelp('opponent')}</small>
+              </button>
+            </div>
+            <div>
+              <span>Result</span>
+              <strong className={resultClass}>{totals.result || 'Enter opponent score'}</strong>
             </div>
           </div>
         ) : null}
@@ -440,8 +591,8 @@ function GolfLoggerInner() {
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
           <button
             type="button"
-            className="btn btnSmall btnLightBlue"
-            disabled={busy}
+            className="btnPrimary"
+            disabled={busy || canceling}
             onClick={async () => {
               const correlationId = getCorrelationId()
               setShowRoundValidation(true)
@@ -449,6 +600,15 @@ function GolfLoggerInner() {
                 const message = `Please complete: ${missingFields.join(', ')}`
                 setErr(message)
                 logFrontendEvent({ category: 'team.round.save', level: 'warn', message: 'validation_failed', data: { correlationId, missingFields } })
+                return
+              }
+              if (useHoles && (missingHoleNumbers.length || missingOpponentHoleNumbers.length)) {
+                const parts = []
+                if (missingHoleNumbers.length) parts.push(`your team holes: ${missingHoleNumbers.join(', ')}`)
+                if (missingOpponentHoleNumbers.length) parts.push(`opponent team holes: ${missingOpponentHoleNumbers.join(', ')}`)
+                const message = `Finish entering scores for ${parts.join('; ')}.`
+                setErr(message)
+                logFrontendEvent({ category: 'team.round.save', level: 'warn', message: 'hole_scores_incomplete', data: { correlationId, missingHoleNumbers, missingOpponentHoleNumbers } })
                 return
               }
               setBusy(true)
@@ -473,19 +633,21 @@ function GolfLoggerInner() {
                   course,
                   team: trimmedTeam,
                   opponentTeam: trimmedOpp,
-                  teamTotal: totals.your,
-                  opponentTotal: totals.opp,
-                  holes: useHoles ? holes : null
+                  teamTotal: useHoles ? holesTotal : totals.your,
+                  opponentTotal: useHoles ? opponentHolesTotal : totals.opp,
+                  holes: useHoles ? holes : null,
+                  opponentHoles: useHoles ? opponentHoles : null
                 }
                 await api<ScoreEntry>('/api/scores', { method: 'POST', body: JSON.stringify(body) })
-                logFrontendEvent({ category: 'team.round.save', message: 'succeeded', data: { correlationId, team: trimmedTeam, opponentTeam: trimmedOpp, course, result: totals.result } })
+                logFrontendEvent({ category: 'team.round.save', message: 'succeeded', data: { correlationId, team: trimmedTeam, opponentTeam: trimmedOpp, course, result: totals.result, useHoles, cumulativeScore: useHoles ? holesTotal : null, opponentCumulativeScore: useHoles ? opponentHolesTotal : null } })
                 setMsg('Round saved.')
                 setCourse('')
                 setTeam(myTeams[0] || '')
                 setOpponentTeam('')
                 setTeamTotal('')
                 setOpponentTotal('')
-                setHoles(Array(NUM_HOLES).fill(0))
+                setHoles(buildClientDefaultHoleScorecard(stateAbbr, course))
+                setOpponentHoles(buildClientDefaultHoleScorecard(stateAbbr, course))
                 setShowRoundValidation(false)
                 navigate('/')
               } catch (e: any) {
@@ -499,7 +661,38 @@ function GolfLoggerInner() {
           >
             {busy ? 'Saving…' : 'Save Round'}
           </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || canceling}
+            onClick={handleCancelRound}
+          >
+            {canceling ? 'Canceling…' : 'Cancel Round'}
+          </button>
         </div>
+
+        {activeScorecardSide ? (
+          <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => setActiveScorecardSide(null)}>
+            <div className="modalCard teamScorecardModalCard" role="dialog" aria-modal="true" aria-label={activeScorecardSide === 'team' ? 'Your team hole-by-hole scorecard' : 'Opponent team hole-by-hole scorecard'} onClick={(event) => event.stopPropagation()}>
+              <div className="teamScorecardModalHeader">
+                <div>
+                  <div className="small">Hole-by-hole score input</div>
+                  <h2>{activeScorecardSide === 'team' ? `${team || 'Your Team'} Score` : `${opponentTeam || 'Opponent Team'} Score`}</h2>
+                </div>
+                <button type="button" className="btn btnSmall" onClick={() => setActiveScorecardSide(null)}>Close</button>
+              </div>
+              <HoleByHoleScorecard
+                enabled={true}
+                stateCode={stateAbbr}
+                course={course}
+                holes={activeScorecardSide === 'team' ? holes : opponentHoles}
+                onChange={activeScorecardSide === 'team' ? setHoles : setOpponentHoles}
+                draftContext={{ mode: 'team', date, team, opponentTeam, scoringSide: activeScorecardSide }}
+                scoreOwnerLabel={activeScorecardSide === 'team' ? `${team || 'Your Team'} score` : `${opponentTeam || 'Opponent Team'} score`}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )

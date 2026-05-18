@@ -12,9 +12,38 @@ import { sortScoresNewestFirst } from '../lib/roundInsights'
 import { calculateHandicapFromScores } from '../lib/handicap'
 import type { ScoreEntry, SoloScoreEntry, TeamScoreEntry } from '../types'
 
-function formatMoney(n: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
+function parseScoreHoleSource(value: any) {
+  if (Array.isArray(value)) return value
+  if (typeof value !== 'string' || !value.trim()) return null
+
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
+
+function readScoreHoles(raw: any, keys: string[]) {
+  for (const key of keys) {
+    const holes = parseScoreHoleSource(raw?.[key])
+    if (holes && holes.length > 0) return holes
+  }
+
+  return null
+}
+
+function normalizeScoreEntry(raw: any): ScoreEntry {
+  const hasTeamFields = Boolean(raw?.team || raw?.opponentTeam || raw?.teamTotal != null || raw?.opponentTotal != null)
+  const mode = raw?.roundScore != null && !hasTeamFields ? 'solo' : (raw?.mode === 'solo' ? 'solo' : 'team')
+  return {
+    ...raw,
+    mode,
+    holes: readScoreHoles(raw, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']) ?? raw?.holes ?? null,
+    opponentHoles: mode === 'team' ? readScoreHoles(raw, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']) : null,
+  } as ScoreEntry
+}
+
 function isTeamScore(s: ScoreEntry): s is TeamScoreEntry { return (s as any).mode !== 'solo' }
 function isSoloScore(s: ScoreEntry): s is SoloScoreEntry { return (s as any).mode === 'solo' }
 function rowClass(round: ScoreEntry) {
@@ -24,7 +53,7 @@ function rowClass(round: ScoreEntry) {
 
 function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => void }) {
   if (round.mode === 'solo') {
-    return (
+  return (
       <button type="button" className={rowClass(round)} onClick={onClick}>
         <div>
           <div className="roundRowTitle">{round.course}</div>
@@ -47,7 +76,7 @@ function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => voi
       </div>
       <div className="roundRowSummary">
         <div className="roundRowValue">{round.teamTotal}-{round.opponentTotal}</div>
-        <div className="small">{result} • {formatMoney(round.money || 0)}</div>
+        <div className="small">{result}</div>
       </div>
     </button>
   )
@@ -81,7 +110,7 @@ function MyGolfScoresInner() {
       setError(null)
       try {
         const data = await api<ScoreEntry[]>('/api/scores')
-        const normalized = data.map((s: any) => ({ ...s, mode: s.mode || 'team' }))
+        const normalized = data.map(normalizeScoreEntry)
         const email = String(user?.email || '').toLowerCase()
         setScores(normalized.filter((s) => String((s as any).createdByEmail || '').toLowerCase() === email))
       } catch (e: any) {
@@ -129,8 +158,7 @@ function MyGolfScoresInner() {
     const wins = teamFiltered.filter((s) => s.won === true).length
     const losses = teamFiltered.filter((s) => s.won === false).length
     const ties = teamFiltered.filter((s) => s.won === null).length
-    const money = teamFiltered.reduce((sum, s) => sum + (s.money || 0), 0)
-    return { total, wins, losses, ties, money, winPct: total ? (wins / total) * 100 : 0 }
+    return { total, wins, losses, ties, winPct: total ? (wins / total) * 100 : 0 }
   }, [teamFiltered])
 
   const soloStats = useMemo(() => {
@@ -149,7 +177,6 @@ function MyGolfScoresInner() {
     if (view !== 'solo') {
       cards.push(
         <StatCard key="record" title="Team Record" value={`${teamStats.wins}-${teamStats.losses}${teamStats.ties ? `-${teamStats.ties}` : ''}`} subtitle={`${teamStats.winPct.toFixed(0)}% win rate`} />,
-        <StatCard key="money" title="Money" value={formatMoney(teamStats.money)} subtitle="Team rounds only" />,
       )
     }
 
@@ -162,6 +189,17 @@ function MyGolfScoresInner() {
 
     return cards
   }, [filteredScores.length, view, teamStats, soloStats, handicapStats])
+
+  function handleRoundUpdated(updatedRound: ScoreEntry) {
+    const normalized = normalizeScoreEntry(updatedRound)
+    setScores((current) => current.map((score) => score.id === normalized.id ? normalized : score))
+    setSelectedRound(normalized)
+  }
+
+  function handleRoundDeleted(roundId: string) {
+    setScores((current) => current.filter((score) => score.id !== roundId))
+    setSelectedRound(null)
+  }
 
   return (
     <div className="container pageStack">
@@ -235,7 +273,7 @@ function MyGolfScoresInner() {
         ) : null}
       </div>
 
-      <RoundDetailModal round={selectedRound} allScores={filteredScores} onClose={() => setSelectedRound(null)} />
+      <RoundDetailModal round={selectedRound} allScores={filteredScores} onClose={() => setSelectedRound(null)} onRoundUpdated={handleRoundUpdated} onRoundDeleted={handleRoundDeleted} />
       <HandicapBreakdownModal open={showHandicapModal} stats={handicapStats} onClose={() => setShowHandicapModal(false)} />
     </div>
   )

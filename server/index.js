@@ -14,6 +14,8 @@ import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, logScheduledJob, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
 import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
+import { calculateHoleScoreTotal, getHoleScorecardForCourse, normalizeHoleScorePayload } from './lib/hole-scorecard.js'
+import { clearScorecardDraftHoles, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
 import { listScheduledJobs, runScheduledJob, startScheduledJobRunner } from './lib/scheduled-jobs.js'
@@ -134,6 +136,39 @@ app.get('/api/golf-courses', async (req, res) => {
   } catch (error) {
     logRouteError('Golf course list error', req, error)
     return res.status(500).json({ message: 'Golf course catalog is temporarily unavailable.' })
+  }
+})
+
+app.get('/api/golf-courses/scorecard', async (req, res) => {
+  try {
+    const state = String(req.query.state || '').trim().toUpperCase()
+    const course = String(req.query.course || '').trim()
+    if (!state || !course) return res.status(400).json({ message: 'state and course query parameters are required' })
+
+    const matchedCourse = await findGolfCourseForState(state, course)
+    if (!matchedCourse) return res.status(404).json({ message: 'Select a golf course from the catalog for the selected state' })
+
+    const scorecard = await getHoleScorecardForCourse({
+      state: matchedCourse.state_code || state,
+      course: matchedCourse.name,
+      courseId: matchedCourse.id,
+    })
+
+    logApi('golf_course_scorecard_completed', {
+      ...requestContext(req),
+      state,
+      course: matchedCourse.name,
+      courseId: matchedCourse.id,
+      source: scorecard.source,
+      holeCount: Array.isArray(scorecard.holes) ? scorecard.holes.length : 0,
+      parTotal: scorecard.parTotal,
+      scoreTotal: scorecard.scoreTotal,
+    })
+
+    return res.json(scorecard)
+  } catch (error) {
+    logRouteError('Golf course scorecard error', req, error)
+    return res.status(500).json({ message: 'Course scorecard is temporarily unavailable.' })
   }
 })
 
@@ -2740,6 +2775,217 @@ app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
   }
 })
 
+
+app.get('/api/scorecard-drafts', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const context = normalizeDraftContext(req.query || {}, req.user)
+    const db = getPool()
+    const holes = await listScorecardDraftHoles(db, context)
+    logApi('scorecard_draft_loaded', {
+      ...requestContext(req),
+      mode: context.mode,
+      scoringSide: context.scoringSide,
+      date: context.date,
+      state: context.state,
+      course: context.course,
+      team: context.team,
+      opponentTeam: context.opponentTeam,
+      holeCount: holes.length,
+    })
+    res.json({ holes, holeCount: holes.length })
+  } catch (error) {
+    const status = /required|between|score/.test(String(error?.message || '')) ? 400 : 500
+    logRouteError('Load scorecard draft error', req, error)
+    res.status(status).json({ message: error?.message || 'Could not load saved hole scores' })
+  }
+})
+
+app.put('/api/scorecard-drafts/hole', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const context = normalizeDraftContext(req.body || {}, req.user)
+    const hole = normalizeDraftHole(req.body?.hole || req.body || {})
+    const db = getPool()
+    const saved = await upsertScorecardDraftHole(db, context, hole)
+    logApi('scorecard_draft_hole_saved', {
+      ...requestContext(req),
+      mode: context.mode,
+      scoringSide: context.scoringSide,
+      date: context.date,
+      state: context.state,
+      course: context.course,
+      team: context.team,
+      opponentTeam: context.opponentTeam,
+      hole: saved.hole,
+      score: saved.score,
+    })
+    res.json({ hole: saved })
+  } catch (error) {
+    const status = /required|between|score|authenticated/.test(String(error?.message || '')) ? 400 : 500
+    logRouteError('Save scorecard draft hole error', req, error)
+    res.status(status).json({ message: error?.message || 'Could not save hole score' })
+  }
+})
+
+app.delete('/api/scorecard-drafts', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const context = normalizeDraftContext(req.query || {}, req.user)
+    const db = getPool()
+    const clearedDraftHoles = await clearScorecardDraftHoles(db, context)
+    logApi('scorecard_draft_cancelled', {
+      ...requestContext(req),
+      mode: context.mode,
+      scoringSide: context.scoringSide,
+      date: context.date,
+      state: context.state,
+      course: context.course,
+      team: context.team,
+      opponentTeam: context.opponentTeam,
+      clearedDraftHoles,
+    })
+    res.json({ clearedDraftHoles })
+  } catch (error) {
+    const status = /required|authenticated/.test(String(error?.message || '')) ? 400 : 500
+    logRouteError('Cancel scorecard draft error', req, error)
+    res.status(status).json({ message: error?.message || 'Could not cancel saved hole scores' })
+  }
+})
+
+
+function isScoreCreator(entry, user) {
+  const userId = String(user?.id || '')
+  const email = normalizeEmail(user?.email)
+  return Boolean(
+    (userId && String(entry?.createdByUserId || '') === userId) ||
+    (email && normalizeEmail(entry?.createdByEmail) === email)
+  )
+}
+
+async function canMutateScore(entry, user) {
+  if (!entry || !user) return false
+  if (isScoreCreator(entry, user)) return true
+  if (entry.mode !== 'team') return false
+  return await isUserOnTeam(entry.team, user.email) || await isUserOnTeam(entry.opponentTeam, user.email)
+}
+
+function coerceScoreNumber(value, fieldName) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) throw new Error(`${fieldName} must be a number`)
+  if (numberValue < 0) throw new Error(`${fieldName} must be zero or greater`)
+  return numberValue
+}
+
+async function loadScorecardDraftFallback(req, contextInput, scoringSide) {
+  try {
+    const context = normalizeDraftContext({ ...contextInput, scoringSide }, req.user)
+    const draftHoles = await listScorecardDraftHoles(getPool(), context)
+    const normalized = normalizeHoleScorePayload(draftHoles)
+    if (normalized?.length) {
+      logApi('scorecard_draft_used_for_score_persistence', {
+        ...requestContext(req),
+        mode: context.mode,
+        scoringSide,
+        holeCount: normalized.length,
+        course: context.course,
+        team: context.team,
+        opponentTeam: context.opponentTeam,
+      })
+      return normalized
+    }
+  } catch (error) {
+    logError('Failed to load scorecard draft fallback for score persistence', {
+      error,
+      scoringSide,
+      userId: req.user?.id,
+      course: contextInput?.course,
+      team: contextInput?.team,
+      opponentTeam: contextInput?.opponentTeam,
+    })
+  }
+
+  return null
+}
+
+async function resolveTeamHolePayloads(req, { date, state, course, team, opponentTeam, holes, opponentHoles }) {
+  let normalizedHoles = normalizeHoleScorePayload(holes)
+  let normalizedOpponentHoles = normalizeHoleScorePayload(opponentHoles)
+  const baseDraftContext = { mode: 'team', date, state: String(state).toUpperCase(), course, team, opponentTeam }
+
+  if (!normalizedHoles?.length) {
+    normalizedHoles = await loadScorecardDraftFallback(req, baseDraftContext, 'team')
+  }
+  if (!normalizedOpponentHoles?.length) {
+    normalizedOpponentHoles = await loadScorecardDraftFallback(req, baseDraftContext, 'opponent')
+  }
+
+  return { normalizedHoles, normalizedOpponentHoles }
+}
+
+async function buildUpdatedScorePayload(existing, body, req) {
+  const mode = existing.mode === 'solo' ? 'solo' : 'team'
+  const date = body.date ?? existing.date
+  const state = String(body.state ?? existing.state ?? '').trim().toUpperCase()
+  const courseInput = String(body.course ?? existing.course ?? '').trim()
+
+  if (!date || !courseInput) throw new Error('date and course required')
+  if (!isValidPastOrTodayDate(date, req.headers['x-user-timezone'])) throw new Error('Date must be today or earlier in your local time zone')
+  if (!state) throw new Error('state required')
+
+  const matchedCourse = await findGolfCourseForState(state, courseInput)
+  if (!matchedCourse) throw new Error('Select a golf course from the catalog for the selected state')
+
+  if (mode === 'solo') {
+    const roundScore = coerceScoreNumber(body.roundScore ?? existing.roundScore, 'roundScore')
+    return {
+      ...existing,
+      mode: 'solo',
+      date,
+      state,
+      course: matchedCourse.name,
+      roundScore,
+      team: null,
+      opponentTeam: null,
+      teamTotal: null,
+      opponentTotal: null,
+      won: null,
+      holes: body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes),
+      opponentHoles: null,
+    }
+  }
+
+  const team = String(body.team ?? existing.team ?? '').trim()
+  const opponentTeam = String(body.opponentTeam ?? existing.opponentTeam ?? '').trim()
+  if (!team) throw new Error('team required')
+  if (!opponentTeam) throw new Error('opponentTeam required')
+  if (team.toLowerCase() === opponentTeam.toLowerCase()) throw new Error('Opponent team must be different from your team')
+
+  const myTeam = await findTeamByName(team)
+  if (!myTeam) throw new Error('Your team must be a known team (create it first)')
+  if (!(await isUserOnTeam(team, req.user.email)) && !isScoreCreator(existing, req.user)) throw new Error('You are not a member of the selected team')
+
+  const oppTeamObj = await findTeamByName(opponentTeam)
+  if (!oppTeamObj) throw new Error('Opponent team must be a known team (create it first)')
+
+  const teamTotal = coerceScoreNumber(body.teamTotal ?? existing.teamTotal, 'teamTotal')
+  const opponentTotal = coerceScoreNumber(body.opponentTotal ?? existing.opponentTotal, 'opponentTotal')
+  const won = teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null)
+
+  return {
+    ...existing,
+    mode: 'team',
+    date,
+    state,
+    course: matchedCourse.name,
+    team,
+    opponentTeam,
+    teamTotal,
+    opponentTotal,
+    roundScore: null,
+    won,
+    holes: body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes),
+    opponentHoles: body.opponentHoles === undefined ? existing.opponentHoles : normalizeHoleScorePayload(body.opponentHoles),
+  }
+}
+
 app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
   try {
     const scores = await storage.listScores()
@@ -2766,20 +3012,39 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       const matchedCourse = await findGolfCourseForState(state, course)
       if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
+      const normalizedHoles = normalizeHoleScorePayload(holes)
+      const holeScoreTotal = calculateHoleScoreTotal(normalizedHoles)
       const entry = await storage.createScore({
         mode: 'solo',
         date,
         state: String(state).toUpperCase(),
         course: matchedCourse.name,
         roundScore,
-        holes: Array.isArray(holes) ? holes : null,
+        holes: normalizedHoles,
         createdByUserId: req.user.id,
         createdByEmail: req.user.email,
+      })
+      if (normalizedHoles?.length) {
+        try {
+          const draftContext = normalizeDraftContext({ mode: 'solo', date, state: String(state).toUpperCase(), course: matchedCourse.name }, req.user)
+          const clearedDraftHoles = await clearScorecardDraftHoles(getPool(), draftContext)
+          logApi('scorecard_draft_cleared', { ...requestContext(req), mode: 'solo', scoreId: entry.id, clearedDraftHoles })
+        } catch (draftError) {
+          logError('Failed to clear solo scorecard draft after score creation', { error: draftError, scoreId: entry.id, userId: req.user.id })
+        }
+      }
+      logApi('solo_score_created', {
+        ...requestContext(req),
+        scoreId: entry.id,
+        course: matchedCourse.name,
+        roundScore,
+        holeCount: normalizedHoles?.length || 0,
+        holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
       })
       return res.status(201).json(entry)
     }
 
-    const { date, state, course, team, opponentTeam, teamTotal, opponentTotal, holes } = body
+    const { date, state, course, team, opponentTeam, teamTotal, opponentTotal, holes, opponentHoles } = body
     if (!date || !course || !team) return res.status(400).json({ message: 'date, course, team required' })
     if (!isValidPastOrTodayDate(date, req.headers['x-user-timezone'])) return res.status(400).json({ message: 'Date must be today or earlier in your local time zone' })
     if (!state || typeof state !== 'string' || !String(state).trim()) return res.status(400).json({ message: 'state required' })
@@ -2801,9 +3066,18 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
     const oppTeamObj = await findTeamByName(opponentTeam)
     if (!oppTeamObj) return res.status(400).json({ message: 'Opponent team must be a known team (create it first)' })
 
+    const { normalizedHoles, normalizedOpponentHoles } = await resolveTeamHolePayloads(req, {
+      date,
+      state: String(state).toUpperCase(),
+      course: matchedCourse.name,
+      team,
+      opponentTeam: String(opponentTeam).trim(),
+      holes,
+      opponentHoles,
+    })
+    const holeScoreTotal = calculateHoleScoreTotal(normalizedHoles)
+    const opponentHoleScoreTotal = calculateHoleScoreTotal(normalizedOpponentHoles)
     const won = teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null)
-    const diff = Math.abs(opponentTotal - teamTotal)
-    const money = won === true ? diff : won === false ? -diff : 0
 
     const entry = await storage.createScore({
       mode: 'team',
@@ -2814,16 +3088,69 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       opponentTeam: String(opponentTeam).trim(),
       teamTotal,
       opponentTotal,
-      money,
       won,
-      holes: Array.isArray(holes) ? holes : null,
+      holes: normalizedHoles,
+      opponentHoles: normalizedOpponentHoles,
       createdByUserId: req.user.id,
       createdByEmail: req.user.email,
+    })
+    if (normalizedHoles?.length || normalizedOpponentHoles?.length) {
+      try {
+        const baseDraftContext = { mode: 'team', date, state: String(state).toUpperCase(), course: matchedCourse.name, team, opponentTeam: String(opponentTeam).trim() }
+        const teamDraftContext = normalizeDraftContext({ ...baseDraftContext, scoringSide: 'team' }, req.user)
+        const opponentDraftContext = normalizeDraftContext({ ...baseDraftContext, scoringSide: 'opponent' }, req.user)
+        const clearedTeamDraftHoles = await clearScorecardDraftHoles(getPool(), teamDraftContext)
+        const clearedOpponentDraftHoles = await clearScorecardDraftHoles(getPool(), opponentDraftContext)
+        logApi('scorecard_draft_cleared', { ...requestContext(req), mode: 'team', scoreId: entry.id, clearedDraftHoles: clearedTeamDraftHoles + clearedOpponentDraftHoles, clearedTeamDraftHoles, clearedOpponentDraftHoles })
+      } catch (draftError) {
+        logError('Failed to clear team scorecard draft after score creation', { error: draftError, scoreId: entry.id, userId: req.user.id })
+      }
+    }
+    logApi('team_score_created', {
+      ...requestContext(req),
+      scoreId: entry.id,
+      course: matchedCourse.name,
+      team,
+      opponentTeam: String(opponentTeam).trim(),
+      teamTotal,
+      opponentTotal,
+      holeCount: normalizedHoles?.length || 0,
+      opponentHoleCount: normalizedOpponentHoles?.length || 0,
+      holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
+      opponentHoleScoreTotal: normalizedOpponentHoles ? opponentHoleScoreTotal : null,
+      won,
     })
     res.status(201).json(entry)
   } catch (error) {
     logRouteError('Create score error', req, error)
     res.status(500).json({ message: 'Could not create score' })
+  }
+})
+
+
+app.patch('/api/scores/:id', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    const existing = await storage.getScoreById(id)
+    if (!existing) return res.status(404).json({ message: 'Score not found' })
+    if (!(await canMutateScore(existing, req.user))) return res.status(403).json({ message: 'Only the round creator or members of the teams involved can edit this round' })
+
+    const updatedPayload = await buildUpdatedScorePayload(existing, req.body || {}, req)
+    const updated = await storage.updateScoreById(id, updatedPayload)
+    logApi('score_updated', {
+      ...requestContext(req),
+      scoreId: id,
+      mode: updated?.mode || updatedPayload.mode,
+      course: updated?.course || updatedPayload.course,
+      team: updated?.team || updatedPayload.team || null,
+      opponentTeam: updated?.opponentTeam || updatedPayload.opponentTeam || null,
+    })
+    res.json(updated)
+  } catch (error) {
+    const message = error?.message || 'Could not update score'
+    const status = /not a member/.test(message) ? 403 : (/required|must be|must be today|Select a golf course|known team|different/.test(message) ? 400 : 500)
+    if (status >= 500) logRouteError('Update score error', req, error)
+    res.status(status).json({ message })
   }
 })
 
@@ -2833,10 +3160,10 @@ app.delete('/api/scores/:id', requireStorage, authMiddleware, async (req, res) =
     const entry = await storage.getScoreById(id)
     if (!entry) return res.status(404).json({ message: 'Score not found' })
 
-    const can = await isUserOnTeam(entry.team, req.user.email) || await isUserOnTeam(entry.opponentTeam, req.user.email)
-    if (!can) return res.status(403).json({ message: 'Only members of the teams involved can delete this round' })
+    if (!(await canMutateScore(entry, req.user))) return res.status(403).json({ message: 'Only the round creator or members of the teams involved can delete this round' })
 
     await storage.deleteScoreById(id)
+    logApi('score_deleted', { ...requestContext(req), scoreId: id, mode: entry.mode, course: entry.course, team: entry.team || null, opponentTeam: entry.opponentTeam || null })
     res.json({ ok: true })
   } catch (error) {
     logRouteError('Delete score error', req, error)

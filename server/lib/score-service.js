@@ -1,10 +1,9 @@
 import { isValidPastOrTodayDate } from './validation.js'
+import { normalizeHoleScorePayload } from './hole-scorecard.js'
 
 export function calculateTeamMatchSummary(teamTotal, opponentTotal) {
   const won = teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null)
-  const diff = Math.abs(opponentTotal - teamTotal)
-  const money = won === true ? diff : won === false ? -diff : 0
-  return { won, money }
+  return { won }
 }
 
 export function validateSoloScorePayload(body = {}) {
@@ -23,13 +22,13 @@ export function validateSoloScorePayload(body = {}) {
       state: String(state).toUpperCase(),
       course,
       roundScore,
-      holes: Array.isArray(holes) ? holes : null,
+      holes: normalizeHoleScorePayload(holes),
     },
   }
 }
 
 export function validateTeamScorePayload(body = {}) {
-  const { date, state, course, team, opponentTeam, teamTotal, opponentTotal, holes } = body
+  const { date, state, course, team, opponentTeam, teamTotal, opponentTotal, holes, opponentHoles } = body
   if (!date || !course || !team) return { ok: false, message: 'date, course, team required' }
   if (!isValidPastOrTodayDate(date)) return { ok: false, message: 'Date must be today or earlier' }
   if (!state || typeof state !== 'string' || !String(state).trim()) return { ok: false, message: 'state required' }
@@ -52,7 +51,8 @@ export function validateTeamScorePayload(body = {}) {
       opponentTeam: String(opponentTeam).trim(),
       teamTotal,
       opponentTotal,
-      holes: Array.isArray(holes) ? holes : null,
+      holes: normalizeHoleScorePayload(holes),
+      opponentHoles: normalizeHoleScorePayload(opponentHoles),
       ...calculateTeamMatchSummary(teamTotal, opponentTotal),
     },
   }
