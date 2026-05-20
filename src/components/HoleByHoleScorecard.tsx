@@ -42,9 +42,11 @@ type Props = {
   course: string
   holes: HoleScoreDetail[]
   onChange: (holes: HoleScoreDetail[]) => void
+  onHoleSaved?: (holes: HoleScoreDetail[], savedHole: HoleScoreDetail) => void | Promise<unknown>
   draftContext?: DraftContext
   scoreOwnerLabel?: string
   loadScorecardOnMount?: boolean
+  compactMobileInput?: boolean
 }
 
 type ScorePreset = {
@@ -92,7 +94,7 @@ function getNextRequiredHoleIndex(holes: HoleScoreDetail[], currentHoleNumber: n
   return targetIndex >= 0 ? targetIndex : Math.max(0, Math.min(holes.length - 1, targetHoleNumber - 1))
 }
 
-export default function HoleByHoleScorecard({ enabled, stateCode, course, holes, onChange, draftContext, scoreOwnerLabel, loadScorecardOnMount = true }: Props) {
+export default function HoleByHoleScorecard({ enabled, stateCode, course, holes, onChange, onHoleSaved, draftContext, scoreOwnerLabel, loadScorecardOnMount = true, compactMobileInput = false }: Props) {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [activeHoleIndex, setActiveHoleIndex] = useState(0)
@@ -200,6 +202,11 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, holes,
     })
 
     try {
+      const savedHole = {
+        ...hole,
+        score: normalizedScore,
+        scoreProvided: true,
+      }
       if (draftParams) {
         await api('/api/scorecard-drafts/hole', {
           method: 'PUT',
@@ -211,13 +218,12 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, holes,
             team: draftContext?.team || '',
             opponentTeam: draftContext?.opponentTeam || '',
             scoringSide: draftContext?.scoringSide || 'team',
-            hole: {
-              ...hole,
-              score: normalizedScore,
-              scoreProvided: true,
-            },
+            hole: savedHole,
           }),
         })
+      }
+      if (onHoleSaved) {
+        await onHoleSaved(next, savedHole)
       }
       const nextRequiredHoleIndex = getNextRequiredHoleIndex(next, hole.hole)
       const nextRequiredHole = nextRequiredHoleIndex == null ? null : next[nextRequiredHoleIndex]?.hole
@@ -252,35 +258,20 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, holes,
   const currentHoleProvided = Boolean(activeHole.scoreProvided)
 
   return (
-    <div className="card holeInputPanel" style={{ marginTop: 16 }}>
+    <div className={`card holeInputPanel ${compactMobileInput ? 'holeInputPanel--compact' : ''}`} style={{ marginTop: 16 }}>
       {loadError ? <div className="small holeInputLoadWarning">Using generated defaults until course hole data is available.</div> : null}
 
-      <section className="holeInputPhone" aria-label={`Score entry for hole ${activeHole.hole}`}>
-        <header className="holeInputCourseHeader">
+      <section className={`holeInputPhone ${compactMobileInput ? 'holeInputPhone--compact' : ''}`} aria-label={`Score entry for hole ${activeHole.hole}`}>
+        <div className={`holeInputScorePageCard ${compactMobileInput ? 'holeInputScorePageCard--compact' : ''}`}>
           {scoreOwnerLabel ? <div className="holeInputTeamLabel">{scoreOwnerLabel}</div> : null}
-          <div className="holeInputFlagMark" aria-hidden="true">
-            <span className="holeInputFlagPole" />
-            <span className="holeInputFlag" />
-            <span className="holeInputCup" />
-          </div>
-          <div className="holeInputCourseName">{course || 'Selected Golf Course'}</div>
-          <div className="small">Hole {activeHoleIndex + 1} of {activeHoleCount}</div>
-        </header>
-
-        <div className="holeInputHero">
-          <h3>Hole {activeHole.hole}</h3>
-          <p>{currentHoleProvided ? 'Update score for this hole' : 'Enter score for this hole'}</p>
-        </div>
-
-        <div className="holeInputScorePageCard">
           <div className="holeInputScoreLabel">Score for Hole {activeHole.hole}</div>
           <div className="scoreStepper holeInputPageStepper">
-            <button type="button" className="btn" aria-label="Decrease score" onClick={() => setActiveScore((score) => Math.max(0, score - 1))}>−</button>
-            <div>
+            <button type="button" className="btn holeInputStepperButton" aria-label="Decrease score" onClick={() => setActiveScore((score) => Math.max(0, score - 1))}>−</button>
+            <div className="holeInputScoreValueBlock">
               <div className="scoreStepperValue" aria-live="polite">{activeScore}</div>
               <div className="holeInputOutcome" aria-live="polite">{currentOutcome}</div>
             </div>
-            <button type="button" className="btn" aria-label="Increase score" onClick={() => setActiveScore((score) => score + 1)}>+</button>
+            <button type="button" className="btn holeInputStepperButton" aria-label="Increase score" onClick={() => setActiveScore((score) => score + 1)}>+</button>
           </div>
 
           <div className="holeInputPresetGrid" aria-label="Quick score presets">

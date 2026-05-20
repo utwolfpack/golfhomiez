@@ -1,4 +1,7 @@
 import type { ScoreEntry, SoloScoreEntry } from '../types'
+import { getCourseDetails } from '../data/courseDetails'
+
+type RatingSource = 'saved' | 'catalog' | 'default' | 'missing'
 
 type HandicapRound = {
   id: string
@@ -9,6 +12,7 @@ type HandicapRound = {
   differential: number | null
   courseRating: number | null
   slopeRating: number | null
+  ratingSource: RatingSource
   included: boolean
 }
 
@@ -18,6 +22,7 @@ export type HandicapStats = {
   soloRounds: number
   ratedRounds: number
   differentialsUsed: number
+  adjustment: number
   formulaText: string
   consideredRounds: HandicapRound[]
 }
@@ -27,15 +32,31 @@ function calculateHandicapDifferential(score: number, courseRating: number, slop
   return Math.round((((score - courseRating) * 113) / slopeRating) * 10) / 10
 }
 
+type HandicapRule = { usedCount: number; adjustment: number; minimumRequired: number }
+
+function resolveHandicapRule(ratedRounds: number): HandicapRule {
+  if (ratedRounds < 3) return { usedCount: 0, adjustment: 0, minimumRequired: 3 }
+  if (ratedRounds === 3) return { usedCount: 1, adjustment: -2, minimumRequired: 3 }
+  if (ratedRounds === 4) return { usedCount: 1, adjustment: -1, minimumRequired: 3 }
+  if (ratedRounds === 5) return { usedCount: 1, adjustment: 0, minimumRequired: 3 }
+  if (ratedRounds === 6) return { usedCount: 2, adjustment: -1, minimumRequired: 3 }
+  if (ratedRounds <= 8) return { usedCount: 2, adjustment: 0, minimumRequired: 3 }
+  if (ratedRounds <= 11) return { usedCount: 3, adjustment: 0, minimumRequired: 3 }
+  if (ratedRounds <= 14) return { usedCount: 4, adjustment: 0, minimumRequired: 3 }
+  if (ratedRounds <= 16) return { usedCount: 5, adjustment: 0, minimumRequired: 3 }
+  if (ratedRounds <= 18) return { usedCount: 6, adjustment: 0, minimumRequired: 3 }
+  if (ratedRounds === 19) return { usedCount: 7, adjustment: 0, minimumRequired: 3 }
+  return { usedCount: 8, adjustment: 0, minimumRequired: 3 }
+}
+
 function calculateHandicapIndex(differentials: number[]) {
   const valid = differentials.filter((value) => Number.isFinite(value)).sort((a, b) => a - b)
-  if (!valid.length) return null
-  const count = Math.min(valid.length, 20)
-  const recent = valid.slice(0, count)
-  const usedCount = count >= 20 ? 8 : count >= 16 ? 6 : count >= 12 ? 4 : count >= 8 ? 2 : 1
-  const used = recent.slice(0, usedCount)
+  const rule = resolveHandicapRule(valid.length)
+  if (!rule.usedCount) return { handicap: null, usedCount: 0, adjustment: rule.adjustment }
+  const used = valid.slice(0, rule.usedCount)
   const average = used.reduce((sum, value) => sum + value, 0) / used.length
-  return Math.round(average * 10) / 10
+  const adjusted = Math.max(0, average + rule.adjustment)
+  return { handicap: Math.round(adjusted * 10) / 10, usedCount: rule.usedCount, adjustment: rule.adjustment }
 }
 
 function isLegacySoloShape(score: any) {
@@ -46,12 +67,32 @@ function isSoloScore(score: ScoreEntry | any): score is SoloScoreEntry {
   return isLegacySoloShape(score)
 }
 
-function resolveRoundRating(score: any) {
-  const explicitCourseRating = Number(score?.courseRating)
-  const explicitSlopeRating = Number(score?.slopeRating)
+function readFiniteNumber(value: unknown) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
 
-  if (Number.isFinite(explicitCourseRating) && Number.isFinite(explicitSlopeRating) && explicitSlopeRating > 0) {
-    return { courseRating: explicitCourseRating, slopeRating: explicitSlopeRating }
+function courseDetailsLooksDefault(score: any, details: ReturnType<typeof getCourseDetails>) {
+  if (!details) return false
+  const exactName = String(details.name || '').trim().toLowerCase() === String(score?.course || '').trim().toLowerCase()
+  return exactName && details.courseRating === 72 && details.slopeRating === 113
+}
+
+function resolveRoundRating(score: any) {
+  const explicitCourseRating = readFiniteNumber(score?.courseRating)
+  const explicitSlopeRating = readFiniteNumber(score?.slopeRating)
+
+  if (explicitCourseRating != null && explicitSlopeRating != null && explicitSlopeRating > 0) {
+    return { courseRating: explicitCourseRating, slopeRating: explicitSlopeRating, source: 'saved' as RatingSource }
+  }
+
+  const catalogDetails = getCourseDetails(String(score?.state || ''), String(score?.course || ''))
+  if (catalogDetails && Number.isFinite(catalogDetails.courseRating) && Number.isFinite(catalogDetails.slopeRating) && catalogDetails.slopeRating > 0) {
+    return {
+      courseRating: catalogDetails.courseRating,
+      slopeRating: catalogDetails.slopeRating,
+      source: courseDetailsLooksDefault(score, catalogDetails) ? 'default' as RatingSource : 'catalog' as RatingSource,
+    }
   }
 
   return null
@@ -63,15 +104,6 @@ function sortNewestFirst(scores: any[]) {
     if (dateCompare !== 0) return dateCompare
     return String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))
   })
-}
-
-function resolveDifferentialsUsedCount(ratedRounds: number) {
-  if (ratedRounds >= 20) return 8
-  if (ratedRounds >= 16) return 6
-  if (ratedRounds >= 12) return 4
-  if (ratedRounds >= 8) return 2
-  if (ratedRounds >= 1) return 1
-  return 0
 }
 
 export function calculateHandicapFromScores(scores: ScoreEntry[]): HandicapStats {
@@ -95,18 +127,18 @@ export function calculateHandicapFromScores(scores: ScoreEntry[]): HandicapStats
         differential: Number.isFinite(differential as number) ? Number(differential) : null,
         courseRating: rating?.courseRating ?? null,
         slopeRating: rating?.slopeRating ?? null,
+        ratingSource: rating?.source ?? 'missing',
         included: false,
       }
     })
 
   const ratedRounds = consideredRounds.filter((round) => round.differential != null)
   const differentials = ratedRounds.map((round) => round.differential as number)
-  const handicap = calculateHandicapIndex(differentials)
-  const differentialsUsed = resolveDifferentialsUsedCount(differentials.length)
+  const handicapResult = calculateHandicapIndex(differentials)
   const includedIds = new Set(
     [...ratedRounds]
       .sort((a, b) => (a.differential as number) - (b.differential as number))
-      .slice(0, differentialsUsed)
+      .slice(0, handicapResult.usedCount)
       .map((round) => round.id)
   )
 
@@ -114,16 +146,17 @@ export function calculateHandicapFromScores(scores: ScoreEntry[]): HandicapStats
     round.included = includedIds.has(round.id)
   }
 
-  const formulaText = ratedRounds.length
-    ? `Using the lowest ${differentialsUsed} differential${differentialsUsed === 1 ? '' : 's'} from ${ratedRounds.length} rated solo round${ratedRounds.length === 1 ? '' : 's'} in the current filtered set (up to the 20 most recent).`
-    : 'No rated solo rounds are available in the current filtered set yet.'
+  const formulaText = ratedRounds.length >= 3
+    ? `Using the lowest ${handicapResult.usedCount} differential${handicapResult.usedCount === 1 ? '' : 's'} from ${ratedRounds.length} rated solo round${ratedRounds.length === 1 ? '' : 's'} in the current filtered set (up to the 20 most recent)${handicapResult.adjustment ? `, then applying a ${handicapResult.adjustment.toFixed(1)} reduced-round adjustment` : ''}.`
+    : `Need at least 3 rated solo rounds in the current filtered set to calculate a handicap. ${ratedRounds.length} rated round${ratedRounds.length === 1 ? '' : 's'} available.`
 
   return {
-    handicap,
+    handicap: handicapResult.handicap,
     roundsUsed: ratedRounds.length,
     soloRounds: soloScores.length,
     ratedRounds: ratedRounds.length,
-    differentialsUsed,
+    differentialsUsed: handicapResult.usedCount,
+    adjustment: handicapResult.adjustment,
     formulaText,
     consideredRounds,
   }

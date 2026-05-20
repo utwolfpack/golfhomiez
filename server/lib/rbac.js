@@ -335,6 +335,20 @@ async function resolveHostTournamentAccountId(pool, hostAccountId) {
   return directHostAccountId
 }
 
+
+function formatPhoneNumber(value) {
+  const rawDigits = String(value ?? '').replace(/\D/g, '')
+  const digits = rawDigits.length === 11 && rawDigits.startsWith('1') ? rawDigits.slice(1) : rawDigits
+  if (!digits) return null
+  if (digits.length !== 10) throw new Error('Phone number is invalid. Use 10 digits formatted like 801 743 7000.')
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`
+}
+
+function sanitizeOptionalPhone(value) {
+  const phone = String(value ?? '').trim()
+  return phone ? formatPhoneNumber(phone) : null
+}
+
 export function normalizeRole(value) {
   const role = String(value || '').trim().toLowerCase()
   return SUPPORTED_ROLES.includes(role) ? role : ''
@@ -343,7 +357,7 @@ export function normalizeRole(value) {
 export function sanitizeHostAccountPayload(body = {}) {
   const golfCourseName = String(body.golfCourseName || '').trim()
   const contactName = String(body.contactName || '').trim()
-  const phone = String(body.phone || '').trim()
+  const phone = sanitizeOptionalPhone(body.phone)
   const websiteUrl = String(body.websiteUrl || '').trim()
   const city = String(body.city || '').trim()
   const state = String(body.state || '').trim()
@@ -357,7 +371,7 @@ export function sanitizeHostAccountPayload(body = {}) {
   return {
     golfCourseName,
     contactName,
-    phone: phone || null,
+    phone,
     websiteUrl: websiteUrl || null,
     city: city || null,
     state: state || null,
@@ -370,7 +384,7 @@ export function sanitizeHostAccountPayload(body = {}) {
 export function sanitizeOrganizerAccountPayload(body = {}) {
   const organizationName = String(body.organizationName || '').trim()
   const contactName = String(body.contactName || '').trim()
-  const phone = String(body.phone || '').trim()
+  const phone = sanitizeOptionalPhone(body.phone)
   const websiteUrl = String(body.websiteUrl || '').trim()
   const notes = String(body.notes || '').trim()
 
@@ -380,7 +394,7 @@ export function sanitizeOrganizerAccountPayload(body = {}) {
   return {
     organizationName,
     contactName,
-    phone: phone || null,
+    phone,
     websiteUrl: websiteUrl || null,
     notes: notes || null,
   }
@@ -514,7 +528,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     prizeDetails: cleanString('prizeDetails'),
     holeContestsExtras: cleanString('holeContestsExtras'),
     contactPerson: cleanString('contactPerson'),
-    contactPhone: cleanString('contactPhone'),
+    contactPhone: sanitizeOptionalPhone(source.contactPhone),
     contactEmail: cleanString('contactEmail'),
     logoFiles,
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
