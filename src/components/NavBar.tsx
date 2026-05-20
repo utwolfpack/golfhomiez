@@ -4,7 +4,6 @@ import { useAdminAuth } from '../context/AdminAuthContext'
 import { useAuth } from '../context/AuthContext'
 import { useHostAuth } from '../context/HostAuthContext'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
-import { fetchInboxSummary } from '../lib/inbox'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import brandEmblem from '../assets/GolfHomiezEmblem.png'
 
@@ -15,7 +14,6 @@ export default function NavBar() {
   const { organizerAccount, logoutOrganizer } = useOrganizerAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
-  const [inboxUnreadCount, setInboxUnreadCount] = useState(0)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
   const restrictedRole = adminUser
@@ -40,31 +38,6 @@ export default function NavBar() {
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
 
-  useEffect(() => {
-    if (!user || restrictedSession) {
-      setInboxUnreadCount(0)
-      return
-    }
-
-    let active = true
-    async function loadInboxIndicator() {
-      try {
-        const summary = await fetchInboxSummary()
-        if (active) setInboxUnreadCount(Number(summary.unreadCount || 0))
-        logFrontendEvent({ category: 'app.nav', message: 'inbox_indicator_loaded', data: { unreadCount: summary.unreadCount || 0 } })
-      } catch (error) {
-        if (active) setInboxUnreadCount(0)
-        logFrontendEvent({ category: 'app.nav', level: 'warn', message: 'inbox_indicator_load_failed', data: { error: error instanceof Error ? error.message : String(error) } })
-      }
-    }
-
-    void loadInboxIndicator()
-    const timer = globalThis.setInterval(() => void loadInboxIndicator(), 30000)
-    return () => {
-      active = false
-      globalThis.clearInterval(timer)
-    }
-  }, [user?.id, restrictedSession])
 
   async function handleLogout() {
     setOpen(false)
@@ -130,30 +103,20 @@ export default function NavBar() {
                     <>
                       <NavLink className="navDropdownItem" to="/host/portal" onClick={() => setOpen(false)}>Host portal</NavLink>
                       <NavLink className="navDropdownItem" to="/host/portal/profile" onClick={() => setOpen(false)}>Host profile</NavLink>
-                      <NavLink className="navDropdownItem" to="/support" onClick={() => setOpen(false)}>Support</NavLink>
                     </>
                   ) : null}
                   {organizerAccount ? (
                     <>
                       <NavLink className="navDropdownItem" to="/organizer/portal" onClick={() => setOpen(false)}>Organizer portal</NavLink>
                       <NavLink className="navDropdownItem" to="/organizer/portal/profile" onClick={() => setOpen(false)}>Organizer profile</NavLink>
-                      <NavLink className="navDropdownItem" to="/support" onClick={() => setOpen(false)}>Support</NavLink>
                     </>
                   ) : null}
                   {restrictedSession ? null : (
                     <>
-                      <NavLink className="navDropdownItem" to="/" onClick={() => setOpen(false)}>Home</NavLink>
-                      <NavLink className="navDropdownItem navDropdownItem--withIndicator" to="/inbox" onClick={() => setOpen(false)}>
-                        <span>Challenges &amp; Messages</span>
-                        {inboxUnreadCount > 0 ? <span className="inboxNavIndicator" aria-label={`${inboxUnreadCount} unread inbox messages`}>{inboxUnreadCount}</span> : null}
-                      </NavLink>
+                      <NavLink className="navDropdownItem" to="/challenges" onClick={() => setOpen(false)}>Challenges</NavLink>
                       <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => setOpen(false)}>My Scores</NavLink>
                       <NavLink className="navDropdownItem" to="/my-tournaments" onClick={() => setOpen(false)}>My Tournaments</NavLink>
-                      <NavLink className="navDropdownItem" to="/teams" onClick={() => setOpen(false)}>Teams</NavLink>
                       <NavLink className="navDropdownItem" to="/profile" onClick={() => setOpen(false)}>Profile</NavLink>
-                      <NavLink className="navDropdownItem" to="/directions" onClick={() => setOpen(false)}>Directions</NavLink>
-                      <NavLink className="navDropdownItem" to="/support" onClick={() => setOpen(false)}>Support</NavLink>
-                      <NavLink className="navDropdownItem" to="/invite-homie" onClick={() => setOpen(false)}>Invite Homie</NavLink>
                     </>
                   )}
                   <button type="button" className="navDropdownItem" onClick={() => void handleLogout()}>Logout</button>

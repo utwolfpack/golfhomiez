@@ -34,6 +34,7 @@ import HostPortal from './pages/HostPortal'
 import HostProfile from './pages/HostProfile'
 import Support from './pages/Support'
 import Inbox from './pages/Inbox'
+import Challenges from './pages/Challenges'
 import InviteHomie from './pages/InviteHomie'
 import TournamentPortal from './pages/TournamentPortal'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -136,6 +137,7 @@ export default function App() {
               <Route path="/directions" element={<Directions />} />
               <Route path="/support" element={<SupportAccessRoute><Support /></SupportAccessRoute>} />
               <Route path="/inbox" element={<ProtectedRoute><Inbox /></ProtectedRoute>} />
+              <Route path="/challenges" element={<ProtectedRoute><Challenges /></ProtectedRoute>} />
               <Route path="/invite-homie" element={<ProtectedRoute><InviteHomie /></ProtectedRoute>} />
               <Route path="/login" element={<LoginEntryRoute mode="user"><Login /></LoginEntryRoute>} />
               <Route path="/register" element={<Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading…</div></div>}><Register /></Suspense>} />

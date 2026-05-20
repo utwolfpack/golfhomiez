@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import ProtectedRoute from '../components/ProtectedRoute'
-import UseMyLocationButton from '../components/UseMyLocationButton'
 import { fetchProfile, saveProfile, type ProfileInput } from '../lib/profile'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateRequiredPhoneNumber } from '../lib/phone-validation'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import beerImg from '../assets/profile/beer-friendly.svg'
 import friendly420Img from '../assets/profile/friendly-420.svg'
 import soberGolfImg from '../assets/profile/sober-golf.svg'
-import type { SavedLocation } from '../lib/location-store'
 
 type ChoiceCardProps = {
   selected: boolean
@@ -46,7 +44,6 @@ function ProfileInner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
-  const [locationStatus, setLocationStatus] = useState<string | null>(null)
   const [needsEnrichment, setNeedsEnrichment] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -67,7 +64,7 @@ function ProfileInner() {
         const profile = await fetchProfile()
         if (!active) return
         setForm({
-          phone: profile.phone || '',
+          phone: sanitizePhoneInput(profile.phone || ''),
           primaryCity: profile.primaryCity || '',
           primaryState: profile.primaryState || '',
           primaryZipCode: profile.primaryZipCode || '',
@@ -124,14 +121,6 @@ function ProfileInner() {
     })
   }
 
-  async function handleLocationResolved(locationData: SavedLocation) {
-    patch('primaryCity', locationData.city || '')
-    patch('primaryState', locationData.stateName || '')
-    patch('primaryZipCode', locationData.postalCode || '')
-    setLocationStatus(locationData.postalCode ? `Location ready: ${locationData.city}, ${locationData.stateName} ${locationData.postalCode}.` : `Location ready: ${locationData.city}, ${locationData.stateName}. Add your zip code if needed.`)
-    logFrontendEvent({ category: 'profile.location', message: 'profile_location_prefilled', data: { city: locationData.city, stateName: locationData.stateName, postalCode: locationData.postalCode || null } })
-  }
-
   function setPhoneValue(value: string) {
     patch('phone', sanitizePhoneInput(value))
   }
@@ -174,22 +163,22 @@ function ProfileInner() {
       <div className="card pageCardShell">
         <PageHero
           eyebrow={isGuidedEnrichment || needsEnrichment ? 'First sign-in setup' : ''}
-          title={isGuidedEnrichment || needsEnrichment ? 'Complete your golfer profile' : 'Your golfer profile'}
+          title={isGuidedEnrichment || needsEnrichment ? 'Complete your profile' : 'Your Profile'}
           subtitle={isGuidedEnrichment || needsEnrichment ? 'We only ask this once on your first sign-in. After that, you can come back here any time to edit it.' : ''}
+          actions={
+            <div className="profileHeaderLinks" aria-label="Profile page links">
+              <Link className="btn btnLightGreen btnSmall" to="/support">Support</Link>
+              <Link className="btn btnLightGreen btnSmall" to="/invite-homie">Invite Homie</Link>
+              <Link className="btn btnLightGreen btnSmall" to="/teams">Teams</Link>
+              <Link className="btn btnLightGreen btnSmall" to="/inbox">Messages</Link>
+            </div>
+          }
         />
 
         <div className="formStack" style={{ maxWidth: 860 }}>
           <div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <UseMyLocationButton onResolved={handleLocationResolved} onStatus={setLocationStatus} />
-            </div>
-            {locationStatus ? <div className="small" style={{ marginTop: 8 }}>{locationStatus}</div> : null}
-          </div>
-
-          <div>
             <label className="label">Phone</label>
-            <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} required aria-invalid={Boolean(validateRequiredPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setPhoneValue(e.target.value)} placeholder="801-555-0123" autoComplete="tel" />
-            <div className="small" style={{ marginTop: 6 }}>Required for golfer profile setup. Used for account and tournament coordination.</div>
+            <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} required aria-invalid={Boolean(validateRequiredPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setPhoneValue(e.target.value)} placeholder="801 743 7000" autoComplete="tel" />
           </div>
 
           <div className="grid" style={{ gridTemplateColumns: '1.4fr 1fr 0.8fr', gap: 12 }}>
@@ -212,14 +201,14 @@ function ProfileInner() {
               <div>
                 <label className="label">Alcohol</label>
                 <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-                  <ChoiceCard selected={alcoholSelected} disabled={alcoholAnd420Disabled} title={alcoholSelected ? 'You are alcohol freindly' : 'Alcohol-friendly'} imageSrc={beerImg} imageAlt="Alcohol-friendly golfer option" onClick={toggleAlcoholPreference} />
+                  <ChoiceCard selected={alcoholSelected} disabled={alcoholAnd420Disabled} title={alcoholSelected ? 'You are Alcohol Friendly' : 'Alcohol-friendly'} imageSrc={beerImg} imageAlt="Alcohol-friendly golfer option" onClick={toggleAlcoholPreference} />
                 </div>
               </div>
 
               <div>
                 <label className="label">Weed</label>
                 <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-                  <ChoiceCard selected={cannabisSelected} disabled={alcoholAnd420Disabled} title={cannabisSelected ? 'You are 420 freindly' : '420 friendly'} imageSrc={friendly420Img} imageAlt="420-friendly golfer option" onClick={toggleCannabisPreference} />
+                  <ChoiceCard selected={cannabisSelected} disabled={alcoholAnd420Disabled} title={cannabisSelected ? 'You are 420 Friendly' : '420 friendly'} imageSrc={friendly420Img} imageAlt="420-friendly golfer option" onClick={toggleCannabisPreference} />
                 </div>
               </div>
 

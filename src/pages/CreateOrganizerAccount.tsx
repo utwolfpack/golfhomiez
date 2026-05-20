@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { createOrganizerAccount, fetchOrganizerAccount, type OrganizerAccountInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
 import { useAuth } from '../context/AuthContext'
 
 const EMPTY_FORM: OrganizerAccountInput = {
@@ -31,7 +32,7 @@ export default function CreateOrganizerAccount() {
         setForm({
           organizationName: account.organizationName,
           contactName: account.contactName,
-          phone: account.phone || '',
+          phone: sanitizePhoneInput(account.phone || ''),
           websiteUrl: account.websiteUrl || '',
           notes: account.notes || '',
         })
@@ -50,6 +51,11 @@ export default function CreateOrganizerAccount() {
     setError(null)
     setSuccess(null)
     try {
+      const phoneValidationError = validateOptionalPhoneNumber(form.phone)
+      if (phoneValidationError) {
+        logFrontendEvent({ category: 'accounts.organizer', level: 'error', message: 'organizer_account_invalid_phone', data: { hasPhone: Boolean(form.phone && form.phone.trim()) } })
+        throw new Error(phoneValidationError)
+      }
       const account = await createOrganizerAccount(form)
       await refreshRoles()
       setSuccess(`Organizer access is active for ${account.organizationName}.`)
@@ -87,7 +93,7 @@ export default function CreateOrganizerAccount() {
           <div className="formRow formRow--split">
             <div>
               <label className="label">Phone</label>
-              <input className="input" value={form.phone || ''} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} />
+              <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} aria-invalid={Boolean(form.phone && validateOptionalPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setForm((prev) => ({ ...prev, phone: sanitizePhoneInput(e.target.value) }))} placeholder="801 743 7000" />
             </div>
             <div>
               <label className="label">Website</label>

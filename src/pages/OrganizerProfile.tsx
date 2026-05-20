@@ -11,7 +11,7 @@ function toForm(account: OrganizerAccount | null): OrganizerAccountInput {
   return {
     organizationName: account?.organizationName || '',
     contactName: account?.contactName || '',
-    phone: account?.phone || '',
+    phone: sanitizePhoneInput(account?.phone || ''),
     notes: account?.notes || null,
   }
 }
@@ -100,7 +100,7 @@ export default function OrganizerProfile() {
           <div>
             <label className="label">Phone</label>
             <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} aria-invalid={Boolean(form.phone && validateOptionalPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setPhoneValue(e.target.value)} />
-            <div className="small">Use 10 to 15 digits. Spaces, dashes, periods, parentheses, and a leading + are allowed.</div>
+            <div className="small">Format: 801 743 7000.</div>
           </div>
           <div>
             <label className="label">Notes</label>

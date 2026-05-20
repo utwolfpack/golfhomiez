@@ -281,7 +281,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const showingOpponentHoles = displayMode === 'team' && detailView === 'opponent'
   const detailTeamScore = `${(round as any).teamTotal == null ? 'Pending' : (round as any).teamTotal} - ${(round as any).opponentTotal == null ? 'Pending' : (round as any).opponentTotal}`
   const detailTeamResult = (round as any).teamTotal == null || (round as any).opponentTotal == null ? 'Pending' : ((round as any).won === true ? 'Win' : (round as any).won === false ? 'Loss' : 'Tie')
-  const insight = isTeamChallengeRound ? 'This Team Challenge score record is maintained from the Inbox Team Challenges section.' : compareRoundToHistory({ ...(round as any), mode: displayMode }, allScores as any)
+  const insight = isTeamChallengeRound ? 'This Team Challenge score record is maintained from the Challenges page Team Challenges section.' : compareRoundToHistory({ ...(round as any), mode: displayMode }, allScores as any)
 
   const updateEditField = (field: keyof RoundEditForm, value: string) => {
     setEditForm((current) => ({ ...current, [field]: value }))

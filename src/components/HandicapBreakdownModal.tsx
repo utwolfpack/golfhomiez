@@ -4,6 +4,13 @@ function formatDifferential(value: number | null) {
   return value == null ? 'Not rated' : value.toFixed(1)
 }
 
+function formatRatingSource(source?: string | null) {
+  if (source === 'saved') return 'saved rating'
+  if (source === 'catalog') return 'catalog rating'
+  if (source === 'default') return 'default rating'
+  return 'rating unavailable'
+}
+
 type Props = {
   open: boolean
   stats: HandicapStats
@@ -32,6 +39,7 @@ export default function HandicapBreakdownModal({ open, stats, onClose }: Props) 
             <div className="detailList" style={{ marginTop: 10 }}>
               <div><strong>Rated rounds considered:</strong> {stats.ratedRounds}</div>
               <div><strong>Differentials used:</strong> {stats.differentialsUsed}</div>
+              <div><strong>Adjustment:</strong> {stats.adjustment ? stats.adjustment.toFixed(1) : 'None'}</div>
               <div><strong>Total solo rounds in filters:</strong> {stats.soloRounds}</div>
             </div>
           </div>
@@ -41,7 +49,7 @@ export default function HandicapBreakdownModal({ open, stats, onClose }: Props) 
             <div style={{ marginTop: 10, lineHeight: 1.55 }}>
               Differential = ((Score − Course Rating) × 113) ÷ Slope Rating.
               <br />
-              Handicap index = average of the lowest eligible differential(s) from your filtered rated solo rounds.
+              Handicap index = average of the lowest eligible differential(s) from your filtered rated solo rounds, plus any reduced-round adjustment when fewer than 20 rated rounds are available.
             </div>
           </div>
         </div>
@@ -56,7 +64,7 @@ export default function HandicapBreakdownModal({ open, stats, onClose }: Props) 
                   <div className="roundRowMeta">{round.date} • {round.state || '—'} • Score {Number.isFinite(round.roundScore) ? round.roundScore : '—'}</div>
                 </div>
                 <div className="handicapRoundMeta">
-                  <div className="small">CR {round.courseRating != null ? round.courseRating.toFixed(1) : '—'} • Slope {round.slopeRating != null ? round.slopeRating : '—'}</div>
+                  <div className="small">CR {round.courseRating != null ? round.courseRating.toFixed(1) : '—'} • Slope {round.slopeRating != null ? round.slopeRating : '—'} • {formatRatingSource(round.ratingSource)}</div>
                   <div><strong>Differential:</strong> {formatDifferential(round.differential)}</div>
                   <div className={`pill ${round.included ? '' : 'pillMuted'}`}>{round.included ? 'Included' : 'Considered only'}</div>
                 </div>

@@ -1,6 +1,7 @@
 import { DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, emptyTournamentTemplateData, type TournamentTemplateData } from '../lib/tournament-templates'
 import ImageUploadField from './ImageUploadField'
 import { compressImageFile } from '../lib/image-upload'
+import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
 
 export type TournamentTemplateFormValue = {
   templateKey?: string | null
@@ -88,6 +89,11 @@ export function TournamentRegistrationDeadlineField({ value, onChange }: Props) 
     onChange({ ...value, templateData: { ...templateData, ...next } })
   }
 
+  function updateTextField(key: keyof TournamentTemplateData, rawValue: string) {
+    const value = key === 'contactPhone' ? sanitizePhoneInput(rawValue) : rawValue
+    updateTemplateData({ [key]: value })
+  }
+
   return (
     <div>
       <label className="label">Registration deadline</label>
@@ -110,6 +116,11 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
 
   function updateTemplateData(next: Partial<TournamentTemplateData>) {
     onChange({ ...value, templateData: { ...templateData, ...next } })
+  }
+
+  function updateTextField(key: keyof TournamentTemplateData, rawValue: string) {
+    const value = key === 'contactPhone' ? sanitizePhoneInput(rawValue) : rawValue
+    updateTemplateData({ [key]: value })
   }
 
   async function onLogoUpload(files?: FileList | null) {
@@ -183,7 +194,17 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
         {textFields.map(([key, label, type]) => (
           <div key={key}>
             <label className="label">{label}</label>
-            <input className="input" type={type || 'text'} value={String(templateData[key] || '')} onChange={(e) => updateTemplateData({ [key]: e.target.value })} />
+            <input
+              className="input"
+              type={key === 'contactPhone' ? 'tel' : type || 'text'}
+              inputMode={key === 'contactPhone' ? 'tel' : undefined}
+              pattern={key === 'contactPhone' ? PHONE_PATTERN : undefined}
+              title={key === 'contactPhone' ? PHONE_VALIDATION_MESSAGE : undefined}
+              aria-invalid={key === 'contactPhone' && Boolean(templateData.contactPhone && validateOptionalPhoneNumber(templateData.contactPhone))}
+              value={String(templateData[key] || '')}
+              onChange={(e) => updateTextField(key, e.target.value)}
+              placeholder={key === 'contactPhone' ? '801 743 7000' : undefined}
+            />
           </div>
         ))}
         {!hideRegistrationDeadline ? <TournamentRegistrationDeadlineField value={value} onChange={onChange} /> : null}

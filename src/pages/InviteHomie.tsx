@@ -45,9 +45,7 @@ export default function InviteHomie() {
   return (
     <div className="container pageStack inviteHomiePage">
       <PageHero
-        eyebrow="Invite Homie"
-        title="Invite a golfer to Golf Homiez"
-        subtitle="Send a registration invite when the golfer you tried to message does not have a Golf Homiez account yet."
+        title="Invite Homie"
       />
 
       <section className="card pageCardShell">

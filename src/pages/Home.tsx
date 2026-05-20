@@ -336,7 +336,7 @@ export default function Home() {
 
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16, gap: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>Most Recent 10 Logged Events</h3>
-          {!user ? <Link className="small" to="/login">Log in to save rounds</Link> : view === 'team' ? <Link className="small" to="/inbox">Open Team Challenges</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">Open My Golf Scores</Link>}
+          {!user ? <Link className="small" to="/login">Log in to save rounds</Link> : view === 'team' ? <Link className="small" to="/challenges">Open Team Challenges</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">Open My Golf Scores</Link>}
         </div>
 
         <div className="roundRowsStack" style={{ marginTop: 12 }}>

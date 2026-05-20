@@ -19,7 +19,7 @@ export default function SoloLogger() {
   const [state, setState] = useState('UT')
   const [course, setCourse] = useState('')
   const [roundScore, setRoundScore] = useState<string>('')
-  const [useHoles, setUseHoles] = useState(false)
+  const [useHoles, setUseHoles] = useState(true)
   const [holes, setHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('UT', ''))
 
   const [saving, setSaving] = useState(false)
@@ -74,7 +74,7 @@ export default function SoloLogger() {
     setState('UT')
     setCourse('')
     setRoundScore('')
-    setUseHoles(false)
+    setUseHoles(true)
     setHoles(buildClientDefaultHoleScorecard('UT', ''))
     setError(null)
     setLocationMessage(null)
@@ -217,14 +217,6 @@ export default function SoloLogger() {
                   />
                 </div>
               ) : null}
-
-              <div>
-                <label className="label">Hole-by-hole entry</label>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <input type="checkbox" checked={useHoles} onChange={e => setUseHoles(e.target.checked)} />
-                  <span className="small">Enable scorecard input</span>
-                </div>
-              </div>
             </div>
           )}
 
@@ -235,6 +227,7 @@ export default function SoloLogger() {
             holes={holes}
             onChange={setHoles}
             draftContext={{ mode: 'solo', date }}
+            compactMobileInput
           />
 
           {roundContextLocked ? (

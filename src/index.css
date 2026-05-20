@@ -594,6 +594,12 @@ button.card{
   color:#1d4ed8;
 }
 
+.handicapSummaryValue--empty{
+  font-size:15px;
+  line-height:1.25;
+  max-width:220px;
+}
+
 .handicapModalCard{
   width:min(960px, 100%);
 }
@@ -1157,6 +1163,30 @@ button.navDropdownItem{font:inherit;}
 .holeInputPageTotals strong{
   color:#064e20;
   font-size:24px;
+}
+
+
+.holeInputPhone--compact{
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+.holeInputPhone--compact .holeInputScorePageCard{
+  margin-top:0;
+}
+.holeInputScorePageCard--compact{
+  border-radius:18px;
+  box-shadow:0 8px 22px rgba(9,46,24,.08);
+}
+.holeInputCompactMeta{
+  margin-top:-4px;
+  margin-bottom:10px;
+  color:var(--muted);
+}
+.holeInputPhone--compact .holeInputFooter{
+  margin-top:12px;
 }
 
 .holeInputScorePageCard{
@@ -2246,4 +2276,477 @@ button.navDropdownItem{font:inherit;}
   .inboxLeaderboardPlayer strong{font-size:.92rem;}
   .inboxLeaderboardPlayer span{display:none;}
   .inboxLeaderboardScore{font-size:1.1rem;}
+}
+
+.inboxLiveScoreSaveNote{
+  margin-top:10px;
+  padding:8px 10px;
+  border:1px solid rgba(20,83,45,.16);
+  border-radius:12px;
+  background:#f0fdf4;
+  color:#0b3d1d;
+  font-weight:800;
+}
+
+.inboxIndividualReadonlyScorecardPanel .holeInputPageTotals{
+  margin-top:12px;
+}
+
+.inboxReadonlySoloScoreGrid{
+  margin-top:14px;
+  grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
+}
+
+.inboxReadonlySoloScoreGrid .roundHoleDetailPill{
+  min-height:64px;
+  border-radius:12px;
+  padding:8px;
+}
+
+.teamScorecardInputButton--readonly{
+  opacity:.96;
+  cursor:pointer;
+}
+
+.teamScorecardInputButton--readonly:hover{
+  border-color:rgba(20,83,45,.32);
+  background:#ffffff;
+}
+
+@media (max-width:480px){
+  .inboxLeaderboardModalOverlay{
+    align-items:flex-start;
+    padding:0;
+  }
+  .inboxLeaderboardModal{
+    width:calc(100vw - 8px);
+    max-height:calc(100vh - 8px);
+    margin:4px;
+    border-radius:22px;
+    overflow-y:auto;
+  }
+  .inboxLeaderboardHero{
+    min-height:250px;
+    padding:20px 14px 34px;
+    gap:8px;
+  }
+  .inboxLeaderboardIconButton{
+    width:36px;
+    height:36px;
+    font-size:1.65rem;
+  }
+  .inboxLeaderboardCrest{
+    width:54px;
+    height:54px;
+    border-radius:14px;
+    font-size:1.6rem;
+  }
+  .inboxLeaderboardHero h2{
+    font-size:clamp(1.9rem,9.5vw,2.6rem);
+    line-height:.93;
+  }
+  .inboxLeaderboardBoard{
+    margin:-26px 4px 4px;
+    padding:8px;
+    border-radius:18px;
+    gap:8px;
+  }
+  .inboxLeaderboardHeaderRow,
+  .inboxLeaderboardRow{
+    grid-template-columns:34px minmax(0,1fr) 38px 30px 38px;
+    gap:4px;
+  }
+  .inboxLeaderboardHeaderRow{
+    padding:0 5px 6px;
+    font-size:.56rem;
+    letter-spacing:.03em;
+  }
+  .inboxLeaderboardRow{
+    min-height:68px;
+    padding:8px 5px;
+    border-radius:12px;
+  }
+  .inboxLeaderboardPosition span{
+    width:30px;
+    height:30px;
+    font-size:.86rem;
+  }
+  .inboxLeaderboardAvatar{
+    width:30px;
+    height:30px;
+    font-size:.65rem;
+  }
+  .inboxLeaderboardPlayer{
+    min-width:0;
+    gap:5px;
+  }
+  .inboxLeaderboardPlayer strong{
+    font-size:.7rem;
+    line-height:1.08;
+    white-space:normal;
+    overflow-wrap:anywhere;
+  }
+  .inboxLeaderboardScore{
+    font-size:.9rem;
+  }
+  .inboxLeaderboardRow > span,
+  .inboxLeaderboardRow > strong{
+    min-width:0;
+    text-align:center;
+    font-size:.76rem;
+  }
+  .inboxLeaderboardUpdated{
+    padding:8px 0 2px;
+    font-size:.86rem;
+  }
+}
+
+.inboxSectionHeader--withActions{
+  align-items:center;
+}
+
+.inboxSectionActions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.inboxCreateChallengeButton,
+.inboxSendMessageButton{
+  min-height:42px;
+  white-space:nowrap;
+}
+
+.inboxEmbeddedForm{
+  border:1px solid rgba(11,61,29,.14);
+  border-radius:18px;
+  background:#f7fbf7;
+  padding:16px;
+}
+
+.inboxLeaderboardTopRightActions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+}
+
+.inboxLeaderboardRefreshButton:disabled{
+  opacity:.7;
+  cursor:progress;
+}
+
+.inboxReadonlyTeamScoreGrid .roundHoleDetailPill{
+  min-height:64px;
+}
+
+@media (max-width:560px){
+  .inboxSectionHeader--withActions{
+    align-items:stretch;
+  }
+
+  .inboxSectionActions{
+    width:100%;
+    justify-content:space-between;
+  }
+
+  .inboxCreateChallengeButton,
+  .inboxSendMessageButton{
+    flex:1 1 150px;
+  }
+}
+.profileHeaderLinks{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+}
+@media (max-width: 640px){
+  .profileHeaderLinks{justify-content:flex-start;width:100%;}
+  .profileHeaderLinks .btn{flex:1 1 calc(50% - 8px);text-align:center;}
+}
+
+.challengeActiveCountLabel{
+  display:inline-flex;
+  align-items:center;
+  min-height:30px;
+  padding:3px 10px;
+  border-radius:999px;
+  background:#fff;
+  border:1px solid rgba(15,23,42,.10);
+  color:var(--primaryDark);
+  font-size:12px;
+  font-weight:800;
+  box-shadow:none;
+}
+
+.profileHeaderLinks .btnLightGreen{
+  background:rgba(240,253,244,.9);
+  border:1px solid rgba(21,128,61,.28);
+  color:#14532d;
+  box-shadow:0 0 0 3px rgba(22,163,74,.08);
+}
+
+.profileHeaderLinks .btnLightGreen:hover{
+  background:#dcfce7;
+}
+
+/* scoreinput.png-aligned hole-by-hole score entry */
+.holeInputPanel,
+.holeInputPanel--compact{
+  width:min(100%, 560px);
+  margin-left:auto;
+  margin-right:auto;
+  padding:14px;
+  border:1px solid rgba(188, 226, 202, .95);
+  border-radius:24px;
+  background:linear-gradient(180deg,#f7fffa,#effaf4);
+  box-shadow:0 16px 34px rgba(9,46,24,.10);
+}
+
+.holeInputPhone,
+.holeInputPhone--compact{
+  width:100%;
+  margin:0;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+
+.holeInputScorePageCard,
+.holeInputScorePageCard--compact{
+  display:grid;
+  gap:12px;
+  padding:16px 14px;
+  border:1px solid rgba(188, 226, 202, .95);
+  border-radius:18px;
+  background:#fff;
+  box-shadow:none;
+}
+
+.holeInputTeamLabel{
+  justify-self:center;
+  max-width:100%;
+  padding:4px 10px;
+  border-radius:999px;
+  background:#dcfce7;
+  color:#14532d;
+  font-size:11px;
+  font-weight:900;
+  line-height:1.2;
+  text-transform:uppercase;
+  letter-spacing:.07em;
+}
+
+.holeInputScoreLabel{
+  color:#064e20;
+  font-size:12px;
+  font-weight:950;
+  letter-spacing:.14em;
+  text-align:center;
+  text-transform:uppercase;
+}
+
+.holeInputPageStepper,
+.scoreStepper.holeInputPageStepper{
+  grid-template-columns:56px minmax(0, 1fr) 56px;
+  gap:10px;
+  align-items:center;
+}
+
+.holeInputStepperButton,
+.holeInputPageStepper > .btn{
+  min-height:30px;
+  border-radius:10px;
+  padding:4px 8px;
+  border-color:rgba(188, 226, 202, .95);
+  background:#fff;
+  color:#0b2b16;
+  font-weight:900;
+}
+
+.holeInputScoreValueBlock{
+  display:grid;
+  gap:8px;
+}
+
+.scoreStepperValue{
+  min-height:58px;
+  border-color:rgba(188, 226, 202, .95);
+  border-radius:14px;
+  background:#fff;
+  color:#064e20;
+  font-size:30px;
+  font-weight:950;
+  line-height:1;
+}
+
+.holeInputOutcome{
+  margin:0;
+  color:#064e20;
+  font-size:18px;
+  font-weight:950;
+  line-height:1.1;
+  text-align:center;
+}
+
+.holeInputPresetGrid{
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:8px;
+}
+
+.holeInputPreset{
+  min-height:38px;
+  border-radius:11px;
+  border:1px solid rgba(9,46,24,.12);
+  color:#0f172a;
+  font-size:13px;
+  font-weight:900;
+  box-shadow:none;
+}
+
+.holeInputPreset--selected{
+  outline:2px solid rgba(6,95,34,.34);
+  outline-offset:1px;
+  border-color:#065f22;
+  box-shadow:inset 0 0 0 1px rgba(6,95,34,.18);
+}
+
+.holeInputSaveButton{
+  min-height:46px;
+  border-radius:12px;
+  background:linear-gradient(180deg,#16a34a,#12863e);
+  color:#fff;
+  font-size:17px;
+  font-weight:950;
+}
+
+.holeInputSaveStatus{
+  min-height:16px;
+  color:#31533c;
+  text-align:center;
+}
+
+.holeInputFooter,
+.holeInputPhone--compact .holeInputFooter{
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px solid rgba(188, 226, 202, .55);
+}
+
+.holeInputMetadata{
+  justify-content:flex-start;
+  gap:8px;
+  padding:14px 12px;
+  border:1px solid rgba(226,232,240,.88);
+  border-radius:0;
+  background:#fff;
+  color:#27272a;
+  font-size:14px;
+  font-weight:850;
+}
+
+.holeInputPin{
+  color:#059669;
+  font-size:24px;
+  line-height:1;
+}
+
+.holeInputNavigation{
+  grid-template-columns:1fr;
+  gap:10px;
+  margin-top:12px;
+}
+
+.holeInputNavButton{
+  min-height:52px;
+  border-radius:15px;
+  font-size:17px;
+  font-weight:950;
+}
+
+.holeInputCompletionIndicator{
+  width:100%;
+  margin:14px auto 0;
+  padding:10px;
+  border:1px solid rgba(188, 226, 202, .95);
+  border-radius:14px;
+  background:rgba(240,253,244,.90);
+}
+
+.holeInputCompletionSummary{
+  color:#064e20;
+  font-size:11px;
+  font-weight:950;
+  letter-spacing:.08em;
+}
+
+.holeInputMissingChip{
+  min-width:24px;
+  min-height:24px;
+  background:#fffbeb;
+  border:1px solid #f59e0b;
+  border-radius:999px;
+  color:#b45309;
+  font-size:12px;
+  font-weight:900;
+}
+
+.holeInputPageTotals{
+  width:100%;
+  margin:12px auto 0;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+
+.holeInputPageTotals div{
+  padding:11px 10px;
+  border-color:rgba(188, 226, 202, .95);
+  border-radius:14px;
+  background:#f0fdf4;
+}
+
+.holeInputPageTotals span{
+  color:#31533c;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.06em;
+}
+
+.holeInputPageTotals strong{
+  color:#065f22;
+  font-size:24px;
+  line-height:1.1;
+}
+
+@media (min-width: 720px){
+  .holeInputNavigation{
+    grid-template-columns:1fr 1fr;
+  }
+}
+
+@media (max-width: 420px){
+  .holeInputPanel,
+  .holeInputPanel--compact{
+    padding:12px;
+    border-radius:20px;
+  }
+
+  .holeInputPageStepper,
+  .scoreStepper.holeInputPageStepper{
+    grid-template-columns:56px minmax(0, 1fr) 56px;
+  }
+
+  .holeInputMetadata{
+    font-size:13px;
+    gap:6px;
+  }
+
+  .holeInputNavButton{
+    min-height:50px;
+  }
 }

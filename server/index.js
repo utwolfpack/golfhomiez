@@ -14,6 +14,7 @@ import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, logScheduledJob, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
 import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
+import { getCourseDetails as getStaticCourseDetails } from './course-data.js'
 import { calculateHoleScoreTotal, getHoleScorecardForCourse, normalizeHoleScorePayload } from './lib/hole-scorecard.js'
 import { clearScorecardDraftHoles, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
@@ -36,6 +37,19 @@ let cancelledTournamentCleanupScheduler = null
 if (!Number.isFinite(PORT) || PORT <= 0) throw new Error('PORT must be set to a valid positive number in the environment')
 let storageReady = false
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
+
+function resolveScoreCourseMetadata(state, matchedCourse) {
+  const staticDetails = getStaticCourseDetails(state, matchedCourse?.name)
+  const courseRating = Number(matchedCourse?.course_rating ?? matchedCourse?.courseRating ?? staticDetails?.courseRating)
+  const slopeRating = Number(matchedCourse?.slope_rating ?? matchedCourse?.slopeRating ?? staticDetails?.slopeRating)
+  const coursePar = Number(matchedCourse?.par ?? matchedCourse?.course_par ?? matchedCourse?.coursePar ?? staticDetails?.par)
+  return {
+    golfCourseId: matchedCourse?.id || null,
+    courseRating: Number.isFinite(courseRating) && courseRating > 0 ? courseRating : null,
+    slopeRating: Number.isFinite(slopeRating) && slopeRating > 0 ? slopeRating : null,
+    coursePar: Number.isFinite(coursePar) && coursePar > 0 ? coursePar : null,
+  }
+}
 const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()
 const publicServerOrigin = String(process.env.BETTER_AUTH_URL || '').trim()
 const allowedOrigins = new Set([
@@ -675,7 +689,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     prizeDetails: cleanString('prizeDetails'),
     holeContestsExtras: cleanString('holeContestsExtras'),
     contactPerson: cleanString('contactPerson'),
-    contactPhone: cleanString('contactPhone'),
+    contactPhone: sanitizeProfilePhone(source.contactPhone, 64),
     contactEmail: cleanString('contactEmail'),
     logoFiles,
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
@@ -1169,19 +1183,26 @@ function sanitizeProfileText(value, maxLength = 512) {
   return trimmed ? trimmed.slice(0, maxLength) : null
 }
 
+function formatProfilePhoneNumber(value) {
+  const rawDigits = String(value ?? '').replace(/\D/g, '')
+  const digits = rawDigits.length === 11 && rawDigits.startsWith('1') ? rawDigits.slice(1) : rawDigits
+  if (!digits) return null
+  if (digits.length !== 10) throw new Error('Phone number is invalid. Use 10 digits formatted like 801 743 7000.')
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`
+}
+
 function isValidProfilePhoneNumber(value) {
-  const phone = String(value ?? '').trim()
-  if (!phone) return true
-  if (!/^\+?[1-9][0-9\s().-]{7,19}$/.test(phone)) return false
-  const digitCount = phone.replace(/\D/g, '').length
-  return digitCount >= 10 && digitCount <= 15
+  try {
+    return !String(value ?? '').trim() || Boolean(formatProfilePhoneNumber(value))
+  } catch {
+    return false
+  }
 }
 
 function sanitizeProfilePhone(value, maxLength = 64) {
   const phone = sanitizeProfileText(value, maxLength)
   if (!phone) return null
-  if (!isValidProfilePhoneNumber(phone)) throw new Error('Phone number is invalid.')
-  return phone
+  return formatProfilePhoneNumber(phone)
 }
 
 
@@ -2888,13 +2909,17 @@ async function resolveIndividualChallengeForNewMessage(req, payload) {
 
 async function createOrUpdateIndividualChallengeSoloScore(message, user, score, holes, participant = null) {
   const normalizedHoles = Array.isArray(holes) && holes.length ? holes : null
+  const scoreState = String(message?.challengeState || '').trim().toUpperCase()
+  const scoreCourse = String(message?.challengeCourse || '').trim() || 'Individual Challenge'
+  const courseMetadata = resolveScoreCourseMetadata(scoreState, { name: scoreCourse })
   const scoreEntry = {
     mode: 'solo',
     date: teamChallengeRecordDate(message),
-    state: String(message?.challengeState || '').trim().toUpperCase(),
-    course: String(message?.challengeCourse || '').trim() || 'Individual Challenge',
+    state: scoreState,
+    course: scoreCourse,
     roundScore: score,
     holes: normalizedHoles,
+    ...courseMetadata,
     createdByUserId: user?.id || participant?.userId || null,
     createdByEmail: normalizeEmail(user?.email || participant?.email),
     source: 'individual_challenge',
@@ -2971,7 +2996,7 @@ app.get('/api/inbox/summary', requireStorage, authMiddleware, async (req, res) =
 app.get('/api/inbox/messages', requireStorage, authMiddleware, async (req, res) => {
   try {
     const messages = await storage.listInboxMessagesForUser(req.user)
-    const unreadCount = messages.filter((message) => !message.readAt).length
+    const unreadCount = messages.filter((message) => message.messageType === 'message' && !message.readAt).length
     logApi('inbox_messages_loaded', { ...requestContext(req), messageCount: messages.length, unreadCount })
     res.json({ messages, unreadCount })
   } catch (error) {
@@ -3632,6 +3657,8 @@ async function buildUpdatedScorePayload(existing, body, req) {
   const matchedCourse = await findGolfCourseForState(state, courseInput)
   if (!matchedCourse) throw new Error('Select a golf course from the catalog for the selected state')
 
+  const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
+
   if (mode === 'solo') {
     const roundScore = coerceScoreNumber(body.roundScore ?? existing.roundScore, 'roundScore')
     return {
@@ -3648,6 +3675,7 @@ async function buildUpdatedScorePayload(existing, body, req) {
       won: null,
       holes: body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes),
       opponentHoles: null,
+      ...courseMetadata,
     }
   }
 
@@ -3687,6 +3715,7 @@ async function buildUpdatedScorePayload(existing, body, req) {
     won,
     holes: body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes),
     opponentHoles: body.opponentHoles === undefined ? existing.opponentHoles : normalizeHoleScorePayload(body.opponentHoles),
+    ...courseMetadata,
   }
 }
 
@@ -3754,6 +3783,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
 
       const normalizedHoles = normalizeHoleScorePayload(holes)
       const holeScoreTotal = calculateHoleScoreTotal(normalizedHoles)
+      const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
       const entry = await storage.createScore({
         mode: 'solo',
         date,
@@ -3761,6 +3791,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
         course: matchedCourse.name,
         roundScore,
         holes: normalizedHoles,
+        ...courseMetadata,
         createdByUserId: req.user.id,
         createdByEmail: req.user.email,
       })
@@ -3778,6 +3809,8 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
         scoreId: entry.id,
         course: matchedCourse.name,
         roundScore,
+        courseRating: courseMetadata.courseRating,
+        slopeRating: courseMetadata.slopeRating,
         holeCount: normalizedHoles?.length || 0,
         holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
       })
@@ -3811,6 +3844,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       if (!userOnOpponentTeam) return res.status(403).json({ message: 'Only members of the opponent team can modify the opponent score' })
     }
 
+    const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
     const { normalizedHoles, normalizedOpponentHoles } = await resolveTeamHolePayloads(req, {
       date,
       state: String(state).toUpperCase(),
@@ -3837,6 +3871,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       won,
       holes: normalizedHoles,
       opponentHoles: persistedOpponentHoles,
+      ...courseMetadata,
       createdByUserId: req.user.id,
       createdByEmail: req.user.email,
     })

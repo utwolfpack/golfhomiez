@@ -25,7 +25,7 @@ export default function Directions() {
             <h3 style={{ marginTop: 0 }}>Quick tips</h3>
             <ul style={{ lineHeight: 1.6, margin: 0, paddingLeft: 18 }}>
               <li>Rotate who tees first to keep everyone involved.</li>
-              <li>Use Inbox Team Challenges to propose challenges, track team dialogue, and enter team scores.</li>
+              <li>Use Challenges page Team Challenges to propose challenges, track team dialogue, and enter team scores.</li>
               <li>Use the Teams page to keep rosters clean before the next event.</li>
             </ul>
             <div className="small" style={{ marginTop: 10 }}>

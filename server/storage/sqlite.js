@@ -324,7 +324,7 @@ export async function getInboxMessageForParticipant(messageId, user) {
 
 export async function getInboxSummaryForUser(user) {
   const messages = await listInboxMessagesForUser(user)
-  return { unreadCount: messages.filter((message) => !message.readAt).length }
+  return { unreadCount: messages.filter((message) => message.messageType === 'message' && !message.readAt).length }
 }
 
 export async function createInboxMessage({ sender, recipient, messageType, body, threadId, parentMessageId, teamContext = null }) {
