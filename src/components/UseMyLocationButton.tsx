@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { resolveMyLocationFromBrowser } from '../lib/locations'
 import { logFrontendEvent } from '../lib/frontend-logger'
-import type { SavedLocation } from '../lib/location-store'
+import { saveLocation, type SavedLocation } from '../lib/location-store'
 
 type Props = {
   className?: string
@@ -20,6 +20,7 @@ export default function UseMyLocationButton({ className = 'btn', label = 'Use my
 
     try {
       const location = await resolveMyLocationFromBrowser()
+      saveLocation(location as SavedLocation)
       await onResolved(location)
       onStatus?.(null)
       logFrontendEvent({ category: 'location.resolve', message: 'succeeded', data: { label: location.label, stateCode: location.stateCode } })

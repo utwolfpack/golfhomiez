@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS team_members (
   team_id VARCHAR(191) NOT NULL,
   name VARCHAR(191) NOT NULL,
   email VARCHAR(191) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'invited',
+  verified TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (team_id, id),
   INDEX idx_team_members_team_id (team_id),
   INDEX idx_team_members_member_id (id),

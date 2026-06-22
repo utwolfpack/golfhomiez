@@ -1,5 +1,6 @@
 import { api } from './api'
 import type { Team } from '../types'
+import type { GolfCourseOption } from './golf-courses'
 
 export type HostAccountInput = {
   golfCourseName: string
@@ -245,7 +246,7 @@ export function updateOrganizerProfile(input: Partial<OrganizerAccountInput>) {
 
 export function fetchGolfCourses(state?: string) {
   const query = state ? `?state=${encodeURIComponent(state)}` : ''
-  return api<HostAccount[]>(`/api/golf-courses${query}`)
+  return api<GolfCourseOption[]>(`/api/golf-courses${query}`)
 }
 
 export function fetchTournaments() {

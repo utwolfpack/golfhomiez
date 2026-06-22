@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import PageHero from '../components/PageHero'
 import HoleByHoleScorecard from '../components/HoleByHoleScorecard'
-import UseMyLocationButton from '../components/UseMyLocationButton'
+import TeeColorSelector from '../components/TeeColorSelector'
 import { useAuth } from '../context/AuthContext'
 import {
   fetchInboxMessages,
@@ -13,6 +12,7 @@ import {
   replyToInboxMessage,
   sendInboxMessage,
   TeamNotFoundError,
+  completeInboxChallenge,
   updateTeamChallengeScore,
   updateIndividualChallengeScore,
   type IndividualChallengeParticipant,
@@ -21,11 +21,14 @@ import {
 } from '../lib/inbox'
 import { fetchTeams } from '../lib/teams'
 import { api } from '../lib/api'
+import { golfCourseNames, searchGolfCourses } from '../lib/golf-courses'
 import { getUserTodayISO } from '../lib/date'
 import { US_STATES } from '../data/usStates'
 import { logFrontendEvent } from '../lib/frontend-logger'
-import { buildClientDefaultHoleScorecard, formatHoleScoreOutcome, holeScoreTotal, missingHoleScoreNumbers, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
+import { buildClientDefaultHoleScorecard, formatHoleScoreOutcome, missingHoleScoreNumbers, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
 import type { HoleScoreDetail, Team } from '../types'
+import type { TeeColorSelection } from '../lib/tee-colors'
+import { DEFAULT_TEE_COLOR, normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
 
 type TeamChallengeScorecardTarget = {
   message: InboxMessage
@@ -144,8 +147,8 @@ export default function Challenges() {
   const [teamChallengeDate, setTeamChallengeDate] = useState(() => getUserTodayISO())
   const [teamChallengeState, setTeamChallengeState] = useState('UT')
   const [teamChallengeCourse, setTeamChallengeCourse] = useState('')
+  const [teamChallengeTeeColor, setTeamChallengeTeeColor] = useState<TeeColorSelection>('')
   const [teamChallengeCourses, setTeamChallengeCourses] = useState<string[]>([])
-  const [teamChallengeLocationMessage, setTeamChallengeLocationMessage] = useState<string | null>(null)
   const [individualParticipantEmails, setIndividualParticipantEmails] = useState('')
   const [challengeBody, setChallengeBody] = useState('')
   const [replyingTo, setReplyingTo] = useState<InboxMessage | null>(null)
@@ -162,7 +165,8 @@ export default function Challenges() {
   const [activeIndividualChallengeLeaderboard, setActiveIndividualChallengeLeaderboard] = useState<InboxMessage | null>(null)
   const [activeTeamChallengeLeaderboard, setActiveTeamChallengeLeaderboard] = useState<InboxMessage | null>(null)
   const [refreshingLeaderboard, setRefreshingLeaderboard] = useState(false)
-  const [markingReadThreadId, setMarkingReadThreadId] = useState<string | null>(null)
+  const autoMarkedReadThreadIds = useRef(new Set<string>())
+  const [completingChallengeThreadId, setCompletingChallengeThreadId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
 
@@ -174,8 +178,13 @@ export default function Challenges() {
   const isIndividualChallenge = challengeType === 'individual'
   const parsedIndividualParticipantEmails = useMemo(() => parseIndividualChallengeEmails(individualParticipantEmails), [individualParticipantEmails])
   const canSubmitChallenge = Boolean(challengeBody.trim() && teamChallengeDate && teamChallengeState && teamChallengeCourse) && (isTeamChallenge ? Boolean(proposerTeamId && challengedTeamName.trim()) : parsedIndividualParticipantEmails.length > 0 && parsedIndividualParticipantEmails.length <= 25)
-  const teamChallengeMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentChallenges].filter(isChallengeMessage)), [messages, sentChallenges])
-  const teamChallengeThreads = useMemo(() => buildInboxThreads(teamChallengeMessages), [teamChallengeMessages])
+  const teamChallengeMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentChallenges].filter((message) => isChallengeMessage(message) && currentUserCanViewChallenge(message))), [messages, sentChallenges, teams, currentUserEmail, user?.id])
+  const teamChallengeThreads = useMemo(() => sortChallengeThreadsByActiveStatus(buildInboxThreads(teamChallengeMessages).map((thread) => {
+    const unreadMessages = thread.unreadMessages.filter((message) => currentUserShouldSeeUnreadNotification(message))
+    return { ...thread, unreadMessages, unreadCount: unreadMessages.length }
+  })), [teamChallengeMessages, teams, currentUserEmail, user?.id])
+  const teamChallengeThreadCount = teamChallengeThreads.filter((thread) => isChallengeActive(getInitialChallengeMessage(thread)) && getInitialChallengeMessage(thread).messageType === 'challenge_request').length
+  const individualChallengeThreadCount = teamChallengeThreads.filter((thread) => isChallengeActive(getInitialChallengeMessage(thread)) && getInitialChallengeMessage(thread).messageType === 'individual_challenge').length
   const allConversationMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentMessages, ...sentChallenges]), [messages, sentMessages, sentChallenges])
 
   function getConversationFor(message: InboxMessage) {
@@ -191,6 +200,63 @@ export default function Challenges() {
     return String(message.senderUserId || '') === String(user?.id || '') || String(message.senderEmail || '').trim().toLowerCase() === currentUserEmail
   }
 
+  function receivedByCurrentUser(message: InboxMessage) {
+    return String(message.recipientUserId || '') === String(user?.id || '') || String(message.recipientEmail || '').trim().toLowerCase() === currentUserEmail
+  }
+
+  function isChallengeCompleted(message: InboxMessage) {
+    return String(message.challengeStatus || '').trim().toLowerCase() === 'completed'
+  }
+
+  function isChallengeActive(message: InboxMessage) {
+    return isChallengeMessage(message) && !isChallengeCompleted(message)
+  }
+
+  function sortChallengeThreadsByActiveStatus(threads: InboxThread[]) {
+    return [...threads].sort((a, b) => {
+      const aActive = isChallengeActive(getInitialChallengeMessage(a))
+      const bActive = isChallengeActive(getInitialChallengeMessage(b))
+      if (aActive !== bActive) return aActive ? -1 : 1
+      return String(b.displayMessage.createdAt || '').localeCompare(String(a.displayMessage.createdAt || ''))
+    })
+  }
+
+  function currentUserShouldSeeUnreadNotification(message: InboxMessage) {
+    if (message.readAt) return false
+    if (message.messageType === 'challenge_request') return receivedByCurrentUser(message) || getTeamChallengeUserSide(message) === 'challenged'
+    if (message.messageType === 'individual_challenge') return receivedByCurrentUser(message) || (!sentByCurrentUser(message) && getIndividualChallengeParticipants(message).some((participant) => currentUserCanEditIndividualParticipant(participant)))
+    return receivedByCurrentUser(message)
+  }
+
+  function teamExists(teamId?: string | null) {
+    const id = String(teamId || '').trim()
+    return Boolean(id && teams.some((team) => String(team.id) === id))
+  }
+
+  function getTeamChallengeDisplayName(message: InboxMessage, side: 'proposer' | 'challenged') {
+    const teamId = side === 'proposer' ? message.proposerTeamId : message.challengedTeamId
+    const teamName = side === 'proposer' ? (message.proposerTeamName || 'Proposing team') : (message.challengedTeamName || 'Challenged team')
+    return teamId && !teamExists(teamId) ? `${teamName} (team deleted)` : teamName
+  }
+
+  function currentUserCanViewChallenge(message: InboxMessage) {
+    if (message.messageType === 'individual_challenge') {
+      return sentByCurrentUser(message) || receivedByCurrentUser(message) || getIndividualChallengeParticipants(message).some((participant) => currentUserCanEditIndividualParticipant(participant))
+    }
+    if (message.messageType === 'challenge_request') {
+      return sentByCurrentUser(message) || receivedByCurrentUser(message) || Boolean(getTeamChallengeUserSide(message))
+    }
+    return false
+  }
+
+  function getInitialChallengeMessage(thread: InboxThread) {
+    return thread.messages.find((item) => !item.parentMessageId) || sortThreadMessages(thread.messages)[0] || thread.displayMessage
+  }
+
+  function currentUserCreatedInitialChallenge(thread: InboxThread) {
+    return sentByCurrentUser(getInitialChallengeMessage(thread))
+  }
+
   function getTeamChallengeUserSide(message: InboxMessage): 'proposer' | 'challenged' | null {
     if (message.messageType !== 'challenge_request') return null
     if (myTeams.some((team) => String(team.id) === String(message.proposerTeamId || ''))) return 'proposer'
@@ -203,7 +269,7 @@ export default function Challenges() {
   }
 
   function getTeamChallengeTeamName(message: InboxMessage, side: 'proposer' | 'challenged') {
-    return side === 'proposer' ? (message.proposerTeamName || 'Proposing team') : (message.challengedTeamName || 'Challenged team')
+    return getTeamChallengeDisplayName(message, side)
   }
 
   function getTeamChallengeStateCode(message: InboxMessage) {
@@ -214,21 +280,35 @@ export default function Challenges() {
     return String(message.challengeCourse || '').trim() || 'Team Challenge'
   }
 
+  function getTeamChallengeTeeColor(message: InboxMessage) {
+    return normalizeTeeColor(message.challengeTeeColor || DEFAULT_TEE_COLOR)
+  }
+
   function getStoredTeamChallengeHoles(message: InboxMessage, side: 'proposer' | 'challenged') {
     const holes = side === 'proposer' ? message.proposerTeamHoles : message.challengedTeamHoles
-    return Array.isArray(holes) && holes.length ? normalizeHoleScorecard(holes, getTeamChallengeStateCode(message), getTeamChallengeCourseName(message)) : null
+    return Array.isArray(holes) && holes.length ? normalizeHoleScorecard(holes, getTeamChallengeStateCode(message), getTeamChallengeCourseName(message), getTeamChallengeTeeColor(message)) : null
+  }
+
+  function getProvidedHoleCount(holes: HoleScoreDetail[]) {
+    return holes.filter((hole) => hole.scoreProvided).length
+  }
+
+  function getProvidedHoleScoreTotal(holes: HoleScoreDetail[]) {
+    return holes
+      .filter((hole) => hole.scoreProvided)
+      .reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
   }
 
   function getTeamChallengeHoles(message: InboxMessage, side: 'proposer' | 'challenged') {
     const key = getTeamChallengeScoreKey(message, side)
     if (teamChallengeScorecards[key]) return teamChallengeScorecards[key]
-    return getStoredTeamChallengeHoles(message, side) || buildClientDefaultHoleScorecard(getTeamChallengeStateCode(message), getTeamChallengeCourseName(message))
+    return getStoredTeamChallengeHoles(message, side) || buildClientDefaultHoleScorecard(getTeamChallengeStateCode(message), getTeamChallengeCourseName(message), getTeamChallengeTeeColor(message))
   }
 
   function getTeamChallengeScore(message: InboxMessage, side: 'proposer' | 'challenged') {
     const holes = getTeamChallengeHoles(message, side)
-    const providedCount = holes.filter((hole) => hole.scoreProvided).length
-    if (providedCount > 0) return holeScoreTotal(holes)
+    const providedCount = getProvidedHoleCount(holes)
+    if (providedCount > 0) return getProvidedHoleScoreTotal(holes)
     const storedScore = side === 'proposer' ? message.proposerTeamScore : message.challengedTeamScore
     return Number.isFinite(Number(storedScore)) ? Number(storedScore) : null
   }
@@ -240,14 +320,14 @@ export default function Challenges() {
     const score = getTeamChallengeScore(message, side)
     if (providedCount === 0 && score == null) return 'Score pending'
     if (providedCount === 0 && score != null) return `Saved score ${score}`
-    return `${providedCount} of ${holes.length || 18} holes entered • Current score ${holeScoreTotal(holes)}`
+    return `${providedCount} of ${holes.length || 18} holes entered • Current score ${getProvidedHoleScoreTotal(holes)}`
   }
 
 
   function getTeamChallengeLeaderboardRows(message: InboxMessage) {
     const sides: Array<{ side: 'proposer' | 'challenged'; name: string }> = [
-      { side: 'proposer', name: message.proposerTeamName || 'Proposing team' },
-      { side: 'challenged', name: message.challengedTeamName || 'Challenged team' },
+      { side: 'proposer', name: getTeamChallengeDisplayName(message, 'proposer') },
+      { side: 'challenged', name: getTeamChallengeDisplayName(message, 'challenged') },
     ]
 
     return sides
@@ -265,7 +345,7 @@ export default function Challenges() {
           thru: enteredHoles.length,
           relativeScore,
           roundLabel: formatLeaderboardRelative(relativeScore),
-          totalLabel: score == null ? 'Pending' : formatLeaderboardRelative(relativeScore),
+          totalLabel: score == null ? 'Pending' : String(score),
         }
       })
       .sort((a, b) => {
@@ -279,8 +359,9 @@ export default function Challenges() {
   }
 
   function openTeamChallengeLeaderboard(message: InboxMessage) {
+    const rows = getTeamChallengeLeaderboardRows(message)
     setActiveTeamChallengeLeaderboard(message)
-    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId } })
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId, displayOrder: ['Round', 'Thru', 'Total'], totalDisplayMode: 'entered_strokes', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length } })
   }
 
   async function refreshTeamChallengeLeaderboard() {
@@ -325,23 +406,13 @@ export default function Challenges() {
 
   function getStoredIndividualChallengeHoles(message: InboxMessage, participant: IndividualChallengeParticipant) {
     const holes = participant.holes
-    return Array.isArray(holes) && holes.length ? normalizeHoleScorecard(holes, getTeamChallengeStateCode(message), getTeamChallengeCourseName(message)) : null
+    return Array.isArray(holes) && holes.length ? normalizeHoleScorecard(holes, getTeamChallengeStateCode(message), getTeamChallengeCourseName(message), getTeamChallengeTeeColor(message)) : null
   }
 
   function getIndividualChallengeHoles(message: InboxMessage, participant: IndividualChallengeParticipant) {
     const key = getIndividualChallengeScoreKey(message, participant)
     if (individualChallengeScorecards[key]) return individualChallengeScorecards[key]
-    return getStoredIndividualChallengeHoles(message, participant) || buildClientDefaultHoleScorecard(getTeamChallengeStateCode(message), getTeamChallengeCourseName(message))
-  }
-
-  function getProvidedHoleCount(holes: HoleScoreDetail[]) {
-    return holes.filter((hole) => hole.scoreProvided).length
-  }
-
-  function getProvidedHoleScoreTotal(holes: HoleScoreDetail[]) {
-    return holes
-      .filter((hole) => hole.scoreProvided)
-      .reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
+    return getStoredIndividualChallengeHoles(message, participant) || buildClientDefaultHoleScorecard(getTeamChallengeStateCode(message), getTeamChallengeCourseName(message), getTeamChallengeTeeColor(message))
   }
 
   function getIndividualChallengeScore(message: InboxMessage, participant: IndividualChallengeParticipant) {
@@ -383,7 +454,7 @@ export default function Challenges() {
           thru: enteredHoles.length,
           relativeScore,
           roundLabel: formatLeaderboardRelative(relativeScore),
-          totalLabel: score == null ? 'Pending' : formatLeaderboardRelative(relativeScore),
+          totalLabel: score == null ? 'Pending' : String(score),
         }
       })
       .sort((a, b) => {
@@ -397,8 +468,9 @@ export default function Challenges() {
   }
 
   function openIndividualChallengeLeaderboard(message: InboxMessage) {
+    const rows = getIndividualChallengeLeaderboardRows(message)
     setActiveIndividualChallengeLeaderboard(message)
-    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_leaderboard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, participantCount: getIndividualChallengeParticipants(message).length } })
+    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_leaderboard_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantCount: getIndividualChallengeParticipants(message).length, displayOrder: ['Round', 'Thru', 'Total'], totalDisplayMode: 'entered_strokes', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length } })
   }
 
   async function refreshIndividualChallengeLeaderboard() {
@@ -464,6 +536,16 @@ export default function Challenges() {
   }, [])
 
   useEffect(() => {
+    if (loading) return
+    const unreadThreads = teamChallengeThreads.filter((thread) => thread.unreadMessages.length > 0 && !autoMarkedReadThreadIds.current.has(thread.threadId))
+    if (unreadThreads.length === 0) return
+    unreadThreads.forEach((thread) => {
+      autoMarkedReadThreadIds.current.add(thread.threadId)
+      void handleAutoMarkThreadRead(thread)
+    })
+  }, [loading, teamChallengeThreads])
+
+  useEffect(() => {
     if (!proposerTeamId && myTeams.length > 0) {
       setProposerTeamId(myTeams[0].id)
     }
@@ -478,7 +560,8 @@ export default function Challenges() {
 
     async function loadTeamChallengeCourses() {
       try {
-        const names = await api<string[]>(`/api/golf-courses?state=${encodeURIComponent(teamChallengeState)}`)
+        const options = await searchGolfCourses({ state: teamChallengeState, limit: 100 })
+        const names = golfCourseNames(options)
         if (cancelled) return
         setTeamChallengeCourses(names)
         setTeamChallengeCourse((prev) => (prev && names.includes(prev) ? prev : (names[0] || '')))
@@ -506,28 +589,29 @@ export default function Challenges() {
     const trimmedChallengeCourse = teamChallengeCourse.trim()
     const trimmedBody = challengeBody.trim()
     const messageTypeForChallenge: InboxMessageType = isTeamChallenge ? 'challenge_request' : 'individual_challenge'
+    const effectiveChallengeTeeColor = normalizeTeeColor(teamChallengeTeeColor)
     const participantEmails = parsedIndividualParticipantEmails
 
     try {
       logFrontendEvent({
         category: isTeamChallenge ? 'inbox.teamChallenge' : 'inbox.individualChallenge',
         message: isTeamChallenge ? 'team_challenge_send_started' : 'individual_challenge_send_started',
-        data: { challengedTeamName: trimmedChallengeTeam, proposerTeamId, proposerTeamName: selectedProposerTeam?.name, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, participantCount: participantEmails.length },
+        data: { challengedTeamName: trimmedChallengeTeam, proposerTeamId, proposerTeamName: selectedProposerTeam?.name, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, challengeTeeColor: effectiveChallengeTeeColor, participantCount: participantEmails.length },
       })
       const result = await sendInboxMessage(isTeamChallenge
-        ? { proposerTeamId, challengedTeamName: trimmedChallengeTeam, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, body: trimmedBody }
-        : { individualParticipantEmails: participantEmails, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, body: trimmedBody })
+        ? { proposerTeamId, challengedTeamName: trimmedChallengeTeam, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, challengeTeeColor: effectiveChallengeTeeColor, messageType: messageTypeForChallenge, body: trimmedBody }
+        : { individualParticipantEmails: participantEmails, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, challengeTeeColor: effectiveChallengeTeeColor, messageType: messageTypeForChallenge, body: trimmedBody })
       setStatus(result.notice || (isTeamChallenge ? 'Your Team Challenge was sent successfully.' : 'Your Individual Challenge was sent successfully.'))
       setChallengedTeamName('')
       setIndividualParticipantEmails('')
       setTeamChallengeDate(getUserTodayISO())
-      setTeamChallengeLocationMessage(null)
+      setTeamChallengeTeeColor('')
       setChallengeBody('')
       setChallengesComposeOpen(false)
       logFrontendEvent({
         category: isTeamChallenge ? 'inbox.teamChallenge' : 'inbox.individualChallenge',
         message: isTeamChallenge ? 'team_challenge_send_succeeded' : 'individual_challenge_send_succeeded',
-        data: { challengedTeamName: trimmedChallengeTeam, proposerTeamId, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, participantCount: participantEmails.length, messageId: result.message?.id, threadId: result.message?.threadId },
+        data: { challengedTeamName: trimmedChallengeTeam, proposerTeamId, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, challengeTeeColor: effectiveChallengeTeeColor, participantCount: participantEmails.length, messageId: result.message?.id, threadId: result.message?.threadId },
       })
       await loadInbox()
     } catch (err) {
@@ -545,7 +629,7 @@ export default function Challenges() {
       }
       const message = err instanceof Error ? err.message : isTeamChallenge ? 'Could not send Team Challenge.' : 'Could not send Individual Challenge.'
       setError(message)
-      logFrontendEvent({ category: isTeamChallenge ? 'inbox.teamChallenge' : 'inbox.individualChallenge', level: 'error', message: isTeamChallenge ? 'team_challenge_send_failed' : 'individual_challenge_send_failed', data: { challengedTeamName: trimmedChallengeTeam, proposerTeamId, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, participantCount: participantEmails.length, error: message } })
+      logFrontendEvent({ category: isTeamChallenge ? 'inbox.teamChallenge' : 'inbox.individualChallenge', level: 'error', message: isTeamChallenge ? 'team_challenge_send_failed' : 'individual_challenge_send_failed', data: { challengedTeamName: trimmedChallengeTeam, proposerTeamId, challengeDate: trimmedChallengeDate, challengeState: trimmedChallengeState, challengeCourse: trimmedChallengeCourse, messageType: messageTypeForChallenge, challengeTeeColor: effectiveChallengeTeeColor, participantCount: participantEmails.length, error: message } })
     } finally {
       setSending(false)
     }
@@ -588,7 +672,7 @@ export default function Challenges() {
     const holes = getTeamChallengeHoles(message, side)
     setTeamChallengeScorecards((prev) => ({ ...prev, [key]: holes }))
     setActiveTeamChallengeScorecard({ message, side })
-    logFrontendEvent({ category: 'inbox.teamChallenge.scorecard', message: 'team_challenge_scorecard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, side, proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId } })
+    logFrontendEvent({ category: 'inbox.teamChallenge.scorecard', message: 'team_challenge_scorecard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, side, challengeTeeColor: getTeamChallengeTeeColor(message), proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId } })
   }
 
   function updateTeamChallengeScorecard(message: InboxMessage, side: 'proposer' | 'challenged', holes: HoleScoreDetail[]) {
@@ -597,6 +681,10 @@ export default function Challenges() {
   }
 
   async function handleTeamChallengeScoreSave(message: InboxMessage, side: 'proposer' | 'challenged') {
+    if (isChallengeCompleted(message)) {
+      setError('This challenge is complete, so scores are locked.')
+      return
+    }
     const key = getTeamChallengeScoreKey(message, side)
     const holes = getTeamChallengeHoles(message, side)
     const missingHoleNumbers = missingHoleScoreNumbers(holes)
@@ -607,7 +695,7 @@ export default function Challenges() {
       return
     }
 
-    const score = holeScoreTotal(holes)
+    const score = getProvidedHoleScoreTotal(holes)
     if (!Number.isFinite(score) || score < 0) {
       setError('Team Challenge score must be zero or greater.')
       return
@@ -617,7 +705,7 @@ export default function Challenges() {
     setError(null)
     setStatus(null)
     try {
-      logFrontendEvent({ category: 'inbox.teamChallenge.score', message: 'team_challenge_score_update_started', data: { messageId: message.id, threadId: message.threadId || message.id, side, score, holeCount: holes.length, proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId } })
+      logFrontendEvent({ category: 'inbox.teamChallenge.score', message: 'team_challenge_score_update_started', data: { messageId: message.id, threadId: message.threadId || message.id, side, challengeTeeColor: getTeamChallengeTeeColor(message), score, holeCount: holes.length, proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId } })
       const updated = await updateTeamChallengeScore(message.id, score, holes)
       const patchScore = (item: InboxMessage) => (messageThreadId(item) === messageThreadId(updated) ? {
         ...item,
@@ -659,6 +747,10 @@ export default function Challenges() {
   }
 
   async function persistIndividualChallengeScoreProgress(message: InboxMessage, participant: IndividualChallengeParticipant, holes: HoleScoreDetail[], options: { closeModal?: boolean; source: 'hole_save' | 'manual_save' }) {
+    if (isChallengeCompleted(message)) {
+      setError('This challenge is complete, so scores are locked.')
+      return null
+    }
     const key = getIndividualChallengeScoreKey(message, participant)
     const providedCount = getProvidedHoleCount(holes)
     if (providedCount === 0) {
@@ -702,15 +794,6 @@ export default function Challenges() {
     setIndividualChallengeScorecards((prev) => ({ ...prev, [key]: holes }))
   }
 
-  async function handleIndividualChallengeScoreSave(message: InboxMessage, participant: IndividualChallengeParticipant) {
-    const holes = getIndividualChallengeHoles(message, participant)
-    try {
-      await persistIndividualChallengeScoreProgress(message, participant, holes, { closeModal: true, source: 'manual_save' })
-    } catch {
-      // Error state and logs are handled by persistIndividualChallengeScoreProgress.
-    }
-  }
-
   function toggleThreadExpansion(thread: InboxThread, source: 'messages' | 'team-challenges') {
     setExpandedThreadId((current) => {
       const next = current === thread.threadId ? null : thread.threadId
@@ -731,19 +814,43 @@ export default function Challenges() {
     })
   }
 
-  async function handleMarkThreadRead(thread: InboxThread) {
+  async function handleAutoMarkThreadRead(thread: InboxThread) {
     if (thread.unreadMessages.length === 0) return
-    setMarkingReadThreadId(thread.threadId)
     try {
       const updatedMessages = await Promise.all(thread.unreadMessages.map((message) => markInboxMessageRead(message.id)))
       setMessages((prev) => prev.map((item) => updatedMessages.find((updated) => updated.id === item.id) || item))
-      logFrontendEvent({ category: 'inbox.message', message: 'inbox_thread_marked_read', data: { threadId: thread.threadId, unreadCount: thread.unreadCount, messageIds: thread.unreadMessages.map((message) => message.id), messageType: thread.displayMessage.messageType } })
+      setSentChallenges((prev) => prev.map((item) => updatedMessages.find((updated) => updated.id === item.id) || item))
+      logFrontendEvent({ category: 'inbox.message', message: 'inbox_thread_marked_read', data: { threadId: thread.threadId, unreadCount: thread.unreadCount, messageIds: thread.unreadMessages.map((message) => message.id), messageType: thread.displayMessage.messageType, source: 'auto_visible_notification' } })
     } catch (err) {
       const messageText = err instanceof Error ? err.message : 'Could not mark thread as read.'
       setError(messageText)
-      logFrontendEvent({ category: 'inbox.message', level: 'error', message: 'inbox_thread_mark_read_failed', data: { threadId: thread.threadId, error: messageText } })
+      logFrontendEvent({ category: 'inbox.message', level: 'error', message: 'inbox_thread_mark_read_failed', data: { threadId: thread.threadId, error: messageText, source: 'auto_visible_notification' } })
+    }
+  }
+
+  async function handleCompleteChallenge(thread: InboxThread) {
+    const initialMessage = getInitialChallengeMessage(thread)
+    const threadId = messageThreadId(initialMessage)
+    setCompletingChallengeThreadId(threadId)
+    setError(null)
+    setStatus(null)
+    try {
+      logFrontendEvent({ category: 'inbox.challenge.complete', message: 'challenge_complete_started', data: { messageId: initialMessage.id, threadId, messageType: initialMessage.messageType } })
+      const updated = await completeInboxChallenge(initialMessage.id)
+      const patchStatus = (item: InboxMessage) => (messageThreadId(item) === messageThreadId(updated) ? { ...item, challengeStatus: updated.challengeStatus } : item)
+      setMessages((prev) => prev.map(patchStatus))
+      setSentChallenges((prev) => prev.map(patchStatus))
+      setActiveTeamChallengeLeaderboard((current) => (current && messageThreadId(current) === messageThreadId(updated) ? patchStatus(current) : current))
+      setActiveIndividualChallengeLeaderboard((current) => (current && messageThreadId(current) === messageThreadId(updated) ? patchStatus(current) : current))
+      setStatus('Challenge completed. Scores are now locked for everyone in this challenge.')
+      logFrontendEvent({ category: 'inbox.challenge.complete', message: 'challenge_complete_succeeded', data: { messageId: updated.id, threadId: messageThreadId(updated), messageType: updated.messageType, challengeStatus: updated.challengeStatus } })
+      await loadInbox()
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : 'Could not complete challenge.'
+      setError(messageText)
+      logFrontendEvent({ category: 'inbox.challenge.complete', level: 'error', message: 'challenge_complete_failed', data: { messageId: initialMessage.id, threadId, messageType: initialMessage.messageType, error: messageText } })
     } finally {
-      setMarkingReadThreadId(null)
+      setCompletingChallengeThreadId(null)
     }
   }
 
@@ -768,16 +875,16 @@ export default function Challenges() {
     if (!isChallengeMessage(message)) return null
     const participants = getIndividualChallengeParticipants(message)
     return (
-      <div className="inboxTeamChallengeContext">
-        <span className="pill">{messageTypeLabel(message.messageType)}</span>
+      <div className="inboxTeamChallengeContext" aria-label="Challenge details">
         {message.messageType === 'challenge_request' ? (
-          <span>{message.proposerTeamName || 'Proposing team'} challenged {message.challengedTeamName || 'Team to Challenge'}</span>
+          <span>{getTeamChallengeDisplayName(message, 'proposer')} challenged {getTeamChallengeDisplayName(message, 'challenged')}</span>
         ) : (
-          <span>{participants.length} golfer Individual Challenge</span>
+          <span>{participants.length} golfer challenge</span>
         )}
         {message.challengeDate || message.challengeState || message.challengeCourse ? (
-          <span className="small">{[message.challengeDate, message.challengeState, message.challengeCourse].filter(Boolean).join(' • ')}</span>
+          <span className="small">{[message.challengeDate, message.challengeState, message.challengeCourse, `${teeColorLabel(getTeamChallengeTeeColor(message))} tees`].filter(Boolean).join(' • ')}</span>
         ) : null}
+        {isChallengeCompleted(message) ? <span className="challengeCompletedLabel">Completed · scores locked</span> : null}
       </div>
     )
   }
@@ -787,11 +894,11 @@ export default function Challenges() {
     const isIndividualChallengeMessage = message.messageType === 'individual_challenge'
     const latestMessage = getLatestConversationMessage(message)
     const replyTarget = replyingTo && messageThreadId(replyingTo) === messageThreadId(message)
-    if (!replyTarget) return null
+    if (!replyTarget || isChallengeCompleted(message)) return null
 
     return (
       <form className="formStack inboxReplyForm" onSubmit={handleReplySubmit}>
-        <label className="label" htmlFor={`reply-${messageThreadId(message)}`}>Reply to {isTeamChallengeMessage ? (message.proposerTeamName || message.challengedTeamName || 'Team Challenge') : (isIndividualChallengeMessage ? 'Individual Challenge' : (latestMessage.senderName || latestMessage.senderEmail))}</label>
+        <label className="label" htmlFor={`reply-${messageThreadId(message)}`}>Reply to {isTeamChallengeMessage ? (getTeamChallengeDisplayName(message, 'proposer') || getTeamChallengeDisplayName(message, 'challenged') || 'Team Challenge') : (isIndividualChallengeMessage ? 'Individual Challenge' : (latestMessage.senderName || latestMessage.senderEmail))}</label>
         <textarea
           id={`reply-${messageThreadId(message)}`}
           className="input"
@@ -814,9 +921,10 @@ export default function Challenges() {
   function renderTeamChallengeScores(message: InboxMessage) {
     if (message.messageType !== 'challenge_request') return null
     const userSide = getTeamChallengeUserSide(message)
+    const completed = isChallengeCompleted(message)
     const scoreRows: Array<{ side: 'proposer' | 'challenged'; label: string; score?: number | null }> = [
-      { side: 'proposer', label: message.proposerTeamName || 'Proposing team', score: message.proposerTeamScore },
-      { side: 'challenged', label: message.challengedTeamName || 'Challenged team', score: message.challengedTeamScore },
+      { side: 'proposer', label: getTeamChallengeDisplayName(message, 'proposer'), score: message.proposerTeamScore },
+      { side: 'challenged', label: getTeamChallengeDisplayName(message, 'challenged'), score: message.challengedTeamScore },
     ]
 
     return (
@@ -827,7 +935,7 @@ export default function Challenges() {
         </div>
         <div className="inboxTeamChallengeScoreGrid">
           {scoreRows.map((row) => {
-            const editable = userSide === row.side
+            const editable = userSide === row.side && !completed
             const score = getTeamChallengeScore(message, row.side)
             return (
               <div key={row.side} className={`inboxTeamChallengeScoreCard ${editable ? 'inboxTeamChallengeScoreCard--editable' : 'inboxTeamChallengeScoreCard--readonly'}`}>
@@ -837,10 +945,10 @@ export default function Challenges() {
                   className={`teamScorecardOpenButton teamScorecardInputButton ${editable ? '' : 'teamScorecardInputButton--readonly'}`}
                   onClick={() => openTeamChallengeScorecard(message, row.side)}
                 >
-                  <span className="teamScorecardInputBadge">{editable ? 'Tap to enter score' : 'Read-only score'}</span>
+                  <span className="teamScorecardInputBadge">{editable ? 'Tap to enter score' : (completed ? 'Completed · locked' : 'Read-only score')}</span>
                   <strong>{score == null ? 'Pending' : score}</strong>
                   <span>{getTeamChallengeScorecardSummary(message, row.side)}</span>
-                  <span>{editable ? 'Only members of this team can edit this score.' : 'Opponent team score is read-only.'}</span>
+                  <span>{editable ? 'Only members of this team can edit this score.' : (completed ? 'This challenge is complete, so scores are locked.' : 'Opponent team score is read-only.')}</span>
                 </button>
               </div>
             )
@@ -853,6 +961,7 @@ export default function Challenges() {
   function renderIndividualChallengeScores(message: InboxMessage) {
     if (message.messageType !== 'individual_challenge') return null
     const participants = getIndividualChallengeParticipants(message)
+    const completed = isChallengeCompleted(message)
     return (
       <div className="inboxTeamChallengeScores inboxIndividualChallengeScores">
         <div className="inboxScoreSectionHeader">
@@ -861,7 +970,7 @@ export default function Challenges() {
         </div>
         <div className="inboxTeamChallengeScoreGrid inboxIndividualChallengeScoreGrid">
           {participants.map((participant) => {
-            const editable = currentUserCanEditIndividualParticipant(participant)
+            const editable = currentUserCanEditIndividualParticipant(participant) && !completed
             const score = getIndividualChallengeScore(message, participant)
             return (
               <div key={participantEmail(participant)} className={`inboxTeamChallengeScoreCard ${editable ? 'inboxTeamChallengeScoreCard--editable' : 'inboxTeamChallengeScoreCard--readonly'}`}>
@@ -871,10 +980,10 @@ export default function Challenges() {
                   className={`teamScorecardOpenButton teamScorecardInputButton ${editable ? '' : 'teamScorecardInputButton--readonly'}`}
                   onClick={() => openIndividualChallengeScorecard(message, participant)}
                 >
-                  <span className="teamScorecardInputBadge">{editable ? 'Tap to enter score' : 'Read-only score'}</span>
+                  <span className="teamScorecardInputBadge">{editable ? 'Tap to enter score' : (completed ? 'Completed · locked' : 'Read-only score')}</span>
                   <strong>{score == null ? 'Pending' : score}</strong>
                   <span>{getIndividualChallengeScorecardSummary(message, participant)}</span>
-                  <span>{editable ? 'Only you can edit your Individual Challenge score.' : 'Other golfer scores are read-only.'}</span>
+                  <span>{editable ? 'Only you can edit your Individual Challenge score.' : (completed ? 'This challenge is complete, so scores are locked.' : 'Other golfer scores are read-only.')}</span>
                 </button>
               </div>
             )
@@ -896,7 +1005,7 @@ export default function Challenges() {
             <div key={hole.hole} className={`roundHoleDetailPill ${outcomeClass}`}>
               <span className="roundHoleDetailOwner">{ownerName}</span>
               <strong>Hole {hole.hole}</strong>
-              <span>Par {hole.par || '—'} • {hole.yards || '—'} yds</span>
+              <span>Par {hole.par || '—'} • {hole.yards || '—'} yds • {teeColorLabel(hole.teeColor || DEFAULT_TEE_COLOR)} tees</span>
               <span className="roundHoleDetailScore">{outcome}</span>
             </div>
           )
@@ -917,7 +1026,7 @@ export default function Challenges() {
             <div key={hole.hole} className={`roundHoleDetailPill ${outcomeClass}`}>
               <span className="roundHoleDetailOwner">{ownerName}</span>
               <strong>Hole {hole.hole}</strong>
-              <span>Par {hole.par || '—'} • {hole.yards || '—'} yds</span>
+              <span>Par {hole.par || '—'} • {hole.yards || '—'} yds • {teeColorLabel(hole.teeColor || DEFAULT_TEE_COLOR)} tees</span>
               <span className="roundHoleDetailScore">{outcome}</span>
             </div>
           )
@@ -932,7 +1041,8 @@ export default function Challenges() {
     const key = getTeamChallengeScoreKey(message, side)
     const teamName = getTeamChallengeTeamName(message, side)
     const holes = getTeamChallengeHoles(message, side)
-    const editable = getTeamChallengeUserSide(message) === side
+    const completed = isChallengeCompleted(message)
+    const editable = getTeamChallengeUserSide(message) === side && !completed
     const score = getTeamChallengeScore(message, side)
 
     return (
@@ -942,7 +1052,7 @@ export default function Challenges() {
             <div>
               <div className="small">Team Challenge score input</div>
               <h2>{teamName} Score</h2>
-              <div className="small">{editable ? 'Enter each hole score, then save the Team Challenge score.' : 'Opponent team score is read-only.'}</div>
+              <div className="small">{editable ? 'Enter each hole score, then save the Team Challenge score.' : (completed ? 'This challenge is complete, so scores are locked.' : 'Opponent team score is read-only.')}</div>
             </div>
             <button type="button" className="btn btnSmall" onClick={() => setActiveTeamChallengeScorecard(null)}>Close</button>
           </div>
@@ -956,6 +1066,7 @@ export default function Challenges() {
                 onChange={(nextHoles) => updateTeamChallengeScorecard(message, side, nextHoles)}
                 scoreOwnerLabel={`${teamName} score`}
                 loadScorecardOnMount={!holes.some((hole) => hole.scoreProvided)}
+                teeColor={getTeamChallengeTeeColor(message)}
               />
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
                 <button
@@ -1016,10 +1127,10 @@ export default function Challenges() {
   function renderIndividualChallengeScorecardModal() {
     if (!activeIndividualChallengeScorecard) return null
     const { message, participant } = activeIndividualChallengeScorecard
-    const key = getIndividualChallengeScoreKey(message, participant)
     const golferName = participantDisplayName(participant)
     const holes = getIndividualChallengeHoles(message, participant)
-    const editable = currentUserCanEditIndividualParticipant(participant)
+    const completed = isChallengeCompleted(message)
+    const editable = currentUserCanEditIndividualParticipant(participant) && !completed
     const score = getIndividualChallengeScore(message, participant)
 
     return (
@@ -1029,7 +1140,7 @@ export default function Challenges() {
             <div>
               <div className="small">Individual Challenge score input</div>
               <h2>{golferName} Score</h2>
-              <div className="small">{editable ? 'Enter each hole score, then save your Individual Challenge score.' : 'Other golfer scores are read-only.'}</div>
+              <div className="small">{editable ? 'Enter each hole score; each completed hole saves automatically.' : (completed ? 'This challenge is complete, so scores are locked.' : 'Other golfer scores are read-only.')}</div>
             </div>
             <button type="button" className="btn btnSmall" onClick={() => setActiveIndividualChallengeScorecard(null)}>Close</button>
           </div>
@@ -1044,17 +1155,9 @@ export default function Challenges() {
                 onHoleSaved={(nextHoles) => persistIndividualChallengeScoreProgress(message, participant, nextHoles, { closeModal: false, source: 'hole_save' })}
                 scoreOwnerLabel={`${golferName} score`}
                 loadScorecardOnMount={!holes.some((hole) => hole.scoreProvided)}
+                teeColor={getTeamChallengeTeeColor(message)}
               />
-              <div className="small inboxLiveScoreSaveNote">Each saved hole records immediately so the live leaderboard can update.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
-                <button
-                  type="button"
-                  className="btnPrimary btnSmall"
-                  disabled={updatingChallengeScoreKey === key || !getProvidedHoleCount(holes)}
-                  onClick={() => void handleIndividualChallengeScoreSave(message, participant)}
-                >
-                  {updatingChallengeScoreKey === key ? 'Saving score…' : 'Save Individual Challenge Score'}
-                </button>
                 <button type="button" className="btn btnSmall" onClick={() => setActiveIndividualChallengeScorecard(null)}>Close</button>
                 <button
                   type="button"
@@ -1133,16 +1236,16 @@ export default function Challenges() {
             <h2>Team Challenge Leaderboard</h2>
             <div className="inboxLeaderboardDivider" />
             <strong>{message.challengeCourse || 'Team Challenge'}</strong>
-            <span>{[message.challengeDate, message.challengeState].filter(Boolean).join(' • ')}</span>
+            <span>{[message.challengeDate, message.challengeState, `${teeColorLabel(getTeamChallengeTeeColor(message))} tees`].filter(Boolean).join(' • ')}</span>
           </div>
 
           <div className="inboxLeaderboardBoard">
             <div className="inboxLeaderboardHeaderRow">
               <span>POS</span>
               <span>TEAM</span>
-              <span>TOTAL</span>
-              <span>THRU</span>
               <span>ROUND</span>
+              <span>THRU</span>
+              <span>TOTAL</span>
             </div>
             {rows.map((row) => {
               const initials = row.teamName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'GH'
@@ -1157,9 +1260,9 @@ export default function Challenges() {
                       <span>{row.side === 'proposer' ? 'Proposing team' : 'Challenged team'}</span>
                     </div>
                   </div>
-                  <strong className="inboxLeaderboardScore">{row.totalLabel}</strong>
-                  <span>{row.thru || '—'}</span>
                   <span>{row.roundLabel}</span>
+                  <span>{row.thru || '—'}</span>
+                  <strong className="inboxLeaderboardScore">{row.totalLabel}</strong>
                 </div>
               )
             })}
@@ -1200,16 +1303,16 @@ export default function Challenges() {
             <h2>Individual Challenge Leaderboard</h2>
             <div className="inboxLeaderboardDivider" />
             <strong>{message.challengeCourse || 'Individual Challenge'}</strong>
-            <span>{[message.challengeDate, message.challengeState].filter(Boolean).join(' • ')}</span>
+            <span>{[message.challengeDate, message.challengeState, `${teeColorLabel(getTeamChallengeTeeColor(message))} tees`].filter(Boolean).join(' • ')}</span>
           </div>
 
           <div className="inboxLeaderboardBoard">
             <div className="inboxLeaderboardHeaderRow">
               <span>POS</span>
               <span>PLAYER</span>
-              <span>TOTAL</span>
-              <span>THRU</span>
               <span>ROUND</span>
+              <span>THRU</span>
+              <span>TOTAL</span>
             </div>
             {rows.map((row) => {
               const name = participantDisplayName(row.participant)
@@ -1225,9 +1328,9 @@ export default function Challenges() {
                       <span>{participantEmail(row.participant)}</span>
                     </div>
                   </div>
-                  <strong className="inboxLeaderboardScore">{row.totalLabel}</strong>
-                  <span>{row.thru || '—'}</span>
                   <span>{row.roundLabel}</span>
+                  <span>{row.thru || '—'}</span>
+                  <strong className="inboxLeaderboardScore">{row.totalLabel}</strong>
                 </div>
               )
             })}
@@ -1241,48 +1344,50 @@ export default function Challenges() {
 
   function renderThreadCard(thread: InboxThread, source: 'messages' | 'team-challenges') {
     const message = thread.displayMessage
+    const challengeMessage = source === 'team-challenges' ? getInitialChallengeMessage(thread) : message
     const isExpanded = expandedThreadId === thread.threadId
-    const isTeamChallengeMessage = message.messageType === 'challenge_request'
-    const isIndividualChallengeMessage = message.messageType === 'individual_challenge'
+    const isTeamChallengeMessage = challengeMessage.messageType === 'challenge_request'
+    const isIndividualChallengeMessage = challengeMessage.messageType === 'individual_challenge'
+    const challengeCompleted = source === 'team-challenges' && isChallengeCompleted(challengeMessage)
+    const canCompleteChallenge = source === 'team-challenges' && isExpanded && !challengeCompleted && currentUserCreatedInitialChallenge(thread)
     const latestMessage = getLatestConversationMessage(message)
     const unreadText = thread.unreadCount === 1 ? '1 new' : `${thread.unreadCount} new`
 
     return (
       <article key={thread.threadId} className={`inboxMessageCard ${thread.unreadCount > 0 ? 'inboxMessageCard--unread' : 'inboxMessageCard--read'} ${isExpanded ? 'inboxMessageCard--expanded' : 'inboxMessageCard--collapsed'}`}>
         <div className="inboxMessageTopline">
-          <span className="pill">{messageTypeLabel(message.messageType)}</span>
+          <span className="pill">{messageTypeLabel(challengeMessage.messageType)}</span>
           {thread.unreadCount > 0 ? <span className="inboxUnreadIndicator">{unreadText}</span> : <span className="small">Latest {formatInboxTimestamp(latestMessage.createdAt)}</span>}
         </div>
         {source === 'team-challenges' ? <div className="inboxMessageSender">Challenge thread</div> : <div className="inboxMessageSender">From: {message.senderName || message.senderEmail}</div>}
         <div className="small">Latest activity {formatInboxTimestamp(latestMessage.createdAt)}</div>
-        {renderTeamChallengeContext(message)}
+        {source === 'team-challenges' ? renderTeamChallengeContext(challengeMessage) : renderTeamChallengeContext(message)}
         {isExpanded ? (
           <>
             <p className="inboxMessageBody">{latestMessage.body}</p>
-            {source === 'team-challenges' && isTeamChallengeMessage ? renderTeamChallengeScores(message) : null}
-            {source === 'team-challenges' && isIndividualChallengeMessage ? renderIndividualChallengeScores(message) : null}
-            {renderConversation(message)}
+            {source === 'team-challenges' && isTeamChallengeMessage ? renderTeamChallengeScores(challengeMessage) : null}
+            {source === 'team-challenges' && isIndividualChallengeMessage ? renderIndividualChallengeScores(challengeMessage) : null}
+            {renderConversation(challengeMessage)}
           </>
         ) : (
           <p className="inboxMessagePreview">{getMessagePreview(latestMessage.body)}</p>
         )}
         <div className="pageHeroActions inboxMessageActions">
           <button type="button" className="btn btnSmall" aria-expanded={isExpanded} onClick={() => toggleThreadExpansion(thread, source)}>{isExpanded ? 'Collapse' : 'Expand'}</button>
-          {thread.unreadCount > 0 ? <button type="button" className="btn btnSmall" disabled={markingReadThreadId === thread.threadId} onClick={() => void handleMarkThreadRead(thread)}>{markingReadThreadId === thread.threadId ? 'Marking…' : 'Mark read'}</button> : null}
-          {isExpanded ? <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(getLatestConversationMessage(message)); setReplyBody('') }}>Reply</button> : null}
+          {isExpanded && !challengeCompleted ? <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(getLatestConversationMessage(challengeMessage)); setReplyBody('') }}>Reply</button> : null}
+          {canCompleteChallenge ? (
+            <button type="button" className="btn btnPrimary btnSmall" disabled={completingChallengeThreadId === messageThreadId(challengeMessage)} onClick={() => void handleCompleteChallenge(thread)}>
+              {completingChallengeThreadId === messageThreadId(challengeMessage) ? 'Completing…' : 'Complete Challenge'}
+            </button>
+          ) : null}
         </div>
-        {isExpanded ? renderReplyForm(message) : null}
+        {isExpanded ? renderReplyForm(challengeMessage) : null}
       </article>
     )
   }
 
   return (
     <div className="container pageStack inboxPage">
-      <PageHero
-        eyebrow="Golf user challenges"
-        title="Challenges"
-      />
-
       <section className="card inboxListCard inboxChallengeListCard">
         <div className="inboxSectionHeader inboxSectionHeader--withActions">
           <div>
@@ -1291,7 +1396,7 @@ export default function Challenges() {
           </div>
           <div className="inboxSectionActions">
             <Link className="btn btnLightGreen btnSmall" to="/directions">Directions</Link>
-            <span className="challengeActiveCountLabel">{teamChallengeThreads.length} active</span>
+            <span className="challengeActiveCountLabel" aria-label="Active challenges count">Active: {teamChallengeThreadCount} team • {individualChallengeThreadCount} individual</span>
             <button
               type="button"
               className="btn btnPrimary btnSmall inboxCreateChallengeButton"
@@ -1316,7 +1421,9 @@ export default function Challenges() {
                   className="input"
                   value={challengeType}
                   onChange={(event) => {
-                    setChallengeType(event.target.value as 'team' | 'individual')
+                    const nextChallengeType = event.target.value as 'team' | 'individual'
+                    setChallengeType(nextChallengeType)
+                    logFrontendEvent({ category: 'inbox.challengeCompose', message: 'challenge_type_changed', data: { challengeType: nextChallengeType } })
                     setError(null)
                     setStatus(null)
                   }}
@@ -1422,19 +1529,10 @@ export default function Challenges() {
                   {!teamChallengeCourses.length ? <option value="">No courses available</option> : null}
                   {teamChallengeCourses.map((course) => <option key={course} value={course}>{course}</option>)}
                 </select>
-                <div className="inboxTeamChallengeLocationActions">
-                  <UseMyLocationButton
-                    onResolved={(location) => {
-                      setTeamChallengeState(location.stateCode)
-                      setTeamChallengeCourse('')
-                      setTeamChallengeLocationMessage(`Location set to ${location.label}.`)
-                    }}
-                    onStatus={setTeamChallengeLocationMessage}
-                  />
-                  {teamChallengeLocationMessage ? <span className="small">{teamChallengeLocationMessage}</span> : null}
-                </div>
               </div>
             </div>
+
+            <TeeColorSelector value={teamChallengeTeeColor} onChange={setTeamChallengeTeeColor} label="Tees played" />
 
             <div>
               <label className="label" htmlFor="challengeMessageBody">Challenge Message</label>

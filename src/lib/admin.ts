@@ -81,6 +81,44 @@ export async function resetAdminPassword(token: string, password: string) {
 }
 
 
+export type ExternalApiCallFilters = {
+  fromDate: string
+  toDate: string
+  apiType?: string
+  endpoint?: string
+}
+
+export type ExternalApiCallSummaryRow = {
+  apiType: string
+  endpoint: string
+  callCount: number
+  successCount: number
+  failureCount: number
+  averageDurationMs?: number | null
+  firstCallAt?: string | null
+  lastCallAt?: string | null
+}
+
+export type ExternalApiCallReport = {
+  filters: Required<ExternalApiCallFilters>
+  generatedAt: string
+  totalCalls: number
+  rows: ExternalApiCallSummaryRow[]
+  apiTypes: Array<{ apiType: string; callCount: number }>
+  endpoints: Array<{ endpoint: string; callCount: number }>
+}
+
+export async function fetchExternalApiCallReport(filters: ExternalApiCallFilters) {
+  const params = new URLSearchParams()
+  if (filters.fromDate) params.set('fromDate', filters.fromDate)
+  if (filters.toDate) params.set('toDate', filters.toDate)
+  if (filters.apiType) params.set('apiType', filters.apiType)
+  if (filters.endpoint) params.set('endpoint', filters.endpoint)
+  const query = params.toString()
+  return api<ExternalApiCallReport>(`/api/admin/external-api-calls${query ? `?${query}` : ''}`)
+}
+
+
 export type ScheduledJobLastRun = {
   id: string
   triggeredBy?: string | null

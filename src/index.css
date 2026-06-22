@@ -1470,7 +1470,7 @@ button.navDropdownItem{font:inherit;}
 
 .soloLockedRoundSummary{
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-columns:minmax(84px,.55fr) minmax(0,2.45fr);
   gap:8px;
   margin-top:12px;
   padding:10px;
@@ -1502,9 +1502,21 @@ button.navDropdownItem{font:inherit;}
   text-overflow:ellipsis;
   white-space:nowrap;
 }
+.soloLockedRoundSummary .roundSummaryDate strong{
+  font-size:12px;
+  letter-spacing:-.01em;
+}
+.soloLockedRoundSummary .roundSummaryCourse{
+  min-width:0;
+}
 
+
+.soloRoundActionSummary{
+  grid-template-columns:minmax(84px,.55fr) minmax(0,2.45fr);
+  margin-top:14px;
+}
 .teamLockedRoundSummary{
-  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+  grid-template-columns:minmax(84px,.55fr) minmax(180px,1.55fr) repeat(auto-fit,minmax(140px,1fr));
 }
 .compactRoundSummaryInput{
   margin-top:5px;
@@ -1596,17 +1608,53 @@ button.navDropdownItem{font:inherit;}
   white-space:normal;
 }
 
+.teamScorecardModalOverlay{
+  align-items:stretch;
+  justify-content:center;
+  padding:8px;
+  overflow:hidden;
+}
+
 .teamScorecardModalCard{
-  width:min(720px, 100%);
+  width:min(960px, 100%);
+  min-height:min(940px, calc(100dvh - 16px));
+  height:calc(100dvh - 16px);
+  max-height:calc(100dvh - 16px);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
   background:linear-gradient(180deg,#ffffff,#f7fbf8);
+}
+
+@supports not (height: 100dvh){
+  .teamScorecardModalCard{
+    min-height:min(940px, calc(100vh - 16px));
+    height:calc(100vh - 16px);
+    max-height:calc(100vh - 16px);
+  }
+}
+
+@media (max-width: 720px){
+  .teamScorecardModalOverlay{
+    padding:4px;
+  }
+
+  .teamScorecardModalCard{
+    min-height:calc(100dvh - 8px);
+    height:calc(100dvh - 8px);
+    max-height:calc(100dvh - 8px);
+    border-radius:18px;
+    padding:12px;
+  }
 }
 .teamScorecardModalHeader{
   display:flex;
+  flex:0 0 auto;
   align-items:flex-start;
   justify-content:space-between;
   gap:12px;
   flex-wrap:wrap;
-  margin-bottom:12px;
+  margin-bottom:10px;
 }
 .teamScorecardModalHeader h2{
   margin:4px 0 0;
@@ -1614,11 +1662,42 @@ button.navDropdownItem{font:inherit;}
   font-size:22px;
 }
 .teamScorecardModalCard .holeInputPanel{
+  width:min(100%, 760px);
+  min-height:0;
+  flex:1 1 auto;
   margin-top:0 !important;
   padding:0;
   border:0;
+  overflow-y:auto;
   background:transparent;
   box-shadow:none;
+}
+
+.teamScorecardModalCard .holeInputScorePageCard{
+  gap:10px;
+  padding:12px;
+}
+
+.teamScorecardModalCard .holeInputFooter{
+  margin-top:10px;
+  padding-top:10px;
+}
+
+.teamScorecardModalCard .holeInputNavigation{
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:8px;
+}
+
+.teamScorecardModalCard .holeInputNavButton{
+  min-height:46px;
+  border-radius:13px;
+  font-size:15px;
+}
+
+.teamScorecardModalCard .holeInputCompletionIndicator{
+  position:sticky;
+  bottom:0;
+  z-index:2;
 }
 
 .roundDetailPanelHeader{
@@ -1917,6 +1996,18 @@ button.navDropdownItem{font:inherit;}
   gap:8px;
   color:#234231;
   font-weight:800;
+}
+
+.challengeCompletedLabel{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 10px;
+  border-radius:999px;
+  background:#ecfdf5;
+  border:1px solid rgba(22,163,74,.22);
+  color:#14532d;
+  font-size:12px;
+  font-weight:900;
 }
 
 .inboxTeamChallengeScores{
@@ -2278,15 +2369,6 @@ button.navDropdownItem{font:inherit;}
   .inboxLeaderboardScore{font-size:1.1rem;}
 }
 
-.inboxLiveScoreSaveNote{
-  margin-top:10px;
-  padding:8px 10px;
-  border:1px solid rgba(20,83,45,.16);
-  border-radius:12px;
-  background:#f0fdf4;
-  color:#0b3d1d;
-  font-weight:800;
-}
 
 .inboxIndividualReadonlyScorecardPanel .holeInputPageTotals{
   margin-top:12px;
@@ -2491,6 +2573,26 @@ button.navDropdownItem{font:inherit;}
 
 .profileHeaderLinks .btnLightGreen:hover{
   background:#dcfce7;
+}
+
+.profileSummaryCard{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  border:1px solid rgba(15,23,42,.10);
+  background:rgba(255,255,255,.88);
+}
+
+.profileSummaryNarrative{
+  margin:0;
+  padding:14px;
+  border-radius:16px;
+  background:rgba(240,253,244,.78);
+  border:1px solid rgba(22,163,74,.16);
+  color:#14532d;
+  font-size:1rem;
+  font-weight:700;
+  line-height:1.55;
 }
 
 /* scoreinput.png-aligned hole-by-hole score entry */
@@ -2749,4 +2851,836 @@ button.navDropdownItem{font:inherit;}
   .holeInputNavButton{
     min-height:50px;
   }
+}
+
+/* disttopinsample.png-aligned hole map modal */
+.holeInputScoreHeader{
+  display:grid;
+  grid-template-columns:40px minmax(0, 1fr) 40px;
+  align-items:center;
+  gap:8px;
+}
+
+.holeInputScoreHeaderSpacer{
+  width:40px;
+  height:40px;
+}
+
+.holeMapIconButton{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:40px;
+  height:40px;
+  border:1px solid rgba(188,226,202,.95);
+  border-radius:14px;
+  background:#fff;
+  color:#064e20;
+  box-shadow:0 8px 18px rgba(9,46,24,.10);
+  cursor:pointer;
+}
+
+.holeMapIconButton:hover,
+.holeMapIconButton:focus-visible{
+  border-color:#16a34a;
+  color:#047857;
+  outline:2px solid rgba(22,163,74,.28);
+  outline-offset:2px;
+}
+
+.holeMapIconButton svg{
+  width:22px;
+  height:22px;
+}
+
+.holeMapModalBackdrop{
+  position:fixed;
+  inset:0;
+  z-index:90;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  background:rgba(2,6,23,.52);
+  backdrop-filter:blur(8px);
+}
+
+.holeMapModal{
+  position:relative;
+  display:grid;
+  grid-template-rows:auto minmax(0, 1fr) auto;
+  width:min(100%, 390px);
+  max-height:min(92vh, 780px);
+  overflow:hidden;
+  border:1px solid rgba(226,232,240,.86);
+  border-radius:34px;
+  background:#f8fafc;
+  box-shadow:0 28px 70px rgba(2,6,23,.36);
+}
+
+.holeMapTopBar{
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:64px minmax(0, 1fr) 82px;
+  align-items:center;
+  gap:8px;
+  min-height:92px;
+  padding:18px 16px 14px;
+  background:rgba(255,255,255,.96);
+  box-shadow:0 12px 28px rgba(15,23,42,.10);
+}
+
+.holeMapCloseButton{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:46px;
+  height:46px;
+  border:1px solid rgba(226,232,240,.94);
+  border-radius:18px;
+  background:#fff;
+  color:#0f172a;
+  font-size:30px;
+  font-weight:700;
+  line-height:1;
+  box-shadow:0 8px 18px rgba(15,23,42,.10);
+  cursor:pointer;
+}
+
+.holeMapDistanceHeader{
+  display:grid;
+  justify-items:center;
+  gap:2px;
+  color:#0f172a;
+  line-height:1;
+}
+
+.holeMapDistanceHeader span{
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:.04em;
+}
+
+.holeMapDistanceHeader strong{
+  font-size:34px;
+  font-weight:950;
+  letter-spacing:-.06em;
+}
+
+.holeMapGpsStatus{
+  display:grid;
+  justify-items:center;
+  gap:4px;
+  color:#334155;
+  font-size:10px;
+  font-weight:850;
+  text-align:center;
+}
+
+.holeMapGpsBars{
+  display:inline-flex;
+  align-items:flex-end;
+  gap:3px;
+  height:24px;
+}
+
+.holeMapGpsBars i{
+  display:block;
+  width:4px;
+  border-radius:999px;
+  background:#94a3b8;
+}
+
+.holeMapGpsBars i:nth-child(1){height:10px;}
+.holeMapGpsBars i:nth-child(2){height:16px;}
+.holeMapGpsBars i:nth-child(3){height:23px;}
+.holeMapGpsStatus--good .holeMapGpsBars i{background:#22c55e;}
+.holeMapGpsStatus--searching .holeMapGpsBars i{background:#f59e0b;}
+.holeMapGpsStatus--unavailable .holeMapGpsBars i{background:#ef4444;}
+
+.holeMapCanvas{
+  position:relative;
+  min-height:520px;
+  overflow:hidden;
+  background:linear-gradient(180deg,#f8fafc 0%,#ffffff 58%,#f1f5f9 100%);
+}
+
+.holeMapSvg{
+  position:absolute;
+  inset:4px -18px 0 18px;
+  width:calc(100% + 24px);
+  height:100%;
+}
+
+.holeMapCartPath{
+  fill:none;
+  stroke:#8bd3ff;
+  stroke-width:3;
+  stroke-linecap:round;
+  opacity:.72;
+}
+
+.holeMapRough{
+  fill:#d7f5c9;
+  stroke:#84cc16;
+  stroke-width:22;
+  stroke-linejoin:round;
+  opacity:.54;
+}
+
+.holeMapFairway{
+  fill:#84d65a;
+  stroke:#3fa645;
+  stroke-width:2;
+  stroke-linejoin:round;
+}
+
+.holeMapGreen{
+  fill:#91dd67;
+  stroke:#339c3d;
+  stroke-width:3;
+}
+
+.holeMapBunker{
+  fill:#f4efc7;
+  stroke:#c7bd7f;
+  stroke-width:2;
+}
+
+.holeMapPinLine{
+  fill:none;
+  stroke:#ef233c;
+  stroke-width:5;
+  stroke-linecap:round;
+}
+
+.holeMapTargetLine{
+  fill:none;
+  stroke:#0f172a;
+  stroke-width:5;
+  stroke-linecap:round;
+}
+
+.holeMapGolferRing{
+  fill:rgba(255,255,255,.38);
+  stroke:#0f172a;
+  stroke-width:5;
+}
+
+.holeMapGolfer{
+  fill:#0f172a;
+}
+
+.holeMapFlagPole{
+  fill:none;
+  stroke:#0f172a;
+  stroke-width:3;
+  stroke-linecap:round;
+}
+
+.holeMapFlag{
+  fill:#ef233c;
+}
+
+.holeMapCup{
+  fill:#0f172a;
+}
+
+.holeMapTree{
+  fill:#79ca50;
+  stroke:#3fa645;
+  stroke-width:1.5;
+}
+
+.holeMapFrontSideCard{
+  position:absolute;
+  z-index:3;
+  top:18px;
+  left:20px;
+  display:grid;
+  gap:10px;
+  color:#0f172a;
+  font-weight:900;
+}
+
+.holeMapFrontSideCard div{
+  display:grid;
+  grid-template-columns:48px auto;
+  align-items:baseline;
+  gap:8px;
+}
+
+.holeMapFrontSideCard span{
+  font-size:12px;
+}
+
+.holeMapFrontSideCard strong{
+  font-size:18px;
+}
+
+.holeMapDistanceCard{
+  position:absolute;
+  z-index:3;
+  left:18px;
+  top:204px;
+  display:grid;
+  gap:10px;
+  padding:4px 0;
+  color:#0f172a;
+}
+
+.holeMapDistanceRow{
+  display:grid;
+  gap:2px;
+  padding-left:14px;
+  border-left:6px solid #0f172a;
+}
+
+.holeMapDistanceRow--pin{
+  border-left-color:#ef233c;
+}
+
+.holeMapDistanceRow span{
+  font-size:13px;
+  font-weight:950;
+}
+
+.holeMapDistanceRow strong{
+  font-size:26px;
+  font-weight:950;
+  letter-spacing:-.05em;
+}
+
+.holeMapFooter{
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:72px 1fr 1.4fr;
+  align-items:center;
+  gap:10px;
+  min-height:98px;
+  padding:16px 18px 18px;
+  border-radius:30px 30px 0 0;
+  background:#fff;
+  box-shadow:0 -14px 28px rgba(15,23,42,.10);
+}
+
+.holeMapFooter div{
+  display:grid;
+  gap:3px;
+}
+
+.holeMapFooter span{
+  color:#334155;
+  font-size:11px;
+  font-weight:800;
+  line-height:1.25;
+}
+
+.holeMapFooter strong{
+  color:#0f172a;
+  font-size:34px;
+  font-weight:950;
+  letter-spacing:-.06em;
+}
+
+@media (max-width: 420px){
+  .holeMapModalBackdrop{
+    padding:10px;
+  }
+
+  .holeMapModal{
+    max-height:94vh;
+    border-radius:30px;
+  }
+
+  .holeMapTopBar{
+    grid-template-columns:56px minmax(0, 1fr) 76px;
+    min-height:86px;
+    padding:14px 14px 12px;
+  }
+
+  .holeMapDistanceHeader strong{
+    font-size:30px;
+  }
+
+  .holeMapCanvas{
+    min-height:500px;
+  }
+
+  .holeMapFooter{
+    grid-template-columns:58px 72px 1fr;
+    padding:14px 14px 16px;
+  }
+}
+
+/* tee-selection scorecard context */
+.teeSelector{
+  display:grid;
+  gap:8px;
+  padding:12px;
+  border:1px solid rgba(188,226,202,.95);
+  border-radius:16px;
+  background:#fff;
+}
+
+.teeSelector legend{
+  padding:0 4px;
+  color:#064e20;
+  font-size:12px;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.teeSelectorOptions{
+  display:grid;
+  grid-template-columns:repeat(4, minmax(0, 1fr));
+  gap:8px;
+}
+
+.teeSelectorOption{
+  display:grid;
+  justify-items:center;
+  gap:5px;
+  min-height:58px;
+  padding:8px 4px;
+  border:1px solid rgba(9,46,24,.14);
+  border-radius:14px;
+  background:#f8fafc;
+  color:#0f172a;
+  font-size:12px;
+  font-weight:900;
+  cursor:pointer;
+}
+
+.teeSelectorOption input{
+  position:absolute;
+  inline-size:1px;
+  block-size:1px;
+  opacity:0;
+  pointer-events:none;
+}
+
+.teeSelectorSwatch{
+  width:20px;
+  height:20px;
+  border-radius:999px;
+  border:2px solid rgba(15,23,42,.28);
+  box-shadow:0 3px 8px rgba(15,23,42,.16);
+}
+
+.teeSelectorOption--red .teeSelectorSwatch{background:#ef4444;}
+.teeSelectorOption--white .teeSelectorSwatch{background:#ffffff;}
+.teeSelectorOption--blue .teeSelectorSwatch{background:#2563eb;}
+.teeSelectorOption--black .teeSelectorSwatch{background:#111827;}
+.teeSelectorOption--selected{
+  border-color:#16a34a;
+  background:#f0fdf4;
+  box-shadow:inset 0 0 0 2px rgba(22,163,74,.18);
+}
+
+.teeSelectorHelp{color:#3f6212;}
+
+.holeMapTeeMarker{
+  fill:#ffffff;
+  stroke:#0f172a;
+  stroke-width:4;
+}
+
+.holeMapTeeMarker--red{fill:#fee2e2;stroke:#ef4444;}
+.holeMapTeeMarker--white{fill:#ffffff;stroke:#94a3b8;}
+.holeMapTeeMarker--blue{fill:#dbeafe;stroke:#2563eb;}
+.holeMapTeeMarker--black{fill:#111827;stroke:#020617;}
+
+.holeMapDistanceRow--carry{border-left-color:#2563eb;}
+
+@media (max-width: 420px){
+  .teeSelectorOptions{grid-template-columns:repeat(2, minmax(0, 1fr));}
+}
+
+/* Admin external API call metrics */
+.adminApiCallFilters{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px;
+  align-items:end;
+  margin-top:12px;
+}
+.adminApiCallFilterActions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+}
+.adminApiCallTableScroll{
+  margin-top:12px;
+  max-height:360px;
+}
+.adminApiEndpointCell{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+  font-size:12px;
+  max-width:260px;
+  word-break:break-word;
+}
+.adminApiTypePill{
+  display:inline-flex;
+  align-items:center;
+  white-space:nowrap;
+}
+.adminApiTypePill--brevo{background:#eef2ff;color:#3730a3;}
+.adminApiTypePill--golfbert{background:#dcfce7;color:#166534;}
+.adminApiTypePill--other{background:#f1f5f9;color:#334155;}
+.adminApiCallHeaderActions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  min-width:min(100%, 280px);
+}
+.adminApiCallViewSummary{
+  display:grid;
+  gap:3px;
+  justify-items:end;
+  color:#334155;
+  font-size:12px;
+  font-weight:800;
+  line-height:1.2;
+}
+.adminApiCallViewSummary strong{
+  color:#0f172a;
+  font-size:13px;
+  font-weight:950;
+}
+.adminApiRefreshButton{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:42px;
+  height:42px;
+  border:1px solid rgba(188,226,202,.95);
+  border-radius:14px;
+  background:#fff;
+  color:#047857;
+  box-shadow:0 8px 18px rgba(9,46,24,.10);
+  cursor:pointer;
+}
+.adminApiRefreshButton:hover,
+.adminApiRefreshButton:focus-visible{
+  border-color:#16a34a;
+  color:#064e20;
+  outline:2px solid rgba(22,163,74,.24);
+  outline-offset:2px;
+}
+.adminApiRefreshButton:disabled{
+  cursor:not-allowed;
+  opacity:.55;
+}
+.adminApiRefreshButton svg{
+  width:21px;
+  height:21px;
+}
+@media (max-width: 640px){
+  .adminApiCallHeaderActions{
+    width:100%;
+    justify-content:space-between;
+  }
+  .adminApiCallViewSummary{
+    justify-items:start;
+  }
+}
+
+/* Golfbert course-page aligned hole map refresh */
+.holeMapCanvas{
+  min-height:560px;
+  background:
+    radial-gradient(circle at 20% 26%, rgba(88,166,95,.38), transparent 28%),
+    radial-gradient(circle at 84% 72%, rgba(42,95,60,.34), transparent 32%),
+    linear-gradient(180deg,#2f4f3b 0%,#426f47 46%,#2f5a3b 100%);
+}
+.holeMapMetricsBar{
+  position:absolute;
+  z-index:4;
+  top:10px;
+  left:10px;
+  right:10px;
+  display:grid;
+  grid-template-columns:1.4fr .78fr .72fr 1fr;
+  gap:6px;
+  padding:7px;
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:18px;
+  background:rgba(15,23,42,.72);
+  box-shadow:0 14px 30px rgba(2,6,23,.22);
+  backdrop-filter:blur(10px);
+}
+.holeMapMetricsBar div{
+  display:grid;
+  gap:2px;
+  min-width:0;
+  padding:6px 7px;
+  border-radius:13px;
+  background:rgba(255,255,255,.10);
+  color:#fff;
+}
+.holeMapMetricsBar span{
+  color:rgba(255,255,255,.74);
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+.holeMapMetricsBar strong{
+  color:#fff;
+  font-size:16px;
+  font-weight:950;
+  letter-spacing:-.04em;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.holeMapTeeStrip{
+  position:absolute;
+  z-index:4;
+  top:82px;
+  left:50%;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:max-content;
+  max-width:calc(100% - 28px);
+  padding:8px 10px;
+  border:1px solid rgba(255,255,255,.2);
+  border-radius:999px;
+  background:rgba(15,23,42,.70);
+  color:#fff;
+  box-shadow:0 14px 28px rgba(2,6,23,.24);
+  transform:translateX(-50%);
+  backdrop-filter:blur(10px);
+}
+.holeMapTeeStrip strong{
+  font-size:17px;
+  font-weight:950;
+  letter-spacing:-.04em;
+}
+.holeMapTeeStrip span{
+  font-size:10px;
+  font-weight:900;
+  color:rgba(255,255,255,.8);
+  white-space:nowrap;
+}
+.holeMapTeeChip{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:5px 8px;
+  border-radius:999px;
+  background:#fff;
+  color:#0f172a !important;
+}
+.holeMapTeeChip::before{
+  content:'';
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#94a3b8;
+}
+.holeMapTeeChip--red::before{background:#ef4444;}
+.holeMapTeeChip--white::before{background:#ffffff;border:1px solid #94a3b8;}
+.holeMapTeeChip--blue::before{background:#2563eb;}
+.holeMapTeeChip--black::before{background:#020617;}
+.holeMapDistanceCard{
+  top:auto;
+  left:14px;
+  bottom:18px;
+  z-index:4;
+  padding:10px;
+  border:1px solid rgba(255,255,255,.22);
+  border-radius:18px;
+  background:rgba(15,23,42,.72);
+  color:#fff;
+  box-shadow:0 14px 30px rgba(2,6,23,.24);
+  backdrop-filter:blur(10px);
+}
+.holeMapDistanceRow span{color:rgba(255,255,255,.78);}
+.holeMapDistanceRow strong{color:#fff;}
+.holeMapSvg{
+  inset:20px -28px 0 -6px;
+  width:calc(100% + 42px);
+  opacity:.98;
+}
+.holeMapSatelliteBase{
+  fill:#31583d;
+}
+.holeMapMowStripe{
+  fill:none;
+  stroke:rgba(255,255,255,.09);
+  stroke-width:54;
+  stroke-linecap:round;
+}
+.holeMapMowStripe--alt{
+  stroke:rgba(0,0,0,.08);
+  stroke-width:70;
+}
+.holeMapWater{
+  fill:rgba(56,189,248,.58);
+  stroke:rgba(186,230,253,.76);
+  stroke-width:2.5;
+}
+.holeMapRough{
+  fill:#507c43;
+  stroke:rgba(21,128,61,.66);
+  stroke-width:30;
+  filter:drop-shadow(0 16px 18px rgba(2,6,23,.30));
+  opacity:.74;
+}
+.holeMapFairway{
+  fill:#81c45d;
+  stroke:#366c35;
+  stroke-width:2.4;
+}
+.holeMapGreen{
+  fill:#9ce070;
+  stroke:#1f7a37;
+  stroke-width:3.2;
+  filter:drop-shadow(0 8px 8px rgba(2,6,23,.22));
+}
+.holeMapBunker{
+  fill:#e7d89b;
+  stroke:#bba96f;
+  stroke-width:2.2;
+}
+.holeMapYardageArc{
+  fill:none;
+  stroke:rgba(255,255,255,.82);
+  stroke-width:2.2;
+  stroke-dasharray:6 7;
+  stroke-linecap:round;
+}
+.holeMapYardageArc--secondary{
+  opacity:.56;
+}
+.holeMapPinLine{
+  stroke:#f43f5e;
+  stroke-width:5.4;
+  filter:drop-shadow(0 4px 5px rgba(2,6,23,.35));
+}
+.holeMapTargetLine{
+  stroke:#111827;
+  stroke-width:5.6;
+  filter:drop-shadow(0 4px 5px rgba(255,255,255,.14));
+}
+.holeMapLandingRing{
+  fill:rgba(255,255,255,.08);
+  stroke:#0f172a;
+  stroke-width:5;
+}
+.holeMapShotLabel,
+.holeMapPinLabel{
+  paint-order:stroke;
+  stroke:rgba(15,23,42,.82);
+  stroke-width:5;
+  fill:#fff;
+  font-size:21px;
+  font-weight:950;
+  letter-spacing:-.04em;
+}
+.holeMapPinLabel{
+  fill:#fee2e2;
+}
+.holeMapTree{
+  fill:#75b957;
+  stroke:#2f6f34;
+  stroke-width:1.6;
+}
+.holeMapFooter{
+  grid-template-columns:64px 104px 1fr;
+}
+@media (max-width: 420px){
+  .holeMapCanvas{min-height:540px;}
+  .holeMapMetricsBar{
+    grid-template-columns:1.2fr .72fr .68fr .9fr;
+    gap:4px;
+    padding:5px;
+  }
+  .holeMapMetricsBar div{padding:5px 6px;}
+  .holeMapMetricsBar span{font-size:8px;}
+  .holeMapMetricsBar strong{font-size:14px;}
+  .holeMapTeeStrip{
+    top:76px;
+    gap:6px;
+    padding:7px 9px;
+  }
+  .holeMapTeeStrip span:last-child{display:none;}
+  .holeMapDistanceCard{
+    left:12px;
+    bottom:14px;
+  }
+}
+
+.holeInputTrackerList{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  flex-wrap:wrap;
+}
+
+.holeInputTrackerChip{
+  min-width:26px;
+  min-height:26px;
+  border:1px solid #cbd5e1;
+  border-radius:999px;
+  background:#fff;
+  color:#334155;
+  font-size:12px;
+  font-weight:900;
+  cursor:pointer;
+  transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,transform .15s ease;
+}
+
+.holeInputTrackerChip:hover{
+  transform:translateY(-1px);
+  box-shadow:0 3px 8px rgba(15,23,42,.12);
+}
+
+.holeInputTrackerChip--saved{
+  background:#dbeafe;
+  border-color:#93c5fd;
+  color:#1e3a8a;
+}
+
+.holeInputTrackerChip--active{
+  border-color:#1d4ed8;
+  box-shadow:0 0 0 3px rgba(147,197,253,.42);
+}
+
+.holeInputTrackerChip--missing{
+  background:#fff;
+}
+
+.roundIncompleteBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.roundDetailIncompleteBadge {
+  margin-top: 6px;
+}
+
+.soloIncompleteRoundBadge {
+  display: inline-flex;
 }

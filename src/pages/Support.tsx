@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { useAuth } from '../context/AuthContext'
 import { useHostAuth } from '../context/HostAuthContext'
@@ -22,6 +22,12 @@ function getSupportHomePath(accountType: SupportAccountContext['accountType'] | 
   if (accountType === 'host') return '/host/portal'
   if (accountType === 'organizer') return '/organizer/portal'
   return '/'
+}
+
+function getSupportProfilePath(accountType: SupportAccountContext['accountType'] | null | undefined) {
+  if (accountType === 'host') return '/host/portal/profile'
+  if (accountType === 'organizer') return '/organizer/portal/profile'
+  return '/profile'
 }
 
 export default function Support() {
@@ -102,7 +108,16 @@ export default function Support() {
       <div className="card pageCardShell">
         <PageHero
           eyebrow="GolfHomiez support"
-          title="Contact support"
+          title="Contact Support"
+          actions={
+            <Link
+              className="btn btnLightGreen btnSmall"
+              to={getSupportProfilePath(accountContext?.accountType)}
+              onClick={() => logFrontendEvent({ category: 'support.navigation', message: 'return_to_profile_clicked', data: { accountType: accountContext?.accountType || null } })}
+            >
+              Return to Profile
+            </Link>
+          }
         />
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 760 }}>
           <div>

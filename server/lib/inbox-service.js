@@ -1,4 +1,5 @@
 import { isEmail, normalizeEmail } from './team-utils.js'
+import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './tee-colors.js'
 
 const MAX_INBOX_MESSAGE_LENGTH = 2000
 const MAX_INBOX_MESSAGE_ID_LENGTH = 191
@@ -89,7 +90,7 @@ export function validateTeamChallengeCourse(value) {
 
 export function normalizeChallengeStatus(value) {
   const normalized = String(value || '').trim().toLowerCase()
-  if (normalized === 'accepted' || normalized === 'declined' || normalized === 'proposed') return normalized
+  if (normalized === 'accepted' || normalized === 'declined' || normalized === 'proposed' || normalized === 'completed') return normalized
   throw new Error('Team Challenge status is invalid.')
 }
 
@@ -132,6 +133,7 @@ export function normalizeTeamChallengeHoles(value) {
     const yards = Number(record.yards)
     const strokeIndex = Number(record.strokeIndex ?? record.stroke_index)
     const score = Number(record.score)
+    const teeColor = normalizeTeeColor(record.teeColor || record.tee_color || record.teeBoxType || DEFAULT_TEE_COLOR)
     const scoreProvided = record.scoreProvided === true || record.score_provided === true || record.scoreProvided === 1 || record.score_provided === 1 || record.scoreProvided === 'true' || record.score_provided === 'true'
     if (!Number.isFinite(holeNumber) || holeNumber < 1 || holeNumber > 18) throw new Error('Team Challenge hole score is invalid.')
     if (!Number.isFinite(score) || score < 0) throw new Error('Team Challenge hole score must be zero or greater.')
@@ -140,6 +142,8 @@ export function normalizeTeamChallengeHoles(value) {
       par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : 4,
       yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : 0,
       strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : Math.trunc(holeNumber),
+      teeColor,
+      teeBoxType: record.teeBoxType || record.tee_box_type || teeColor,
       score: Math.max(0, Math.trunc(score)),
       scoreProvided,
     }
@@ -176,6 +180,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
       challengeDate: payload.challengeDate ? validateTeamChallengeDate(payload.challengeDate) : null,
       challengeState: payload.challengeState ? validateTeamChallengeState(payload.challengeState) : null,
       challengeCourse: payload.challengeCourse ? validateTeamChallengeCourse(payload.challengeCourse) : null,
+      challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
       individualParticipantEmails: null,
     }
   }
@@ -191,6 +196,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
       challengeDate: validateTeamChallengeDate(payload.challengeDate || payload.date),
       challengeState: validateTeamChallengeState(payload.challengeState || payload.state || payload.stateCode),
       challengeCourse: validateTeamChallengeCourse(payload.challengeCourse || payload.course),
+      challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
     }
   }
 
@@ -205,6 +211,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
       challengeDate: validateTeamChallengeDate(payload.challengeDate || payload.date),
       challengeState: validateTeamChallengeState(payload.challengeState || payload.state || payload.stateCode),
       challengeCourse: validateTeamChallengeCourse(payload.challengeCourse || payload.course),
+      challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
       individualParticipantEmails: normalizeIndividualChallengeParticipantEmails(payload.individualParticipantEmails || payload.recipientEmails || payload.participantEmails || payload.recipients),
     }
   }
@@ -219,6 +226,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
     challengeDate: null,
     challengeState: null,
     challengeCourse: null,
+    challengeTeeColor: DEFAULT_TEE_COLOR,
     individualParticipantEmails: null,
   }
 }
@@ -242,6 +250,7 @@ export function mapInboxMessageRow(row = {}) {
     challengeDate: row.challenge_date || row.challengeDate || null,
     challengeState: row.challenge_state || row.challengeState || null,
     challengeCourse: row.challenge_course || row.challengeCourse || null,
+    challengeTeeColor: normalizeTeeColor(row.challenge_tee_color || row.challengeTeeColor || DEFAULT_TEE_COLOR),
     proposerTeamScore: row.proposer_team_score ?? row.proposerTeamScore ?? null,
     challengedTeamScore: row.challenged_team_score ?? row.challengedTeamScore ?? null,
     proposerTeamHoles: parseTeamChallengeHoles(row.proposer_team_holes_json ?? row.proposerTeamHoles ?? row.proposerTeamHolesJson),

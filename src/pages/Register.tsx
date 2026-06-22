@@ -2,14 +2,12 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
-import LocationInput from '../components/LocationInput'
-import type { SavedLocation } from '../lib/location-store'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 export default function Register() {
   const [params] = useSearchParams()
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [location, setLocation] = useState<SavedLocation | null>(null)
   const [email, setEmail] = useState(params.get('email') || '')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -31,13 +29,15 @@ export default function Register() {
       const trimmedLastName = lastName.trim()
       if (!trimmedFirstName) throw new Error('First name is required')
       if (!trimmedLastName) throw new Error('Last name is required')
-      if (!location) throw new Error('Location is required')
       if (password.length < 8) throw new Error('Password must be at least 8 characters')
       if (password !== confirmPassword) throw new Error('Passwords do not match')
+      logFrontendEvent({ category: 'auth.register', message: 'register_submit_started', data: { email: email.trim().toLowerCase(), locationDeferredToProfile: true } })
       const result = await register(trimmedFirstName, trimmedLastName, email.trim(), password)
+      logFrontendEvent({ category: 'auth.register', message: 'register_submit_succeeded', data: { email: result.email, locationDeferredToProfile: true } })
       navigate(`/verify-contact?email=${encodeURIComponent(result.email)}&welcome=1`)
     } catch (err: any) {
       setError(err?.message || 'Registration failed')
+      logFrontendEvent({ category: 'auth.register', level: 'error', message: 'register_submit_failed', data: { email: email.trim().toLowerCase(), error: err?.message || 'Registration failed', locationDeferredToProfile: true } })
     } finally {
       setBusy(false)
     }
@@ -64,8 +64,6 @@ export default function Register() {
               <input className="input" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Last name" autoComplete="family-name" />
             </div>
           </div>
-
-          <LocationInput value={location} onChange={setLocation} />
 
           <div>
             <label className="label">Email</label>

@@ -32,6 +32,14 @@ function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase()
 }
 
+function normalizeMemberStatus(status, verified = false, hasUser = false) {
+  if (verified === true) return 'active'
+  if (hasUser) return 'pending_verification'
+  const value = String(status || '').trim().toLowerCase()
+  if (value === 'active' || value === 'pending_verification' || value === 'invited') return value
+  return 'invited'
+}
+
 function toIso(value) {
   if (!value) return null
   const dt = new Date(value)
@@ -40,11 +48,13 @@ function toIso(value) {
 }
 
 function mapMember(row) {
-  const verified = row.user_email_verified == null ? null : Boolean(row.user_email_verified)
-  const status = verified === true ? 'active' : 'pending_verification'
+  const hasUser = Boolean(row.user_id)
+  const verified = hasUser ? Boolean(row.user_email_verified) : Boolean(row.verified)
+  const status = normalizeMemberStatus(row.status, verified, hasUser)
+  const userName = String(row.user_name || '').replace(/\s+/g, ' ').trim()
   return {
     id: row.id,
-    name: row.name,
+    name: userName || row.name,
     email: row.email,
     status,
     verified: verified === true,
@@ -62,6 +72,7 @@ function mapTeam(rows, memberRows) {
       name: row.name,
       createdAt: toIso(row.created_at),
       members,
+      status: members.some((member) => member.status !== 'active') ? 'pending' : 'verified',
       hasPendingMembers: members.some((member) => member.status !== 'active'),
     }
   })
@@ -79,6 +90,7 @@ function mapScore(row) {
     teamTotal: row.team_total,
     opponentTotal: row.opponent_total,
     roundScore: row.round_score,
+    teeColor: hasColumn(row, 'tee_color') ? (row.tee_color || 'white') : 'white',
     won: row.won == null ? null : Boolean(row.won),
     holes: row.holes_json ? (typeof row.holes_json === 'string' ? JSON.parse(row.holes_json) : row.holes_json) : null,
     opponentHoles: hasColumn(row, 'opponent_holes_json') && row.opponent_holes_json ? (typeof row.opponent_holes_json === 'string' ? JSON.parse(row.opponent_holes_json) : row.opponent_holes_json) : null,
@@ -104,7 +116,7 @@ export async function getBackendName() {
 async function fetchTeamMembers(db, teamId) {
   if (teamId) {
     const [rows] = await db.execute(
-      `SELECT tm.*, u.emailVerified AS user_email_verified
+      `SELECT tm.*, u.id AS user_id, u.name AS user_name, u.emailVerified AS user_email_verified
          FROM team_members tm
          LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
         WHERE tm.team_id = ?
@@ -115,7 +127,7 @@ async function fetchTeamMembers(db, teamId) {
   }
 
   const [rows] = await db.query(
-    `SELECT tm.*, u.emailVerified AS user_email_verified
+    `SELECT tm.*, u.id AS user_id, u.name AS user_name, u.emailVerified AS user_email_verified
        FROM team_members tm
        LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
       ORDER BY tm.name ASC`,
@@ -153,8 +165,8 @@ export async function createTeam({ name, members }) {
     await conn.execute('INSERT INTO teams (id, name, created_at) VALUES (?, ?, NOW())', [team.id, team.name])
     for (const member of members) {
       await conn.execute(
-        'INSERT INTO team_members (id, team_id, name, email) VALUES (?, ?, ?, ?)',
-        [member.id, team.id, member.name, normalizeEmail(member.email)],
+        'INSERT INTO team_members (id, team_id, name, email, status, verified) VALUES (?, ?, ?, ?, ?, ?)',
+        [member.id, team.id, member.name, normalizeEmail(member.email), normalizeMemberStatus(member.status, Boolean(member.verified)), Boolean(member.verified) ? 1 : 0],
       )
     }
     await conn.commit()
@@ -181,8 +193,8 @@ export async function updateTeam(id, { name, members }) {
     await conn.execute('DELETE FROM team_members WHERE team_id = ?', [id])
     for (const member of members) {
       await conn.execute(
-        'INSERT INTO team_members (id, team_id, name, email) VALUES (?, ?, ?, ?)',
-        [member.id, id, member.name, normalizeEmail(member.email)],
+        'INSERT INTO team_members (id, team_id, name, email, status, verified) VALUES (?, ?, ?, ?, ?, ?)',
+        [member.id, id, member.name, normalizeEmail(member.email), normalizeMemberStatus(member.status, Boolean(member.verified)), Boolean(member.verified) ? 1 : 0],
       )
     }
     if (existing.name !== String(name).trim()) {
@@ -195,6 +207,28 @@ export async function updateTeam(id, { name, members }) {
   } catch (error) {
     await conn.rollback()
     logError('Failed to update team in MySQL storage', { error, teamId: id, teamName: String(name).trim() })
+    throw error
+  } finally {
+    conn.release()
+  }
+}
+
+export async function deleteTeamById(id) {
+  const db = getPool()
+  const existing = await getTeamById(id)
+  if (!existing) return false
+
+  const conn = await db.getConnection()
+  try {
+    await conn.beginTransaction()
+    await conn.execute('DELETE FROM team_members WHERE team_id = ?', [id])
+    await conn.execute('DELETE FROM teams WHERE id = ?', [id])
+    await conn.commit()
+    logInfo('Deleted team while retaining logged events', { teamId: id, teamName: existing.name })
+    return true
+  } catch (error) {
+    await conn.rollback()
+    logError('Failed to delete team in MySQL storage', { error, teamId: id })
     throw error
   } finally {
     conn.release()
@@ -277,6 +311,7 @@ export async function createScore(entry) {
     const scoreColumns = await getScoreTableColumns()
 
     const optionalColumnEntries = [
+      ['tee_color', score.teeColor || 'white'],
       ['opponent_holes_json', score.opponentHoles ? JSON.stringify(score.opponentHoles) : null],
       ['golf_course_id', score.golfCourseId ?? null],
       ['course_rating', score.courseRating ?? null],
@@ -338,6 +373,7 @@ export async function updateScoreById(id, entry) {
   try {
     const scoreColumns = await getScoreTableColumns()
     const optionalColumnEntries = [
+      ['tee_color', score.teeColor || 'white'],
       ['opponent_holes_json', score.opponentHoles ? JSON.stringify(score.opponentHoles) : null],
       ['golf_course_id', score.golfCourseId ?? null],
       ['course_rating', score.courseRating ?? null],
@@ -406,6 +442,7 @@ function mapInboxMessage(row) {
     challengeDate: toIso(row.challenge_date)?.slice(0, 10) || null,
     challengeState: row.challenge_state || null,
     challengeCourse: row.challenge_course || null,
+    challengeTeeColor: hasColumn(row, 'challenge_tee_color') ? (row.challenge_tee_color || 'white') : 'white',
     proposerTeamScore: row.proposer_team_score ?? null,
     challengedTeamScore: row.challenged_team_score ?? null,
     proposerTeamHoles: parseJsonArray(row.proposer_team_holes_json),
@@ -438,6 +475,10 @@ function isInboxTeamChallenge(message) {
 
 function isInboxIndividualChallenge(message) {
   return message.messageType === 'individual_challenge'
+}
+
+function isInboxChallengeMessage(message) {
+  return isInboxTeamChallenge(message) || isInboxIndividualChallenge(message)
 }
 
 function isInboxIndividualChallengeParticipant(message, user, normalizedEmail) {
@@ -500,8 +541,8 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
   const resolvedThreadId = threadId || id
   await db.execute(
     `INSERT INTO inbox_messages
-      (id, thread_id, parent_message_id, message_type, sender_user_id, sender_email, sender_name, recipient_user_id, recipient_email, proposer_team_id, proposer_team_name, challenged_team_id, challenged_team_name, challenge_status, challenge_date, challenge_state, challenge_course, proposer_team_score, challenged_team_score, proposer_team_holes_json, challenged_team_holes_json, individual_participants_json, message_body, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      (id, thread_id, parent_message_id, message_type, sender_user_id, sender_email, sender_name, recipient_user_id, recipient_email, proposer_team_id, proposer_team_name, challenged_team_id, challenged_team_name, challenge_status, challenge_date, challenge_state, challenge_course, challenge_tee_color, proposer_team_score, challenged_team_score, proposer_team_holes_json, challenged_team_holes_json, individual_participants_json, message_body, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       id,
       resolvedThreadId,
@@ -520,6 +561,7 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
       teamContext?.challengeDate || null,
       teamContext?.challengeState || null,
       teamContext?.challengeCourse || null,
+      teamContext?.challengeTeeColor || 'white',
       teamContext?.proposerTeamScore ?? null,
       teamContext?.challengedTeamScore ?? null,
       teamContext?.proposerTeamHoles ? JSON.stringify(teamContext.proposerTeamHoles) : null,
@@ -553,10 +595,10 @@ export async function updateInboxChallengeStatus(messageId, user, status) {
   const db = getPool()
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
-  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'challenge_request'])
+  const [existingRows] = await db.execute("SELECT * FROM inbox_messages WHERE id = ? AND message_type IN ('challenge_request', 'individual_challenge') LIMIT 1", [String(messageId || '')])
   const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
   if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
-  await db.execute('UPDATE inbox_messages SET challenge_status = ? WHERE thread_id = ? AND message_type = ?', [status, existing.threadId || existing.id, 'challenge_request'])
+  await db.execute("UPDATE inbox_messages SET challenge_status = ? WHERE thread_id = ? AND message_type IN ('challenge_request', 'individual_challenge')", [status, existing.threadId || existing.id])
   const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
   return rows[0] ? mapInboxMessage(rows[0]) : null
 }
@@ -568,6 +610,7 @@ export async function updateInboxChallengeScore(messageId, user, side, score, ho
   const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'challenge_request'])
   const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
   if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
   if (side === 'proposer' && !userTeamIds.has(String(existing.proposerTeamId || ''))) return null
   if (side === 'challenged' && !userTeamIds.has(String(existing.challengedTeamId || ''))) return null
   const column = side === 'proposer' ? 'proposer_team_score' : 'challenged_team_score'
@@ -585,6 +628,7 @@ export async function updateInboxIndividualChallengeScore(messageId, user, score
   const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'individual_challenge'])
   const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
   if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
   let userCanEditOwnScore = false
   const participants = (existing.individualChallengeParticipants || []).map((participant) => {
     const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail

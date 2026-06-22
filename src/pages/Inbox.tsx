@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -326,13 +326,19 @@ export default function Inbox() {
       <PageHero
         eyebrow="Golf user messages"
         title="Messages"
+        actions={
+          <Link
+            className="btn btnLightGreen btnSmall"
+            to="/profile"
+            onClick={() => logFrontendEvent({ category: 'inbox.navigation', message: 'return_to_profile_clicked', data: { unreadCount, receivedThreadCount: receivedThreads.length } })}
+          >
+            Return to Profile
+          </Link>
+        }
       />
 
       <section className="card inboxListCard inboxMessagesListCard">
         <div className="inboxSectionHeader inboxSectionHeader--withActions">
-          <div>
-            <h2 className="inboxSectionTitle">Messages</h2>
-          </div>
           <div className="inboxSectionActions">
             <span className={unreadCount > 0 ? 'inboxUnreadIndicator' : 'pill'}>{unreadCount > 0 ? `${unreadCount} unread` : 'No unread messages'}</span>
             <button

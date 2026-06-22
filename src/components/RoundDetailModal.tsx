@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { HoleScoreDetail, ScoreEntry } from '../types'
 import { compareRoundToHistory } from '../lib/roundInsights'
 import { formatFriendlyDateTime } from '../lib/time-format'
 import { formatHoleScoreOutcome, holeScoreTotal as calculateClientHoleScoreTotal, missingHoleScoreNumbers, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
+import { normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
+import { getIncompleteRoundStatus } from '../lib/round-status'
 import { api } from '../lib/api'
 import HoleByHoleScorecard from './HoleByHoleScorecard'
+import type { PendingHoleScoreSaveHandler } from './HoleByHoleScorecard'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 
 type DisplayHoleScore = {
   hole: number
@@ -13,6 +17,7 @@ type DisplayHoleScore = {
   par: number | null
   yards: number | null
   strokeIndex: number | null
+  teeColor?: string | null
 }
 
 type RoundEditForm = {
@@ -76,13 +81,17 @@ function normalizeDisplayHoles(input: unknown): DisplayHoleScore[] {
         .map((value: unknown, index: number) => {
           if (typeof value === 'number') return { hole: index + 1, score: value, par: null, yards: null, strokeIndex: null }
           const record = value as Record<string, unknown>
+          const explicitProvided = Object.prototype.hasOwnProperty.call(record, 'scoreProvided') || Object.prototype.hasOwnProperty.call(record, 'score_provided')
+          const providedValue = record.scoreProvided ?? record.score_provided
+          const provided = explicitProvided ? (providedValue === true || providedValue === 1 || providedValue === '1' || providedValue === 'true') : Number.isFinite(Number(record.score))
           const score = Number(record.score)
           return {
             hole: Number(record.hole) || index + 1,
-            score: Number.isFinite(score) ? score : null,
+            score: provided && Number.isFinite(score) ? score : null,
             par: Number.isFinite(Number(record.par)) ? Number(record.par) : null,
             yards: Number.isFinite(Number(record.yards)) ? Number(record.yards) : null,
             strokeIndex: Number.isFinite(Number(record.strokeIndex ?? record.stroke_index)) ? Number(record.strokeIndex ?? record.stroke_index) : null,
+            teeColor: normalizeTeeColor(record.teeColor ?? record.tee_color),
           }
         })
         .filter((value: DisplayHoleScore) => value.score != null)
@@ -114,17 +123,25 @@ function buildRoundEditForm(round: ScoreEntry | null): RoundEditForm {
 }
 
 
+function getRoundTeeColor(round: ScoreEntry | null) {
+  return normalizeTeeColor((round as any)?.teeColor ?? (round as any)?.tee_color)
+}
+
 function buildEditableHoleScores(round: ScoreEntry | null, keys: string[]): HoleScoreDetail[] {
   if (!round) return []
   const record = round as unknown as Record<string, unknown>
   const state = String((round as any).state || '')
   const course = String((round as any).course || '')
   const raw = readHoleScores(record, keys)
-  const holes = normalizeHoleScorecard(raw, state, course)
-  if (Array.isArray(raw) && raw.length > 0) {
-    return holes.map((hole) => ({ ...hole, scoreProvided: true }))
-  }
+  const holes = normalizeHoleScorecard(raw, state, course, getRoundTeeColor(round))
+  if (Array.isArray(raw) && raw.length > 0) return holes
   return holes
+}
+
+function providedHoleScoreTotal(holes: HoleScoreDetail[]) {
+  return holes
+    .filter((hole) => hole.scoreProvided)
+    .reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
 }
 
 function teamEditResult(teamTotal: number, opponentTotal: number) {
@@ -233,9 +250,11 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const [editSoloHoles, setEditSoloHoles] = useState<HoleScoreDetail[]>(() => buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
   const [editTeamHoles, setEditTeamHoles] = useState<HoleScoreDetail[]>(() => buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
   const [editOpponentHoles, setEditOpponentHoles] = useState<HoleScoreDetail[]>(() => buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']))
+  const pendingEditHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const [activeEditScorecardSide, setActiveEditScorecardSide] = useState<'solo' | 'team' | 'opponent' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [isClosingEditScorecard, setIsClosingEditScorecard] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const roundId = (round as any)?.id
 
@@ -244,11 +263,27 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
     setIsEditing(false)
     setActionError(null)
     setActiveEditScorecardSide(null)
+    pendingEditHoleSaveRef.current = null
     setEditForm(buildRoundEditForm(round))
     setEditSoloHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
     setEditTeamHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
     setEditOpponentHoles(buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']))
   }, [roundId])
+
+  useEffect(() => {
+    if (!round || !isEditing || getDisplayRoundMode(round) !== 'solo') return
+    logFrontendEvent({
+      category: 'roundDetail.soloEdit',
+      message: 'comparison_panel_hidden',
+      data: {
+        correlationId: getCorrelationId(),
+        roundId: (round as any).id || null,
+        course: (round as any).course || '',
+        date: (round as any).date || '',
+        comparisonPanelVisible: false,
+      },
+    })
+  }, [roundId, isEditing])
 
   if (!round) return null
 
@@ -258,6 +293,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const teamLabel = displayName((round as any).team, 'Team')
   const opponentLabel = displayName((round as any).opponentTeam, 'Opponent Team')
   const roundRecord = round as unknown as Record<string, unknown>
+  const roundTeeColor = getRoundTeeColor(round)
+  const roundTeeLabel = teeColorLabel(roundTeeColor)
   const holes: DisplayHoleScore[] = normalizeDisplayHoles(readHoleScores(roundRecord, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']) ?? (round as any).holes)
   const opponentHoles: DisplayHoleScore[] = displayMode === 'team'
     ? normalizeDisplayHoles(readHoleScores(roundRecord, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']) ?? (round as any).opponentHoles)
@@ -266,14 +303,14 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const opponentHoleScoreTotal = opponentHoles.reduce((sum, hole) => sum + (hole.score || 0), 0)
   const canShowTeamComparison = displayMode === 'team' && holes.length > 0 && opponentHoles.length > 0
   const soloEditUsesHoles = displayMode === 'solo'
-  const editSoloScoreTotal = calculateClientHoleScoreTotal(editSoloHoles)
   const editSoloMissingHoles = missingHoleScoreNumbers(editSoloHoles)
-  const editSoloParTotal = editSoloHoles.reduce((sum, hole) => sum + (Number.isFinite(hole.par) ? hole.par : 0), 0)
+  const editSoloScoreTotal = editSoloMissingHoles.length ? providedHoleScoreTotal(editSoloHoles) : calculateClientHoleScoreTotal(editSoloHoles)
+  const editSoloParTotal = editSoloHoles.reduce((sum, hole) => sum + (Number.isFinite(hole.par) ? (hole.par ?? 0) : 0), 0)
   const teamEditUsesHoles = displayMode === 'team' && (holes.length > 0 || opponentHoles.length > 0)
-  const editTeamScoreTotal = calculateClientHoleScoreTotal(editTeamHoles)
-  const editOpponentScoreTotal = calculateClientHoleScoreTotal(editOpponentHoles)
   const editTeamMissingHoles = missingHoleScoreNumbers(editTeamHoles)
   const editOpponentMissingHoles = missingHoleScoreNumbers(editOpponentHoles)
+  const editTeamScoreTotal = editTeamMissingHoles.length ? providedHoleScoreTotal(editTeamHoles) : calculateClientHoleScoreTotal(editTeamHoles)
+  const editOpponentScoreTotal = editOpponentMissingHoles.length ? providedHoleScoreTotal(editOpponentHoles) : calculateClientHoleScoreTotal(editOpponentHoles)
   const editTeamResult = teamEditResult(editTeamScoreTotal, editOpponentScoreTotal)
   const canOpenTeamScoreView = displayMode === 'team'
   const canOpenOpponentScoreView = displayMode === 'team'
@@ -282,9 +319,81 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const detailTeamScore = `${(round as any).teamTotal == null ? 'Pending' : (round as any).teamTotal} - ${(round as any).opponentTotal == null ? 'Pending' : (round as any).opponentTotal}`
   const detailTeamResult = (round as any).teamTotal == null || (round as any).opponentTotal == null ? 'Pending' : ((round as any).won === true ? 'Win' : (round as any).won === false ? 'Loss' : 'Tie')
   const insight = isTeamChallengeRound ? 'This Team Challenge score record is maintained from the Challenges page Team Challenges section.' : compareRoundToHistory({ ...(round as any), mode: displayMode }, allScores as any)
+  const showInsightPanel = !(isEditing && displayMode === 'solo')
+  const incompleteStatus = getIncompleteRoundStatus(round)
 
   const updateEditField = (field: keyof RoundEditForm, value: string) => {
     setEditForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const buildRoundEditPayload = (overrides: { soloHoles?: HoleScoreDetail[]; teamHoles?: HoleScoreDetail[]; opponentHoles?: HoleScoreDetail[] } = {}) => {
+    const nextSoloHoles = overrides.soloHoles || editSoloHoles
+    const nextTeamHoles = overrides.teamHoles || editTeamHoles
+    const nextOpponentHoles = overrides.opponentHoles || editOpponentHoles
+    const nextSoloMissingHoles = missingHoleScoreNumbers(nextSoloHoles)
+    const nextTeamMissingHoles = missingHoleScoreNumbers(nextTeamHoles)
+    const nextOpponentMissingHoles = missingHoleScoreNumbers(nextOpponentHoles)
+    const nextSoloScoreTotal = nextSoloMissingHoles.length ? providedHoleScoreTotal(nextSoloHoles) : calculateClientHoleScoreTotal(nextSoloHoles)
+    const nextTeamScoreTotal = nextTeamMissingHoles.length ? providedHoleScoreTotal(nextTeamHoles) : calculateClientHoleScoreTotal(nextTeamHoles)
+    const nextOpponentScoreTotal = nextOpponentMissingHoles.length ? providedHoleScoreTotal(nextOpponentHoles) : calculateClientHoleScoreTotal(nextOpponentHoles)
+
+    return displayMode === 'solo'
+      ? {
+          mode: 'solo',
+          date: editForm.date,
+          state: editForm.state,
+          course: editForm.course,
+          roundScore: soloEditUsesHoles ? nextSoloScoreTotal : Number(editForm.roundScore),
+          teeColor: roundTeeColor,
+          holes: soloEditUsesHoles ? nextSoloHoles : undefined,
+        }
+      : {
+          mode: 'team',
+          date: editForm.date,
+          state: editForm.state,
+          course: editForm.course,
+          team: editForm.team,
+          opponentTeam: editForm.opponentTeam,
+          teamTotal: teamEditUsesHoles ? nextTeamScoreTotal : Number(editForm.teamTotal),
+          opponentTotal: teamEditUsesHoles ? nextOpponentScoreTotal : Number(editForm.opponentTotal),
+          teeColor: roundTeeColor,
+          holes: teamEditUsesHoles ? nextTeamHoles : undefined,
+          opponentHoles: teamEditUsesHoles ? nextOpponentHoles : undefined,
+        }
+  }
+
+  const saveRoundEditChanges = async (source: string, overrides: { soloHoles?: HoleScoreDetail[]; teamHoles?: HoleScoreDetail[]; opponentHoles?: HoleScoreDetail[] } = {}) => {
+    const correlationId = getCorrelationId()
+    const payload = buildRoundEditPayload(overrides)
+    const scoreId = String((round as any).id)
+    const payloadRecord = payload as Record<string, any>
+    logFrontendEvent({
+      category: 'round.detail.edit.save',
+      message: 'started',
+      data: {
+        correlationId,
+        scoreId,
+        source,
+        mode: displayMode,
+        activeEditScorecardSide,
+        roundScore: payloadRecord.roundScore,
+        teamTotal: payloadRecord.teamTotal,
+        opponentTotal: payloadRecord.opponentTotal,
+        providedHoleCount: Array.isArray(payloadRecord.holes) ? payloadRecord.holes.filter((hole: HoleScoreDetail) => hole.scoreProvided).length : null,
+        opponentProvidedHoleCount: Array.isArray(payloadRecord.opponentHoles) ? payloadRecord.opponentHoles.filter((hole: HoleScoreDetail) => hole.scoreProvided).length : null,
+      },
+    })
+    const updated = await api<ScoreEntry>(`/api/scores/${encodeURIComponent(scoreId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+    onRoundUpdated?.(updated)
+    logFrontendEvent({
+      category: 'round.detail.edit.save',
+      message: 'succeeded',
+      data: { correlationId, scoreId, source, mode: displayMode },
+    })
+    return updated
   }
 
   const handleEditSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -292,47 +401,13 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
     setActionError(null)
     setIsSavingEdit(true)
     try {
-      if (displayMode === 'solo' && soloEditUsesHoles && editSoloMissingHoles.length) {
-        throw new Error(`Finish entering scores for holes: ${editSoloMissingHoles.join(', ')}.`)
-      }
-
-      if (displayMode === 'team' && teamEditUsesHoles && (editTeamMissingHoles.length || editOpponentMissingHoles.length)) {
-        const parts = []
-        if (editTeamMissingHoles.length) parts.push(`${teamLabel} holes: ${editTeamMissingHoles.join(', ')}`)
-        if (editOpponentMissingHoles.length) parts.push(`${opponentLabel} holes: ${editOpponentMissingHoles.join(', ')}`)
-        throw new Error(`Finish entering scores for ${parts.join('; ')}.`)
-      }
-
-      const payload = displayMode === 'solo'
-        ? {
-            mode: 'solo',
-            date: editForm.date,
-            state: editForm.state,
-            course: editForm.course,
-            roundScore: soloEditUsesHoles ? editSoloScoreTotal : Number(editForm.roundScore),
-            holes: soloEditUsesHoles ? editSoloHoles : undefined,
-          }
-        : {
-            mode: 'team',
-            date: editForm.date,
-            state: editForm.state,
-            course: editForm.course,
-            team: editForm.team,
-            opponentTeam: editForm.opponentTeam,
-            teamTotal: teamEditUsesHoles ? editTeamScoreTotal : Number(editForm.teamTotal),
-            opponentTotal: teamEditUsesHoles ? editOpponentScoreTotal : Number(editForm.opponentTotal),
-            holes: teamEditUsesHoles ? editTeamHoles : undefined,
-            opponentHoles: teamEditUsesHoles ? editOpponentHoles : undefined,
-          }
-      const updated = await api<ScoreEntry>(`/api/scores/${encodeURIComponent(String((round as any).id))}`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      })
-      onRoundUpdated?.(updated)
+      await saveRoundEditChanges('save_changes_button')
       setIsEditing(false)
       setDetailView('round')
     } catch (error: any) {
-      setActionError(error?.message || 'Could not update this round')
+      const message = error?.message || 'Could not update this round'
+      setActionError(message)
+      logFrontendEvent({ category: 'round.detail.edit.save', level: 'error', message: 'failed', data: { correlationId: getCorrelationId(), scoreId: String((round as any).id || ''), source: 'save_changes_button', error: message } })
     } finally {
       setIsSavingEdit(false)
     }
@@ -354,10 +429,98 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
     }
   }
 
+  const handleEditHoleSaved = async (nextHoles: HoleScoreDetail[], savedHole: HoleScoreDetail) => {
+    const side = activeEditScorecardSide
+    if (!side) return
+    const overrides = side === 'solo'
+      ? { soloHoles: nextHoles }
+      : side === 'team'
+        ? { teamHoles: nextHoles }
+        : { opponentHoles: nextHoles }
+    const nextScoreTotal = missingHoleScoreNumbers(nextHoles).length ? providedHoleScoreTotal(nextHoles) : calculateClientHoleScoreTotal(nextHoles)
+    if (side === 'solo') {
+      setEditSoloHoles(nextHoles)
+      setEditForm((current) => ({ ...current, roundScore: String(nextScoreTotal) }))
+    } else if (side === 'team') {
+      setEditTeamHoles(nextHoles)
+      setEditForm((current) => ({ ...current, teamTotal: String(nextScoreTotal) }))
+    } else {
+      setEditOpponentHoles(nextHoles)
+      setEditForm((current) => ({ ...current, opponentTotal: String(nextScoreTotal) }))
+    }
+
+    try {
+      await saveRoundEditChanges(`edit_scorecard_${side}_hole_save`, overrides)
+    } catch (error: any) {
+      const message = error?.message || 'Could not save this hole score to the round.'
+      setActionError(message)
+      logFrontendEvent({ category: 'round.detail.edit.save', level: 'error', message: 'failed', data: { correlationId: getCorrelationId(), scoreId: String((round as any).id || ''), source: `edit_scorecard_${side}_hole_save`, side, hole: savedHole.hole, error: message } })
+      throw error
+    }
+  }
+
+  const handleParentClose = async () => {
+    if (!isEditing) {
+      onClose()
+      return
+    }
+
+    const correlationId = getCorrelationId()
+    const scoreId = String((round as any).id || '')
+    setActionError(null)
+    setIsSavingEdit(true)
+    logFrontendEvent({ category: 'round.detail.parent_close', message: 'started', data: { correlationId, scoreId, mode: displayMode, activeEditScorecardSide, pendingHoleFlushRegistered: Boolean(pendingEditHoleSaveRef.current) } })
+    try {
+      const pendingSaveResult = activeEditScorecardSide && pendingEditHoleSaveRef.current
+        ? await pendingEditHoleSaveRef.current('round_detail_parent_close_button')
+        : null
+      const overrides = activeEditScorecardSide === 'solo' && pendingSaveResult?.holes
+        ? { soloHoles: pendingSaveResult.holes }
+        : activeEditScorecardSide === 'team' && pendingSaveResult?.holes
+          ? { teamHoles: pendingSaveResult.holes }
+          : activeEditScorecardSide === 'opponent' && pendingSaveResult?.holes
+            ? { opponentHoles: pendingSaveResult.holes }
+            : {}
+      await saveRoundEditChanges('round_detail_parent_close_button', overrides)
+      logFrontendEvent({ category: 'round.detail.parent_close', message: 'succeeded', data: { correlationId, scoreId, mode: displayMode, pendingHoleSaved: pendingSaveResult?.saved || false, pendingHole: pendingSaveResult?.hole || null } })
+      onClose()
+    } catch (error: any) {
+      const message = error?.message || 'Could not save this round before closing.'
+      setActionError(message)
+      logFrontendEvent({ category: 'round.detail.parent_close', level: 'error', message: 'failed', data: { correlationId, scoreId, mode: displayMode, error: message } })
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  const closeActiveEditScorecard = async (source = 'round_detail_scorecard_close_button') => {
+    if (!activeEditScorecardSide || isClosingEditScorecard) return
+    const correlationId = getCorrelationId()
+    const side = activeEditScorecardSide
+    setActionError(null)
+    setIsClosingEditScorecard(true)
+    logFrontendEvent({ category: 'round.detail.edit_scorecard.close', message: 'started', data: { correlationId, scoreId: String((round as any).id || ''), side, source, pendingHoleFlushRegistered: Boolean(pendingEditHoleSaveRef.current) } })
+    try {
+      const pendingSaveResult = pendingEditHoleSaveRef.current
+        ? await pendingEditHoleSaveRef.current(source)
+        : { saved: false, hole: null, providedHoleNumbers: [] }
+      setActiveEditScorecardSide(null)
+      pendingEditHoleSaveRef.current = null
+      logFrontendEvent({ category: 'round.detail.edit_scorecard.close', message: 'succeeded', data: { correlationId, scoreId: String((round as any).id || ''), side, source, pendingHoleSaved: pendingSaveResult.saved, pendingHole: pendingSaveResult.hole, providedHoleNumbers: pendingSaveResult.providedHoleNumbers } })
+    } catch (error: any) {
+      const message = error?.message || 'Could not save the current hole score before closing.'
+      setActionError(message)
+      logFrontendEvent({ category: 'round.detail.edit_scorecard.close', level: 'error', message: 'failed', data: { correlationId, scoreId: String((round as any).id || ''), side, source, error: message } })
+    } finally {
+      setIsClosingEditScorecard(false)
+    }
+  }
+
   const resetEditState = () => {
     setIsEditing(false)
     setActionError(null)
     setActiveEditScorecardSide(null)
+    pendingEditHoleSaveRef.current = null
     setEditForm(buildRoundEditForm(round))
     setEditSoloHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
     setEditTeamHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
@@ -472,7 +635,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
       </form>
 
       {activeEditScorecardSide ? (
-        <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => setActiveEditScorecardSide(null)}>
+        <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => { void closeActiveEditScorecard('round_detail_scorecard_overlay_close') }}>
           <div
             className="modalCard teamScorecardModalCard"
             role="dialog"
@@ -485,7 +648,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
                 <div className="small">Edit hole-by-hole score input</div>
                 <h2>{activeEditScorecardSide === 'solo' ? 'Solo Round Score' : activeEditScorecardSide === 'team' ? `${teamLabel} Score` : `${opponentLabel} Score`}</h2>
               </div>
-              <button type="button" className="btn btnSmall" onClick={() => setActiveEditScorecardSide(null)}>Close</button>
+              <button type="button" className="btn btnSmall" disabled={isClosingEditScorecard} onClick={() => { void closeActiveEditScorecard('round_detail_scorecard_close_button') }}>{isClosingEditScorecard ? 'Saving…' : 'Save & Close'}</button>
             </div>
             <HoleByHoleScorecard
               enabled={true}
@@ -494,8 +657,10 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
               course={editForm.course}
               holes={activeEditScorecardSide === 'solo' ? editSoloHoles : activeEditScorecardSide === 'team' ? editTeamHoles : editOpponentHoles}
               onChange={activeEditScorecardSide === 'solo' ? setEditSoloHoles : activeEditScorecardSide === 'team' ? setEditTeamHoles : setEditOpponentHoles}
-              draftContext={activeEditScorecardSide === 'solo' ? { mode: 'solo', date: editForm.date } : { mode: 'team', date: editForm.date, team: editForm.team, opponentTeam: editForm.opponentTeam, scoringSide: activeEditScorecardSide }}
+              onHoleSaved={handleEditHoleSaved}
+              teeColor={roundTeeColor}
               scoreOwnerLabel={activeEditScorecardSide === 'solo' ? 'Solo round score' : activeEditScorecardSide === 'team' ? `${teamLabel} score` : `${opponentLabel} score`}
+              registerPendingHoleSave={(handler) => { pendingEditHoleSaveRef.current = handler }}
             />
           </div>
         </div>
@@ -504,14 +669,15 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   )
 
   return (
-    <div className="modalOverlay" role="presentation" onClick={onClose}>
+    <div className="modalOverlay" role="presentation" onClick={() => { void handleParentClose() }}>
       <div className="modalCard" role="dialog" aria-modal="true" aria-labelledby="round-detail-title" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div>
             <h3 id="round-detail-title" style={{ margin: '4px 0 0' }}>{round.course}</h3>
             <div className="small" style={{ marginTop: 4 }}>
-              {formatFriendlyDateTime(round.date)} • {String((round as any).state || '').toUpperCase()} • {roundTypeLabel}
+              {formatFriendlyDateTime(round.date)} • {String((round as any).state || '').toUpperCase()} • {roundTypeLabel} • {roundTeeLabel} tees
             </div>
+            {incompleteStatus.incomplete ? <div className="roundIncompleteBadge roundDetailIncompleteBadge">Incomplete round • {incompleteStatus.label}</div> : null}
           </div>
           <div className="roundDetailHeaderActions">
             {!isTeamChallengeRound ? (
@@ -520,7 +686,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
                 <button type="button" className="btn btnSmall btnDanger" onClick={handleDeleteRound} disabled={isDeleting}>{isDeleting ? 'Deleting…' : 'Delete'}</button>
               </>
             ) : null}
-            <button type="button" className="btn btnSmall" onClick={onClose}>Close</button>
+            <button type="button" className="btn btnSmall" onClick={() => { void handleParentClose() }} disabled={isSavingEdit || isClosingEditScorecard}>{isEditing && isSavingEdit ? 'Saving…' : 'Close'}</button>
           </div>
         </div>
 
@@ -533,6 +699,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
                 <div><strong>Team:</strong> {renderTeamSummaryValue(teamLabel, canOpenTeamScoreView, showingTeamHoles, () => setDetailView('team'))}</div>
                 <div><strong>Opponent:</strong> {renderTeamSummaryValue(opponentLabel, canOpenOpponentScoreView, showingOpponentHoles, () => setDetailView('opponent'))}</div>
                 <div><strong>Score:</strong> {detailTeamScore}</div>
+                <div><strong>Tees:</strong> {roundTeeLabel}</div>
                 <div><strong>Result:</strong> {detailTeamResult}</div>
                 <div><strong>Logged at:</strong> {formatFriendlyDateTime((round as any).createdAt)}</div>
                 <div>
@@ -562,6 +729,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
             ) : (
               <div className="detailList" style={{ marginTop: 10 }}>
                 <div><strong>Score:</strong> {(round as any).roundScore}</div>
+                <div><strong>Tees:</strong> {roundTeeLabel}</div>
                 <div><strong>Logged by:</strong> {(round as any).createdByEmail || 'Unknown user'}</div>
                 <div><strong>Logged at:</strong> {formatFriendlyDateTime((round as any).createdAt)}</div>
                 <div>
@@ -572,10 +740,12 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
             )}
           </div>
 
-          <div className="card detailPanel">
-            <div className="small">How this round compares</div>
-            <div style={{ marginTop: 10, lineHeight: 1.55 }}>{insight}</div>
-          </div>
+          {showInsightPanel ? (
+            <div className="card detailPanel">
+              <div className="small">How this round compares</div>
+              <div style={{ marginTop: 10, lineHeight: 1.55 }}>{insight}</div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

@@ -38,8 +38,29 @@ function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase()
 }
 
+function normalizeMemberStatus(status, verified = false) {
+  if (verified === true) return 'active'
+  const value = String(status || '').trim().toLowerCase()
+  if (value === 'active' || value === 'pending_verification' || value === 'invited') return value
+  return 'invited'
+}
+
+function normalizeTeamForResponse(team) {
+  const members = (team.members || []).map((member) => {
+    const verified = Boolean(member.verified)
+    const status = normalizeMemberStatus(member.status, verified)
+    return { ...member, status, verified }
+  })
+  return {
+    ...team,
+    members,
+    status: members.some((member) => member.status !== 'active') ? 'pending' : 'verified',
+    hasPendingMembers: members.some((member) => member.status !== 'active'),
+  }
+}
+
 function withSortedTeams(teams) {
-  return [...teams].sort((a, b) => String(a.name).localeCompare(String(b.name)))
+  return [...teams].map(normalizeTeamForResponse).sort((a, b) => String(a.name).localeCompare(String(b.name)))
 }
 
 export async function initStorage() {
@@ -148,14 +169,16 @@ export async function listTeams() {
 
 export async function getTeamById(id) {
   const teams = readJson(teamsPath, [])
-  return teams.find((t) => String(t.id) === String(id)) || null
+  const team = teams.find((t) => String(t.id) === String(id)) || null
+  return team ? normalizeTeamForResponse(team) : null
 }
 
 export async function getTeamByName(name) {
   const n = String(name || '').trim().toLowerCase()
   if (!n) return null
   const teams = readJson(teamsPath, [])
-  return teams.find((t) => String(t.name || '').trim().toLowerCase() === n) || null
+  const team = teams.find((t) => String(t.name || '').trim().toLowerCase() === n) || null
+  return team ? normalizeTeamForResponse(team) : null
 }
 
 export async function createTeam({ name, members }) {
@@ -163,7 +186,7 @@ export async function createTeam({ name, members }) {
   const team = { id: uuidv4(), name: String(name).trim(), members, createdAt: new Date().toISOString() }
   const next = withSortedTeams([...teams, team])
   writeJson(teamsPath, next)
-  return team
+  return normalizeTeamForResponse(team)
 }
 
 export async function updateTeam(id, { name, members }) {
@@ -191,6 +214,15 @@ export async function updateTeam(id, { name, members }) {
   return updated
 }
 
+export async function deleteTeamById(id) {
+  const teams = readJson(teamsPath, [])
+  const beforeCount = teams.length
+  const nextTeams = teams.filter((t) => String(t.id) !== String(id))
+  if (nextTeams.length === beforeCount) return false
+  writeJson(teamsPath, withSortedTeams(nextTeams))
+  return true
+}
+
 export async function listScores() {
   return readJson(scoresPath, [])
 }
@@ -202,7 +234,7 @@ export async function getScoreById(id) {
 
 export async function createScore(entry) {
   const scores = readJson(scoresPath, [])
-  const score = { id: uuidv4(), ...entry, createdAt: new Date().toISOString() }
+  const score = { id: uuidv4(), teeColor: entry.teeColor || 'white', ...entry, createdAt: new Date().toISOString() }
   scores.unshift(score)
   writeJson(scoresPath, scores)
   return score
@@ -273,6 +305,10 @@ function isInboxTeamChallenge(message) {
 
 function isInboxIndividualChallenge(message) {
   return message.messageType === 'individual_challenge'
+}
+
+function isInboxChallengeMessage(message) {
+  return isInboxTeamChallenge(message) || isInboxIndividualChallenge(message)
 }
 
 function isInboxIndividualChallengeParticipant(message, user, normalizedEmail) {
@@ -356,6 +392,7 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
     challengeDate: teamContext?.challengeDate || null,
     challengeState: teamContext?.challengeState || null,
     challengeCourse: teamContext?.challengeCourse || null,
+    challengeTeeColor: teamContext?.challengeTeeColor || 'white',
     proposerTeamScore: teamContext?.proposerTeamScore ?? null,
     challengedTeamScore: teamContext?.challengedTeamScore ?? null,
     proposerTeamHoles: teamContext?.proposerTeamHoles || null,
@@ -392,13 +429,13 @@ export async function updateInboxChallengeStatus(messageId, user, status) {
   const messages = readJson(inboxMessagesPath, [])
   const idx = messages.findIndex((message) => {
     const hydrated = hydrateInboxMessage(message)
-    return String(hydrated.id) === String(messageId) && hydrated.messageType === 'challenge_request' && canParticipateInInboxMessage(hydrated, user, normalizedEmail, userTeamIds)
+    return String(hydrated.id) === String(messageId) && isInboxChallengeMessage(hydrated) && canParticipateInInboxMessage(hydrated, user, normalizedEmail, userTeamIds)
   })
   if (idx < 0) return null
   const targetThreadId = hydrateInboxMessage(messages[idx]).threadId || messages[idx].id
   const nextMessages = messages.map((message) => {
     const hydrated = hydrateInboxMessage(message)
-    if (hydrated.messageType === 'challenge_request' && String(hydrated.threadId || hydrated.id) === String(targetThreadId)) {
+    if (isInboxChallengeMessage(hydrated) && String(hydrated.threadId || hydrated.id) === String(targetThreadId)) {
       return { ...message, challengeStatus: status }
     }
     return message
@@ -418,6 +455,7 @@ export async function updateInboxChallengeScore(messageId, user, side, score, ho
   })
   if (idx < 0) return null
   const existing = hydrateInboxMessage(messages[idx])
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
   if (side === 'proposer' && !userTeamIds.has(String(existing.proposerTeamId || ''))) return null
   if (side === 'challenged' && !userTeamIds.has(String(existing.challengedTeamId || ''))) return null
   const targetThreadId = existing.threadId || existing.id
@@ -443,6 +481,7 @@ export async function updateInboxIndividualChallengeScore(messageId, user, score
   const hydratedMessages = messages.map(hydrateInboxMessage)
   const target = hydratedMessages.find((message) => String(message.id) === String(messageId || '') && message.messageType === 'individual_challenge')
   if (!target || !canParticipateInInboxMessage(target, user, normalizedEmail, userTeamIds)) return null
+  if (String(target.challengeStatus || '').toLowerCase() === 'completed') return null
   const threadId = target.threadId || target.id
   let userCanEditOwnScore = false
   const nextMessages = messages.map((message) => {

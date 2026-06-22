@@ -52,6 +52,8 @@ async function ensureAppTables(db) {
       team_id VARCHAR(191) NOT NULL,
       name VARCHAR(191) NOT NULL,
       email VARCHAR(191) NOT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'invited',
+      verified TINYINT(1) NOT NULL DEFAULT 0,
       PRIMARY KEY (team_id, id),
       INDEX idx_team_members_team_id (team_id),
       INDEX idx_team_members_member_id (id),
@@ -69,6 +71,7 @@ async function ensureAppTables(db) {
       team_total INT NULL,
       opponent_total INT NULL,
       round_score INT NULL,
+      tee_color VARCHAR(16) NOT NULL DEFAULT 'white',
       money DECIMAL(10,2) NULL,
       won TINYINT NULL,
       holes_json JSON NULL,
@@ -80,23 +83,6 @@ async function ensureAppTables(db) {
       INDEX idx_scores_date (date)
     );
 
-
-    CREATE TABLE IF NOT EXISTS golf_course_hole_scorecards (
-      id VARCHAR(64) NOT NULL PRIMARY KEY,
-      golf_course_id VARCHAR(191) NULL,
-      state VARCHAR(8) NOT NULL,
-      course_name VARCHAR(191) NOT NULL,
-      hole_number TINYINT UNSIGNED NOT NULL,
-      par TINYINT UNSIGNED NULL,
-      yards SMALLINT UNSIGNED NULL,
-      stroke_index TINYINT UNSIGNED NULL,
-      source VARCHAR(64) NOT NULL DEFAULT 'api',
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY ux_golf_course_hole_scorecards_course_hole (state, course_name, hole_number),
-      INDEX idx_golf_course_hole_scorecards_course_id (golf_course_id),
-      INDEX idx_golf_course_hole_scorecards_state_course (state, course_name)
-    );
 
 
     CREATE TABLE IF NOT EXISTS scorecard_hole_drafts (

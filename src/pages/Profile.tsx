@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import ProtectedRoute from '../components/ProtectedRoute'
-import { fetchProfile, saveProfile, type ProfileInput } from '../lib/profile'
+import { fetchProfile, saveProfile, type FeatureFlags, type ProfileInput, type ProfileSummary } from '../lib/profile'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateRequiredPhoneNumber } from '../lib/phone-validation'
-import { logFrontendEvent } from '../lib/frontend-logger'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import { searchLocations, type ResolvedLocation } from '../lib/locations'
 import beerImg from '../assets/profile/beer-friendly.svg'
 import friendly420Img from '../assets/profile/friendly-420.svg'
 import soberGolfImg from '../assets/profile/sober-golf.svg'
@@ -45,12 +46,21 @@ function ProfileInner() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [needsEnrichment, setNeedsEnrichment] = useState(false)
+  const [profileSummary, setProfileSummary] = useState<ProfileSummary | null>(null)
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({})
+  const [citySuggestions, setCitySuggestions] = useState<ResolvedLocation[]>([])
+  const [citySuggestionsOpen, setCitySuggestionsOpen] = useState(false)
+  const [citySearchLoading, setCitySearchLoading] = useState(false)
+  const [cityHelperText, setCityHelperText] = useState<string | null>(null)
+  const citySearchRequestId = useRef(0)
+  const cityBlurTimer = useRef<number | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
   const { hasRole, refreshProfileStatus } = useAuth()
 
   const isGuidedEnrichment = useMemo(() => new URLSearchParams(location.search).get('enrich') === '1', [location.search])
   const isPreferenceRestricted = hasRole('admin') || hasRole('host') || hasRole('organizer')
+  const socialPreferencesEnabled = Boolean(featureFlags.profileSocialPreferences)
   const alcoholSelected = form.alcoholPreference === 'alcohol_friendly'
   const cannabisSelected = form.cannabisPreference === 'weed_friendly'
   const soberSelected = form.sobrietyPreference === 'sober_only'
@@ -73,6 +83,8 @@ function ProfileInner() {
           sobrietyPreference: profile.sobrietyPreference || '',
         })
         setNeedsEnrichment(Boolean(profile.needsEnrichment))
+        setProfileSummary(profile.summary || null)
+        setFeatureFlags(profile.featureFlags || {})
       } catch (err) {
         if (!active) return
         setError(err instanceof Error ? err.message : 'Failed to load profile.')
@@ -82,6 +94,43 @@ function ProfileInner() {
     })()
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    if (!citySuggestionsOpen) {
+      setCitySuggestions([])
+      setCitySearchLoading(false)
+      return
+    }
+
+    const query = form.primaryCity.trim()
+    if (query.length < 2) {
+      setCitySuggestions([])
+      setCitySearchLoading(false)
+      return
+    }
+
+    const requestId = ++citySearchRequestId.current
+    const correlationId = getCorrelationId()
+    setCitySearchLoading(true)
+    setCityHelperText(null)
+    logFrontendEvent({ category: 'profile.citySearch', message: 'city_typeahead_started', data: { correlationId, query } })
+
+    searchLocations(query, 8)
+      .then((results) => {
+        if (requestId !== citySearchRequestId.current) return
+        setCitySuggestions(results)
+        logFrontendEvent({ category: 'profile.citySearch', message: 'city_typeahead_completed', data: { correlationId, query, resultCount: results.length, postalCodeResultCount: results.filter((item) => Boolean(item.postalCode)).length } })
+      })
+      .catch((err) => {
+        if (requestId !== citySearchRequestId.current) return
+        setCitySuggestions([])
+        setCityHelperText('City suggestions are temporarily unavailable. You can still enter your city, state, and zip manually.')
+        logFrontendEvent({ category: 'profile.citySearch', level: 'error', message: 'city_typeahead_failed', data: { correlationId, query, error: err instanceof Error ? err.message : String(err) } })
+      })
+      .finally(() => {
+        if (requestId === citySearchRequestId.current) setCitySearchLoading(false)
+      })
+  }, [form.primaryCity, citySuggestionsOpen])
 
   function patch<K extends keyof ProfileInput>(key: K, value: ProfileInput[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -125,6 +174,44 @@ function ProfileInner() {
     patch('phone', sanitizePhoneInput(value))
   }
 
+  function handleCityInput(value: string) {
+    setForm((prev) => ({ ...prev, primaryCity: value, primaryState: '', primaryZipCode: '' }))
+    setCityHelperText('Select a city from the suggestions to populate state and zip.')
+    setCitySuggestionsOpen(true)
+  }
+
+  function selectCitySuggestion(location: ResolvedLocation) {
+    const city = String(location.city || '').trim()
+    const state = String(location.stateName || location.state || location.stateCode || '').trim()
+    const zip = String(location.postalCode || '').trim()
+    setForm((prev) => ({
+      ...prev,
+      primaryCity: city,
+      primaryState: state,
+      primaryZipCode: zip || prev.primaryZipCode || '',
+    }))
+    setCitySuggestionsOpen(false)
+    setCitySuggestions([])
+    setCityHelperText(zip ? `Selected ${city}, ${location.stateCode} ${zip}.` : `Selected ${city}, ${location.stateCode}. Enter your zip code to finish your profile location.`)
+    logFrontendEvent({ category: 'profile.citySearch', message: 'city_typeahead_selected', data: { correlationId: getCorrelationId(), city, stateCode: location.stateCode, stateName: state, postalCodeAvailable: Boolean(zip) } })
+  }
+
+  function handleCityFocus() {
+    if (cityBlurTimer.current) window.clearTimeout(cityBlurTimer.current)
+    setCitySuggestionsOpen(true)
+  }
+
+  function handleCityBlur() {
+    cityBlurTimer.current = window.setTimeout(() => setCitySuggestionsOpen(false), 120)
+  }
+
+  function getLocationValidationError() {
+    if (!form.primaryCity.trim() || !form.primaryState.trim() || !form.primaryZipCode.trim()) {
+      return 'City, state, and zip code are required.'
+    }
+    return null
+  }
+
   async function handleSave() {
     setSaving(true)
     setError(null)
@@ -135,11 +222,18 @@ function ProfileInner() {
         logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_invalid_phone', data: { hasPhone: Boolean(form.phone && form.phone.trim()) } })
         throw new Error(phoneValidationError)
       }
-      const payload = isPreferenceRestricted ? { ...form, alcoholPreference: '', cannabisPreference: '', sobrietyPreference: '' } : form
+      const locationValidationError = getLocationValidationError()
+      if (locationValidationError) {
+        logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_invalid_location', data: { hasCity: Boolean(form.primaryCity.trim()), hasState: Boolean(form.primaryState.trim()), hasZipCode: Boolean(form.primaryZipCode.trim()) } })
+        throw new Error(locationValidationError)
+      }
+      const payload = !socialPreferencesEnabled || isPreferenceRestricted ? { ...form, alcoholPreference: '', cannabisPreference: '', sobrietyPreference: '' } : form
       const saved = await saveProfile(payload)
       setNeedsEnrichment(Boolean(saved.needsEnrichment))
+      setProfileSummary(saved.summary || null)
+      setFeatureFlags(saved.featureFlags || {})
       setStatus('Profile saved.')
-      logFrontendEvent({ category: 'profile.save', message: 'profile_saved', data: { needsEnrichment: saved.needsEnrichment } })
+      logFrontendEvent({ category: 'profile.save', message: 'profile_saved', data: { needsEnrichment: saved.needsEnrichment, hasLocation: Boolean(saved.primaryCity && saved.primaryState && saved.primaryZipCode), socialPreferencesEnabled: Boolean(saved.featureFlags?.profileSocialPreferences), roundsGolfed: saved.summary?.roundsGolfed || 0 } })
       await refreshProfileStatus()
       if (isGuidedEnrichment) {
         navigate('/?profileEnriched=1', { replace: true })
@@ -181,22 +275,59 @@ function ProfileInner() {
             <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} required aria-invalid={Boolean(validateRequiredPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setPhoneValue(e.target.value)} placeholder="801 743 7000" autoComplete="tel" />
           </div>
 
-          <div className="grid" style={{ gridTemplateColumns: '1.4fr 1fr 0.8fr', gap: 12 }}>
-            <div>
-              <label className="label">City</label>
-              <input className="input" value={form.primaryCity} onChange={(e) => patch('primaryCity', e.target.value)} placeholder="Salt Lake City" />
+          <div>
+            <div className="grid" style={{ gridTemplateColumns: '1.4fr 1fr 0.8fr', gap: 12 }}>
+              <div className="locationBox">
+                <label className="label" htmlFor="profilePrimaryCity">City</label>
+                <input
+                  id="profilePrimaryCity"
+                  className="input"
+                  required
+                  role="combobox"
+                  aria-expanded={citySuggestionsOpen}
+                  aria-controls="profileCitySuggestions"
+                  value={form.primaryCity}
+                  onChange={(e) => handleCityInput(e.target.value)}
+                  onFocus={handleCityFocus}
+                  onBlur={handleCityBlur}
+                  placeholder="Start typing your city"
+                  autoComplete="off"
+                />
+                {citySuggestionsOpen ? (
+                  <div id="profileCitySuggestions" className="locationSuggestions" role="listbox">
+                    {citySearchLoading ? <div className="small" style={{ padding: 8 }}>Loading city suggestions…</div> : null}
+                    {!citySearchLoading && citySuggestions.map((item) => (
+                      <button
+                        type="button"
+                        key={`${item.city}|${item.stateCode}|${item.postalCode || ''}|${item.latitude}|${item.longitude}`}
+                        className="locationSuggestion"
+                        role="option"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectCitySuggestion(item)}
+                      >
+                        <span>{item.city}, {item.stateCode}{item.postalCode ? ` ${item.postalCode}` : ''}</span>
+                        <span className="small">{item.stateName}</span>
+                      </button>
+                    ))}
+                    {!citySearchLoading && !citySuggestions.length && form.primaryCity.trim().length >= 2 ? <div className="small" style={{ padding: 8 }}>No city suggestions found.</div> : null}
+                  </div>
+                ) : null}
+              </div>
+              <div>
+                <label className="label" htmlFor="profilePrimaryState">State</label>
+                <input id="profilePrimaryState" className="input" required value={form.primaryState} onChange={(e) => patch('primaryState', e.target.value)} placeholder="Auto-filled" autoComplete="address-level1" />
+              </div>
+              <div>
+                <label className="label" htmlFor="profilePrimaryZipCode">Zip code</label>
+                <input id="profilePrimaryZipCode" className="input" required value={form.primaryZipCode} onChange={(e) => patch('primaryZipCode', e.target.value)} placeholder="Auto-filled" autoComplete="postal-code" />
+              </div>
             </div>
-            <div>
-              <label className="label">State</label>
-              <input className="input" value={form.primaryState} onChange={(e) => patch('primaryState', e.target.value)} placeholder="Utah" />
-            </div>
-            <div>
-              <label className="label">Zip code</label>
-              <input className="input" value={form.primaryZipCode} onChange={(e) => patch('primaryZipCode', e.target.value)} placeholder="84101" />
-            </div>
+            {cityHelperText ? <div className="small" style={{ marginTop: 6 }}>{cityHelperText}</div> : null}
           </div>
 
-          {!isPreferenceRestricted ? (
+          <ProfileSummarySection summary={profileSummary} />
+
+          {socialPreferencesEnabled ? (!isPreferenceRestricted ? (
             <>
               <div>
                 <label className="label">Alcohol</label>
@@ -219,7 +350,7 @@ function ProfileInner() {
                 </div>
               </div>
             </>
-          ) : <div className="small">Preference settings are not available for admin, host, or organizer accounts.</div>}
+          ) : <div className="small">Preference settings are not available for admin, host, or organizer accounts.</div>) : null}
 
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
           {status ? <div className="small" style={{ color: '#166534' }}>{status}</div> : null}
@@ -231,6 +362,71 @@ function ProfileInner() {
         </div>
       </div>
     </div>
+  )
+}
+
+
+function formatProfileSummaryDate(value: string | null | undefined) {
+  if (!value) return ''
+  try {
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
+  } catch {
+    return String(value)
+  }
+}
+
+type ProfileSummarySectionProps = {
+  summary: ProfileSummary | null
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+function ProfileSummarySection({ summary }: ProfileSummarySectionProps) {
+  const roundsGolfed = summary?.roundsGolfed ?? 0
+  const individualEvents = summary?.eventTypes?.individual ?? 0
+  const teamEvents = summary?.eventTypes?.team ?? 0
+  const mostPlayedCourse = summary?.mostPlayedCourse
+  const handicap = summary?.handicap
+  const bestScore = summary?.bestScore
+  const hasRounds = roundsGolfed > 0
+
+  const eventSummary = [
+    individualEvents ? pluralize(individualEvents, 'individual event') : '',
+    teamEvents ? pluralize(teamEvents, 'team event') : '',
+  ].filter(Boolean).join(' and ')
+
+  const courseSummary = mostPlayedCourse
+    ? `You golf most at ${mostPlayedCourse.course}, with ${pluralize(mostPlayedCourse.count, 'logged round')} there.`
+    : 'Start logging rounds to reveal the course you play the most.'
+
+  const bestScoreSummary = bestScore
+    ? `Your best completed ${bestScore.mode === 'solo' ? 'individual' : 'team'} score is ${bestScore.score}${bestScore.course ? ` at ${bestScore.course}` : ''}${bestScore.date ? ` on ${formatProfileSummaryDate(bestScore.date)}` : ''}.`
+    : 'Finish an 18-hole scorecard to unlock your best completed score.'
+
+  const handicapSummary = handicap?.handicap != null
+    ? `Your current handicap is ${handicap.handicap.toFixed(1)}. ${handicap.message}`
+    : `${handicap?.message || 'Log rated solo rounds to unlock a handicap.'}`
+
+  const leadSentence = hasRounds
+    ? `You have logged ${pluralize(roundsGolfed, 'round')} across ${eventSummary || 'golf events'}.`
+    : 'Your Golf Homiez profile is ready for your first logged round.'
+
+  const encouragement = hasRounds
+    ? 'Keep chasing lower scores, adding complete rounds, and building your Golf Homiez history.'
+    : 'Log your next round to start building your golf story and track your progress.'
+
+  return (
+    <section className="profileSummaryCard card" aria-labelledby="profile-summary-title">
+      <div>
+        <div id="profile-summary-title" className="label">Profile Summary</div>
+        <div className="small">A quick snapshot of your Golf Homiez activity.</div>
+      </div>
+      <p className="profileSummaryNarrative">
+        {leadSentence} {courseSummary} {bestScoreSummary} {handicapSummary} {encouragement}
+      </p>
+    </section>
   )
 }
 

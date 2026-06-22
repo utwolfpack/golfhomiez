@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import path from 'node:path'
 
 import { MAX_SCHEMA_BACKUPS, MYSQL_DUMPS_DIR, buildTimestamp, getSchemaBackupFileName } from '../server/scripts/mysql-schema-backup.js'
 
@@ -12,7 +13,7 @@ test('schema backups live in mysql_dumps at the project root and use timestamped
 
   assert.equal(timestamp, '20260403_123456')
   assert.equal(filename, 'golf_homiez_schema_20260403_123456.sql')
-  assert.equal(MYSQL_DUMPS_DIR.endsWith('/mysql_dumps'), true)
+  assert.equal(path.basename(MYSQL_DUMPS_DIR), 'mysql_dumps')
   assert.equal(MAX_SCHEMA_BACKUPS, 5)
   assert.match(backupScript, /path\.join\(projectRoot, 'mysql_dumps'\)/)
   assert.match(backupScript, /const gitkeepPath = path\.join\(MYSQL_DUMPS_DIR, '\.gitkeep'\)/)

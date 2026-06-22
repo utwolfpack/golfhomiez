@@ -7,10 +7,14 @@ import {
   deleteAdminAccount,
   deleteHostAccountRequest,
   fetchAdminPortal,
+  fetchExternalApiCallReport,
   requestAdminPasswordReset,
+  type ExternalApiCallFilters,
+  type ExternalApiCallReport,
 } from '../lib/admin'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { formatFriendlyDateTime } from '../lib/time-format'
+import { getUserTodayISO } from '../lib/date'
 import { logFrontendEvent } from '../lib/frontend-logger'
 
 type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
@@ -100,6 +104,158 @@ function SummaryCards({ portal, onOpenDetails }: { portal: PortalState | null; o
         />
       ))}
     </div>
+  )
+}
+
+
+function apiTypeLabel(apiType?: string) {
+  const normalized = String(apiType || '').toLowerCase()
+  if (normalized === 'brevo') return 'Brevo'
+  if (normalized === 'golfbert') return 'Golfbert'
+  if (normalized === 'other') return 'Other external APIs'
+  return 'All external APIs'
+}
+
+function apiTypePillClass(apiType?: string) {
+  const normalized = String(apiType || '').toLowerCase()
+  if (normalized === 'brevo') return 'pill adminApiTypePill adminApiTypePill--brevo'
+  if (normalized === 'golfbert') return 'pill adminApiTypePill adminApiTypePill--golfbert'
+  return 'pill adminApiTypePill adminApiTypePill--other'
+}
+
+function ExternalApiCallsSection({
+  report,
+  filters,
+  loading,
+  error,
+  onFilterChange,
+  onApply,
+  onReset,
+  onRefresh,
+  refreshedAt,
+}: {
+  report: ExternalApiCallReport | null
+  filters: ExternalApiCallFilters
+  loading: boolean
+  error: string | null
+  onFilterChange: (filters: ExternalApiCallFilters) => void
+  onApply: () => void
+  onReset: () => void
+  onRefresh: () => void
+  refreshedAt: string | null
+}) {
+  const rows = report?.rows ?? []
+  const endpoints = report?.endpoints ?? []
+  const apiTypes = report?.apiTypes ?? []
+  const displayedTotalCalls = Number(report?.totalCalls ?? 0).toLocaleString()
+  const displayedApiTime = refreshedAt ? formatFriendlyDateTime(refreshedAt) : '—'
+
+  return (
+    <section className="card adminPanel" style={{ padding: 14, overflow: 'hidden' }}>
+      <div className="adminSectionHeader">
+        <div>
+          <h2 style={{ margin: 0 }}>External API calls</h2>
+          <p className="small" style={{ margin: '6px 0 0' }}>Persistent counts for outbound APIs that are not GolfHomiez application calls.</p>
+        </div>
+        <div className="adminApiCallHeaderActions" aria-label="External API call view status">
+          <div className="adminApiCallViewSummary">
+            <span>API time - {displayedApiTime}</span>
+            <strong>View cumulative - {displayedTotalCalls} calls</strong>
+          </div>
+          <button
+            className="adminApiRefreshButton"
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            aria-label="Refresh external API calls"
+            title="Refresh external API calls"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+              <path d="M20 6v5h-5M4 18v-5h5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M18.2 9A7 7 0 0 0 6.3 6.1L4 8.5M5.8 15A7 7 0 0 0 17.7 17.9L20 15.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <form
+        className="adminApiCallFilters"
+        onSubmit={(event) => {
+          event.preventDefault()
+          onApply()
+        }}
+      >
+        <div>
+          <label className="label">Start date</label>
+          <input className="input" type="date" value={filters.fromDate} onChange={(event) => onFilterChange({ ...filters, fromDate: event.target.value })} />
+        </div>
+        <div>
+          <label className="label">End date</label>
+          <input className="input" type="date" value={filters.toDate} onChange={(event) => onFilterChange({ ...filters, toDate: event.target.value })} />
+        </div>
+        <div>
+          <label className="label">API type</label>
+          <select className="select" value={filters.apiType || ''} onChange={(event) => onFilterChange({ ...filters, apiType: event.target.value })}>
+            <option value="">All external APIs</option>
+            <option value="brevo">Brevo</option>
+            <option value="golfbert">Golfbert</option>
+            <option value="other">Other external APIs</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">Endpoint</label>
+          <select className="select" value={filters.endpoint || ''} onChange={(event) => onFilterChange({ ...filters, endpoint: event.target.value })}>
+            <option value="">All endpoints</option>
+            {endpoints.map((entry) => (
+              <option key={entry.endpoint} value={entry.endpoint}>{entry.endpoint} ({entry.callCount})</option>
+            ))}
+          </select>
+        </div>
+        <div className="adminApiCallFilterActions">
+          <button className="btnPrimary" type="submit" disabled={loading}>{loading ? 'Loading…' : 'Apply filters'}</button>
+          <button className="btn" type="button" onClick={onReset} disabled={loading}>Current day</button>
+        </div>
+      </form>
+
+      {error ? <p className="statusMessage statusError">{error}</p> : null}
+
+      <div className="adminStatusGrid" style={{ marginTop: 12 }}>
+        {apiTypes.length ? apiTypes.map((entry) => (
+          <span className={apiTypePillClass(entry.apiType)} key={entry.apiType}><strong>{apiTypeLabel(entry.apiType)}</strong> {entry.callCount}</span>
+        )) : <span className="small">No external API calls are recorded for this date range.</span>}
+      </div>
+
+      <div className="adminTableScroll adminApiCallTableScroll">
+        <table className="table adminCompactTable">
+          <thead>
+            <tr>
+              <th>API type</th>
+              <th>Endpoint</th>
+              <th>Calls</th>
+              <th>Success</th>
+              <th>Failed</th>
+              <th>Avg ms</th>
+              <th>Last call</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? rows.map((row) => (
+              <tr key={`${row.apiType}:${row.endpoint}`}>
+                <td><span className={apiTypePillClass(row.apiType)}>{apiTypeLabel(row.apiType)}</span></td>
+                <td className="adminApiEndpointCell">{row.endpoint}</td>
+                <td>{row.callCount}</td>
+                <td>{row.successCount}</td>
+                <td>{row.failureCount}</td>
+                <td>{row.averageDurationMs ?? '—'}</td>
+                <td>{formatValue(row.lastCallAt, 'updated_at')}</td>
+              </tr>
+            )) : (
+              <tr><td colSpan={7} className="small" style={{ padding: '18px 10px' }}>No external API call metrics match these filters.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
 
@@ -366,6 +522,14 @@ export default function AdminPortal() {
   const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null)
   const [deletingAdminUserId, setDeletingAdminUserId] = useState<string | null>(null)
   const [detailModal, setDetailModal] = useState<DetailModalState>(null)
+  const [apiCallFilters, setApiCallFilters] = useState<ExternalApiCallFilters>(() => {
+    const today = getUserTodayISO()
+    return { fromDate: today, toDate: today, apiType: '', endpoint: '' }
+  })
+  const [apiCallReport, setApiCallReport] = useState<ExternalApiCallReport | null>(null)
+  const [apiCallLoading, setApiCallLoading] = useState(false)
+  const [apiCallError, setApiCallError] = useState<string | null>(null)
+  const [apiCallRefreshedAt, setApiCallRefreshedAt] = useState<string | null>(null)
 
   async function loadPortal() {
     logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_load_started' })
@@ -374,17 +538,44 @@ export default function AdminPortal() {
     logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_loaded', data: { summary: portalData.summary } })
   }
 
+  async function loadExternalApiCalls(filters: ExternalApiCallFilters = apiCallFilters) {
+    setApiCallLoading(true)
+    setApiCallError(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.api_calls', message: 'external_api_call_metrics_load_started', data: { filters } })
+      const report = await fetchExternalApiCallReport(filters)
+      setApiCallReport(report)
+      setApiCallRefreshedAt(report.generatedAt || new Date().toISOString())
+      logFrontendEvent({ category: 'admin.portal.api_calls', message: 'external_api_call_metrics_loaded', data: { filters: report.filters, totalCalls: report.totalCalls, rowCount: report.rows.length } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load external API call metrics.'
+      setApiCallError(message)
+      logFrontendEvent({ category: 'admin.portal.api_calls', level: 'error', message: 'external_api_call_metrics_load_failed', data: { filters, error: message } })
+    } finally {
+      setApiCallLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!adminUser) {
       setPortal(null)
+      setApiCallReport(null)
       return
     }
     void loadPortal()
+    void loadExternalApiCalls(apiCallFilters)
   }, [adminUser])
 
   function openDetails(title: string, rows: RowRecord[], columns: DetailColumn[]) {
     logFrontendEvent({ category: 'admin.portal.metadata', message: 'admin_metadata_modal_opened', data: { title, recordCount: rows.length } })
     setDetailModal({ title, rows, columns })
+  }
+
+  function resetExternalApiCallFilters() {
+    const today = getUserTodayISO()
+    const nextFilters = { fromDate: today, toDate: today, apiType: '', endpoint: '' }
+    setApiCallFilters(nextFilters)
+    void loadExternalApiCalls(nextFilters)
   }
 
   async function onLogin(e: FormEvent) {
@@ -558,6 +749,17 @@ export default function AdminPortal() {
 
         <div className="adminPortalReviewGrid">
           <div className="adminReviewColumn">
+            <ExternalApiCallsSection
+              report={apiCallReport}
+              filters={apiCallFilters}
+              loading={apiCallLoading}
+              error={apiCallError}
+              onFilterChange={setApiCallFilters}
+              onApply={() => void loadExternalApiCalls(apiCallFilters)}
+              onReset={resetExternalApiCallFilters}
+              onRefresh={() => void loadExternalApiCalls(apiCallFilters)}
+              refreshedAt={apiCallRefreshedAt}
+            />
             <AccountSummarySection portal={portal} onOpenDetails={openDetails} />
             <RequestTable rows={requestRows} approvingRequestId={approvingRequestId} deletingRequestId={deletingRequestId} onApprove={onApproveRequest} onDelete={onDeleteRequest} />
           </div>
