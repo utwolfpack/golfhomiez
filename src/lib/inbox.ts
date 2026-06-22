@@ -4,7 +4,7 @@ import { requestJson } from './request'
 import type { HoleScoreDetail, ScoreEntry } from '../types'
 
 export type InboxMessageType = 'message' | 'challenge_request' | 'individual_challenge'
-export type TeamChallengeStatus = 'proposed' | 'accepted' | 'declined'
+export type TeamChallengeStatus = 'proposed' | 'accepted' | 'declined' | 'completed'
 
 export type IndividualChallengeParticipant = {
   userId?: string | null
@@ -33,6 +33,7 @@ export type InboxMessage = {
   challengeDate?: string | null
   challengeState?: string | null
   challengeCourse?: string | null
+  challengeTeeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   proposerTeamScore?: number | null
   challengedTeamScore?: number | null
   proposerTeamHoles?: HoleScoreDetail[] | null
@@ -72,6 +73,7 @@ export type SendInboxMessageInput = {
   challengeDate?: string | null
   challengeState?: string | null
   challengeCourse?: string | null
+  challengeTeeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   individualParticipantEmails?: string[]
 }
 
@@ -161,6 +163,11 @@ export async function updateTeamChallengeStatus(messageId: string, status: TeamC
     method: 'PATCH',
     body: JSON.stringify({ status }),
   })
+}
+
+
+export async function completeInboxChallenge(messageId: string): Promise<InboxMessage> {
+  return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/complete`, { method: 'PATCH' })
 }
 
 export async function updateTeamChallengeScore(messageId: string, score: number, holes?: HoleScoreDetail[]): Promise<InboxMessage> {

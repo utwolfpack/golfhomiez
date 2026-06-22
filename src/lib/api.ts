@@ -1,7 +1,7 @@
 import { handleExpiredSession } from './session-expiration'
 import { attachRequestMetadata, logFrontendEvent } from './frontend-logger'
 
-export type ApiError = { message: string }
+export type ApiError = Error & { message: string; suggestedTeamName?: string; [key: string]: unknown }
 
 function getUserTimeZoneHeader() {
   try {
@@ -40,7 +40,9 @@ export async function api<T>(url: string, opts: RequestInit = {}): Promise<T> {
     if (!res.ok) {
       handleExpiredSession('api', res.status)
       const msg = (data && data.message) ? data.message : `Request failed (${res.status})`
-      throw new Error(msg)
+      const error = new Error(msg) as ApiError
+      if (data && typeof data === 'object') Object.assign(error, data)
+      throw error
     }
     return data as T
   } catch (error) {

@@ -1,6 +1,13 @@
 import { v4 as uuidv4 } from 'uuid'
 import { initDb, getSqliteDb } from '../db.js'
 
+function normalizeMemberStatus(status, verified = false) {
+  if (verified === true) return 'active'
+  const value = String(status || '').trim().toLowerCase()
+  if (value === 'active' || value === 'pending_verification' || value === 'invited') return value
+  return 'invited'
+}
+
 function toIso(value) {
   if (!value) return null
   const dt = new Date(value)
@@ -9,13 +16,20 @@ function toIso(value) {
 }
 
 function mapTeamRow(row, memberRows) {
+  const members = memberRows
+    .filter((member) => member.team_id === row.id)
+    .map((member) => {
+      const verified = Boolean(member.verified)
+      const status = normalizeMemberStatus(member.status, verified)
+      return { id: member.id, name: member.name, email: member.email, status, verified }
+    })
   return {
     id: row.id,
     name: row.name,
     createdAt: toIso(row.created_at),
-    members: memberRows
-      .filter((member) => member.team_id === row.id)
-      .map((member) => ({ id: member.id, name: member.name, email: member.email })),
+    members,
+    status: members.some((member) => member.status !== 'active') ? 'pending' : 'verified',
+    hasPendingMembers: members.some((member) => member.status !== 'active'),
   }
 }
 
@@ -31,6 +45,7 @@ function mapScoreRow(row) {
     teamTotal: row.team_total,
     opponentTotal: row.opponent_total,
     roundScore: row.round_score,
+    teeColor: row.tee_color || 'white',
     won: row.won == null ? null : Boolean(row.won),
     holes: row.holes_json ? JSON.parse(row.holes_json) : null,
     opponentHoles: row.opponent_holes_json ? JSON.parse(row.opponent_holes_json) : null,
@@ -75,12 +90,12 @@ export async function createTeam({ name, members }) {
   const db = getSqliteDb()
   const team = { id: uuidv4(), name: String(name).trim(), members, createdAt: new Date().toISOString() }
   const insertTeam = db.prepare('INSERT INTO teams (id, name, created_at) VALUES (?, ?, ?)')
-  const insertMember = db.prepare('INSERT INTO team_members (id, team_id, name, email) VALUES (?, ?, ?, ?)')
+  const insertMember = db.prepare('INSERT INTO team_members (id, team_id, name, email, status, verified) VALUES (?, ?, ?, ?, ?, ?)')
 
   const transaction = db.transaction(() => {
     insertTeam.run(team.id, team.name, team.createdAt)
     for (const member of members) {
-      insertMember.run(member.id, team.id, member.name, member.email)
+      insertMember.run(member.id, team.id, member.name, member.email, normalizeMemberStatus(member.status, Boolean(member.verified)), member.verified ? 1 : 0)
     }
   })
 
@@ -95,7 +110,7 @@ export async function updateTeam(id, { name, members }) {
 
   const updateTeamStmt = db.prepare('UPDATE teams SET name = ? WHERE id = ?')
   const deleteMembersStmt = db.prepare('DELETE FROM team_members WHERE team_id = ?')
-  const insertMemberStmt = db.prepare('INSERT INTO team_members (id, team_id, name, email) VALUES (?, ?, ?, ?)')
+  const insertMemberStmt = db.prepare('INSERT INTO team_members (id, team_id, name, email, status, verified) VALUES (?, ?, ?, ?, ?, ?)')
   const updateTeamScoresStmt = db.prepare('UPDATE scores SET team = ? WHERE team = ?')
   const updateOpponentScoresStmt = db.prepare('UPDATE scores SET opponent_team = ? WHERE opponent_team = ?')
 
@@ -103,7 +118,7 @@ export async function updateTeam(id, { name, members }) {
     updateTeamStmt.run(String(name).trim(), id)
     deleteMembersStmt.run(id)
     for (const member of members) {
-      insertMemberStmt.run(member.id, id, member.name, member.email)
+      insertMemberStmt.run(member.id, id, member.name, member.email, normalizeMemberStatus(member.status, Boolean(member.verified)), member.verified ? 1 : 0)
     }
     if (existing.name !== String(name).trim()) {
       updateTeamScoresStmt.run(String(name).trim(), existing.name)
@@ -113,6 +128,23 @@ export async function updateTeam(id, { name, members }) {
 
   transaction()
   return getTeamById(id)
+}
+
+export async function deleteTeamById(id) {
+  const db = getSqliteDb()
+  const existing = await getTeamById(id)
+  if (!existing) return false
+
+  const deleteMembersStmt = db.prepare('DELETE FROM team_members WHERE team_id = ?')
+  const deleteTeamStmt = db.prepare('DELETE FROM teams WHERE id = ?')
+
+  const transaction = db.transaction(() => {
+    deleteMembersStmt.run(id)
+    deleteTeamStmt.run(id)
+  })
+
+  transaction()
+  return true
 }
 
 export async function listScores() {
@@ -273,6 +305,10 @@ function isInboxIndividualChallenge(message) {
   return message.messageType === 'individual_challenge'
 }
 
+function isInboxChallengeMessage(message) {
+  return isInboxTeamChallenge(message) || isInboxIndividualChallenge(message)
+}
+
 function isInboxIndividualChallengeParticipant(message, user, normalizedEmail) {
   return (message.individualChallengeParticipants || []).some((participant) =>
     String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail)
@@ -351,6 +387,7 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
     challenge_date: teamContext?.challengeDate || null,
     challenge_state: teamContext?.challengeState || null,
     challenge_course: teamContext?.challengeCourse || null,
+    challenge_tee_color: teamContext?.challengeTeeColor || 'white',
     proposer_team_score: teamContext?.proposerTeamScore ?? null,
     challenged_team_score: teamContext?.challengedTeamScore ?? null,
     proposer_team_holes_json: teamContext?.proposerTeamHoles ? JSON.stringify(teamContext.proposerTeamHoles) : null,
@@ -381,10 +418,10 @@ export async function updateInboxChallengeStatus(messageId, user, status) {
   const db = getSqliteDb()
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
-  const existingRow = db.prepare('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1').get(String(messageId || ''), 'challenge_request')
+  const existingRow = db.prepare("SELECT * FROM inbox_messages WHERE id = ? AND message_type IN ('challenge_request', 'individual_challenge') LIMIT 1").get(String(messageId || ''))
   const existing = existingRow ? mapInboxMessageRow(existingRow) : null
   if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
-  db.prepare('UPDATE inbox_messages SET challenge_status = ? WHERE thread_id = ? AND message_type = ?').run(status, existing.threadId || existing.id, 'challenge_request')
+  db.prepare("UPDATE inbox_messages SET challenge_status = ? WHERE thread_id = ? AND message_type IN ('challenge_request', 'individual_challenge')").run(status, existing.threadId || existing.id)
   const row = db.prepare('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1').get(String(messageId || ''))
   return row ? mapInboxMessageRow(row) : null
 }
@@ -396,6 +433,7 @@ export async function updateInboxChallengeScore(messageId, user, side, score, ho
   const existingRow = db.prepare('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1').get(String(messageId || ''), 'challenge_request')
   const existing = existingRow ? mapInboxMessageRow(existingRow) : null
   if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
   if (side === 'proposer' && !userTeamIds.has(String(existing.proposerTeamId || ''))) return null
   if (side === 'challenged' && !userTeamIds.has(String(existing.challengedTeamId || ''))) return null
   const column = side === 'proposer' ? 'proposer_team_score' : 'challenged_team_score'
@@ -413,6 +451,7 @@ export async function updateInboxIndividualChallengeScore(messageId, user, score
   const existingRow = db.prepare('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1').get(String(messageId || ''), 'individual_challenge')
   const existing = existingRow ? mapInboxMessageRow(existingRow) : null
   if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
   let userCanEditOwnScore = false
   const participants = (existing.individualChallengeParticipants || []).map((participant) => {
     const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail

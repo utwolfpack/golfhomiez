@@ -13,6 +13,7 @@ import { jumpToFirstByLetter } from '../lib/selectHotkey'
 import { sortScoresNewestFirst } from '../lib/roundInsights'
 import { calculateHandicapFromScores } from '../lib/handicap'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { getIncompleteRoundStatus } from '../lib/round-status'
 import { fetchTeamChallengeScoreRecords } from '../lib/inbox'
 import type { ScoreEntry, SoloScoreEntry, TeamScoreEntry } from '../types'
 
@@ -88,12 +89,16 @@ function roundRowClass(round: ScoreEntry) {
 }
 
 function RoundRow({ round, onClick }: { round: ScoreEntry; onClick: () => void }) {
+  const incompleteStatus = getIncompleteRoundStatus(round)
+  const incompleteBadge = incompleteStatus.incomplete ? <span className="roundIncompleteBadge">Incomplete round • {incompleteStatus.label}</span> : null
+
   if (round.mode === 'solo') {
-  return (
+    return (
       <button type="button" className={roundRowClass(round)} onClick={onClick}>
         <div>
           <div className="roundRowTitle">{round.course}</div>
           <div className="roundRowMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo round</div>
+          {incompleteBadge}
         </div>
         <div className="roundRowSummary">
           <div className="roundRowValue">{round.roundScore}</div>
@@ -110,6 +115,7 @@ function RoundRow({ round, onClick }: { round: ScoreEntry; onClick: () => void }
       <div>
         <div className="roundRowTitle">{round.course}</div>
         <div className="roundRowMeta">{round.date} • {rowType} • {round.team} vs {round.opponentTeam}</div>
+        {incompleteBadge}
       </div>
       <div className="roundRowSummary">
         <div className="roundRowValue">{formatTeamScoreValue(round)}</div>

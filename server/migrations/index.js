@@ -26,6 +26,20 @@ async function columnCollation(db, tableName, columnName) {
 }
 
 
+
+async function uniqueTeamNameIndexExists(db) {
+  const [rows] = await db.execute(
+    `SELECT INDEX_NAME AS indexName
+       FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'teams'
+        AND COLUMN_NAME = 'name'
+        AND NON_UNIQUE = 0
+      LIMIT 1`,
+  )
+  return rows.length > 0
+}
+
 async function columnIsNullable(db, tableName, columnName) {
   const [[row] = []] = await db.execute(
     `SELECT IS_NULLABLE AS isNullable
@@ -1598,6 +1612,145 @@ ON DUPLICATE KEY UPDATE
     },
   },
 
+
+  {
+    version: '20260521_050',
+    name: 'remove_local_golf_course_datasource',
+    filename: '20260521_050_remove_local_golf_course_datasource.sql',
+    async isSatisfied(db) {
+      return (
+        !(await tableExists(db, 'golf_courses')) &&
+        !(await tableExists(db, 'golf_course_holes')) &&
+        !(await tableExists(db, 'golf_course_hole_scorecards'))
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260521_050_remove_local_golf_course_datasource.sql')
+    },
+  },
+
+
+  {
+    version: '20260521_051',
+    name: 'round_and_challenge_tee_color',
+    filename: '20260521_051_round_and_challenge_tee_color.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'scores') &&
+        await columnExists(db, 'scores', 'tee_color') &&
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'challenge_tee_color')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (await tableExists(db, 'scores') && !(await columnExists(db, 'scores', 'tee_color'))) statements.push("ALTER TABLE scores ADD COLUMN tee_color VARCHAR(16) NOT NULL DEFAULT 'white' AFTER round_score")
+      if (await tableExists(db, 'inbox_messages') && !(await columnExists(db, 'inbox_messages', 'challenge_tee_color'))) statements.push("ALTER TABLE inbox_messages ADD COLUMN challenge_tee_color VARCHAR(16) NOT NULL DEFAULT 'white' AFTER challenge_course")
+      return statements.join(';\n') || '-- round and challenge tee-color schema already exists'
+    },
+  },
+
+  {
+    version: '20260521_052',
+    name: 'external_api_call_metrics',
+    filename: '20260521_052_external_api_call_metrics.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'external_api_call_metrics') &&
+        await indexExists(db, 'external_api_call_metrics', 'idx_external_api_call_metrics_api_date') &&
+        await indexExists(db, 'external_api_call_metrics', 'idx_external_api_call_metrics_api_endpoint_date')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260521_052_external_api_call_metrics.sql')
+    },
+  },
+
+  {
+    version: '20260522_053',
+    name: 'profile_location_enrichment_requirement',
+    filename: '20260522_053_profile_location_enrichment_requirement.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'app_users'))) return true
+      const [[row = {}] = []] = await db.execute(`
+        SELECT COUNT(*) AS pending
+          FROM app_users
+         WHERE profile_enriched_at IS NOT NULL
+           AND (
+             phone IS NULL OR TRIM(phone) = '' OR
+             primary_city IS NULL OR TRIM(primary_city) = '' OR
+             primary_state IS NULL OR TRIM(primary_state) = '' OR
+             primary_zip_code IS NULL OR TRIM(primary_zip_code) = ''
+           )
+      `)
+      return Number(row.pending || 0) === 0
+    },
+    async getSql() {
+      return loadMigrationSql('20260522_053_profile_location_enrichment_requirement.sql')
+    },
+  },
+
+
+
+  {
+    version: '20260527_054',
+    name: 'team_name_unique_index',
+    filename: '20260527_054_team_name_unique_index.sql',
+    async isSatisfied(db) {
+      return await tableExists(db, 'teams') && await uniqueTeamNameIndexExists(db)
+    },
+    async getSql() {
+      return loadMigrationSql('20260527_054_team_name_unique_index.sql')
+    },
+  },
+
+  {
+    version: '20260527_055',
+    name: 'team_member_invite_status',
+    filename: '20260527_055_team_member_invite_status.sql',
+    async isSatisfied(db) {
+      return await tableExists(db, 'team_members') &&
+        await columnExists(db, 'team_members', 'status') &&
+        await columnExists(db, 'team_members', 'verified')
+    },
+    async getSql(db) {
+      const statements = []
+      if (await tableExists(db, 'team_members') && !(await columnExists(db, 'team_members', 'status'))) {
+        statements.push("ALTER TABLE team_members ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'invited' AFTER email")
+      }
+      if (await tableExists(db, 'team_members') && !(await columnExists(db, 'team_members', 'verified'))) {
+        statements.push("ALTER TABLE team_members ADD COLUMN verified TINYINT(1) NOT NULL DEFAULT 0 AFTER status")
+      }
+      statements.push(`UPDATE team_members tm
+LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
+   SET tm.status = CASE
+         WHEN COALESCE(u.emailVerified, 0) <> 0 THEN 'active'
+         WHEN u.id IS NOT NULL THEN 'pending_verification'
+         ELSE COALESCE(NULLIF(tm.status, ''), 'invited')
+       END,
+       tm.verified = CASE WHEN COALESCE(u.emailVerified, 0) <> 0 THEN 1 ELSE COALESCE(tm.verified, 0) END`)
+      return statements.join(';\n')
+    },
+  },
+
+  {
+    version: '20260622_056',
+    name: 'app_feature_flags',
+    filename: '20260622_056_app_feature_flags.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'app_feature_flags'))) return false
+      if (!(await indexExists(db, 'app_feature_flags', 'idx_app_feature_flags_enabled'))) return false
+      const [[row = {}] = []] = await db.execute(
+        `SELECT COUNT(*) AS flagCount
+           FROM app_feature_flags
+          WHERE flag_key = 'profileSocialPreferences'`,
+      )
+      return Number(row.flagCount || 0) > 0
+    },
+    async getSql() {
+      return loadMigrationSql('20260622_056_app_feature_flags.sql')
+    },
+  },
 
 ]
 

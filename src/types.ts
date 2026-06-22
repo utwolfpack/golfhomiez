@@ -1,8 +1,13 @@
 export type HoleScoreDetail = {
   hole: number
-  par: number
-  yards: number
-  strokeIndex: number
+  par: number | null
+  yards: number | null
+  strokeIndex: number | null
+  teeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
+  teeBoxType?: string | null
+  distanceToFlagYards?: number | null
+  flagLatitude?: number | null
+  flagLongitude?: number | null
   score: number
   scoreProvided?: boolean
 }
@@ -28,6 +33,7 @@ export type TeamScoreEntry = {
   courseRating?: number | null
   slopeRating?: number | null
   coursePar?: number | null
+  teeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   createdByUserId?: string
   createdByEmail?: string
   source?: ScoreRecordSource
@@ -49,6 +55,7 @@ export type SoloScoreEntry = {
   courseRating?: number | null
   slopeRating?: number | null
   coursePar?: number | null
+  teeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   createdByUserId?: string
   createdByEmail?: string
   source?: ScoreRecordSource
@@ -67,10 +74,13 @@ export type TeamMember = {
   verified?: boolean
 }
 
+export type TeamStatus = 'pending' | 'verified'
+
 export type Team = {
   id: string
   name: string
   members: TeamMember[]
   createdAt: string
+  status?: TeamStatus
   hasPendingMembers?: boolean
 }

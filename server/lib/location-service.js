@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { City, State } from 'country-state-city'
 
 const stateNameByCode = new Map(
@@ -7,12 +9,105 @@ const stateNameByCode = new Map(
 )
 
 let usLocationsCache = null
+let postalCodeMapCache = null
+const DEFAULT_POSTAL_CODE_CSV_PATH = path.resolve(process.cwd(), 'opengolfapi-us.courses.042026.csv')
 
 function normalize(value) {
   return String(value || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+}
+
+function parseCsvRows(text) {
+  const rows = []
+  let row = []
+  let value = ''
+  let inQuotes = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    const next = text[index + 1]
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        value += '"'
+        index += 1
+      } else if (char === '"') {
+        inQuotes = false
+      } else {
+        value += char
+      }
+      continue
+    }
+    if (char === '"') {
+      inQuotes = true
+      continue
+    }
+    if (char === ',') {
+      row.push(value)
+      value = ''
+      continue
+    }
+    if (char === '\n') {
+      row.push(value)
+      rows.push(row)
+      row = []
+      value = ''
+      continue
+    }
+    if (char !== '\r') value += char
+  }
+
+  if (value.length || row.length) {
+    row.push(value)
+    rows.push(row)
+  }
+  return rows
+}
+
+function postalCodeKey(city, stateCode) {
+  return `${normalize(city).trim()}|${String(stateCode || '').trim().toUpperCase()}`
+}
+
+function getPostalCodeMap() {
+  if (postalCodeMapCache) return postalCodeMapCache
+
+  const pathFromEnv = process.env.LOCATION_POSTAL_CODE_CSV_PATH || process.env.GOLF_COURSE_CSV_PATH || DEFAULT_POSTAL_CODE_CSV_PATH
+  const countsByCity = new Map()
+  try {
+    const csvText = fs.readFileSync(path.resolve(pathFromEnv), 'utf8')
+    const rows = parseCsvRows(csvText)
+    const headers = (rows[0] || []).map((header) => String(header || '').trim())
+    const cityIndex = headers.indexOf('city')
+    const stateIndex = headers.indexOf('state')
+    const postalIndex = headers.indexOf('postal_code') >= 0 ? headers.indexOf('postal_code') : headers.indexOf('postalCode')
+    if (cityIndex < 0 || stateIndex < 0 || postalIndex < 0) throw new Error('postal code CSV is missing city, state, or postal_code columns')
+
+    for (const values of rows.slice(1)) {
+      const city = String(values[cityIndex] || '').trim()
+      const stateCode = String(values[stateIndex] || '').trim().toUpperCase()
+      const postalCode = String(values[postalIndex] || '').trim()
+      if (!city || !stateCode || !/^\d{5}(?:-\d{4})?$/.test(postalCode)) continue
+      const key = postalCodeKey(city, stateCode)
+      if (!countsByCity.has(key)) countsByCity.set(key, new Map())
+      const counts = countsByCity.get(key)
+      counts.set(postalCode, (counts.get(postalCode) || 0) + 1)
+    }
+  } catch {
+    postalCodeMapCache = new Map()
+    return postalCodeMapCache
+  }
+
+  postalCodeMapCache = new Map()
+  for (const [key, counts] of countsByCity.entries()) {
+    const postalCode = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || ''
+    if (postalCode) postalCodeMapCache.set(key, postalCode)
+  }
+  return postalCodeMapCache
+}
+
+function getPostalCodeForCity(city, stateCode) {
+  return getPostalCodeMap().get(postalCodeKey(city, stateCode)) || ''
 }
 
 function buildLabel(city, stateName, stateCode, postalCode = '') {
@@ -27,13 +122,15 @@ function toLocation(city) {
   const stateName = stateNameByCode.get(city.stateCode) || ''
   if (!stateName || Number.isNaN(latitude) || Number.isNaN(longitude)) return null
 
+  const postalCode = getPostalCodeForCity(city.name, city.stateCode)
+
   return {
     key: `${city.name}|${city.stateCode}|${latitude}|${longitude}`,
     city: city.name,
     stateCode: city.stateCode,
     stateName,
-    postalCode: '',
-    label: buildLabel(city.name, stateName, city.stateCode),
+    postalCode,
+    label: buildLabel(city.name, stateName, city.stateCode, postalCode),
     latitude,
     longitude,
   }

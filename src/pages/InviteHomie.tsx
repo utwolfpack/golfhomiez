@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { sendHomieInvite } from '../lib/teams'
 import { logFrontendEvent } from '../lib/frontend-logger'
@@ -46,6 +46,15 @@ export default function InviteHomie() {
     <div className="container pageStack inviteHomiePage">
       <PageHero
         title="Invite Homie"
+        actions={
+          <Link
+            className="btn btnLightGreen btnSmall"
+            to="/profile"
+            onClick={() => logFrontendEvent({ category: 'invite_homie.navigation', message: 'return_to_profile_clicked', data: { reason } })}
+          >
+            Return to Profile
+          </Link>
+        }
       />
 
       <section className="card pageCardShell">

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { searchGolfCourses, type GolfCourseOption } from '../lib/golf-courses'
 
-export function useGolfCourseOptions({ state, query, enabled = true, limit = 50 }: { state?: string; query?: string; enabled?: boolean; limit?: number }) {
+export function useGolfCourseOptions({ state, query, enabled = true }: { state?: string; query?: string; enabled?: boolean; limit?: number }) {
   const [courses, setCourses] = useState<GolfCourseOption[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,7 +31,7 @@ export function useGolfCourseOptions({ state, query, enabled = true, limit = 50 
     setError(null)
     const timer = globalThis.setTimeout(async () => {
       try {
-        const next = await searchGolfCourses({ state, query: trimmedQuery, limit })
+        const next = await searchGolfCourses({ state, query: trimmedQuery })
         if (active) setCourses(next)
       } catch (err) {
         if (active) {
@@ -47,7 +47,7 @@ export function useGolfCourseOptions({ state, query, enabled = true, limit = 50 
       active = false
       globalThis.clearTimeout(timer)
     }
-  }, [enabled, state, query, limit])
+  }, [enabled, state, query])
 
   return { courses, loading, error }
 }

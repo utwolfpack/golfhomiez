@@ -10,11 +10,10 @@ import { getLatestPasswordReset, getLatestVerificationLink } from './auth-debug.
 import storage from './storage/index.js'
 import { getPool } from './db.js'
 import { isValidPastOrTodayDate } from './lib/date-utils.js'
-import { normalizeCreateTeamMembers, normalizeEmail, isEmail } from './lib/team-utils.js'
+import { buildSuggestedTeamName, isValidTeamSize, normalizeCreateTeamMembers, normalizeEmail, isEmail, normalizeTeamMemberStatus } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, logScheduledJob, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
-import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseNamesByState } from './lib/golf-course-service.js'
-import { getCourseDetails as getStaticCourseDetails } from './course-data.js'
+import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCoursesForState } from './lib/golf-course-service.js'
 import { calculateHoleScoreTotal, getHoleScorecardForCourse, normalizeHoleScorePayload } from './lib/hole-scorecard.js'
 import { clearScorecardDraftHoles, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
@@ -26,6 +25,10 @@ import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganize
 import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, consumeAdminResetToken, deleteAdminUser, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
 import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listHostManagedTournaments, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload } from './lib/rbac.js'
 import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles } from './lib/inbox-service.js'
+import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './lib/tee-colors.js'
+import { getExternalApiCallSummary } from './lib/external-api-metrics.js'
+import { getFeatureFlags, featureFlagDefinitionsForApi, isFeatureEnabled } from './lib/feature-flags.js'
+import { loadProfileSummary } from './lib/profile-summary.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -39,10 +42,9 @@ let storageReady = false
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
 
 function resolveScoreCourseMetadata(state, matchedCourse) {
-  const staticDetails = getStaticCourseDetails(state, matchedCourse?.name)
-  const courseRating = Number(matchedCourse?.course_rating ?? matchedCourse?.courseRating ?? staticDetails?.courseRating)
-  const slopeRating = Number(matchedCourse?.slope_rating ?? matchedCourse?.slopeRating ?? staticDetails?.slopeRating)
-  const coursePar = Number(matchedCourse?.par ?? matchedCourse?.course_par ?? matchedCourse?.coursePar ?? staticDetails?.par)
+  const courseRating = Number(matchedCourse?.course_rating ?? matchedCourse?.courseRating)
+  const slopeRating = Number(matchedCourse?.slope_rating ?? matchedCourse?.slopeRating)
+  const coursePar = Number(matchedCourse?.par ?? matchedCourse?.course_par ?? matchedCourse?.coursePar ?? matchedCourse?.parTotal)
   return {
     golfCourseId: matchedCourse?.id || null,
     courseRating: Number.isFinite(courseRating) && courseRating > 0 ? courseRating : null,
@@ -128,6 +130,7 @@ app.get('/api/locations/search', (req, res) => {
       query,
       limit,
       resultCount: results.length,
+      postalCodeResultCount: results.filter((item) => Boolean(item.postalCode)).length,
     })
     res.json(results)
   } catch (error) {
@@ -139,18 +142,22 @@ app.get('/api/locations/search', (req, res) => {
 app.get('/api/golf-courses', async (req, res) => {
   try {
     const state = String(req.query.state || '').trim().toUpperCase()
-    if (!state) return res.status(400).json({ message: 'state query parameter required' })
+    const query = String(req.query.q || req.query.query || '').trim()
+    if (!state && !query) return res.status(400).json({ message: 'state or q query parameter required' })
 
-    const courses = await listGolfCourseNamesByState(state)
+    const courses = await listGolfCoursesForState(state, { query })
     logApi('golf_courses_list_completed', {
       ...requestContext(req),
       state,
+      query,
+      source: 'golfbert-api',
       resultCount: courses.length,
     })
     return res.json(courses)
   } catch (error) {
-    logRouteError('Golf course list error', req, error)
-    return res.status(500).json({ message: 'Golf course catalog is temporarily unavailable.' })
+    logRouteError('Golfbert golf course list error', req, error)
+    const status = /GOLFBERT_API_KEY/.test(error?.message || '') ? 503 : 500
+    return res.status(status).json({ message: 'Golfbert course catalog is temporarily unavailable.' })
   }
 })
 
@@ -158,32 +165,45 @@ app.get('/api/golf-courses/scorecard', async (req, res) => {
   try {
     const state = String(req.query.state || '').trim().toUpperCase()
     const course = String(req.query.course || '').trim()
-    if (!state || !course) return res.status(400).json({ message: 'state and course query parameters are required' })
+    const courseId = String(req.query.courseId || req.query.course_id || '').trim()
+    const golferLatitude = Number(req.query.lat ?? req.query.latitude)
+    const golferLongitude = Number(req.query.lng ?? req.query.longitude)
+    const teeColor = normalizeTeeColor(req.query.teeColor || req.query.tee_color || DEFAULT_TEE_COLOR)
+    if (!state || (!course && !courseId)) return res.status(400).json({ message: 'state and course or courseId query parameters are required' })
 
-    const matchedCourse = await findGolfCourseForState(state, course)
-    if (!matchedCourse) return res.status(404).json({ message: 'Select a golf course from the catalog for the selected state' })
+    const matchedCourse = courseId ? await findGolfCourseForState(state, course || courseId) : await findGolfCourseForState(state, course)
+    if (!matchedCourse && !courseId) return res.status(404).json({ message: 'Select a golf course from the Golfbert catalog for the selected state' })
 
     const scorecard = await getHoleScorecardForCourse({
-      state: matchedCourse.state_code || state,
-      course: matchedCourse.name,
-      courseId: matchedCourse.id,
+      state: matchedCourse?.state_code || matchedCourse?.state || state,
+      course: matchedCourse?.name || course,
+      courseId: matchedCourse?.id || courseId,
+      golferLatitude: Number.isFinite(golferLatitude) ? golferLatitude : null,
+      golferLongitude: Number.isFinite(golferLongitude) ? golferLongitude : null,
+      teeColor,
     })
 
     logApi('golf_course_scorecard_completed', {
       ...requestContext(req),
       state,
-      course: matchedCourse.name,
-      courseId: matchedCourse.id,
+      course: scorecard.course,
+      courseId: scorecard.courseId,
       source: scorecard.source,
+      teeColor: scorecard.teeColor || teeColor,
+      availableTeeColors: scorecard.availableTeeColors || [],
+      golferLocationProvided: Number.isFinite(golferLatitude) && Number.isFinite(golferLongitude),
       holeCount: Array.isArray(scorecard.holes) ? scorecard.holes.length : 0,
+      holeMapReadyCount: Array.isArray(scorecard.holes) ? scorecard.holes.filter((hole) => Number.isFinite(Number(hole.flagLatitude)) && Number.isFinite(Number(hole.flagLongitude))).length : 0,
+      distanceToFlagCount: Array.isArray(scorecard.holes) ? scorecard.holes.filter((hole) => Number.isFinite(Number(hole.distanceToFlagYards))).length : 0,
       parTotal: scorecard.parTotal,
       scoreTotal: scorecard.scoreTotal,
     })
 
     return res.json(scorecard)
   } catch (error) {
-    logRouteError('Golf course scorecard error', req, error)
-    return res.status(500).json({ message: 'Course scorecard is temporarily unavailable.' })
+    logRouteError('Golfbert golf course scorecard error', req, error)
+    const status = /Select a golf course|did not return hole data/.test(error?.message || '') ? 404 : (/GOLFBERT_API_KEY/.test(error?.message || '') ? 503 : 500)
+    return res.status(status).json({ message: 'Golfbert course scorecard is temporarily unavailable.' })
   }
 })
 
@@ -314,6 +334,14 @@ function logRouteError(message, req, error, extra = {}) {
     ...extra,
     error,
   })
+}
+
+function summarizeProvidedHoleScores(holes) {
+  const providedHoles = Array.isArray(holes) ? holes.filter((hole) => hole?.scoreProvided) : []
+  return {
+    providedHoleCount: providedHoles.length,
+    enteredStrokeTotal: calculateHoleScoreTotal(providedHoles),
+  }
 }
 
 async function getAuthenticatedUserFromRequest(req) {
@@ -551,24 +579,27 @@ function normalizeProfileValue(value) {
   return trimmed || null
 }
 
-function sanitizeProfilePayload(body = {}) {
+function sanitizeProfilePayload(body = {}, options = {}) {
   const phone = sanitizeProfilePhone(body.phone, 64)
   const primaryCity = normalizeProfileValue(body.primaryCity)
   const primaryState = normalizeProfileValue(body.primaryState)
   const primaryZipCode = normalizeProfileValue(body.primaryZipCode)
-  const alcoholPreference = normalizeProfileValue(body.alcoholPreference) || ''
-  const cannabisPreference = normalizeProfileValue(body.cannabisPreference) || ''
-  const sobrietyPreference = normalizeProfileValue(body.sobrietyPreference) || ''
+  const socialPreferencesEnabled = Boolean(options.socialPreferencesEnabled)
+  const alcoholPreference = socialPreferencesEnabled ? (normalizeProfileValue(body.alcoholPreference) || '') : ''
+  const cannabisPreference = socialPreferencesEnabled ? (normalizeProfileValue(body.cannabisPreference) || '') : ''
+  const sobrietyPreference = socialPreferencesEnabled ? (normalizeProfileValue(body.sobrietyPreference) || '') : ''
 
   if (!phone) throw new Error('Phone number is required.')
   if (!primaryCity || !primaryState || !primaryZipCode) {
     throw new Error('City, state, and zip code are required.')
   }
-  if (!ALCOHOL_PREFERENCES.has(alcoholPreference)) throw new Error('Select a valid alcohol preference.')
-  if (!CANNABIS_PREFERENCES.has(cannabisPreference)) throw new Error('Select a valid weed preference.')
-  if (!SOBRIETY_PREFERENCES.has(sobrietyPreference)) throw new Error('Select a valid sobriety preference.')
-  if (sobrietyPreference === 'sober_only' && (alcoholPreference === 'alcohol_friendly' || cannabisPreference === 'weed_friendly')) {
-    throw new Error('Sober golf cannot be combined with alcohol or 420 preferences.')
+  if (socialPreferencesEnabled) {
+    if (!ALCOHOL_PREFERENCES.has(alcoholPreference)) throw new Error('Select a valid alcohol preference.')
+    if (!CANNABIS_PREFERENCES.has(cannabisPreference)) throw new Error('Select a valid weed preference.')
+    if (!SOBRIETY_PREFERENCES.has(sobrietyPreference)) throw new Error('Select a valid sobriety preference.')
+    if (sobrietyPreference === 'sober_only' && (alcoholPreference === 'alcohol_friendly' || cannabisPreference === 'weed_friendly')) {
+      throw new Error('Sober golf cannot be combined with alcohol or 420 preferences.')
+    }
   }
 
   return {
@@ -579,6 +610,7 @@ function sanitizeProfilePayload(body = {}) {
     alcoholPreference,
     cannabisPreference,
     sobrietyPreference,
+    socialPreferencesEnabled,
   }
 }
 
@@ -606,8 +638,9 @@ async function ensureAppUserProfileRow(user) {
   return rows[0] || null
 }
 
-function mapProfileRow(row) {
+function mapProfileRow(row, options = {}) {
   if (!row) return null
+  const socialPreferencesEnabled = isFeatureEnabled(options.featureFlags, 'profileSocialPreferences')
   return {
     id: row.id,
     email: row.email,
@@ -616,11 +649,13 @@ function mapProfileRow(row) {
     primaryCity: row.primary_city || '',
     primaryState: row.primary_state || '',
     primaryZipCode: row.primary_zip_code || '',
-    alcoholPreference: row.alcohol_preference || '',
-    cannabisPreference: row.cannabis_preference || '',
-    sobrietyPreference: row.sobriety_preference || '',
+    alcoholPreference: socialPreferencesEnabled ? (row.alcohol_preference || '') : '',
+    cannabisPreference: socialPreferencesEnabled ? (row.cannabis_preference || '') : '',
+    sobrietyPreference: socialPreferencesEnabled ? (row.sobriety_preference || '') : '',
     profileEnrichedAt: row.profile_enriched_at || null,
-    needsEnrichment: !row.profile_enriched_at || !row.phone,
+    needsEnrichment: !row.profile_enriched_at || !row.phone || !row.primary_city || !row.primary_state || !row.primary_zip_code,
+    summary: options.summary || null,
+    featureFlags: options.featureFlags || {},
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
   }
@@ -1731,6 +1766,32 @@ app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
   }
 })
 
+app.get('/api/admin/external-api-calls', adminMiddleware, async (req, res) => {
+  try {
+    const report = await getExternalApiCallSummary({
+      fromDate: req.query.fromDate,
+      toDate: req.query.toDate,
+      apiType: req.query.apiType,
+      endpoint: req.query.endpoint,
+    })
+    logApi('admin_external_api_call_metrics_loaded', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      filters: report.filters,
+      generatedAt: report.generatedAt,
+      totalCalls: report.totalCalls,
+      rowCount: report.rows.length,
+    })
+    res.json(report)
+  } catch (error) {
+    if (/start date/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Admin external API call metrics load error', req, error)
+    res.status(500).json({ message: 'Could not load external API call metrics' })
+  }
+})
+
 app.get('/api/admin/scheduled-jobs', adminMiddleware, async (req, res) => {
   try {
     const jobs = await listScheduledJobs(getPool())
@@ -2606,11 +2667,28 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
   }
 })
 
+app.get('/api/feature-flags', requireStorage, async (req, res) => {
+  try {
+    const pool = getPool()
+    const flags = await getFeatureFlags(pool)
+    logApi('feature_flags_loaded', { ...requestContext(req), flags })
+    res.json({ flags, definitions: featureFlagDefinitionsForApi() })
+  } catch (error) {
+    logRouteError('Feature flags load error', req, error)
+    res.status(500).json({ message: 'Could not load feature flags' })
+  }
+})
+
 app.get('/api/profile', requireStorage, authMiddleware, async (req, res) => {
   try {
-    const row = await ensureAppUserProfileRow(req.user)
-    logApi('profile_fetch_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone, hasPhone: Boolean(row?.phone) })
-    res.json(mapProfileRow(row))
+    const pool = getPool()
+    const [row, featureFlags, summary] = await Promise.all([
+      ensureAppUserProfileRow(req.user),
+      getFeatureFlags(pool),
+      loadProfileSummary(pool, req.user),
+    ])
+    logApi('profile_fetch_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone || !row?.primary_city || !row?.primary_state || !row?.primary_zip_code, hasPhone: Boolean(row?.phone), hasLocation: Boolean(row?.primary_city && row?.primary_state && row?.primary_zip_code), socialPreferencesEnabled: isFeatureEnabled(featureFlags, 'profileSocialPreferences'), roundsGolfed: summary?.roundsGolfed || 0 })
+    res.json(mapProfileRow(row, { featureFlags, summary }))
   } catch (error) {
     logRouteError('Profile fetch error', req, error)
     res.status(500).json({ message: 'Could not load profile' })
@@ -2619,10 +2697,12 @@ app.get('/api/profile', requireStorage, authMiddleware, async (req, res) => {
 
 app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
   try {
-    const profile = sanitizeProfilePayload(req.body || {})
-    logApi('profile_save_started', { ...requestContext(req), hasPhone: Boolean(profile.phone), profile })
-    await ensureAppUserProfileRow(req.user)
     const pool = getPool()
+    const featureFlags = await getFeatureFlags(pool)
+    const socialPreferencesEnabled = isFeatureEnabled(featureFlags, 'profileSocialPreferences')
+    const profile = sanitizeProfilePayload(req.body || {}, { socialPreferencesEnabled })
+    logApi('profile_save_started', { ...requestContext(req), hasPhone: Boolean(profile.phone), hasLocation: Boolean(profile.primaryCity && profile.primaryState && profile.primaryZipCode), socialPreferencesEnabled, profile })
+    const existingRow = await ensureAppUserProfileRow(req.user)
     await pool.execute(
       `UPDATE app_users
           SET email = ?,
@@ -2643,15 +2723,18 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
         profile.primaryCity,
         profile.primaryState,
         profile.primaryZipCode,
-        profile.alcoholPreference,
-        profile.cannabisPreference,
-        profile.sobrietyPreference,
+        socialPreferencesEnabled ? profile.alcoholPreference : (existingRow?.alcohol_preference || ''),
+        socialPreferencesEnabled ? profile.cannabisPreference : (existingRow?.cannabis_preference || ''),
+        socialPreferencesEnabled ? profile.sobrietyPreference : (existingRow?.sobriety_preference || ''),
         req.user.id,
       ],
     )
-    const row = await ensureAppUserProfileRow(req.user)
-    logApi('profile_save_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone, hasPhone: Boolean(row?.phone), profile: mapProfileRow(row) })
-    res.json(mapProfileRow(row))
+    const [row, summary] = await Promise.all([
+      ensureAppUserProfileRow(req.user),
+      loadProfileSummary(pool, req.user),
+    ])
+    logApi('profile_save_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone || !row?.primary_city || !row?.primary_state || !row?.primary_zip_code, hasPhone: Boolean(row?.phone), hasLocation: Boolean(row?.primary_city && row?.primary_state && row?.primary_zip_code), socialPreferencesEnabled, roundsGolfed: summary?.roundsGolfed || 0, profile: mapProfileRow(row, { featureFlags, summary }) })
+    res.json(mapProfileRow(row, { featureFlags, summary }))
   } catch (error) {
     if (error instanceof Error && /required|invalid|Select|Sober golf/.test(error.message)) {
       logApi('profile_save_validation_failed', { ...requestContext(req), validationError: error.message })
@@ -2744,6 +2827,7 @@ function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds) {
       date: teamChallengeRecordDate(message),
       state: message.challengeState || '',
       course: message.challengeCourse || 'Team Challenge',
+      teeColor: normalizeTeeColor(message.challengeTeeColor || DEFAULT_TEE_COLOR),
       team: teamIsProposer ? message.proposerTeamName : message.challengedTeamName,
       opponentTeam: teamIsProposer ? message.challengedTeamName : message.proposerTeamName,
       teamTotal,
@@ -2812,6 +2896,7 @@ async function resolveTeamChallengeForNewMessage(req, payload) {
       challengeDate: payload.challengeDate,
       challengeState: payload.challengeState,
       challengeCourse: payload.challengeCourse,
+      challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || DEFAULT_TEE_COLOR),
     },
   }
 }
@@ -2841,6 +2926,7 @@ async function resolveTeamChallengeForReply(req, parentMessage) {
       challengeDate: parentMessage.challengeDate || null,
       challengeState: parentMessage.challengeState || null,
       challengeCourse: parentMessage.challengeCourse || null,
+      challengeTeeColor: normalizeTeeColor(parentMessage.challengeTeeColor || DEFAULT_TEE_COLOR),
       proposerTeamScore: parentMessage.proposerTeamScore ?? null,
       challengedTeamScore: parentMessage.challengedTeamScore ?? null,
       proposerTeamHoles: parentMessage.proposerTeamHoles || null,
@@ -2857,6 +2943,42 @@ function individualChallengeParticipantMatchesUser(participant, user) {
 
 function individualChallengeParticipantForUser(message, user) {
   return (message?.individualChallengeParticipants || []).find((participant) => individualChallengeParticipantMatchesUser(participant, user)) || null
+}
+
+function inboxChallengeMessageType(message) {
+  return message?.messageType === 'challenge_request' || message?.messageType === 'individual_challenge'
+}
+
+function inboxMessageCreatedByUser(message, user) {
+  const userEmail = normalizeEmail(user?.email)
+  return String(message?.senderUserId || '') === String(user?.id || '') || (userEmail && normalizeEmail(message?.senderEmail) === userEmail)
+}
+
+function sortInboxMessagesByCreatedAt(messages = []) {
+  return [...messages].sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')) || String(a?.id || '').localeCompare(String(b?.id || '')))
+}
+
+async function resolveChallengeCompletionForUser(messageId, user) {
+  const [receivedMessages, sentMessages] = await Promise.all([
+    storage.listInboxMessagesForUser(user),
+    storage.listSentInboxMessagesForUser(user),
+  ])
+  const byId = new Map()
+  for (const message of [...(receivedMessages || []), ...(sentMessages || [])]) {
+    if (message?.id) byId.set(String(message.id), message)
+  }
+  const selected = byId.get(String(messageId || '')) || null
+  if (!selected || !inboxChallengeMessageType(selected)) return { status: 404, body: { message: 'Challenge not found' } }
+  const threadId = String(selected.threadId || selected.id)
+  const threadMessages = Array.from(byId.values()).filter((message) => inboxChallengeMessageType(message) && String(message.threadId || message.id) === threadId)
+  const initialMessage = sortInboxMessagesByCreatedAt(threadMessages).find((message) => !message.parentMessageId) || sortInboxMessagesByCreatedAt(threadMessages)[0] || selected
+  if (!inboxMessageCreatedByUser(initialMessage, user)) {
+    return { status: 403, body: { message: 'Only the golfer who created the challenge can complete it.' } }
+  }
+  if (String(initialMessage.challengeStatus || '').toLowerCase() === 'completed') {
+    return { status: 409, body: { message: 'Challenge is already completed.' } }
+  }
+  return { status: 200, message: initialMessage }
 }
 
 function buildIndividualChallengeParticipants(sender, users) {
@@ -2901,6 +3023,7 @@ async function resolveIndividualChallengeForNewMessage(req, payload) {
       challengeDate: payload.challengeDate,
       challengeState: payload.challengeState,
       challengeCourse: payload.challengeCourse,
+      challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || DEFAULT_TEE_COLOR),
       individualChallengeParticipants: participants,
     },
   }
@@ -2977,6 +3100,7 @@ async function resolveIndividualChallengeForReply(req, parentMessage) {
       challengeDate: parentMessage.challengeDate || null,
       challengeState: parentMessage.challengeState || null,
       challengeCourse: parentMessage.challengeCourse || null,
+      challengeTeeColor: normalizeTeeColor(parentMessage.challengeTeeColor || DEFAULT_TEE_COLOR),
       individualChallengeParticipants: parentMessage.individualChallengeParticipants || [],
     },
   }
@@ -3062,6 +3186,7 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
       challengeDate: payload.challengeDate || null,
       challengeState: payload.challengeState || null,
       challengeCourse: payload.challengeCourse || null,
+      challengeTeeColor: payload.challengeTeeColor || DEFAULT_TEE_COLOR,
       messageType: payload.messageType,
       replyToMessageId: payload.replyToMessageId,
       bodyLength: payload.body.length,
@@ -3134,6 +3259,7 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
         challengeDate: teamContext?.challengeDate || null,
         challengeState: teamContext?.challengeState || null,
         challengeCourse: teamContext?.challengeCourse || null,
+        challengeTeeColor: teamContext?.challengeTeeColor || DEFAULT_TEE_COLOR,
         recipientEmail,
       })
     } else if (payload.messageType === 'individual_challenge') {
@@ -3149,6 +3275,7 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
         challengeDate: teamContext?.challengeDate || null,
         challengeState: teamContext?.challengeState || null,
         challengeCourse: teamContext?.challengeCourse || null,
+        challengeTeeColor: teamContext?.challengeTeeColor || DEFAULT_TEE_COLOR,
         recipientEmail,
       })
     }
@@ -3203,9 +3330,41 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
 })
 
 
+app.patch('/api/inbox/messages/:id/complete', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const completion = await resolveChallengeCompletionForUser(req.params.id, req.user)
+    if (completion.status !== 200) {
+      logApi('challenge_complete_denied', { ...requestContext(req), messageId: req.params.id, status: completion.status, reason: completion.body?.message || null })
+      return res.status(completion.status).json(completion.body)
+    }
+    const message = await storage.updateInboxChallengeStatus(completion.message.id, req.user, 'completed')
+    if (!message) {
+      logApi('challenge_complete_not_found', { ...requestContext(req), messageId: completion.message.id, threadId: completion.message.threadId || completion.message.id })
+      return res.status(404).json({ message: 'Challenge not found' })
+    }
+    logApi('challenge_completed', {
+      ...requestContext(req),
+      messageId: message.id,
+      threadId: message.threadId || null,
+      messageType: message.messageType,
+      challengeStatus: message.challengeStatus || 'completed',
+      createdByUserId: completion.message.senderUserId || null,
+      createdByEmail: completion.message.senderEmail || null,
+    })
+    res.json(message)
+  } catch (error) {
+    logRouteError('Challenge complete error', req, error)
+    res.status(500).json({ message: 'Could not complete challenge' })
+  }
+})
+
 app.patch('/api/inbox/messages/:id/challenge-status', requireStorage, authMiddleware, async (req, res) => {
   try {
     const status = normalizeChallengeStatus(req.body?.status)
+    if (status === 'completed') {
+      logApi('team_challenge_status_completed_rejected', { ...requestContext(req), messageId: req.params.id })
+      return res.status(400).json({ message: 'Use the complete challenge action to complete a challenge.' })
+    }
     const message = await storage.updateInboxChallengeStatus(req.params.id, req.user, status)
     if (!message) {
       logApi('team_challenge_status_not_found', { ...requestContext(req), messageId: req.params.id, requestedStatus: status })
@@ -3234,10 +3393,15 @@ app.patch('/api/inbox/messages/:id/team-score', requireStorage, authMiddleware, 
   try {
     const score = normalizeTeamChallengeScore(req.body?.score)
     const holes = normalizeTeamChallengeHoles(req.body?.holes)
+    const holeScoreSummary = summarizeProvidedHoleScores(holes)
     const participantMessage = await storage.getInboxMessageForParticipant(req.params.id, req.user)
     if (!participantMessage || participantMessage.messageType !== 'challenge_request') {
       logApi('team_challenge_score_not_found', { ...requestContext(req), messageId: req.params.id })
       return res.status(404).json({ message: 'Team Challenge not found' })
+    }
+    if (String(participantMessage.challengeStatus || '').toLowerCase() === 'completed') {
+      logApi('team_challenge_score_update_locked', { ...requestContext(req), messageId: req.params.id, threadId: participantMessage.threadId || participantMessage.id })
+      return res.status(409).json({ message: 'This challenge is complete, so scores are locked.' })
     }
     const userTeamIds = await resolveUserTeamIds(req.user)
     const side = userTeamChallengeSide(participantMessage, userTeamIds)
@@ -3257,6 +3421,8 @@ app.patch('/api/inbox/messages/:id/team-score', requireStorage, authMiddleware, 
       side,
       score,
       holeCount: Array.isArray(holes) ? holes.length : 0,
+      providedHoleCount: holeScoreSummary.providedHoleCount,
+      enteredStrokeTotal: holeScoreSummary.enteredStrokeTotal,
       proposerTeamId: message.proposerTeamId || null,
       challengedTeamId: message.challengedTeamId || null,
       proposerTeamScore: message.proposerTeamScore ?? null,
@@ -3278,10 +3444,15 @@ app.patch('/api/inbox/messages/:id/individual-score', requireStorage, authMiddle
   try {
     const score = normalizeIndividualChallengeScore(req.body?.score)
     const holes = normalizeTeamChallengeHoles(req.body?.holes)
+    const holeScoreSummary = summarizeProvidedHoleScores(holes)
     const participantMessage = await storage.getInboxMessageForParticipant(req.params.id, req.user)
     if (!participantMessage || participantMessage.messageType !== 'individual_challenge') {
       logApi('individual_challenge_score_not_found', { ...requestContext(req), messageId: req.params.id })
       return res.status(404).json({ message: 'Individual Challenge not found' })
+    }
+    if (String(participantMessage.challengeStatus || '').toLowerCase() === 'completed') {
+      logApi('individual_challenge_score_update_locked', { ...requestContext(req), messageId: req.params.id, threadId: participantMessage.threadId || participantMessage.id })
+      return res.status(409).json({ message: 'This challenge is complete, so scores are locked.' })
     }
     const participant = individualChallengeParticipantForUser(participantMessage, req.user)
     if (!participant) {
@@ -3300,6 +3471,8 @@ app.patch('/api/inbox/messages/:id/individual-score', requireStorage, authMiddle
       threadId: message.threadId || null,
       score,
       holeCount: Array.isArray(holes) ? holes.length : 0,
+      providedHoleCount: holeScoreSummary.providedHoleCount,
+      enteredStrokeTotal: holeScoreSummary.enteredStrokeTotal,
       participantCount: message.individualChallengeParticipants?.length || 0,
       soloScoreId: soloScore?.id || null,
     })
@@ -3333,15 +3506,46 @@ app.get('/api/users/lookup', requireStorage, authMiddleware, async (req, res) =>
   try {
     const email = String(req.query.email || '').trim()
     if (!email) return res.status(400).json({ message: 'email query parameter required' })
-    const found = await storage.findUserByEmail(email)
-    if (!found) return res.json({ found: false, email: normalizeEmail(email) })
+    const normalized = normalizeEmail(email)
+    logApi('team_member_lookup_started', { ...requestContext(req), email: normalized })
+    const found = await storage.findUserByEmail(normalized)
+    if (!found) {
+      logApi('team_member_lookup_not_found', { ...requestContext(req), email: normalized })
+      return res.json({ found: false, email: normalized })
+    }
     const parts = splitName(found.name, found.email)
-    res.json({ found: true, email: found.email, firstName: parts.firstName, name: found.name, verified: Boolean(found.emailVerified) })
+    logApi('team_member_lookup_found', { ...requestContext(req), email: found.email, verified: Boolean(found.emailVerified) })
+    res.json({ found: true, email: found.email, firstName: parts.firstName, lastName: parts.lastName, name: found.name, verified: Boolean(found.emailVerified) })
   } catch (error) {
     logRouteError('User lookup error', req, error)
     res.status(500).json({ message: 'Could not look up user' })
   }
 })
+
+async function hydrateTeamMembersFromDirectory(normalizedMembers, req, actionName) {
+  const hydrated = []
+  for (const member of normalizedMembers) {
+    if (!member.email) {
+      hydrated.push(member)
+      continue
+    }
+    const fallbackName = String(member.name || '').replace(/\s+/g, ' ').trim() || normalizeEmail(member.email).split('@')[0]
+    const found = await storage.findUserByEmail(member.email)
+    if (!found) {
+      const status = normalizeTeamMemberStatus(member.status || 'invited', false)
+      logApi(`${actionName}_member_directory_miss`, { ...requestContext(req), memberEmail: member.email, status })
+      hydrated.push({ ...member, name: fallbackName, status, verified: false })
+      continue
+    }
+    const parts = splitName(found.name, found.email)
+    const name = `${parts.firstName} ${parts.lastName}`.replace(/\s+/g, ' ').trim() || fallbackName || normalizeEmail(found.email).split('@')[0]
+    const verified = Boolean(found.emailVerified)
+    const status = normalizeTeamMemberStatus(verified ? 'active' : 'pending_verification', verified)
+    logApi(`${actionName}_member_directory_hydrated`, { ...requestContext(req), memberEmail: found.email, verified, status })
+    hydrated.push({ ...member, name, email: normalizeEmail(found.email), verified, status })
+  }
+  return hydrated
+}
 
 app.post('/api/invitations', requireStorage, authMiddleware, async (req, res) => {
   try {
@@ -3387,37 +3591,78 @@ app.get('/api/teams', requireStorage, authMiddleware, async (req, res) => {
 app.post('/api/teams', requireStorage, authMiddleware, async (req, res) => {
   try {
     const { name, members } = req.body || {}
-    const trimmed = String(name || '').trim()
-    if (!trimmed) return res.status(400).json({ message: 'Team name required' })
+    const trimmed = String(name || '').replace(/\s+/g, ' ').trim()
+    logApi('team_create_started', { ...requestContext(req), teamName: trimmed, requestedMemberCount: Array.isArray(members) ? members.length : 0 })
+    if (!trimmed) {
+      logApi('team_create_validation_failed', { ...requestContext(req), reason: 'missing_team_name' })
+      return res.status(400).json({ message: 'Team name required' })
+    }
 
-    const normalizedMembers = normalizeCreateTeamMembers(members, req.user)
+    let normalizedMembers = normalizeCreateTeamMembers(members, req.user)
+    normalizedMembers = await hydrateTeamMembersFromDirectory(normalizedMembers, req, 'team_create')
 
-    if (!normalizedMembers[0]?.email) return res.status(400).json({ message: 'The signed-in user must have an email to create a team' })
-    if (normalizedMembers.length < 2) return res.status(400).json({ message: 'A team must have at least 2 members' })
-    if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
+    if (!normalizedMembers[0]?.email) {
+      logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'missing_signed_in_email' })
+      return res.status(400).json({ message: 'The signed-in user must have an email to create a team' })
+    }
+    if (!isValidTeamSize(normalizedMembers.length)) {
+      logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'invalid_team_size', memberCount: normalizedMembers.length })
+      return res.status(400).json({ message: 'Teams can only have 2 to 5 team members.' })
+    }
 
     for (const m of normalizedMembers) {
-      if (!m.name) return res.status(400).json({ message: 'Each team member must have a name' })
-      if (!m.email) return res.status(400).json({ message: 'Each team member must have an email' })
-      if (!isEmail(m.email)) return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
+      if (!m.name) {
+        logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'missing_member_name', memberEmail: m.email })
+        return res.status(400).json({ message: 'Each team member must have a name' })
+      }
+      if (!m.email) {
+        logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'missing_member_email', memberName: m.name })
+        return res.status(400).json({ message: 'Each team member must have an email' })
+      }
+      if (!isEmail(m.email)) {
+        logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'invalid_member_email', memberEmail: m.email })
+        return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
+      }
     }
 
     const seen = new Set()
     for (const m of normalizedMembers) {
-      if (seen.has(m.email)) return res.status(400).json({ message: 'Duplicate team member email in the same team' })
+      if (seen.has(m.email)) {
+        logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'duplicate_member_email', memberEmail: m.email })
+        return res.status(400).json({ message: 'Duplicate team member email in the same team' })
+      }
       seen.add(m.email)
     }
 
-    const exists = await storage.getTeamByName(trimmed)
-    if (exists) return res.status(409).json({ message: 'Team already exists' })
+    const teams = await storage.listTeams()
+    const exists = teams.find((team) => String(team?.name || '').replace(/\s+/g, ' ').trim().toLowerCase() === trimmed.toLowerCase()) || null
+    if (exists) {
+      const suggestedTeamName = buildSuggestedTeamName(trimmed, teams)
+      const message = `Team name already exists`
+      logApi('team_create_duplicate_name', { ...requestContext(req), teamName: trimmed, existingTeamId: exists.id, suggestedTeamName })
+      return res.status(409).json({ message, suggestedTeamName })
+    }
 
-    const team = await storage.createTeam({ name: trimmed, members: normalizedMembers })
-    res.status(201).json(team)
+    try {
+      const team = await storage.createTeam({ name: trimmed, members: normalizedMembers })
+      logApi('team_created', { ...requestContext(req), teamId: team?.id || null, teamName: team?.name || trimmed, memberCount: normalizedMembers.length })
+      res.status(201).json(team)
+    } catch (error) {
+      if (/duplicate|ER_DUP_ENTRY|unique/i.test(String(error?.code || '') + ' ' + String(error?.message || ''))) {
+        const latestTeams = await storage.listTeams()
+        const suggestedTeamName = buildSuggestedTeamName(trimmed, latestTeams)
+        const message = `Team name already exists`
+        logApi('team_create_duplicate_name_race', { ...requestContext(req), teamName: trimmed, suggestedTeamName })
+        return res.status(409).json({ message, suggestedTeamName })
+      }
+      throw error
+    }
   } catch (error) {
     logRouteError('Create team error', req, error)
     res.status(500).json({ message: 'Could not create team' })
   }
 })
+
 
 app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
   try {
@@ -3425,44 +3670,125 @@ app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
     if (!id) return res.status(400).json({ message: 'Team id required' })
 
     const { name, members } = req.body || {}
-    const trimmed = String(name || '').trim()
-    if (!trimmed) return res.status(400).json({ message: 'Team name required' })
+    const trimmed = String(name || '').replace(/\s+/g, ' ').trim()
+    logApi('team_update_started', { ...requestContext(req), teamId: id, teamName: trimmed, requestedMemberCount: Array.isArray(members) ? members.length : 0 })
+    if (!trimmed) {
+      logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, reason: 'missing_team_name' })
+      return res.status(400).json({ message: 'Team name required' })
+    }
 
-    const normalizedMembers = normalizeCreateTeamMembers(members, req.user)
+    let normalizedMembers = normalizeCreateTeamMembers(members, req.user)
+    normalizedMembers = await hydrateTeamMembersFromDirectory(normalizedMembers, req, 'team_update')
 
-    if (!normalizedMembers[0]?.email) return res.status(400).json({ message: 'The signed-in user must have an email to create a team' })
-    if (normalizedMembers.length < 2) return res.status(400).json({ message: 'A team must have at least 2 members' })
-    if (normalizedMembers.length > 4) return res.status(400).json({ message: 'A team can have at most 4 members' })
+    if (!normalizedMembers[0]?.email) {
+      logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'missing_signed_in_email' })
+      return res.status(400).json({ message: 'The signed-in user must have an email to create a team' })
+    }
+    if (!isValidTeamSize(normalizedMembers.length)) {
+      logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'invalid_team_size', memberCount: normalizedMembers.length })
+      return res.status(400).json({ message: 'Teams can only have 2 to 5 team members.' })
+    }
 
     for (const m of normalizedMembers) {
-      if (!m.name) return res.status(400).json({ message: 'Each team member must have a name' })
-      if (!m.email) return res.status(400).json({ message: 'Each team member must have an email' })
-      if (!isEmail(m.email)) return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
+      if (!m.name) {
+        logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'missing_member_name', memberEmail: m.email })
+        return res.status(400).json({ message: 'Each team member must have a name' })
+      }
+      if (!m.email) {
+        logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'missing_member_email', memberName: m.name })
+        return res.status(400).json({ message: 'Each team member must have an email' })
+      }
+      if (!isEmail(m.email)) {
+        logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'invalid_member_email', memberEmail: m.email })
+        return res.status(400).json({ message: `Invalid team member email: ${m.email}` })
+      }
     }
 
     const seen = new Set()
     for (const m of normalizedMembers) {
-      if (seen.has(m.email)) return res.status(400).json({ message: 'Duplicate team member email in the same team' })
+      if (seen.has(m.email)) {
+        logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'duplicate_member_email', memberEmail: m.email })
+        return res.status(400).json({ message: 'Duplicate team member email in the same team' })
+      }
       seen.add(m.email)
     }
 
     const existing = await storage.getTeamById(id)
-    if (!existing) return res.status(404).json({ message: 'Team not found' })
+    if (!existing) {
+      logApi('team_update_not_found', { ...requestContext(req), teamId: id })
+      return res.status(404).json({ message: 'Team not found' })
+    }
 
-    const nameTaken = await storage.getTeamByName(trimmed)
-    if (nameTaken && String(nameTaken.id) !== id) return res.status(409).json({ message: 'Team name already exists' })
+    const teams = await storage.listTeams()
+    const nameTaken = teams.find((team) => String(team?.id) !== id && String(team?.name || '').replace(/\s+/g, ' ').trim().toLowerCase() === trimmed.toLowerCase()) || null
+    if (nameTaken) {
+      const suggestedTeamName = buildSuggestedTeamName(trimmed, teams, id)
+      const message = `Team name already exists`
+      logApi('team_update_duplicate_name', { ...requestContext(req), teamId: id, teamName: trimmed, existingTeamId: nameTaken.id, suggestedTeamName })
+      return res.status(409).json({ message, suggestedTeamName })
+    }
 
     const requesterEmail = normalizeEmail(req.user.email)
     const canEdit = (existing.members || []).some((m) => normalizeEmail(m.email) === requesterEmail)
-    if (!canEdit) return res.status(403).json({ message: 'Only team members can edit this team' })
+    if (!canEdit) {
+      logApi('team_update_forbidden', { ...requestContext(req), teamId: id, teamName: existing.name })
+      return res.status(403).json({ message: 'Only team members can edit this team' })
+    }
 
-    const updated = await storage.updateTeam(id, { name: trimmed, members: normalizedMembers })
-    res.json(updated)
+    try {
+      const updated = await storage.updateTeam(id, { name: trimmed, members: normalizedMembers })
+      logApi('team_updated', { ...requestContext(req), teamId: id, teamName: updated?.name || trimmed, memberCount: normalizedMembers.length })
+      res.json(updated)
+    } catch (error) {
+      if (/duplicate|ER_DUP_ENTRY|unique/i.test(String(error?.code || '') + ' ' + String(error?.message || ''))) {
+        const latestTeams = await storage.listTeams()
+        const suggestedTeamName = buildSuggestedTeamName(trimmed, latestTeams, id)
+        const message = `Team name already exists`
+        logApi('team_update_duplicate_name_race', { ...requestContext(req), teamId: id, teamName: trimmed, suggestedTeamName })
+        return res.status(409).json({ message, suggestedTeamName })
+      }
+      throw error
+    }
   } catch (error) {
     logRouteError('Update team error', req, error)
     res.status(500).json({ message: 'Could not update team' })
   }
 })
+
+app.delete('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!id) return res.status(400).json({ message: 'Team id required' })
+
+    logApi('team_delete_started', { ...requestContext(req), teamId: id })
+    const existing = await storage.getTeamById(id)
+    if (!existing) {
+      logApi('team_delete_not_found', { ...requestContext(req), teamId: id })
+      return res.status(404).json({ message: 'Team not found' })
+    }
+
+    const requesterEmail = normalizeEmail(req.user.email)
+    const canDelete = (existing.members || []).some((m) => normalizeEmail(m.email) === requesterEmail)
+    if (!canDelete) {
+      logApi('team_delete_forbidden', { ...requestContext(req), teamId: id, teamName: existing.name, requesterEmail })
+      return res.status(403).json({ message: 'Only team members can delete this team' })
+    }
+
+    const allScores = await storage.listScores()
+    const retainedLoggedEventsCount = (allScores || []).filter((score) => (
+      score?.mode === 'team'
+      && (String(score.team || '') === String(existing.name || '') || String(score.opponentTeam || '') === String(existing.name || ''))
+    )).length
+
+    await storage.deleteTeamById(id)
+    logApi('team_deleted', { ...requestContext(req), teamId: id, teamName: existing.name, retainedLoggedEventsCount })
+    res.json({ ok: true, deletedTeamId: id, retainedLoggedEventsCount })
+  } catch (error) {
+    logRouteError('Delete team error', req, error)
+    res.status(500).json({ message: 'Could not delete team' })
+  }
+})
+
 
 
 app.get('/api/scorecard-drafts', requireStorage, authMiddleware, async (req, res) => {
@@ -3568,6 +3894,18 @@ function coerceOptionalScoreNumber(value, fieldName) {
   return coerceScoreNumber(value, fieldName)
 }
 
+function countProvidedHoleScores(holes) {
+  if (!Array.isArray(holes)) return 0
+  return holes.filter((hole) => {
+    if (typeof hole === 'number') return Number.isFinite(hole)
+    if (!hole || typeof hole !== 'object') return false
+    if (Object.prototype.hasOwnProperty.call(hole, 'scoreProvided') || Object.prototype.hasOwnProperty.call(hole, 'score_provided')) {
+      return hole.scoreProvided === true || hole.scoreProvided === 1 || hole.scoreProvided === '1' || hole.scoreProvided === 'true' || hole.score_provided === true || hole.score_provided === 1 || hole.score_provided === '1' || hole.score_provided === 'true'
+    }
+    return Number.isFinite(Number(hole.score))
+  }).length
+}
+
 function sameTeamName(a, b) {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
 }
@@ -3583,6 +3921,19 @@ function findMatchingTeamRound(scores, { date, state, course, team, opponentTeam
     const normal = sameTeamName(entry.team, team) && sameTeamName(entry.opponentTeam, opponentTeam)
     const reversed = sameTeamName(entry.team, opponentTeam) && sameTeamName(entry.opponentTeam, team)
     return normal || reversed
+  }) || null
+}
+
+function findMatchingSoloRound(scores, { date, state, course, user }) {
+  const normalizedState = String(state || '').trim().toUpperCase()
+  const normalizedCourse = String(course || '').trim().toLowerCase()
+  return (scores || []).find((entry) => {
+    if (entry?.mode !== 'solo') return false
+    if (entry?.source === 'individual_challenge') return false
+    if (String(entry.date || '') !== String(date || '')) return false
+    if (String(entry.state || '').trim().toUpperCase() !== normalizedState) return false
+    if (String(entry.course || '').trim().toLowerCase() !== normalizedCourse) return false
+    return isScoreCreator(entry, user)
   }) || null
 }
 
@@ -3658,6 +4009,7 @@ async function buildUpdatedScorePayload(existing, body, req) {
   if (!matchedCourse) throw new Error('Select a golf course from the catalog for the selected state')
 
   const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
+  const teeColor = normalizeTeeColor(body.teeColor ?? body.tee_color ?? existing.teeColor ?? DEFAULT_TEE_COLOR)
 
   if (mode === 'solo') {
     const roundScore = coerceScoreNumber(body.roundScore ?? existing.roundScore, 'roundScore')
@@ -3668,6 +4020,7 @@ async function buildUpdatedScorePayload(existing, body, req) {
       state,
       course: matchedCourse.name,
       roundScore,
+      teeColor,
       team: null,
       opponentTeam: null,
       teamTotal: null,
@@ -3712,12 +4065,50 @@ async function buildUpdatedScorePayload(existing, body, req) {
     teamTotal,
     opponentTotal,
     roundScore: null,
+    teeColor,
     won,
     holes: body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes),
     opponentHoles: body.opponentHoles === undefined ? existing.opponentHoles : normalizeHoleScorePayload(body.opponentHoles),
     ...courseMetadata,
   }
 }
+
+app.get('/api/solo-round-score', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const context = {
+      date: String(req.query.date || '').trim(),
+      state: String(req.query.state || '').trim().toUpperCase(),
+      course: String(req.query.course || '').trim(),
+    }
+    if (!context.date || !context.state || !context.course) {
+      return res.status(400).json({ message: 'date, state, and course are required' })
+    }
+    if (!isValidPastOrTodayDate(context.date, req.headers['x-user-timezone'])) {
+      return res.status(400).json({ message: 'Date must be today or earlier in your local time zone' })
+    }
+
+    const matchedCourse = await findGolfCourseForState(context.state, context.course)
+    if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
+
+    const scores = await storage.listScores()
+    const entry = findMatchingSoloRound(scores, { ...context, course: matchedCourse.name, user: req.user })
+    const holes = Array.isArray(entry?.holes) ? entry.holes : null
+    const providedHoleCount = countProvidedHoleScores(holes)
+    logApi('solo_round_score_lookup_loaded', {
+      ...requestContext(req),
+      ...context,
+      course: matchedCourse.name,
+      scoreId: entry?.id || null,
+      providedHoleCount,
+      incomplete: providedHoleCount > 0 && providedHoleCount < 18,
+    })
+    res.json({ score: entry || null })
+  } catch (error) {
+    logRouteError('Solo round score lookup error', req, error)
+    res.status(500).json({ message: 'Could not load solo round score' })
+  }
+})
+
 
 app.get('/api/team-round-score', requireStorage, authMiddleware, async (req, res) => {
   try {
@@ -3781,8 +4172,10 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       const matchedCourse = await findGolfCourseForState(state, course)
       if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
+      const teeColor = normalizeTeeColor(body.teeColor || body.tee_color || DEFAULT_TEE_COLOR)
       const normalizedHoles = normalizeHoleScorePayload(holes)
       const holeScoreTotal = calculateHoleScoreTotal(normalizedHoles)
+      const providedHoleCount = countProvidedHoleScores(normalizedHoles)
       const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
       const entry = await storage.createScore({
         mode: 'solo',
@@ -3790,6 +4183,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
         state: String(state).toUpperCase(),
         course: matchedCourse.name,
         roundScore,
+        teeColor,
         holes: normalizedHoles,
         ...courseMetadata,
         createdByUserId: req.user.id,
@@ -3809,9 +4203,12 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
         scoreId: entry.id,
         course: matchedCourse.name,
         roundScore,
+        teeColor,
         courseRating: courseMetadata.courseRating,
         slopeRating: courseMetadata.slopeRating,
         holeCount: normalizedHoles?.length || 0,
+        providedHoleCount,
+        incomplete: providedHoleCount > 0 && providedHoleCount < 18,
         holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
       })
       return res.status(201).json(entry)
@@ -3845,6 +4242,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
     }
 
     const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
+    const teeColor = normalizeTeeColor(body.teeColor || body.tee_color || DEFAULT_TEE_COLOR)
     const { normalizedHoles, normalizedOpponentHoles } = await resolveTeamHolePayloads(req, {
       date,
       state: String(state).toUpperCase(),
@@ -3869,6 +4267,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       teamTotal: normalizedTeamTotal,
       opponentTotal: normalizedOpponentTotal,
       won,
+      teeColor,
       holes: normalizedHoles,
       opponentHoles: persistedOpponentHoles,
       ...courseMetadata,
@@ -3895,6 +4294,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       opponentTeam: String(opponentTeam).trim(),
       teamTotal: normalizedTeamTotal,
       opponentTotal: normalizedOpponentTotal,
+      teeColor,
       holeCount: normalizedHoles?.length || 0,
       opponentHoleCount: persistedOpponentHoles?.length || 0,
       holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
@@ -3925,6 +4325,9 @@ app.patch('/api/scores/:id', requireStorage, authMiddleware, async (req, res) =>
       course: updated?.course || updatedPayload.course,
       team: updated?.team || updatedPayload.team || null,
       opponentTeam: updated?.opponentTeam || updatedPayload.opponentTeam || null,
+      teeColor: updated?.teeColor || updatedPayload.teeColor || DEFAULT_TEE_COLOR,
+      providedHoleCount: countProvidedHoleScores(updated?.holes || updatedPayload.holes),
+      opponentProvidedHoleCount: countProvidedHoleScores(updated?.opponentHoles || updatedPayload.opponentHoles),
     })
     res.json(updated)
   } catch (error) {

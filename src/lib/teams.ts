@@ -13,7 +13,11 @@ export async function updateTeam(id: string, name: string, members: TeamMember[]
   return api<Team>(`/api/teams/${id}`, { method: 'PUT', body: JSON.stringify({ name, members }) })
 }
 
-export async function lookupUserByEmail(email: string): Promise<{ found: boolean; email: string; firstName?: string; name?: string; verified?: boolean }> {
+export async function deleteTeam(id: string): Promise<{ ok: boolean; deletedTeamId: string; retainedLoggedEventsCount: number }> {
+  return api(`/api/teams/${id}`, { method: 'DELETE' })
+}
+
+export async function lookupUserByEmail(email: string): Promise<{ found: boolean; email: string; firstName?: string; lastName?: string; name?: string; verified?: boolean }> {
   return api(`/api/users/lookup?email=${encodeURIComponent(email)}`)
 }
 

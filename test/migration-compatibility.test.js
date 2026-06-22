@@ -1,12 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 
 import { APP_MIGRATIONS } from '../server/migrations/index.js'
 
 function makeDb(existingColumns = [], invitationsExists = false, primaryKeyColumns = ['id'], existingIndexes = []) {
   const columnSet = new Set(existingColumns)
   return {
-    async execute(sql, params) {
+    async execute(sql, params = []) {
       if (sql.includes('information_schema.columns')) {
         const [, columnName] = params
         return [columnSet.has(columnName) ? [{}] : []]
@@ -33,22 +34,23 @@ function makeDb(existingColumns = [], invitationsExists = false, primaryKeyColum
   }
 }
 
-test('team member invites migration builds MySQL-compatible ALTER statements without IF NOT EXISTS', async () => {
+test('team member invites migration creates the invitations table with MySQL-compatible SQL', async () => {
   const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260403_006')
   const sql = await migration.getSql(makeDb())
 
-  assert.match(sql, /ALTER TABLE team_members ADD COLUMN user_id/)
-  assert.match(sql, /CREATE TABLE invitations/)
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS invitations/)
+  assert.match(sql, /invited_by_user_id VARCHAR\(191\) NULL/)
+  assert.match(sql, /invited_by_email VARCHAR\(191\) NOT NULL/)
+  assert.match(sql, /INDEX idx_invitations_email \(email\)/)
+  assert.match(sql, /INDEX idx_invitations_team_id \(team_id\)/)
   assert.doesNotMatch(sql, /ADD COLUMN IF NOT EXISTS/)
 })
 
-test('team member invites migration only includes missing schema changes', async () => {
+test('team member invites migration is satisfied once the invitations table exists', async () => {
   const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260403_006')
-  const sql = await migration.getSql(
-    makeDb(['user_id', 'invite_status', 'is_verified', 'invited_by_email', 'last_invited_at'], true)
-  )
 
-  assert.equal(sql, '')
+  assert.equal(await migration.isSatisfied(makeDb([], false)), false)
+  assert.equal(await migration.isSatisfied(makeDb([], true)), true)
 })
 
 
@@ -75,4 +77,15 @@ test('host account request migration is registered for production deployments', 
   assert.match(migrations, /host_account_requests/)
   assert.match(sql, /CREATE TABLE IF NOT EXISTS host_account_requests/)
   assert.match(sql, /idx_host_account_requests_status_created/)
+})
+
+test('app feature flags migration is registered with the profile social preferences flag disabled by default', async () => {
+  const migrations = await readFile(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const sql = await readFile(new URL('../migration_scripts/20260622_056_app_feature_flags.sql', import.meta.url), 'utf8')
+
+  assert.match(migrations, /20260622_056/)
+  assert.match(migrations, /app_feature_flags/)
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS app_feature_flags/)
+  assert.match(sql, /profileSocialPreferences/)
+  assert.match(sql, /VALUES \(\s*'profileSocialPreferences',\s*0,/)
 })

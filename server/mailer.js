@@ -1,4 +1,5 @@
 import { logSmtp, getCorrelationId } from './lib/logger.js'
+import { recordExternalApiCall } from './lib/external-api-metrics.js'
 import net from 'net'
 import tls from 'tls'
 
@@ -133,16 +134,26 @@ async function sendWithBrevoApi({ from, to, subject, text, html }) {
 
   logSmtp('smtp_api_send_started', { provider: 'brevo-api', correlationId: getCorrelationId(), sender: sender.email, to, subject })
 
-  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-      'api-key': apiKey,
-    },
-    body: JSON.stringify(payload),
-  })
+  const brevoEndpoint = '/v3/smtp/email'
+  const startedAt = Date.now()
+  let response
+  try {
+    response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify(payload),
+    })
+  } catch (error) {
+    await recordExternalApiCall({ apiType: 'brevo', endpoint: brevoEndpoint, method: 'POST', statusCode: null, ok: false, durationMs: Date.now() - startedAt })
+    logSmtp('smtp_api_send_failed', { provider: 'brevo-api', correlationId: getCorrelationId(), to, subject, error })
+    throw error
+  }
 
+  await recordExternalApiCall({ apiType: 'brevo', endpoint: brevoEndpoint, method: 'POST', statusCode: response.status, ok: response.ok, durationMs: Date.now() - startedAt })
 
   if (!response.ok) {
     const body = await response.text()

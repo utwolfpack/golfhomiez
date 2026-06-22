@@ -2,7 +2,7 @@
 
 make the requested changes along with any necessary test additions or changes to verify the requested functionality without breaking existing functionality not included in the requested changes: 
 
-if changes are made provide the changed files in a downloadable zip file and output directions on their paths in the application. create the necessary migration scripts to support schema changes made locally to deploy to a production environment and output the directions on how to implement them
+if changes are made provide the changed files in a downloadable zip file and output directions on their paths in the application. create the necessary migration scripts to support schema changes made locally to deploy to a production environment 
 
 if the changes made are around ports the application is running on, do not hardcode any port information in the application, use the .env file PORT variable to obtain the necessary port information
 

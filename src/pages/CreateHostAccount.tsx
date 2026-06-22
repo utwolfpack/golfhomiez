@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import PageHero from '../components/PageHero'
 import { US_STATES } from '../data/usStates'
 import { requestHostAccount } from '../lib/host-auth'
-import { api } from '../lib/api'
+import { golfCourseNames, searchGolfCourses } from '../lib/golf-courses'
 
 export default function CreateHostAccount() {
   const [firstName, setFirstName] = useState('')
@@ -29,7 +29,8 @@ export default function CreateHostAccount() {
 
     async function loadCourses() {
       try {
-        const names = await api<string[]>(`/api/golf-courses?state=${encodeURIComponent(state)}`)
+        const options = await searchGolfCourses({ state, limit: 100 })
+        const names = golfCourseNames(options)
         if (cancelled) return
         setCourses(names)
         setCourse((prev) => (prev && names.includes(prev) ? prev : (names[0] || '')))

@@ -1,7 +1,7 @@
 import type { ScoreEntry, SoloScoreEntry } from '../types'
-import { getCourseDetails } from '../data/courseDetails'
+import { getIncompleteRoundStatus } from './round-status'
 
-type RatingSource = 'saved' | 'catalog' | 'default' | 'missing'
+type RatingSource = 'saved' | 'missing'
 
 type HandicapRound = {
   id: string
@@ -72,27 +72,12 @@ function readFiniteNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null
 }
 
-function courseDetailsLooksDefault(score: any, details: ReturnType<typeof getCourseDetails>) {
-  if (!details) return false
-  const exactName = String(details.name || '').trim().toLowerCase() === String(score?.course || '').trim().toLowerCase()
-  return exactName && details.courseRating === 72 && details.slopeRating === 113
-}
-
 function resolveRoundRating(score: any) {
   const explicitCourseRating = readFiniteNumber(score?.courseRating)
   const explicitSlopeRating = readFiniteNumber(score?.slopeRating)
 
   if (explicitCourseRating != null && explicitSlopeRating != null && explicitSlopeRating > 0) {
     return { courseRating: explicitCourseRating, slopeRating: explicitSlopeRating, source: 'saved' as RatingSource }
-  }
-
-  const catalogDetails = getCourseDetails(String(score?.state || ''), String(score?.course || ''))
-  if (catalogDetails && Number.isFinite(catalogDetails.courseRating) && Number.isFinite(catalogDetails.slopeRating) && catalogDetails.slopeRating > 0) {
-    return {
-      courseRating: catalogDetails.courseRating,
-      slopeRating: catalogDetails.slopeRating,
-      source: courseDetailsLooksDefault(score, catalogDetails) ? 'default' as RatingSource : 'catalog' as RatingSource,
-    }
   }
 
   return null
@@ -107,7 +92,8 @@ function sortNewestFirst(scores: any[]) {
 }
 
 export function calculateHandicapFromScores(scores: ScoreEntry[]): HandicapStats {
-  const soloScores = sortNewestFirst(scores.filter(isSoloScore as any))
+  const allSoloScores = sortNewestFirst(scores.filter(isSoloScore as any))
+  const soloScores = allSoloScores.filter((score) => !getIncompleteRoundStatus(score).incomplete)
   const recentSoloScores = soloScores.slice(0, 20)
 
   const consideredRounds = recentSoloScores
@@ -153,7 +139,7 @@ export function calculateHandicapFromScores(scores: ScoreEntry[]): HandicapStats
   return {
     handicap: handicapResult.handicap,
     roundsUsed: ratedRounds.length,
-    soloRounds: soloScores.length,
+    soloRounds: allSoloScores.length,
     ratedRounds: ratedRounds.length,
     differentialsUsed: handicapResult.usedCount,
     adjustment: handicapResult.adjustment,

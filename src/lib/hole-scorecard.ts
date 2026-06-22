@@ -1,7 +1,9 @@
 import type { HoleScoreDetail } from '../types'
+import { normalizeTeeColor } from './tee-colors'
 
 const DEFAULT_PAR_VALUES = [3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5]
 const DEFAULT_STROKE_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+const EARTH_RADIUS_YARDS = 6967410
 
 function hashString(value: string) {
   let hash = 2166136261
@@ -41,26 +43,57 @@ function isProvided(value: unknown) {
   return value === true || value === 1 || value === '1' || value === 'true'
 }
 
-export function buildClientDefaultHoleScorecard(state = '', course = ''): HoleScoreDetail[] {
-  const random = createSeededRandom(`${String(state).toUpperCase()}|${course}`)
+function hasScoreProvidedFlag(record: Record<string, unknown>) {
+  return Object.prototype.hasOwnProperty.call(record, 'scoreProvided') || Object.prototype.hasOwnProperty.call(record, 'score_provided')
+}
+
+function finiteNumber(value: unknown) {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : null
+}
+
+export function calculateDistanceYards(latitudeA: unknown, longitudeA: unknown, latitudeB: unknown, longitudeB: unknown) {
+  const lat1 = finiteNumber(latitudeA)
+  const lon1 = finiteNumber(longitudeA)
+  const lat2 = finiteNumber(latitudeB)
+  const lon2 = finiteNumber(longitudeB)
+  if ([lat1, lon1, lat2, lon2].some((value) => value == null)) return null
+
+  const toRadians = (degrees: number) => degrees * Math.PI / 180
+  const dLat = toRadians((lat2 as number) - (lat1 as number))
+  const dLon = toRadians((lon2 as number) - (lon1 as number))
+  const startLat = toRadians(lat1 as number)
+  const endLat = toRadians(lat2 as number)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(startLat) * Math.cos(endLat) * Math.sin(dLon / 2) ** 2
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return Math.round(EARTH_RADIUS_YARDS * c)
+}
+
+export function buildClientDefaultHoleScorecard(state = '', course = '', teeColor = 'white'): HoleScoreDetail[] {
+  const selectedTeeColor = normalizeTeeColor(teeColor)
+  const random = createSeededRandom(`${String(state).toUpperCase()}|${course}|${selectedTeeColor}`)
   const strokeIndexes = shuffleWithRandom(DEFAULT_STROKE_INDEXES, random)
   return shuffleWithRandom(DEFAULT_PAR_VALUES, random).map((par, index) => ({
     hole: index + 1,
     par,
     yards: yardsForPar(par, random),
     strokeIndex: strokeIndexes[index] || index + 1,
+    teeColor: selectedTeeColor,
+    teeBoxType: selectedTeeColor,
     score: par,
     scoreProvided: false,
   }))
 }
 
-export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallbackCourse = ''): HoleScoreDetail[] {
-  if (!Array.isArray(holes)) return buildClientDefaultHoleScorecard(fallbackState, fallbackCourse)
+export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallbackCourse = '', fallbackTeeColor = 'white'): HoleScoreDetail[] {
+  if (!Array.isArray(holes)) return buildClientDefaultHoleScorecard(fallbackState, fallbackCourse, fallbackTeeColor)
+
+  const selectedTeeColor = normalizeTeeColor(fallbackTeeColor)
 
   const normalized = holes.slice(0, 18).map((hole, index) => {
     if (typeof hole === 'number') {
       const score = Number.isFinite(hole) ? Math.max(0, Math.trunc(hole)) : 0
-      return { hole: index + 1, par: 4, yards: 0, strokeIndex: index + 1, score, scoreProvided: true }
+      return { hole: index + 1, par: null, yards: null, strokeIndex: index + 1, teeColor: selectedTeeColor, teeBoxType: selectedTeeColor, distanceToFlagYards: null, score, scoreProvided: true }
     }
 
     const record = hole as Record<string, unknown>
@@ -68,28 +101,41 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
     const par = Number(record.par)
     const yards = Number(record.yards)
     const strokeIndex = Number(record.strokeIndex ?? record.stroke_index)
+    const distanceToFlagYards = Number(record.distanceToFlagYards ?? record.distance_to_flag_yards)
+    const teeColor = normalizeTeeColor(record.teeColor ?? record.tee_color ?? selectedTeeColor)
+    const teeBoxType = String(record.teeBoxType ?? record.tee_box_type ?? teeColor ?? '').trim() || teeColor
     const score = Number(record.score)
 
     return {
       hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
-      par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : 4,
-      yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : 0,
+      par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : null,
+      yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : null,
       strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : index + 1,
-      score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 4),
+      teeColor,
+      teeBoxType,
+      distanceToFlagYards: Number.isFinite(distanceToFlagYards) && distanceToFlagYards >= 0 ? Math.trunc(distanceToFlagYards) : null,
+      flagLatitude: Number.isFinite(Number(record.flagLatitude ?? record.flag_latitude)) ? Number(record.flagLatitude ?? record.flag_latitude) : null,
+      flagLongitude: Number.isFinite(Number(record.flagLongitude ?? record.flag_longitude)) ? Number(record.flagLongitude ?? record.flag_longitude) : null,
+      score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 0),
       scoreProvided: isProvided(record.scoreProvided ?? record.score_provided),
     }
   })
 
-  return normalized.length === 18 ? normalized : buildClientDefaultHoleScorecard(fallbackState, fallbackCourse)
+  return normalized.length ? normalized : buildClientDefaultHoleScorecard(fallbackState, fallbackCourse, selectedTeeColor)
 }
 
 function normalizePartialProvidedHoleScore(hole: unknown, index: number): HoleScoreDetail | null {
   if (typeof hole === 'number') {
     return {
       hole: index + 1,
-      par: 4,
-      yards: 0,
+      par: null,
+      yards: null,
       strokeIndex: index + 1,
+      teeColor: 'white',
+      teeBoxType: 'white',
+      distanceToFlagYards: null,
+      flagLatitude: null,
+      flagLongitude: null,
       score: Number.isFinite(hole) ? Math.max(0, Math.trunc(hole)) : 0,
       scoreProvided: true,
     }
@@ -101,16 +147,28 @@ function normalizePartialProvidedHoleScore(hole: unknown, index: number): HoleSc
   const par = Number(record.par)
   const yards = Number(record.yards)
   const strokeIndex = Number(record.strokeIndex ?? record.stroke_index)
+  const distanceToFlagYards = Number(record.distanceToFlagYards ?? record.distance_to_flag_yards)
+  const teeColor = normalizeTeeColor(record.teeColor ?? record.tee_color)
+  const teeBoxType = String(record.teeBoxType ?? record.tee_box_type ?? teeColor ?? '').trim() || teeColor
+  const flagLatitude = Number(record.flagLatitude ?? record.flag_latitude)
+  const flagLongitude = Number(record.flagLongitude ?? record.flag_longitude)
   const score = Number(record.score)
+  const scoreProvidedValue = record.scoreProvided ?? record.score_provided
 
   if (!Number.isFinite(holeNumber) || holeNumber < 1 || holeNumber > 18) return null
   if (!Number.isFinite(score) || score < 0) return null
+  if (hasScoreProvidedFlag(record) && !isProvided(scoreProvidedValue)) return null
 
   return {
     hole: Math.trunc(holeNumber),
-    par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : 4,
-    yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : 0,
+    par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : null,
+    yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : null,
     strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : Math.trunc(holeNumber),
+    teeColor,
+    teeBoxType,
+    distanceToFlagYards: Number.isFinite(distanceToFlagYards) && distanceToFlagYards >= 0 ? Math.trunc(distanceToFlagYards) : null,
+    flagLatitude: Number.isFinite(flagLatitude) ? flagLatitude : null,
+    flagLongitude: Number.isFinite(flagLongitude) ? flagLongitude : null,
     score: Math.max(0, Math.trunc(score)),
     scoreProvided: true,
   }
@@ -130,9 +188,14 @@ export function mergeProvidedHoleScores(baseHoles: HoleScoreDetail[], savedHoles
     if (!saved) return hole
     return {
       ...hole,
-      par: Number.isFinite(saved.par) && saved.par > 0 ? saved.par : hole.par,
-      yards: Number.isFinite(saved.yards) && saved.yards > 0 ? saved.yards : hole.yards,
-      strokeIndex: Number.isFinite(saved.strokeIndex) && saved.strokeIndex > 0 ? saved.strokeIndex : hole.strokeIndex,
+      par: Number.isFinite(Number(saved.par)) && Number(saved.par) > 0 ? saved.par : hole.par,
+      yards: Number.isFinite(Number(saved.yards)) && Number(saved.yards) > 0 ? saved.yards : hole.yards,
+      strokeIndex: Number.isFinite(saved.strokeIndex) && Number(saved.strokeIndex) > 0 ? saved.strokeIndex : hole.strokeIndex,
+      teeColor: saved.teeColor || hole.teeColor,
+      teeBoxType: saved.teeBoxType || hole.teeBoxType,
+      distanceToFlagYards: Number.isFinite(saved.distanceToFlagYards) && Number(saved.distanceToFlagYards) >= 0 ? saved.distanceToFlagYards : hole.distanceToFlagYards,
+      flagLatitude: Number.isFinite(Number(saved.flagLatitude)) ? saved.flagLatitude : hole.flagLatitude,
+      flagLongitude: Number.isFinite(Number(saved.flagLongitude)) ? saved.flagLongitude : hole.flagLongitude,
       score: Number.isFinite(saved.score) && saved.score >= 0 ? saved.score : hole.score,
       scoreProvided: true,
     }
@@ -162,7 +225,10 @@ export function holeScoreTotal(holes: HoleScoreDetail[]) {
 }
 
 export function holeParTotal(holes: HoleScoreDetail[]) {
-  return holes.reduce((sum, hole) => sum + (Number.isFinite(hole.par) ? hole.par : 0), 0)
+  return holes.reduce((sum, hole) => {
+    const par = Number(hole.par)
+    return sum + (Number.isFinite(par) ? par : 0)
+  }, 0)
 }
 
 export function holeScoreRelativeToPar(hole: Pick<HoleScoreDetail, 'par' | 'score'>) {
