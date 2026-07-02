@@ -111,7 +111,7 @@ function SummaryCards({ portal, onOpenDetails }: { portal: PortalState | null; o
 function apiTypeLabel(apiType?: string) {
   const normalized = String(apiType || '').toLowerCase()
   if (normalized === 'brevo') return 'Brevo'
-  if (normalized === 'golfbert') return 'Golfbert'
+  if (normalized === 'opengolfapi') return 'OpenGolfAPI'
   if (normalized === 'other') return 'Other external APIs'
   return 'All external APIs'
 }
@@ -119,7 +119,7 @@ function apiTypeLabel(apiType?: string) {
 function apiTypePillClass(apiType?: string) {
   const normalized = String(apiType || '').toLowerCase()
   if (normalized === 'brevo') return 'pill adminApiTypePill adminApiTypePill--brevo'
-  if (normalized === 'golfbert') return 'pill adminApiTypePill adminApiTypePill--golfbert'
+  if (normalized === 'opengolfapi') return 'pill adminApiTypePill adminApiTypePill--opengolfapi'
   return 'pill adminApiTypePill adminApiTypePill--other'
 }
 
@@ -198,7 +198,7 @@ function ExternalApiCallsSection({
           <select className="select" value={filters.apiType || ''} onChange={(event) => onFilterChange({ ...filters, apiType: event.target.value })}>
             <option value="">All external APIs</option>
             <option value="brevo">Brevo</option>
-            <option value="golfbert">Golfbert</option>
+            <option value="opengolfapi">OpenGolfAPI</option>
             <option value="other">Other external APIs</option>
           </select>
         </div>

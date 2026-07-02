@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
-import { golfCourseNames, searchGolfCourses } from '../lib/golf-courses'
-import { US_STATES } from '../data/usStates'
+import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { useNavigate } from 'react-router-dom'
 import { getUserTodayISO } from '../lib/date'
 import HoleByHoleScorecard from '../components/HoleByHoleScorecard'
 import type { PendingHoleScoreSaveHandler } from '../components/HoleByHoleScorecard'
 import TeeColorSelector from '../components/TeeColorSelector'
-import { buildClientDefaultHoleScorecard, holeScoreTotal, mergeProvidedHoleScores, normalizeHoleScorecard } from '../lib/hole-scorecard'
+import GolfCourseInput from '../components/GolfCourseInput'
+import { buildClientDefaultHoleScorecard, mergeProvidedHoleScores, normalizeHoleScorecard, providedHoleScoreTotal } from '../lib/hole-scorecard'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import type { HoleScoreDetail, SoloScoreEntry } from '../types'
 import type { TeeColorSelection } from '../lib/tee-colors'
@@ -35,9 +35,7 @@ function getProvidedHoleCount(holes: HoleScoreDetail[]) {
 }
 
 function getProvidedHoleScoreTotal(holes: HoleScoreDetail[]) {
-  return holes
-    .filter((hole) => hole.scoreProvided)
-    .reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
+  return providedHoleScoreTotal(holes)
 }
 
 function buildSoloRoundMissingFields({ date, today, state, course, scoreValue, requireManualRoundScore }: { date: string; today: string; state: string; course: string; scoreValue: unknown; requireManualRoundScore: boolean }) {
@@ -61,6 +59,8 @@ export default function SoloLogger() {
   const [date, setDate] = useState(() => getUserTodayISO())
   const [state, setState] = useState('UT')
   const [course, setCourse] = useState('')
+  const [courseId, setCourseId] = useState('')
+  const [courseSearch, setCourseSearch] = useState('')
   const [teeColor, setTeeColor] = useState<TeeColorSelection>('')
   const [roundScore, setRoundScore] = useState<string>('')
   const [useHoles, setUseHoles] = useState(true)
@@ -76,38 +76,27 @@ export default function SoloLogger() {
 
   const pendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
 
-  const [courses, setCourses] = useState<string[]>([])
-  const holesTotal = useMemo(() => holeScoreTotal(holes), [holes])
+  const { states: stateOptions, loading: statesLoading, error: statesError } = useGolfCourseStates()
   const providedHoleCount = useMemo(() => getProvidedHoleCount(holes), [holes])
-  const providedHoleScoreTotal = useMemo(() => getProvidedHoleScoreTotal(holes), [holes])
+  const currentHoleScoreTotal = useMemo(() => getProvidedHoleScoreTotal(holes), [holes])
+  const soloScorecardSetupReady = useMemo(() => Boolean(useHoles && state && course.trim() && teeColor), [useHoles, state, course, teeColor])
   const roundContextLocked = useMemo(() => useHoles && holes.some((hole) => hole.scoreProvided), [useHoles, holes])
-  const incompleteRoundLabel = providedHoleCount > 0 && providedHoleCount < 18 ? `${providedHoleCount} of 18 holes saved` : ''
+  const totalHoleCount = useMemo(() => Math.max(1, Math.min(18, holes.length || 18)), [holes])
+  const incompleteRoundLabel = providedHoleCount > 0 && providedHoleCount < totalHoleCount ? `${providedHoleCount} of ${totalHoleCount} holes saved` : ''
 
   useEffect(() => {
     if (!useHoles) return
-    setRoundScore(String(providedHoleCount > 0 ? providedHoleScoreTotal : holesTotal))
-  }, [useHoles, holesTotal, providedHoleCount, providedHoleScoreTotal])
+    setRoundScore(String(currentHoleScoreTotal))
+  }, [useHoles, currentHoleScoreTotal])
 
   useEffect(() => {
-    let cancelled = false
-
-    async function loadCourses() {
-      try {
-        const options = await searchGolfCourses({ state, limit: 100 })
-        const names = golfCourseNames(options)
-        if (cancelled) return
-        setCourses(names)
-        setCourse(prev => (prev && names.includes(prev) ? prev : (names[0] || '')))
-      } catch {
-        if (cancelled) return
-        setCourses([])
-        setCourse('')
-      }
+    if (stateOptions.length && !stateOptions.some(option => option.abbr === state)) {
+      setState(stateOptions[0].abbr)
+      setCourse('')
+      setCourseId('')
+      setCourseSearch('')
     }
-
-    loadCourses()
-    return () => { cancelled = true }
-  }, [state])
+  }, [stateOptions, state])
 
   useEffect(() => {
     if (!user || !date || !state || !course) {
@@ -122,7 +111,8 @@ export default function SoloLogger() {
     async function loadExistingSoloRound() {
       try {
         const params = new URLSearchParams({ date, state, course })
-        logFrontendEvent({ category: 'solo.round.progress', message: 'existing_round_lookup_started', data: { correlationId, date, state, course } })
+        if (courseId) params.set('courseId', courseId)
+        logFrontendEvent({ category: 'solo.round.progress', message: 'existing_round_lookup_started', data: { correlationId, date, state, course, courseId } })
         const result = await api<ExistingSoloRoundResponse>(`/api/solo-round-score?${params.toString()}`)
         if (cancelled) return
 
@@ -139,13 +129,13 @@ export default function SoloLogger() {
           setPersistedSoloHoles(null)
         }
 
-        logFrontendEvent({ category: 'solo.round.progress', message: 'existing_round_lookup_succeeded', data: { correlationId, date, state, course, scoreId: score?.id || null, restoredHoleCount: storedHoles?.filter((hole: any) => Boolean(hole?.scoreProvided ?? hole?.score_provided)).length || 0 } })
+        logFrontendEvent({ category: 'solo.round.progress', message: 'existing_round_lookup_succeeded', data: { correlationId, date, state, course, courseId, scoreId: score?.id || null, restoredHoleCount: storedHoles?.filter((hole: any) => Boolean(hole?.scoreProvided ?? hole?.score_provided)).length || 0 } })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : 'Could not check for saved round progress.'
         setPersistedSoloScoreId(null)
         setPersistedSoloHoles(null)
-        logFrontendEvent({ category: 'solo.round.progress', level: 'warn', message: 'existing_round_lookup_failed', data: { correlationId, date, state, course, error: message } })
+        logFrontendEvent({ category: 'solo.round.progress', level: 'warn', message: 'existing_round_lookup_failed', data: { correlationId, date, state, course, courseId, error: message } })
       }
     }
 
@@ -162,38 +152,33 @@ export default function SoloLogger() {
     requireManualRoundScore: !useHoles,
   }), [date, today, state, course, roundScore, useHoles])
 
-  function resetSoloLoggerPage() {
-    setDate(getUserTodayISO())
-    setState('UT')
-    setCourse('')
-    setRoundScore('')
-    setTeeColor('')
-    setUseHoles(true)
-    setHoles(buildClientDefaultHoleScorecard('UT', '', DEFAULT_TEE_COLOR))
-    setPersistedSoloScoreId(null)
-    setPersistedSoloHoles(null)
-    setError(null)
-    setShowValidation(false)
+  async function cancelSoloRoundRecords() {
+    if (!useHoles || !date || !state || !course) return null
+    const params = new URLSearchParams({ mode: 'solo', date, state, course })
+    if (courseId) params.set('courseId', courseId)
+    if (persistedSoloScoreId) params.set('scoreId', persistedSoloScoreId)
+    return api(`/api/scores/cancel-round?${params.toString()}`, { method: 'DELETE' })
   }
 
   async function clearSoloDraft() {
-    if (!useHoles || !date || !state || !course) return
-    const params = new URLSearchParams({ mode: 'solo', date, state, course })
-    await api(`/api/scorecard-drafts?${params.toString()}`, { method: 'DELETE' })
+    if (!useHoles || !date || !state || !course) return null
+    const params = new URLSearchParams({ mode: 'solo', date, state, course, scoringSide: 'team' })
+    const correlationId = getCorrelationId()
+    logFrontendEvent({ category: 'solo.round.progress', message: 'draft_clear_started_after_progress_save', data: { correlationId, date, state, course, courseId } })
+    const result = await api(`/api/scorecard-drafts?${params.toString()}`, { method: 'DELETE' })
+    logFrontendEvent({ category: 'solo.round.progress', message: 'draft_clear_succeeded_after_progress_save', data: { correlationId, date, state, course, courseId, result } })
+    return result
   }
 
   async function handleCancelRound() {
     const correlationId = getCorrelationId()
     setCanceling(true)
     setError(null)
-    logFrontendEvent({ category: 'solo.round.cancel', message: 'started', data: { correlationId, date, state, course, teeColor, useHoles, savedHoleCount: providedHoleCount, scoreId: persistedSoloScoreId, roundActionSummaryVisible: true, savedHolesSummaryVisible: false } })
+    logFrontendEvent({ category: 'solo.round.cancel', message: 'started', data: { correlationId, date, state, course, courseId, teeColor, useHoles, savedHoleCount: providedHoleCount, scoreId: persistedSoloScoreId, roundActionSummaryVisible: false, savedHolesSummaryVisible: false } })
     try {
-      await clearSoloDraft()
-      if (persistedSoloScoreId) {
-        await api(`/api/scores/${encodeURIComponent(persistedSoloScoreId)}`, { method: 'DELETE' })
-      }
-      resetSoloLoggerPage()
-      logFrontendEvent({ category: 'solo.round.cancel', message: 'succeeded', data: { correlationId, scoreId: persistedSoloScoreId } })
+      const cancelResult = await cancelSoloRoundRecords()
+      logFrontendEvent({ category: 'solo.round.cancel', message: 'succeeded', data: { correlationId, scoreId: persistedSoloScoreId, cancelResult } })
+      nav('/my-golf-scores')
     } catch (e: any) {
       const message = e?.message || 'Could not cancel this round.'
       logFrontendEvent({ category: 'solo.round.cancel', level: 'error', message: 'failed', data: { correlationId, scoreId: persistedSoloScoreId, error: message } })
@@ -207,7 +192,7 @@ export default function SoloLogger() {
     const correlationId = getCorrelationId()
     setClosing(true)
     setError(null)
-    logFrontendEvent({ category: 'solo.round.close', message: 'started', data: { correlationId, date, state, course, teeColor, scoreId: persistedSoloScoreId, savedHoleCount: providedHoleCount, incomplete: Boolean(incompleteRoundLabel), pendingHoleFlushRegistered: Boolean(pendingHoleSaveRef.current), roundActionSummaryVisible: true, savedHolesSummaryVisible: false } })
+    logFrontendEvent({ category: 'solo.round.close', message: 'started', data: { correlationId, date, state, course, courseId, teeColor, scoreId: persistedSoloScoreId, savedHoleCount: providedHoleCount, incomplete: Boolean(incompleteRoundLabel), pendingHoleFlushRegistered: Boolean(pendingHoleSaveRef.current), roundActionSummaryVisible: false, savedHolesSummaryVisible: false } })
     try {
       const pendingSaveResult = useHoles && pendingHoleSaveRef.current
         ? await pendingHoleSaveRef.current('solo_close_button')
@@ -259,13 +244,14 @@ export default function SoloLogger() {
     }
 
     setSaving(true)
-    logFrontendEvent({ category: 'solo.round.progress', message: 'hole_progress_save_started', data: { correlationId, date, state, course, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), scoreId: persistedSoloScoreId, hole: savedHole.hole, savedHoleCount: nextProvidedHoleCount, roundScore: scoreNum, derivedRoundScoreFromHoles: true } })
+    logFrontendEvent({ category: 'solo.round.progress', message: 'hole_progress_save_started', data: { correlationId, date, state, course, courseId, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), scoreId: persistedSoloScoreId, hole: savedHole.hole, savedHoleCount: nextProvidedHoleCount, roundScore: scoreNum, derivedRoundScoreFromHoles: true } })
     try {
       const payload = {
         mode: 'solo',
         date,
         state,
         course,
+        courseId,
         teeColor: effectiveTeeColor,
         roundScore: scoreNum,
         holes: nextHoles,
@@ -283,7 +269,7 @@ export default function SoloLogger() {
         const message = draftError instanceof Error ? draftError.message : 'Could not clear solo draft after progress save.'
         logFrontendEvent({ category: 'solo.round.progress', level: 'warn', message: 'draft_clear_failed_after_progress_save', data: { correlationId, scoreId: savedScore.id, error: message } })
       }
-      logFrontendEvent({ category: 'solo.round.progress', message: 'hole_progress_save_succeeded', data: { correlationId, scoreId: savedScore.id, hole: savedHole.hole, savedHoleCount: nextProvidedHoleCount, roundScore: scoreNum, derivedRoundScoreFromHoles: true, incomplete: nextProvidedHoleCount > 0 && nextProvidedHoleCount < 18 } })
+      logFrontendEvent({ category: 'solo.round.progress', message: 'hole_progress_save_succeeded', data: { correlationId, scoreId: savedScore.id, hole: savedHole.hole, savedHoleCount: nextProvidedHoleCount, totalHoleCount: nextHoles.length || totalHoleCount, roundScore: scoreNum, derivedRoundScoreFromHoles: true, incomplete: nextProvidedHoleCount > 0 && nextProvidedHoleCount < (nextHoles.length || totalHoleCount) } })
     } catch (e: any) {
       const message = e?.message || 'Failed to save round progress.'
       logFrontendEvent({ category: 'solo.round.progress', level: 'error', message: 'hole_progress_save_failed', data: { correlationId, scoreId: persistedSoloScoreId, hole: savedHole.hole, error: message } })
@@ -297,7 +283,6 @@ export default function SoloLogger() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <h1 className="pageSimpleTitle">Solo Round</h1>
         {!user ? (
           <div className="small" style={{ marginTop: 10 }}>
             You’re not logged in. Please login to log rounds.
@@ -305,7 +290,7 @@ export default function SoloLogger() {
         ) : null}
 
         <form onSubmit={(event) => event.preventDefault()} style={{ marginTop: 14 }}>
-          {roundContextLocked ? null : (
+          {soloScorecardSetupReady ? null : (
             <div className="grid grid3" style={{ gap: 12 }}>
               <div>
                 <label className="label">Date</label>
@@ -314,19 +299,40 @@ export default function SoloLogger() {
 
               <div>
                 <label className="label">State</label>
-                <select className="input" value={state} onChange={e => { setState(e.target.value); setCourse('') }}>
-                  {US_STATES.map(s => (
+                <select className="input" value={state} onChange={e => { setState(e.target.value); setCourse(''); setCourseId(''); setCourseSearch('') }} disabled={statesLoading && !stateOptions.length}>
+                  {!stateOptions.length ? <option value={state}>{statesLoading ? 'Loading golf course states…' : (state || 'No golf course states available')}</option> : null}
+                  {stateOptions.map(s => (
                     <option key={s.abbr} value={s.abbr}>{s.name}</option>
                   ))}
                 </select>
+                {statesError ? <div className="small">{statesError}</div> : null}
               </div>
 
               <div>
-                <label className="label">Course</label>
-                <select className="input" value={course} onChange={e => setCourse(e.target.value)} disabled={!courses.length}>
-                  {!courses.length ? <option value="">No courses available</option> : null}
-                  {courses.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <GolfCourseInput
+                  label="Course"
+                  state={state}
+                  searchValue={courseSearch}
+                  selectedCourseName={course}
+                  selectedCourseId={courseId}
+                  onSearchChange={(next) => {
+                    setCourseSearch(next)
+                    setCourse('')
+                    setCourseId('')
+                  }}
+                  onCourseSelected={(selected) => {
+                    setCourseId(selected.id || '')
+                    setCourse(selected.name || '')
+                    setCourseSearch(selected.name || '')
+                  }}
+                  placeholder="Search courses in the selected state"
+                  helperText="Search checks every available course for the selected state."
+                  inputId="soloRoundCourseSearch"
+                  enableNearestDefault
+                  onStateChange={setState}
+                  disabled={roundContextLocked}
+                  required
+                />
               </div>
 
               <TeeColorSelector value={teeColor} onChange={setTeeColor} label="Tees played" />
@@ -349,9 +355,10 @@ export default function SoloLogger() {
           )}
 
           <HoleByHoleScorecard
-            enabled={useHoles}
+            enabled={soloScorecardSetupReady}
             stateCode={state}
             course={course}
+            courseId={courseId}
             holes={holes}
             onChange={setHoles}
             onHoleSaved={handleSoloHoleSaved}
@@ -365,17 +372,6 @@ export default function SoloLogger() {
           {incompleteRoundLabel ? <div className="roundIncompleteBadge soloIncompleteRoundBadge" style={{ marginTop: 10 }}>Incomplete round • {incompleteRoundLabel}</div> : null}
           {showValidation && missingFields.length ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
           {error ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>{error}</div> : null}
-
-          <div className="soloLockedRoundSummary soloRoundActionSummary" aria-label="Selected round details">
-            <div className="roundSummaryDate">
-              <span>Date</span>
-              <strong>{date}</strong>
-            </div>
-            <div className="roundSummaryCourse">
-              <span>Course</span>
-              <strong>{course || 'Selected course'}</strong>
-            </div>
-          </div>
 
           <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
             <button className="btnPrimary" type="button" disabled={saving || canceling || closing} onClick={handleCloseRound}>

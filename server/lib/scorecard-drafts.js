@@ -87,7 +87,7 @@ export function normalizeDraftHole(input = {}) {
     hole: Math.trunc(holeNumber),
     par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : null,
     yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : null,
-    strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : Math.trunc(holeNumber),
+    strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : null,
     score: Math.max(0, Math.trunc(score)),
     scoreProvided: true,
   }
@@ -98,7 +98,7 @@ export function mapDraftHole(row = {}) {
     hole: Number(row.hole_number),
     par: row.par == null ? null : Number(row.par),
     yards: row.yards == null ? null : Number(row.yards),
-    strokeIndex: row.stroke_index == null ? Number(row.hole_number) : Number(row.stroke_index),
+    strokeIndex: row.stroke_index == null ? null : Number(row.stroke_index),
     score: Number(row.score),
     scoreProvided: Boolean(row.score_provided),
     updatedAt: row.updated_at || row.created_at || null,

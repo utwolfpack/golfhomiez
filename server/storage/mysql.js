@@ -443,6 +443,8 @@ function mapInboxMessage(row) {
     challengeState: row.challenge_state || null,
     challengeCourse: row.challenge_course || null,
     challengeTeeColor: hasColumn(row, 'challenge_tee_color') ? (row.challenge_tee_color || 'white') : 'white',
+    challengeScoringType: hasColumn(row, 'challenge_scoring_type') ? (row.challenge_scoring_type || 'stroke_play') : 'stroke_play',
+    challengePointsPerHole: hasColumn(row, 'challenge_points_per_hole') ? (row.challenge_points_per_hole ?? null) : null,
     proposerTeamScore: row.proposer_team_score ?? null,
     challengedTeamScore: row.challenged_team_score ?? null,
     proposerTeamHoles: parseJsonArray(row.proposer_team_holes_json),
@@ -541,8 +543,8 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
   const resolvedThreadId = threadId || id
   await db.execute(
     `INSERT INTO inbox_messages
-      (id, thread_id, parent_message_id, message_type, sender_user_id, sender_email, sender_name, recipient_user_id, recipient_email, proposer_team_id, proposer_team_name, challenged_team_id, challenged_team_name, challenge_status, challenge_date, challenge_state, challenge_course, challenge_tee_color, proposer_team_score, challenged_team_score, proposer_team_holes_json, challenged_team_holes_json, individual_participants_json, message_body, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      (id, thread_id, parent_message_id, message_type, sender_user_id, sender_email, sender_name, recipient_user_id, recipient_email, proposer_team_id, proposer_team_name, challenged_team_id, challenged_team_name, challenge_status, challenge_date, challenge_state, challenge_course, challenge_tee_color, challenge_scoring_type, challenge_points_per_hole, proposer_team_score, challenged_team_score, proposer_team_holes_json, challenged_team_holes_json, individual_participants_json, message_body, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       id,
       resolvedThreadId,
@@ -562,6 +564,8 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
       teamContext?.challengeState || null,
       teamContext?.challengeCourse || null,
       teamContext?.challengeTeeColor || 'white',
+      teamContext?.challengeScoringType || 'stroke_play',
+      teamContext?.challengePointsPerHole ?? null,
       teamContext?.proposerTeamScore ?? null,
       teamContext?.challengedTeamScore ?? null,
       teamContext?.proposerTeamHoles ? JSON.stringify(teamContext.proposerTeamHoles) : null,

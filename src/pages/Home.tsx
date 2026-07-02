@@ -6,7 +6,7 @@ import HandicapBreakdownModal from '../components/HandicapBreakdownModal'
 import HandicapSummaryCard from '../components/HandicapSummaryCard'
 import StatCard from '../components/StatCard'
 import { useAuth } from '../context/AuthContext'
-import { US_STATES } from '../data/usStates'
+import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { api } from '../lib/api'
 import { GUEST_HOME_EMAIL, GUEST_HOME_SCORES } from '../lib/dashboardSample'
 import { jumpToFirstByLetter } from '../lib/selectHotkey'
@@ -135,6 +135,7 @@ export default function Home() {
 
   const [view, setView] = useState<'all' | 'team' | 'solo'>('all')
   const [stateFilter, setStateFilter] = useState('UT')
+  const { states: apiStateOptions } = useGolfCourseStates()
   const [courseFilter, setCourseFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
 
@@ -177,7 +178,7 @@ export default function Home() {
     return userScores.filter((s) => (view === 'all' ? true : view === 'solo' ? isSoloScore(s) : isTeamChallengeScore(s)))
   }, [userScores, view])
 
-  const nameByAbbr = useMemo(() => new Map(US_STATES.map((s) => [s.abbr, s.name])), [])
+  const nameByAbbr = useMemo(() => new Map(apiStateOptions.map((s) => [s.abbr, s.name])), [apiStateOptions])
   const stateOptions = useMemo(() => {
     const fromLogs = scopedScores.map((s) => String((s as any).state || '').toUpperCase()).filter(Boolean)
     const unique = Array.from(new Set(fromLogs))

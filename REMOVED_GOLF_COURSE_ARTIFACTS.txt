@@ -1,7 +1,0 @@
-server/course-data.js
-server/lib/course-catalog.js
-server/scripts/import-golf-courses.js
-src/data/coursesByState.ts
-src/data/courseDetails.ts
-src/data/utahCourses.ts
-opengolfapi-us.courses.042026.csv

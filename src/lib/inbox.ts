@@ -2,6 +2,7 @@ import { api } from './api'
 import { logFrontendEvent } from './frontend-logger'
 import { requestJson } from './request'
 import type { HoleScoreDetail, ScoreEntry } from '../types'
+import type { TeamChallengeScoringType } from './team-challenge-scoring'
 
 export type InboxMessageType = 'message' | 'challenge_request' | 'individual_challenge'
 export type TeamChallengeStatus = 'proposed' | 'accepted' | 'declined' | 'completed'
@@ -34,6 +35,8 @@ export type InboxMessage = {
   challengeState?: string | null
   challengeCourse?: string | null
   challengeTeeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
+  challengeScoringType?: TeamChallengeScoringType | string | null
+  challengePointsPerHole?: number | null
   proposerTeamScore?: number | null
   challengedTeamScore?: number | null
   proposerTeamHoles?: HoleScoreDetail[] | null
@@ -74,6 +77,8 @@ export type SendInboxMessageInput = {
   challengeState?: string | null
   challengeCourse?: string | null
   challengeTeeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
+  challengeScoringType?: TeamChallengeScoringType | string | null
+  challengePointsPerHole?: number | string | null
   individualParticipantEmails?: string[]
 }
 

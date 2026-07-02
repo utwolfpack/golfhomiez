@@ -5,7 +5,16 @@ export type HoleScoreDetail = {
   strokeIndex: number | null
   teeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   teeBoxType?: string | null
+  distanceToFrontYards?: number | null
+  distanceToCenterYards?: number | null
+  distanceToBackYards?: number | null
   distanceToFlagYards?: number | null
+  frontLatitude?: number | null
+  frontLongitude?: number | null
+  centerLatitude?: number | null
+  centerLongitude?: number | null
+  backLatitude?: number | null
+  backLongitude?: number | null
   flagLatitude?: number | null
   flagLongitude?: number | null
   score: number

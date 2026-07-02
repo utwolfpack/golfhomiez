@@ -7,8 +7,9 @@ import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEm
 import { createQrMatrix, generateQrSvg, MAX_QR_BYTE_LENGTH, QR_SIZE } from '../server/lib/qr-code.js'
 import { deleteTournamentWithSafeAssociations, SAFE_TOURNAMENT_CHILD_DELETES } from '../server/lib/tournament-delete.js'
 import { deleteCancelledTournaments, nextCancelledTournamentCleanupRun, CANCELLED_TOURNAMENT_CLEANUP_TIME_ZONE } from '../server/lib/cancelled-tournament-cleanup.js'
-import { buildDefaultHoleScorecard, calculateHoleScoreTotal, normalizeHoleScorePayload } from '../server/lib/hole-scorecard.js'
-import { __resetGolfbertClientCachesForTests, calculateDistanceYards, getGolfbertCourseHoles, searchGolfbertCourses } from '../server/lib/golfbert-client.js'
+import { buildDefaultHoleScorecard, calculateHoleScoreTotal, calculateProvidedHoleScoreTotal, normalizeHoleScorePayload } from '../server/lib/hole-scorecard.js'
+import { calculateDistanceYards } from '../server/lib/golf-course-service.js'
+import { buildOpenGolfApiStateCoursesPath, buildOpenGolfApiUrl, extractOpenGolfApiCourseList, extractOpenGolfApiCoursePage, extractOpenGolfCourseHoles, getOpenGolfApiRateLimitConfig, getOpenGolfApiRetryDelayMs, getOpenGolfApiStateImportConfig, isOpenGolfApiRetriableStatus, normalizeOpenGolfCoursePayload, parseOpenGolfApiRetryAfterMs } from '../server/lib/opengolfapi-client.js'
 import { buildScorecardDraftId, normalizeDraftContext, normalizeDraftHole } from '../server/lib/scorecard-drafts.js'
 import { closeDb } from '../server/db.js'
 import { buildProfileSummaryFromScores } from '../server/lib/profile-summary.js'
@@ -107,6 +108,8 @@ test('team logger has a compact team round header and locked hole-by-hole summar
   assert.match(source, /activeScorecardSide/)
   assert.match(source, /handleCancelRound/)
   assert.match(source, /team.round.cancel/)
+  assert.match(source, /\/api\/scores\/cancel-round/)
+  assert.match(source, /navigate\('\/my-golf-scores'\)/)
   assert.match(source, /opponentHoles/)
   assert.match(source, /\/api\/team-round-score/)
   assert.match(source, /Opponent score is read-only/)
@@ -145,7 +148,7 @@ test('solo logger defaults to compact hole-by-hole scorecard entry', () => {
   const scorecard = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 
-  assert.match(soloLogger, /Solo Round/)
+  assert.doesNotMatch(soloLogger, /Solo Round/)
   assert.doesNotMatch(soloLogger, /Enable scorecard input/)
   assert.match(soloLogger, /const \[useHoles, setUseHoles\] = useState\(true\)/)
   assert.match(soloLogger, /useState<HoleScoreDetail\[\]>\(\(\) => buildClientDefaultHoleScorecard\('UT', '', DEFAULT_TEE_COLOR\)\)/)
@@ -153,6 +156,9 @@ test('solo logger defaults to compact hole-by-hole scorecard entry', () => {
   assert.match(soloLogger, /persistedHoles=\{persistedSoloHoles\}/)
   assert.match(scorecard, /persistedHoles\?: HoleScoreDetail\[\] \| null/)
   assert.match(soloLogger, /compactMobileInput/)
+  assert.match(soloLogger, /soloScorecardSetupReady/)
+  assert.match(soloLogger, /enabled=\{soloScorecardSetupReady\}/)
+  assert.match(soloLogger, /Boolean\(useHoles && state && course\.trim\(\) && teeColor\)/)
   assert.match(soloLogger, /roundContextLocked/)
   assert.match(soloLogger, /Close/)
   assert.match(soloLogger, /handleCloseRound/)
@@ -161,7 +167,7 @@ test('solo logger defaults to compact hole-by-hole scorecard entry', () => {
   assert.match(soloLogger, /method: 'DELETE'/)
   assert.match(soloLogger, /method: 'PATCH'/)
   assert.match(soloLogger, /method: 'POST'/)
-  assert.match(soloLogger, /soloLockedRoundSummary/)
+  assert.doesNotMatch(soloLogger, /soloRoundActionSummary/)
   assert.match(soloLogger, /TeeColorSelector/)
   assert.match(soloLogger, /teeColor=\{teeColor\}/)
   assert.match(soloLogger, /normalizeTeeColor/)
@@ -171,6 +177,10 @@ test('solo logger defaults to compact hole-by-hole scorecard entry', () => {
   assert.match(soloLogger, /\/api\/solo-round-score/)
   assert.match(server, /app\.get\('\/api\/solo-round-score'/)
   assert.match(server, /findMatchingSoloRound/)
+  assert.match(server, /app\.delete\('\/api\/scores\/cancel-round'/)
+  assert.match(server, /round_cancelled/)
+  assert.match(soloLogger, /\/api\/scores\/cancel-round/)
+  assert.match(soloLogger, /nav\('\/my-golf-scores'\)/)
   assert.doesNotMatch(soloLogger, /UseMyLocationButton/)
   assert.doesNotMatch(soloLogger, /Save Round/)
   assert.doesNotMatch(soloLogger, /Finish entering scores for holes:/)
@@ -185,27 +195,20 @@ test('hole-by-hole input uses the scoreinput reference layout throughout the app
   const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 
-  assert.match(component, /Score for Hole \{activeHole\.hole\}/)
+  assert.match(component, /Hole \{activeHole\.hole\}/)
   assert.match(component, /holeInputScoreHeader/)
-  assert.match(component, /holeMapIconButton/)
-  assert.match(component, /Open map for hole/)
-  assert.match(component, /role="dialog"/)
-  assert.match(component, /Pin Distance/)
-  assert.match(component, /holeMapMetricsBar/)
-  assert.match(component, /Pin distance/)
-  assert.match(component, /mapHoleLabel/)
-  assert.match(component, /mapParLabel/)
-  assert.match(component, /holeMapSatelliteBase/)
-  assert.match(component, /holeMapYardageArc/)
-  assert.match(component, /To pin/)
-  assert.match(component, /GPS: Good/)
-  assert.match(component, /scorecard\.hole_map/)
-  assert.match(component, /navigator\.geolocation\.getCurrentPosition/)
-  assert.match(component, /calculateDistanceYards/)
+  assert.match(component, /holeInputContextText/)
+  assert.match(component, /holeInputContextValue/)
+  assert.doesNotMatch(component, /Score for Hole/)
+  assert.doesNotMatch(component, /holeMapIconButton/)
+  assert.doesNotMatch(component, /Open map for hole/)
+  assert.doesNotMatch(component, /holeMapModal/)
+  assert.doesNotMatch(component, /Pin Distance/)
+  assert.doesNotMatch(component, /scorecard\.hole_map/)
+  assert.doesNotMatch(component, /navigator\.geolocation\.getCurrentPosition/)
+  assert.doesNotMatch(component, /calculateDistanceYards/)
   assert.match(component, /teeColorLabel/)
-  assert.match(component, /holeMapTeeMarker/)
-  assert.match(component, /Carry view/)
-  assert.match(component, /mapTeeStart/)
+  assert.match(component, /hasDisplayablePositiveNumber/)
   assert.match(component, /holeInputStepperButton/)
   assert.match(component, /holeInputScoreValueBlock/)
   assert.match(component, /holeInputCompletionIndicator/)
@@ -214,18 +217,19 @@ test('hole-by-hole input uses the scoreinput reference layout throughout the app
   assert.doesNotMatch(component, /holeInputHero/)
   assert.doesNotMatch(component, /holeInputCompactMeta/)
   assert.match(css, /scoreinput\.png-aligned hole-by-hole score entry/)
-  assert.match(css, /disttopinsample\.png-aligned hole map modal/)
-  assert.match(css, /\.holeMapModal/)
-  assert.match(css, /\.holeMapDistanceCard/)
-  assert.match(css, /\.holeMapMetricsBar/)
-  assert.match(css, /\.holeMapSatelliteBase/)
-  assert.match(css, /\.holeMapYardageArc/)
-  assert.match(css, /\.holeMapGpsStatus/)
+  assert.doesNotMatch(css, /disttopinsample\.png-aligned hole map modal/)
+  assert.doesNotMatch(css, /\.holeMapModal/)
+  assert.doesNotMatch(css, /\.holeMapDistanceCard/)
+  assert.doesNotMatch(css, /\.holeMapMetricsBar/)
+  assert.doesNotMatch(css, /\.holeMapGpsStatus/)
+  assert.match(css, /scoreinput\.png-aligned score entry header/)
   assert.match(css, /\.teeSelector/)
-  assert.match(css, /\.holeMapTeeMarker--blue/)
   assert.match(css, /\.holeInputPanel,[\s\S]*\.holeInputPanel--compact/)
   assert.match(css, /\.holeInputScorePageCard,[\s\S]*\.holeInputScorePageCard--compact/)
+  assert.match(css, /\.holeInputContextText\{/)
+  assert.match(css, /overflow-wrap:anywhere/)
   assert.match(css, /\.holeInputMetadata/)
+  assert.match(component, /hasDisplayablePositiveNumber/)
 })
 
 test('hole-by-hole scorecard uses dedicated hole pages, persisted draft scores, completion indicators, and generated par 72 defaults', () => {
@@ -233,13 +237,19 @@ test('hole-by-hole scorecard uses dedicated hole pages, persisted draft scores, 
   assert.equal(scorecard.holes.length, 18)
   assert.equal(scorecard.parTotal, 72)
   assert.equal(calculateHoleScoreTotal(scorecard.holes), 72)
+  assert.equal(calculateProvidedHoleScoreTotal(scorecard.holes), 0)
+  assert.equal(calculateProvidedHoleScoreTotal([{ hole: 1, score: 4, scoreProvided: true }, { hole: 2, score: 5, scoreProvided: false }, { hole: 3, score: 3, scoreProvided: true }]), 7)
   assert.ok(scorecard.holes.every((hole) => Number.isInteger(hole.hole) && hole.hole >= 1 && hole.hole <= 18))
   assert.ok(scorecard.holes.every((hole) => [3, 4, 5].includes(hole.par)))
   assert.ok(scorecard.holes.every((hole) => Number.isInteger(hole.yards) && hole.yards > 0))
   assert.ok(scorecard.holes.every((hole) => Number.isInteger(hole.strokeIndex) && hole.strokeIndex >= 1 && hole.strokeIndex <= 18))
 
   const normalized = normalizeHoleScorePayload([{ hole: 1, par: 4, yards: 420, strokeIndex: 9, score: 6 }])
-  assert.deepEqual(normalized, [{ hole: 1, par: 4, yards: 420, strokeIndex: 9, teeColor: 'white', teeBoxType: 'white', distanceToFlagYards: null, flagLatitude: null, flagLongitude: null, score: 6, scoreProvided: true }])
+  assert.deepEqual(normalized, [{ hole: 1, par: 4, yards: 420, strokeIndex: 9, teeColor: 'white', teeBoxType: 'white', distanceToFlagYards: null, distanceToFrontYards: null, distanceToCenterYards: null, distanceToBackYards: null, flagLatitude: null, flagLongitude: null, frontLatitude: null, frontLongitude: null, centerLatitude: null, centerLongitude: null, backLatitude: null, backLongitude: null, score: 6, scoreProvided: true }])
+
+  const normalizedWithoutYardsOrStrokeIndex = normalizeHoleScorePayload([{ hole: 2, par: 3, yards: null, strokeIndex: null, score: 3 }])
+  assert.equal(normalizedWithoutYardsOrStrokeIndex[0].yards, null)
+  assert.equal(normalizedWithoutYardsOrStrokeIndex[0].strokeIndex, null)
 
   const blueScorecard = buildDefaultHoleScorecard({ state: 'UT', course: 'Bonneville Golf Course', teeColor: 'blue' })
   assert.equal(blueScorecard.teeColor, 'blue')
@@ -248,43 +258,63 @@ test('hole-by-hole scorecard uses dedicated hole pages, persisted draft scores, 
   const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   assert.equal(scorecard.holes.every((hole) => hole.scoreProvided === false), true)
-  assert.match(server, /holeMapReadyCount/)
+  assert.doesNotMatch(server, /holeMapReadyCount/)
   assert.match(server, /distanceToFlagCount/)
 
   assert.match(component, /holeInputPhone/)
   assert.match(component, /holeInputScorePageCard/)
   assert.match(component, /holeInputCompletionIndicator/)
   assert.match(component, /holeInputTrackerList/)
-  assert.match(component, /All 18 hole score tracker/)
+  assert.match(component, /All \$\{activeHoleCount\} hole score tracker/)
   assert.match(component, /holeInputTrackerChip--saved/)
   assert.doesNotMatch(component, /Still needed:/)
   assert.match(component, /Save Hole Score/)
+  assert.match(component, /autoAdvanceAfterSave: true/)
+  assert.match(component, /findNextUnscoredHoleIndex/)
+  assert.match(component, /for \(let holeNumber = normalizedSavedHoleNumber \+ 1; holeNumber <= activeHoleCount; holeNumber \+= 1\)/)
+  assert.match(component, /for \(let holeNumber = 1; holeNumber < normalizedSavedHoleNumber; holeNumber \+= 1\)/)
+  assert.match(component, /scorecard\.hole\.auto_advance/)
+  assert.match(component, /next_unscored_hole_selected/)
+  assert.match(component, /Moved to Hole/)
   assert.match(component, /Update Hole Score/)
   assert.match(component, /Decrease score/)
   assert.match(component, /Increase score/)
   assert.match(component, /Course par/)
-  assert.match(component, /Cumulative score/)
+  assert.match(component, /Current score/)
+  assert.match(component, /providedHoleScoreTotal/)
+  assert.doesNotMatch(component, /Cumulative score/)
+  assert.doesNotMatch(component, /Previous Hole/)
+  assert.doesNotMatch(component, /Next Hole/)
   assert.match(component, /Stroke Index/)
-  assert.match(component, /holeMapIconButton/)
-  assert.match(component, /holeMapModal/)
-  assert.match(component, /holeMapDistanceHeader/)
-  assert.match(component, /getHoleMapDistanceToPin/)
-  assert.match(component, /savedLocationToMapLocation/)
-  assert.match(component, /holeInputTeamLabel/)
+  assert.match(component, /hasDisplayablePositiveNumber\(activeHole\.yards\)/)
+  assert.match(component, /hasDisplayablePositiveNumber\(activeHole\.strokeIndex\)/)
+  assert.match(component, /formatYardage\(activeHole\.yards\).*Yards/)
+  assert.doesNotMatch(component, /activeHole\.yards \|\| '—'/)
+  assert.doesNotMatch(component, /activeHole\.strokeIndex \|\| activeHole\.hole/)
+  assert.doesNotMatch(component, /holeMapIconButton/)
+  assert.doesNotMatch(component, /holeMapModal/)
+  assert.doesNotMatch(component, /getHoleMapDistanceToPin/)
+  assert.doesNotMatch(component, /savedLocationToMapLocation/)
+  assert.match(component, /getRoundTypeLabel/)
   assert.match(component, /scoreOwnerLabel/)
   assert.match(component, /scoringSide/)
   assert.match(component, /api\('\/api\/scorecard-drafts\/hole'/)
   assert.match(component, /mergeProvidedHoleScores/)
-  assert.match(component, /getNextRequiredHoleIndex/)
-  assert.match(component, /setActiveHoleIndex\(nextRequiredHoleIndex\)/)
+  assert.match(component, /Tap another hole circle to continue/)
+  assert.doesNotMatch(component, /getNextRequiredHoleIndex/)
+  assert.doesNotMatch(component, /nextRequiredHoleIndex/)
   assert.match(component, /loadScorecardOnMount = true/)
   assert.match(component, /compactMobileInput/)
+  assert.match(component, /withSelectedTeeColor\(normalizeHoleScorecard/)
+  assert.match(component, /const activeHoleTeeLabel = teeColorLabel\(selectedTeeColor\)/)
+  assert.match(component, /teeColor: selectedTeeColor/)
+  assert.doesNotMatch(component, /teeColor: hole\.teeColor \|\| selectedTeeColor/)
   assert.match(component, /holeInputPhone--compact/)
   assert.match(component, /holeInputScorePageCard--compact/)
   assert.match(component, /holeInputStepperButton/)
   assert.match(component, /onHoleSaved/)
   assert.match(component, /await onHoleSaved\(next, savedHole\)/)
-  assert.match(component, /Next required hole/)
+  assert.doesNotMatch(component, /Next required hole/)
   assert.doesNotMatch(component, /Solo round hole-by-hole scorecard/)
   assert.doesNotMatch(component, /Each hole has its own score entry screen/)
 
@@ -297,7 +327,52 @@ test('hole-by-hole scorecard uses dedicated hole pages, persisted draft scores, 
 
 
 
-test('tee selection is wired through score logging, challenges, storage, migrations, and Golfbert scorecards', () => {
+
+
+test('score and challenge course pickers use one search field across all courses for the selected state', () => {
+  const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
+  const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
+  const challenges = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
+  const courseInput = fs.readFileSync(new URL('../src/components/GolfCourseInput.tsx', import.meta.url), 'utf8')
+  const courseClient = fs.readFileSync(new URL('../src/lib/golf-courses.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(golfLogger, /GolfCourseInput/)
+  assert.match(soloLogger, /GolfCourseInput/)
+  assert.match(challenges, /GolfCourseInput/)
+  assert.match(golfLogger, /inputId="teamRoundCourseSearch"/)
+  assert.match(soloLogger, /inputId="soloRoundCourseSearch"/)
+  assert.match(challenges, /inputId="teamChallengeCourseSearch"/)
+  assert.match(golfLogger, /enableNearestDefault/)
+  assert.match(soloLogger, /enableNearestDefault/)
+  assert.match(challenges, /enableNearestDefault/)
+  assert.doesNotMatch(golfLogger, /Search or select a course/)
+  assert.doesNotMatch(soloLogger, /Search or select a course/)
+  assert.doesNotMatch(challenges, /teamChallengeCourses/)
+  assert.doesNotMatch(challenges, /id="teamChallengeCourse"[\s\S]*<select/)
+  assert.match(courseInput, /type="search"/)
+  assert.match(courseInput, /role="listbox"/)
+  assert.match(courseInput, /Searching all available courses for the selected state/)
+  assert.match(courseInput, /MAX_COURSE_SEARCH_LIMIT/)
+  assert.match(courseInput, /course_selected/)
+  assert.match(courseInput, /nearest_default/)
+  assert.match(courseInput, /Confirm course/)
+  assert.match(courseInput, /getBrowserCoordinates/)
+  assert.match(courseInput, /findNearestGolfCourse/)
+  assert.match(courseInput, /uniqueCourses\.slice\(0, 12\)/)
+  assert.match(courseClient, /export const MAX_COURSE_SEARCH_LIMIT = 1000/)
+  assert.match(courseClient, /export async function findNearestGolfCourse/)
+  assert.match(courseClient, /\/api\/golf-courses\/nearest/)
+  assert.match(server, /Number\(req\.query\.limit\) \|\| 1000, 1\), 1000/)
+  assert.match(server, /app\.get\('\/api\/golf-courses\/nearest'/)
+  assert.match(server, /findNearestGolfCourse/)
+  assert.match(css, /courseSearchResults/)
+  assert.match(css, /courseNearestConfirmation/)
+  assert.match(css, /courseSearchResultButton/)
+})
+
+test('tee selection is wired through score logging, challenges, storage, migrations, and database scorecards', () => {
   const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
   const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
   const challenges = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
@@ -329,7 +404,7 @@ test('admin portal persists and filters external API call metrics by API type an
   const adminPortal = fs.readFileSync(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8')
   const adminClient = fs.readFileSync(new URL('../src/lib/admin.ts', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
-  const golfbertClient = fs.readFileSync(new URL('../server/lib/golfbert-client.js', import.meta.url), 'utf8')
+  const openGolfApiClient = fs.readFileSync(new URL('../server/lib/opengolfapi-client.js', import.meta.url), 'utf8')
   const mailer = fs.readFileSync(new URL('../server/mailer.js', import.meta.url), 'utf8')
   const metrics = fs.readFileSync(new URL('../server/lib/external-api-metrics.js', import.meta.url), 'utf8')
   const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
@@ -341,7 +416,7 @@ test('admin portal persists and filters external API call metrics by API type an
   assert.match(adminPortal, /End date/)
   assert.match(adminPortal, /API type/)
   assert.match(adminPortal, /Brevo/)
-  assert.match(adminPortal, /Golfbert/)
+  assert.match(adminPortal, /OpenGolfAPI/)
   assert.match(adminPortal, /Other external APIs/)
   assert.match(adminPortal, /Endpoint/)
   assert.match(adminPortal, /Current day/)
@@ -353,7 +428,7 @@ test('admin portal persists and filters external API call metrics by API type an
   assert.match(adminClient, /\/api\/admin\/external-api-calls/)
   assert.match(server, /app\.get\('\/api\/admin\/external-api-calls'/)
   assert.match(server, /getExternalApiCallSummary/)
-  assert.match(golfbertClient, /recordExternalApiCall\(\{ apiType: 'golfbert'/)
+  assert.match(openGolfApiClient, /recordExternalApiCall\(\{ apiType: 'opengolfapi'/)
   assert.match(mailer, /recordExternalApiCall\(\{ apiType: 'brevo'/)
   assert.match(metrics, /CREATE TABLE IF NOT EXISTS external_api_call_metrics/)
   assert.match(metrics, /generatedAt: new Date\(\)\.toISOString\(\)/)
@@ -364,149 +439,158 @@ test('admin portal persists and filters external API call metrics by API type an
   assert.match(migrationSql, /idx_external_api_call_metrics_api_endpoint_date/)
 })
 
-test('Golfbert client maps courses, holes, and golfer distance without polygon calls', async () => {
-  const originalFetch = globalThis.fetch
-  const originalKey = process.env.GOLFBERT_API_KEY
-  const originalBase = process.env.GOLFBERT_API_BASE_URL
-  const originalScheme = process.env.GOLFBERT_API_AUTH_SCHEME
-  const originalAccessKey = process.env.GOLFBERT_API_ACCESS_KEY
-  const originalSecretKey = process.env.GOLFBERT_API_SECRET_KEY
-  const originalPageSize = process.env.GOLFBERT_COURSE_PAGE_SIZE
-  const calls = []
-  process.env.GOLFBERT_API_KEY = 'test-key'
-  process.env.GOLFBERT_API_BASE_URL = 'https://golfbert.com/api/v1'
-  process.env.GOLFBERT_COURSE_PAGE_SIZE = '100'
-  process.env.GOLFBERT_API_AUTH_SCHEME = 'header'
-  delete process.env.GOLFBERT_API_ACCESS_KEY
-  delete process.env.GOLFBERT_API_SECRET_KEY
-  __resetGolfbertClientCachesForTests()
-
-  globalThis.fetch = async (url) => {
-    const requestUrl = new URL(String(url))
-    calls.push({ host: requestUrl.host, path: requestUrl.pathname, params: Object.fromEntries(requestUrl.searchParams.entries()) })
-    if (requestUrl.host === 'api.golfbert.com' && requestUrl.pathname === '/v1/courses/') {
-      assert.equal(requestUrl.searchParams.get('state'), 'Utah')
-      assert.equal(requestUrl.searchParams.get('name'), 'Test')
-      assert.equal(requestUrl.searchParams.get('limit'), '100')
-      assert.equal(requestUrl.searchParams.get('marker'), '0')
-      return new Response(JSON.stringify({ resources: [
-        {
-          id: 1,
-          name: 'Test Golf Club',
-          address: { street: '1 Fairway Dr', city: 'Provo', state: 'Utah', zip: '84601' },
-          coordinates: { lat: 40.0, _long: -111.0 },
-        },
-      ] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    }
-    if (requestUrl.host === 'api.golfbert.com' && requestUrl.pathname === '/v1/courses/1/holes') {
-      return new Response(JSON.stringify({ resources: Array.from({ length: 18 }, (_, index) => ({
-        id: index + 1,
-        number: index + 1,
-        flagcoords: { lat: 40.0, _long: -111.0 },
-      })) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    }
-    if (requestUrl.host === 'api.golfbert.com' && requestUrl.pathname === '/v1/courses/1/scorecard') {
-      return new Response(JSON.stringify({ holeteeboxes: Array.from({ length: 18 }, (_, index) => ({
-        holeid: index + 1,
-        holenumber: index + 1,
-        par: index === 0 ? 4 : 3,
-        length: 400 + index,
-        handicap: index + 1,
-        teebox_type: index % 2 === 0 ? 'Blue' : 'White',
-      })) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    }
-    return new Response(JSON.stringify({ message: 'not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+test('OpenGolfAPI client maps state payloads, course details, and hole scorecards for database import', () => {
+  const listPayload = { courses: [
+    { id: 'course-1', name: 'Test Golf Club', state: 'UT', city: 'Provo', holes: 18, par: 72 },
+  ] }
+  const detailPayload = {
+    id: 'course-1',
+    name: 'Test Golf Club',
+    county: 'Utah County',
+    state: 'Utah',
+    city: 'Provo',
+    address: '1 Fairway Dr',
+    postal_code: '84601',
+    phone: '801-555-0100',
+    website: 'https://example.test',
+    total_yardage: 6500,
+    scorecard: Array.from({ length: 18 }, (_, index) => ({
+      hole: index + 1,
+      par: index === 0 ? 4 : 3,
+      yards: 420 + index,
+      handicap: index + 1,
+      front: { latitude: 40, longitude: -111.0005 },
+      center: { latitude: 40, longitude: -111 },
+      back: { latitude: 40, longitude: -110.9995 },
+    })),
   }
 
-  try {
-    const courses = await searchGolfbertCourses({ state: 'UT', query: 'Test', limit: 10 })
-    assert.equal(courses.length, 1)
-    assert.equal(courses[0].name, 'Test Golf Club')
-    assert.equal(courses[0].state, 'UT')
-    assert.equal(courses[0].city, 'Provo')
-    assert.equal(courses[0].postal_code, '84601')
-    assert.equal(courses[0].latitude, 40)
-    assert.equal(courses[0].longitude, -111)
+  const list = extractOpenGolfApiCourseList(listPayload)
+  assert.equal(list.length, 1)
 
-    const scorecard = await getGolfbertCourseHoles({ state: 'UT', course: 'Test Golf Club', golferLatitude: 40.0, golferLongitude: -111.01, teeColor: 'blue' })
-    assert.equal(scorecard.holes.length, 18)
-    assert.equal(scorecard.holes[0].par, 4)
-    assert.equal(scorecard.holes[0].yards, 400)
-    assert.equal(scorecard.holes[0].strokeIndex, 1)
-    assert.equal(scorecard.teeColor, 'blue')
-    assert.equal(scorecard.holes[0].teeColor, 'blue')
-    assert.ok(Number.isInteger(scorecard.holes[0].distanceToFlagYards))
-    assert.equal(calls.some((call) => call.path.includes('/polygons')), false)
-    assert.deepEqual(calls.map((call) => call.path), ['/v1/courses/', '/v1/courses/1/holes', '/v1/courses/1/scorecard'])
+  const course = normalizeOpenGolfCoursePayload(list[0], detailPayload)
+  assert.equal(course.id, 'course-1')
+  assert.equal(course.name, 'Test Golf Club')
+  assert.equal(course.stateCode, 'UT')
+  assert.equal(course.stateName, 'Utah')
+  assert.equal(course.county, 'Utah County')
+  assert.equal(course.city, 'Provo')
+  assert.equal(course.postalCode, '84601')
+  assert.equal(course.parTotal, 72)
+  assert.equal(course.totalYardage, 6500)
+
+  const holes = extractOpenGolfCourseHoles(detailPayload)
+  assert.equal(holes.length, 18)
+  assert.equal(holes[0].holeNumber, 1)
+  assert.equal(holes[0].par, 4)
+  assert.equal(holes[0].yards, 420)
+  assert.equal(holes[0].strokeIndex, 1)
+  assert.equal(holes[0].centerLatitude, 40)
+})
+
+test('OpenGolfAPI client builds documented state and course-detail curl-compatible paths', () => {
+  const originalBase = process.env.OPEN_GOLF_API_BASE_URL
+  process.env.OPEN_GOLF_API_BASE_URL = 'https://api.opengolfapi.org/v1/'
+  try {
+    assert.equal(buildOpenGolfApiUrl('/courses/state/UT').toString(), 'https://api.opengolfapi.org/v1/courses/state/UT')
+    assert.equal(buildOpenGolfApiStateCoursesPath('ut', { limit: 50, offset: 100 }), '/courses/state/UT?limit=50&offset=100')
+    assert.equal(buildOpenGolfApiUrl(buildOpenGolfApiStateCoursesPath('UT', { limit: 50, offset: 50 })).toString(), 'https://api.opengolfapi.org/v1/courses/state/UT?limit=50&offset=50')
+    assert.equal(buildOpenGolfApiUrl('/courses/course-1').toString(), 'https://api.opengolfapi.org/v1/courses/course-1')
   } finally {
-    globalThis.fetch = originalFetch
-    if (originalKey === undefined) delete process.env.GOLFBERT_API_KEY
-    else process.env.GOLFBERT_API_KEY = originalKey
-    if (originalBase === undefined) delete process.env.GOLFBERT_API_BASE_URL
-    else process.env.GOLFBERT_API_BASE_URL = originalBase
-    if (originalScheme === undefined) delete process.env.GOLFBERT_API_AUTH_SCHEME
-    else process.env.GOLFBERT_API_AUTH_SCHEME = originalScheme
-    if (originalAccessKey === undefined) delete process.env.GOLFBERT_API_ACCESS_KEY
-    else process.env.GOLFBERT_API_ACCESS_KEY = originalAccessKey
-    if (originalSecretKey === undefined) delete process.env.GOLFBERT_API_SECRET_KEY
-    else process.env.GOLFBERT_API_SECRET_KEY = originalSecretKey
-    if (originalPageSize === undefined) delete process.env.GOLFBERT_COURSE_PAGE_SIZE
-    else process.env.GOLFBERT_COURSE_PAGE_SIZE = originalPageSize
-    __resetGolfbertClientCachesForTests()
+    if (originalBase === undefined) delete process.env.OPEN_GOLF_API_BASE_URL
+    else process.env.OPEN_GOLF_API_BASE_URL = originalBase
   }
 })
 
-test('Golfbert course search returns all state courses using paged Golfbert marker requests without UI limits', async () => {
-  const originalFetch = globalThis.fetch
-  const originalKey = process.env.GOLFBERT_API_KEY
-  const originalBase = process.env.GOLFBERT_API_BASE_URL
-  const originalScheme = process.env.GOLFBERT_API_AUTH_SCHEME
-  const originalPageSize = process.env.GOLFBERT_COURSE_PAGE_SIZE
-  const calls = []
-  process.env.GOLFBERT_API_KEY = 'test-key'
-  process.env.GOLFBERT_API_BASE_URL = 'https://api.golfbert.com/v1'
-  process.env.GOLFBERT_API_AUTH_SCHEME = 'header'
-  process.env.GOLFBERT_COURSE_PAGE_SIZE = '2'
-  __resetGolfbertClientCachesForTests()
+test('OpenGolfAPI state imports use limit-offset pagination before course-detail hole import', () => {
+  const page = extractOpenGolfApiCoursePage({
+    courses: [
+      { id: 'ut-1', course_name: 'First Utah Course' },
+      { id: 'ut-2', course_name: 'Second Utah Course' },
+    ],
+    total: 4791,
+  })
+  assert.equal(page.courses.length, 2)
+  assert.equal(page.total, 4791)
 
-  globalThis.fetch = async (url) => {
-    const requestUrl = new URL(String(url))
-    calls.push({ path: requestUrl.pathname, params: Object.fromEntries(requestUrl.searchParams.entries()) })
-    assert.equal(requestUrl.pathname, '/v1/courses/')
-    assert.equal(requestUrl.searchParams.has('limit'), true)
-    assert.equal(requestUrl.searchParams.has('marker'), true)
-    const marker = Number(requestUrl.searchParams.get('marker'))
-    const pageOne = [
-      { id: 1, name: 'Alpha Golf Club', state: 'Utah' },
-      { id: 2, name: 'Beta Golf Club', state: 'Utah' },
-    ]
-    const pageTwo = [
-      { id: 3, name: 'Gamma Golf Club', state: 'Utah' },
-    ]
-    return new Response(JSON.stringify({ resources: marker === 0 ? pageOne : pageTwo }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-  }
-
+  const originalLimit = process.env.OPEN_GOLF_API_STATE_PAGE_LIMIT
+  const originalMaxPages = process.env.OPEN_GOLF_API_STATE_MAX_PAGES
+  process.env.OPEN_GOLF_API_STATE_PAGE_LIMIT = '50'
+  process.env.OPEN_GOLF_API_STATE_MAX_PAGES = '400'
   try {
-    const courses = await searchGolfbertCourses({ state: 'UT', limit: 1 })
-    assert.deepEqual(courses.map((course) => course.name), ['Alpha Golf Club', 'Beta Golf Club', 'Gamma Golf Club'])
-    assert.deepEqual(calls.map((call) => call.params.marker), ['0', '2'])
-    assert.deepEqual(calls.map((call) => call.params.limit), ['2', '2'])
+    assert.deepEqual(getOpenGolfApiStateImportConfig(), { pageLimit: 50, maxPages: 400 })
   } finally {
-    globalThis.fetch = originalFetch
-    if (originalKey === undefined) delete process.env.GOLFBERT_API_KEY
-    else process.env.GOLFBERT_API_KEY = originalKey
-    if (originalBase === undefined) delete process.env.GOLFBERT_API_BASE_URL
-    else process.env.GOLFBERT_API_BASE_URL = originalBase
-    if (originalScheme === undefined) delete process.env.GOLFBERT_API_AUTH_SCHEME
-    else process.env.GOLFBERT_API_AUTH_SCHEME = originalScheme
-    if (originalPageSize === undefined) delete process.env.GOLFBERT_COURSE_PAGE_SIZE
-    else process.env.GOLFBERT_COURSE_PAGE_SIZE = originalPageSize
-    __resetGolfbertClientCachesForTests()
+    if (originalLimit === undefined) delete process.env.OPEN_GOLF_API_STATE_PAGE_LIMIT
+    else process.env.OPEN_GOLF_API_STATE_PAGE_LIMIT = originalLimit
+    if (originalMaxPages === undefined) delete process.env.OPEN_GOLF_API_STATE_MAX_PAGES
+    else process.env.OPEN_GOLF_API_STATE_MAX_PAGES = originalMaxPages
   }
+
+  const openGolfApiClient = fs.readFileSync(new URL('../server/lib/opengolfapi-client.js', import.meta.url), 'utf8')
+  const importScript = fs.readFileSync(new URL('../server/scripts/import-opengolfapi-courses.js', import.meta.url), 'utf8')
+  const catalogMigrationSql = fs.readFileSync(new URL('../migration_scripts/20260630_059_opengolfapi_database_catalog.sql', import.meta.url), 'utf8')
+
+  assert.match(openGolfApiClient, /fetchOpenGolfApiStateCoursePage/)
+  assert.match(openGolfApiClient, /offset = pageIndex \* effectiveLimit/)
+  assert.match(openGolfApiClient, /expectedTotal/)
+  assert.match(openGolfApiClient, /page\.courses\.length < effectiveLimit/)
+  assert.match(openGolfApiClient, /opengolfapi_state_course_page_loaded/)
+  assert.match(openGolfApiClient, /opengolfapi_state_course_pages_completed/)
+  assert.match(importScript, /fetchOpenGolfApiStateCourses\(stateCode, \{ pageLimit \}\)/)
+  assert.match(importScript, /fetchOpenGolfApiCourseDetail\(courseId\)/)
+  assert.match(importScript, /upsertOpenGolfCourse\(listRecord, detailPayload, db\)/)
+  assert.match(importScript, /holesImported \+= result\.holeCount/)
+  assert.match(catalogMigrationSql, /limit=50&offset=0/)
+  assert.match(catalogMigrationSql, /limit=50&offset=50/)
 })
 
+test('OpenGolfAPI client throttles and retries rate-limited imports without changing request paths', () => {
+  const original = {
+    interval: process.env.OPEN_GOLF_API_REQUEST_INTERVAL_MS,
+    retries: process.env.OPEN_GOLF_API_MAX_RETRIES,
+    base: process.env.OPEN_GOLF_API_RETRY_BASE_MS,
+    max: process.env.OPEN_GOLF_API_RETRY_MAX_MS,
+  }
+  process.env.OPEN_GOLF_API_REQUEST_INTERVAL_MS = '2500'
+  process.env.OPEN_GOLF_API_MAX_RETRIES = '3'
+  process.env.OPEN_GOLF_API_RETRY_BASE_MS = '1000'
+  process.env.OPEN_GOLF_API_RETRY_MAX_MS = '60000'
+  try {
+    assert.deepEqual(getOpenGolfApiRateLimitConfig(), {
+      requestIntervalMs: 2500,
+      maxRetries: 3,
+      retryBaseMs: 1000,
+      retryMaxMs: 60000,
+    })
+    assert.equal(isOpenGolfApiRetriableStatus(429), true)
+    assert.equal(isOpenGolfApiRetriableStatus(503), true)
+    assert.equal(isOpenGolfApiRetriableStatus(404), false)
+    assert.equal(parseOpenGolfApiRetryAfterMs('2', 0), 2000)
+    assert.equal(getOpenGolfApiRetryDelayMs({ statusCode: 429, attempt: 0, retryAfterHeader: '4' }), 4000)
+    assert.equal(getOpenGolfApiRetryDelayMs({ statusCode: 500, attempt: 2 }), 4000)
+  } finally {
+    for (const [key, value] of Object.entries({
+      OPEN_GOLF_API_REQUEST_INTERVAL_MS: original.interval,
+      OPEN_GOLF_API_MAX_RETRIES: original.retries,
+      OPEN_GOLF_API_RETRY_BASE_MS: original.base,
+      OPEN_GOLF_API_RETRY_MAX_MS: original.max,
+    })) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
 
-test('Golfbert distance helper returns yardage between golfer and flag coordinates', () => {
+  const openGolfApiClient = fs.readFileSync(new URL('../server/lib/opengolfapi-client.js', import.meta.url), 'utf8')
+  const importScript = fs.readFileSync(new URL('../server/scripts/import-opengolfapi-courses.js', import.meta.url), 'utf8')
+  assert.match(openGolfApiClient, /OPEN_GOLF_API_REQUEST_INTERVAL_MS/)
+  assert.match(openGolfApiClient, /opengolfapi_request_retry_scheduled/)
+  assert.match(openGolfApiClient, /retry-after/i)
+  assert.match(importScript, /state-delay-ms/)
+  assert.match(importScript, /stop-on-error/)
+  assert.match(importScript, /OpenGolfAPI state course list import failed/)
+})
+
+test('database scorecard distance helper returns yardage between golfer and green coordinates', () => {
   const yards = calculateDistanceYards(40, -111, 40, -111.001)
   assert.ok(yards > 80 && yards < 100)
 
@@ -657,7 +741,7 @@ test('round detail modal exposes opponent score links plus edit and delete actio
 test('scorecard backend endpoint, draft persistence, storage migrations, and transaction logging are wired', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
-  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260516_039_golf_course_hole_scorecards.sql', import.meta.url), 'utf8')
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260630_059_opengolfapi_database_catalog.sql', import.meta.url), 'utf8')
   const packageJson = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
   const draftSql = fs.readFileSync(new URL('../migration_scripts/20260516_041_scorecard_hole_drafts.sql', import.meta.url), 'utf8')
   const teamScorecardSideSql = fs.readFileSync(new URL('../migration_scripts/20260516_042_team_scorecard_sides_and_opponent_holes.sql', import.meta.url), 'utf8')
@@ -676,18 +760,17 @@ test('scorecard backend endpoint, draft persistence, storage migrations, and tra
   assert.match(server, /solo_score_created/)
   assert.match(server, /team_score_created/)
   assert.match(server, /normalizeHoleScorePayload\(holes\)/)
-  const strokeIndexSql = fs.readFileSync(new URL('../migration_scripts/20260516_040_golf_course_hole_scorecards_stroke_index.sql', import.meta.url), 'utf8')
-
-  assert.match(migrations, /20260516_039/)
-  assert.match(migrations, /20260516_040/)
   assert.match(migrations, /20260516_041/)
   assert.match(migrations, /20260516_042/)
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS golf_course_hole_scorecards/)
+  assert.match(migrations, /20260630_059/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS golf_courses/)
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS golf_course_holes/)
+  assert.match(migrationSql, /county VARCHAR\(128\) NULL/)
+  assert.match(migrationSql, /total_yardage SMALLINT UNSIGNED NULL/)
   assert.match(migrationSql, /hole_number TINYINT UNSIGNED NOT NULL/)
   assert.match(migrationSql, /par TINYINT UNSIGNED NULL/)
   assert.match(migrationSql, /yards SMALLINT UNSIGNED NULL/)
   assert.match(migrationSql, /stroke_index TINYINT UNSIGNED NULL/)
-  assert.match(strokeIndexSql, /ADD COLUMN stroke_index TINYINT UNSIGNED NULL AFTER yards/)
   assert.match(draftSql, /CREATE TABLE IF NOT EXISTS scorecard_hole_drafts/)
   assert.doesNotMatch(draftSql, /UNIQUE KEY ux_scorecard_hole_drafts_context/)
   assert.match(draftSql, /INDEX idx_scorecard_hole_drafts_context_lookup/)
@@ -731,6 +814,14 @@ test('scorecard draft helpers normalize context and hole payloads for per-hole p
     yards: 385,
     strokeIndex: 9,
     score: 5,
+    scoreProvided: true,
+  })
+  assert.deepEqual(normalizeDraftHole({ hole: { hole: 8, par: 4, yards: null, strokeIndex: null, score: 4 } }), {
+    hole: 8,
+    par: 4,
+    yards: null,
+    strokeIndex: null,
+    score: 4,
     scoreProvided: true,
   })
   assert.throws(() => normalizeDraftHole({ hole: 19, score: 4 }), /hole must be between 1 and 18/)
@@ -1070,19 +1161,26 @@ test('tee selector shows the white-default helper only until a tee is selected',
   assert.match(challenges, /const effectiveChallengeTeeColor = normalizeTeeColor\(teamChallengeTeeColor\)/)
 })
 
-test('hole tracker always renders eighteen circles and marks saved holes light blue', () => {
+test('hole tracker renders only the available course holes and marks saved holes light blue', () => {
   const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
   const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
   const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
 
-  assert.match(component, /Array\.from\(\{ length: 18 \}/)
-  assert.match(component, /All 18 hole score tracker/)
+  assert.match(component, /Array\.from\(\{ length: activeHoleCount \}/)
+  assert.match(component, /All \$\{activeHoleCount\} hole score tracker/)
   assert.match(component, /hole_tracker_selected/)
   assert.match(component, /providedHoleNumbers/)
+  assert.match(component, /getScorecardHoleCount/)
+  assert.match(component, /Math\.min\(18, count \|\| 18\)/)
+  assert.match(component, /providedCount\} of \{activeHoleCount\} holes provided/)
+  assert.doesNotMatch(component, /providedCount\} of 18 holes provided/)
   assert.match(component, /holeInputTrackerChip--saved/)
   assert.match(css, /\.holeInputTrackerChip--saved\{[\s\S]*background:#dbeafe/)
   assert.doesNotMatch(component, /holeInputMissingList/)
+  assert.match(soloLogger, /const totalHoleCount = useMemo\(\(\) => Math\.max\(1, Math\.min\(18, holes\.length \|\| 18\)\), \[holes\]\)/)
+  assert.match(soloLogger, /`\$\{providedHoleCount\} of \$\{totalHoleCount\} holes saved`/)
+  assert.doesNotMatch(soloLogger, /`\$\{providedHoleCount\} of 18 holes saved`/)
   assert.doesNotMatch(soloLogger, /<span>State<\/span>[\s\S]*<strong>\{state\}<\/strong>/)
   assert.doesNotMatch(soloLogger, /<span>Tees<\/span>/)
   assert.doesNotMatch(golfLogger, /<span>State<\/span>[\s\S]*<strong>\{stateAbbr\}<\/strong>/)
@@ -1091,15 +1189,31 @@ test('hole tracker always renders eighteen circles and marks saved holes light b
 })
 
 
-test('solo hole-by-hole controls show date and course above actions without saved holes progress section', () => {
+test('hole-by-hole controls move date, course, and round type above score controls without duplicate action summary', () => {
   const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
+  const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
+  const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 
-  assert.match(soloLogger, /className="soloLockedRoundSummary soloRoundActionSummary" aria-label="Selected round details"/)
-  assert.match(soloLogger, /<span>Date<\/span>[\s\S]*<strong>\{date\}<\/strong>[\s\S]*<span>Course<\/span>[\s\S]*<strong>\{course \|\| 'Selected course'\}<\/strong>/)
-  assert.match(soloLogger, /roundActionSummaryVisible: true/)
+  assert.match(component, /holeInputContextText/)
+  assert.doesNotMatch(component, /Hole Number/)
+  assert.doesNotMatch(component, /label: 'Course'/)
+  assert.doesNotMatch(component, /label: 'Date'/)
+  assert.doesNotMatch(component, /label: 'Round Type'/)
+  assert.match(component, /Solo Round/)
+  assert.match(component, /Team Round/)
+  assert.match(component, /draftContext\.date/)
+  assert.match(component, /draftContext\.scoringSide === 'opponent'/)
+  assert.match(component, /holeInputContextValue--emphasis/)
+  assert.match(component, /holeInputContextValue--subtle/)
+  assert.doesNotMatch(component, /key: 'hole'/)
+  assert.doesNotMatch(soloLogger, /className="soloLockedRoundSummary soloRoundActionSummary" aria-label="Selected round details"/)
+  assert.doesNotMatch(golfLogger, /<div className="roundSummaryDate">[\s\S]*<span>Date<\/span>[\s\S]*<\/div>[\s\S]*<div className="roundSummaryCourse">/)
+  assert.match(soloLogger, /roundActionSummaryVisible: false/)
   assert.match(soloLogger, /savedHolesSummaryVisible: false/)
-  assert.match(css, /\.soloRoundActionSummary\{/)
+  assert.match(css, /\.holeInputContextText\{/)
+  assert.match(css, /\.holeInputContextValue--emphasis/)
+  assert.match(css, /\.holeInputContextValue--subtle/)
   assert.doesNotMatch(soloLogger, /<span>Saved holes<\/span>/)
 })
 
@@ -1124,7 +1238,10 @@ test('hole-by-hole close actions save the active dirty score before closing edit
   assert.match(scorecard, /const \[activeScoreDirty, setActiveScoreDirty\] = useState\(false\)/)
   assert.match(scorecard, /savePendingActiveHoleScore/)
   assert.match(scorecard, /no_dirty_score_change/)
-  assert.match(scorecard, /advanceAfterSave: false, throwOnError: true/)
+  assert.match(scorecard, /throwOnError: true/)
+  assert.match(scorecard, /autoAdvanceAfterSave/)
+  assert.match(scorecard, /scorecard\.hole\.auto_advance/)
+  assert.match(scorecard, /advancedAfterSave: nextUnscoredHoleIndex != null/)
   assert.match(scorecard, /setActiveScoreDirty\(true\); setActiveScore/)
   assert.match(scorecard, /category: 'scorecard\.hole\.pending_save'/)
   assert.match(scorecard, /useLayoutEffect/)
@@ -1168,6 +1285,41 @@ test('solo hole tracker merge keeps unsaved persisted holes marked missing', () 
   assert.match(component, /providedHoleNumbers: loadedProvidedHoleNumbers/)
 })
 
+
+test('hole scorecard persisted save refreshes merge without reloading or resetting active hole navigation', () => {
+  const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
+  const soloLogger = fs.readFileSync(new URL('../src/pages/SoloLogger.tsx', import.meta.url), 'utf8')
+
+  assert.match(component, /const persistedHolesRef = useRef<HoleScoreDetail\[] \| null>\(persistedHoles\)/)
+  assert.match(component, /persistedHolesRef\.current = persistedHoles/)
+  assert.match(component, /const latestPersistedHoles = persistedHolesRef\.current/)
+  assert.match(component, /scorecard\.persisted_holes\.merge/)
+  assert.match(component, /merged_without_navigation_reset/)
+  assert.match(component, /}, \[enabled, loadScorecardOnMount, stateCode, course, courseId, selectedTeeColor, draftParams\?\.toString\(\)\]\)/)
+  assert.doesNotMatch(component, /}, \[enabled, loadScorecardOnMount, stateCode, course, courseId, selectedTeeColor, draftParams\?\.toString\(\), persistedHoles\]\)/)
+
+  const persistedMergeSection = component.slice(component.indexOf("category: 'scorecard.persisted_holes.merge'") - 500, component.indexOf("category: 'scorecard.persisted_holes.merge'") + 800)
+  assert.doesNotMatch(persistedMergeSection, /setActiveHoleIndex\(0\)/)
+  assert.match(soloLogger, /async function clearSoloDraft\(\)/)
+  assert.match(soloLogger, /api\(`\/api\/scorecard-drafts\?\$\{params\.toString\(\)\}`, \{ method: 'DELETE' \}\)/)
+  assert.match(soloLogger, /draft_clear_succeeded_after_progress_save/)
+  assert.doesNotMatch(soloLogger, /clearSoloDraft is not defined/)
+})
+
+
+
+test('challenge hole scorecards preserve the selected challenge tee color instead of falling back to white', () => {
+  const challengesPage = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
+
+  assert.match(challengesPage, /function applyChallengeTeeColor\(holes: HoleScoreDetail\[], teeColor: string\)/)
+  assert.match(challengesPage, /teeColor: selectedTeeColor/)
+  assert.match(challengesPage, /teeBoxType: selectedTeeColor/)
+  assert.match(challengesPage, /formatHoleMetadata\(hole: HoleScoreDetail, fallbackTeeColor: string = DEFAULT_TEE_COLOR\)/)
+  assert.match(challengesPage, /formatHoleMetadata\(hole, fallbackTeeColor\)/)
+  assert.match(challengesPage, /applyChallengeTeeColor\(normalizeHoleScorecard\(holes, getTeamChallengeStateCode\(message\), getTeamChallengeCourseName\(message\), selectedTeeColor\), selectedTeeColor\)/)
+  assert.match(challengesPage, /if \(teamChallengeScorecards\[key\]\) return applyChallengeTeeColor\(teamChallengeScorecards\[key\], selectedTeeColor\)/)
+  assert.match(challengesPage, /if \(individualChallengeScorecards\[key\]\) return applyChallengeTeeColor\(individualChallengeScorecards\[key\], selectedTeeColor\)/)
+})
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -2487,8 +2639,8 @@ test('tournament locations use resolved physical golf-course addresses and print
   const myTournaments = fs.readFileSync(new URL('../src/pages/MyTournaments.tsx', import.meta.url), 'utf8')
 
   assert.match(golfCourseService, /formatGolfCoursePhysicalAddress/)
-  assert.match(golfCourseService, /resolveGolfbertCourse/)
-  assert.match(golfCourseService, /formatGolfbertPhysicalAddress/)
+  assert.match(golfCourseService, /resolveGolfCourseForState/)
+  assert.match(golfCourseService, /formatGolfCoursePhysicalAddress/)
   assert.match(server, /resolveTournamentGolfCourseAddress/)
   assert.match(server, /formatGolfCoursePhysicalAddress\(course\)/)
   assert.match(server, /mappedRow\.host_golf_course_address = physicalAddress/)
@@ -2808,8 +2960,9 @@ test('golf user inbox supports messages, Team Challenges, unread indicators, inv
   assert.match(inboxFeatureFiles, /teamChallengeState/)
   assert.match(inboxFeatureFiles, /teamChallengeCourse/)
   assert.doesNotMatch(inboxFeatureFiles, /UseMyLocationButton/)
-  assert.match(inboxFeatureFiles, /US_STATES/)
-  assert.match(inboxFeatureFiles, /searchGolfCourses\(\{ state: teamChallengeState/)
+  assert.match(inboxFeatureFiles, /useGolfCourseStates/)
+  assert.match(inboxFeatureFiles, /GolfCourseInput/)
+  assert.match(inboxFeatureFiles, /teamChallengeCourseSearch/)
   assert.match(inboxFeatureFiles, /Your team/)
   assert.match(inboxFeatureFiles, /fetchTeams/)
   assert.match(inboxFeatureFiles, /teamChallengeOptions/)
@@ -2879,7 +3032,7 @@ test('golf user inbox supports messages, Team Challenges, unread indicators, inv
   assert.match(challengesPage, /totalDisplayMode: 'entered_strokes'/)
   assert.match(challengesPage, /totalLabel: score == null \? 'Pending' : String\(score\)/)
   assert.match(inboxFeatureFiles, /renderReadonlyIndividualChallengeHoles/)
-  assert.match(inboxFeatureFiles, /renderReadonlyTeamChallengeHoles\(holes, teamName\)/)
+  assert.match(inboxFeatureFiles, /renderReadonlyTeamChallengeHoles\(holes, teamName, getTeamChallengeTeeColor\(message\)\)/)
   assert.match(inboxFeatureFiles, /formatHoleScoreOutcome/)
   assert.match(inboxFeatureFiles, /scoreOutcomeClassName/)
   assert.doesNotMatch(inboxFeatureFiles, /Unread messages show an inbox indicator/)
@@ -3217,53 +3370,74 @@ test('home and my golf scores use Team Challenges from inbox score records inste
 })
 
 
-test('golf course datasource has shifted from local database/CSV to Golfbert API', () => {
+test('golf course datasource has shifted from live GolfCourseAPI calls to an OpenGolfAPI-backed database catalog', () => {
   const serverIndex = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const service = fs.readFileSync(new URL('../server/lib/golf-course-service.js', import.meta.url), 'utf8')
   const scorecardService = fs.readFileSync(new URL('../server/lib/hole-scorecard.js', import.meta.url), 'utf8')
-  const golfbertClient = fs.readFileSync(new URL('../server/lib/golfbert-client.js', import.meta.url), 'utf8')
+  const openGolfApiClient = fs.readFileSync(new URL('../server/lib/opengolfapi-client.js', import.meta.url), 'utf8')
+  const importScript = fs.readFileSync(new URL('../server/scripts/import-opengolfapi-courses.js', import.meta.url), 'utf8')
   const clientScorecard = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const viteGolfCourses = fs.readFileSync(new URL('../src/lib/golf-courses.ts', import.meta.url), 'utf8')
+  const useGolfCourseStates = fs.readFileSync(new URL('../src/hooks/useGolfCourseStates.ts', import.meta.url), 'utf8')
   const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
-  const removalMigrationSql = fs.readFileSync(new URL('../migration_scripts/20260521_050_remove_local_golf_course_datasource.sql', import.meta.url), 'utf8')
-  const dbBootstrap = fs.readFileSync(new URL('../server/db.js', import.meta.url), 'utf8')
+  const catalogMigrationSql = fs.readFileSync(new URL('../migration_scripts/20260630_059_opengolfapi_database_catalog.sql', import.meta.url), 'utf8')
   const packageJson = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
   const handicap = fs.readFileSync(new URL('../src/lib/handicap.ts', import.meta.url), 'utf8')
 
   assert.match(serverIndex, /listGolfCoursesForState/)
+  assert.match(serverIndex, /listGolfCourseStates/)
+  assert.match(serverIndex, /app\.get\('\/api\/golf-course-states'/)
+  assert.doesNotMatch(serverIndex, /\/api\/igolf-viewer-config/)
   assert.match(serverIndex, /golferLocationProvided/)
+  assert.match(serverIndex, /Golf course scorecard is temporarily unavailable/)
+  assert.doesNotMatch(serverIndex, /GolfCourseAPI/)
   assert.doesNotMatch(serverIndex, /getStaticCourseDetails/)
-  assert.doesNotMatch(service, /getPool/)
+  assert.match(service, /getPool\(\)/)
+  assert.match(service, /FROM golf_courses/)
+  assert.match(service, /FROM golf_course_holes/)
+  assert.match(service, /LIMIT \$\{limit\}/)
+  assert.doesNotMatch(service, /LIMIT \?/)
+  assert.doesNotMatch(service, /params\.push\(limit\)/)
+  assert.match(service, /upsertOpenGolfCourse/)
+  assert.doesNotMatch(service, /golfcourseapi-client/)
   assert.doesNotMatch(service, /opengolfapi-us\.courses/)
-  assert.match(scorecardService, /getGolfbertCourseHoles/)
-  assert.doesNotMatch(scorecardService, /golf_course_hole_scorecards/)
-  assert.match(golfbertClient, /DEFAULT_BASE_URL = 'https:\/\/api\.golfbert\.com'/)
-  assert.match(golfbertClient, /buildSignedAwsV4Headers/)
-  assert.match(golfbertClient, /golfbertStateParam/)
-  assert.match(golfbertClient, /golfbertCoursePageSize/)
-  assert.match(golfbertClient, /golfbert_course_page_loaded/)
-  assert.match(golfbertClient, /requestPath/)
-  assert.match(golfbertClient, /Missing Authentication Token/)
-  assert.match(golfbertClient, /resources/)
-  assert.match(golfbertClient, /golfbertRequest\('\/courses\/'/)
-  assert.match(golfbertClient, /\/courses\/\$\{encodeURIComponent\(matchedCourse\.id\)\}\/holes/)
-  assert.match(golfbertClient, /\/courses\/\$\{encodeURIComponent\(cleanCourseId\)\}\/scorecard/)
-  assert.doesNotMatch(golfbertClient, /polygons/)
+  assert.match(scorecardService, /getGolfCourseHolesForCourse/)
+  assert.match(scorecardService, /source: 'database'/)
+  assert.doesNotMatch(scorecardService, /getGolfCourseApiCourseHoles/)
+  assert.match(openGolfApiClient, /DEFAULT_BASE_URL = 'https:\/\/api\.opengolfapi\.org'/)
+  assert.match(openGolfApiClient, /\/courses\/state\/\$\{encodeURIComponent\(stateCode\)\}/)
+  assert.match(openGolfApiClient, /\/courses\/\$\{encodeURIComponent\(id\)\}/)
+  assert.match(openGolfApiClient, /recordExternalApiCall\(\{ apiType: 'opengolfapi'/)
+  assert.match(openGolfApiClient, /OPEN_GOLF_API_REQUEST_INTERVAL_MS/)
+  assert.match(openGolfApiClient, /isOpenGolfApiRetriableStatus/)
+  assert.match(openGolfApiClient, /opengolfapi_request_retry_scheduled/)
+  assert.match(importScript, /fetchOpenGolfApiStateCourses/)
+  assert.match(importScript, /fetchOpenGolfApiCourseDetail/)
+  assert.match(importScript, /upsertOpenGolfCourse/)
+  assert.match(importScript, /state-delay-ms/)
+  assert.match(importScript, /stop-on-error/)
   assert.match(clientScorecard, /loadSavedLocation\(\)/)
-  assert.match(clientScorecard, /distanceToFlagYards/)
-  assert.match(viteGolfCourses, /normalizeGolfCourseOptions/)
-  assert.doesNotMatch(viteGolfCourses, /query\.set\('limit'/)
-  assert.doesNotMatch(dbBootstrap, /CREATE TABLE IF NOT EXISTS golf_course_hole_scorecards/)
-  assert.doesNotMatch(packageJson, /golf-courses:import/)
+  assert.doesNotMatch(clientScorecard, /holeMap/)
+  assert.doesNotMatch(clientScorecard, /IgolfHoleViewer/)
+  assert.match(clientScorecard, /courseId/)
+  assert.match(service, /distanceToFrontYards/)
+  assert.doesNotMatch(clientScorecard, /yds to center/)
+  assert.match(service, /distanceToBackYards/)
+  assert.match(viteGolfCourses, /fetchGolfCourseStates/)
+  assert.match(viteGolfCourses, /COURSE_SEARCH_MIN_CHARS = 0/)
+  assert.match(viteGolfCourses, /query\.set\('limit'/)
+  assert.match(useGolfCourseStates, /fetchGolfCourseStates/)
+  assert.doesNotMatch(packageJson, /GOLF_COURSE_API/)
+  assert.match(packageJson, /golf-courses:import-opengolfapi/)
   assert.doesNotMatch(handicap, /data\/courseDetails/)
-  assert.match(migrations, /20260521_050/)
-  assert.match(migrations, /remove_local_golf_course_datasource/)
-  assert.match(migrations, /tableExists\(db, 'golf_course_holes'\)/)
-  assert.match(removalMigrationSql, /DROP TABLE IF EXISTS golf_course_holes/)
-  assert.ok(
-    removalMigrationSql.indexOf('DROP TABLE IF EXISTS golf_course_holes') < removalMigrationSql.indexOf('DROP TABLE IF EXISTS golf_courses'),
-    'local hole child table must be dropped before local course parent table'
-  )
+  assert.match(migrations, /20260630_059/)
+  assert.match(migrations, /opengolfapi_database_catalog/)
+  assert.match(catalogMigrationSql, /CREATE TABLE IF NOT EXISTS golf_courses/)
+  assert.match(catalogMigrationSql, /CREATE TABLE IF NOT EXISTS golf_course_holes/)
+  assert.match(catalogMigrationSql, /curl "https:\/\/api\.opengolfapi\.org\/v1\/courses\/state\/UT\?limit=50&offset=0"/)
+  assert.match(catalogMigrationSql, /curl "https:\/\/api\.opengolfapi\.org\/v1\/courses\/\{id\}"/)
+  assert.match(catalogMigrationSql, /is_manual TINYINT\(1\) NOT NULL DEFAULT 0/)
+  assert.match(catalogMigrationSql, /UNIQUE KEY ux_golf_course_holes_course_hole_tee_source/)
 })
 
 test('registration defers location collection to first profile sign-in setup with correlated logging', () => {
@@ -3310,4 +3484,105 @@ test('challenge thread renders the challenge type only once in the card header',
   assert.doesNotMatch(contextSource, /golfer Individual Challenge/)
   assert.match(contextSource, /golfer challenge/)
   assert.match(challengesPage, /challenge_type_changed/)
+})
+
+test('team challenge skins and skins-push points are persisted, logged, and shown on leaderboard', () => {
+  const challengesPage = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
+  const directionsPage = fs.readFileSync(new URL('../src/pages/Directions.tsx', import.meta.url), 'utf8')
+  const inboxClient = fs.readFileSync(new URL('../src/lib/inbox.ts', import.meta.url), 'utf8')
+  const scoring = fs.readFileSync(new URL('../src/lib/team-challenge-scoring.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const inboxService = fs.readFileSync(new URL('../server/lib/inbox-service.js', import.meta.url), 'utf8')
+  const mysqlStorage = fs.readFileSync(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
+  const sqliteStorage = fs.readFileSync(new URL('../server/storage/sqlite.js', import.meta.url), 'utf8')
+  const jsonStorage = fs.readFileSync(new URL('../server/storage/json.js', import.meta.url), 'utf8')
+  const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const migrationSql = fs.readFileSync(new URL('../migration_scripts/20260624_057_team_challenge_skins_points.sql', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(challengesPage, /teamChallengeScoringType/)
+  assert.match(challengesPage, /Team challenge game/)
+  assert.match(challengesPage, /Standard team score/)
+  assert.match(challengesPage, /Skins - Push/)
+  assert.match(challengesPage, /teamChallengePointsPerHole/)
+  assert.match(challengesPage, /challengeScoringType: effectiveChallengeScoringType/)
+  assert.match(challengesPage, /challengePointsPerHole: effectiveChallengePointsPerHole/)
+  assert.match(challengesPage, /calculateTeamChallengePoints/)
+  assert.match(challengesPage, /pointsRelativeLabel/)
+  assert.match(challengesPage, /opponent_adjusted_net_points/)
+  assert.match(challengesPage, /formatOpponentAdjustedPointLabel/)
+  assert.match(challengesPage, /carryover points pending/)
+  assert.match(challengesPage, /teamChallengeTypeIndicator/)
+  assert.match(challengesPage, /inboxLeaderboardPoints/)
+  assert.match(challengesPage, /team_challenge_scoring_type_changed/)
+
+  assert.match(inboxClient, /challengeScoringType\?: TeamChallengeScoringType \| string \| null/)
+  assert.match(inboxClient, /challengePointsPerHole\?: number \| null/)
+  assert.match(inboxClient, /challengePointsPerHole\?: number \| string \| null/)
+
+  assert.match(scoring, /export function calculateTeamChallengePoints/)
+  assert.match(scoring, /winner: 'tie'/)
+  assert.match(scoring, /carryoverPoints \+= pointsPerHole/)
+  assert.match(scoring, /proposerPoints \+= awarded/)
+  assert.match(scoring, /challengedPoints \+= awarded/)
+  assert.match(scoring, /proposerNetPoints = proposerPoints - challengedPoints/)
+  assert.match(scoring, /challengedNetPoints = challengedPoints - proposerPoints/)
+
+  assert.match(server, /challengeScoringType/)
+  assert.match(server, /challengePointsPerHole/)
+  assert.match(server, /team_challenge_recipient_resolved/)
+  assert.match(inboxService, /normalizeTeamChallengeScoringType/)
+  assert.match(inboxService, /normalizeTeamChallengePointsPerHole/)
+  assert.match(mysqlStorage, /challenge_scoring_type/)
+  assert.match(mysqlStorage, /challenge_points_per_hole/)
+  assert.match(sqliteStorage, /challenge_scoring_type/)
+  assert.match(sqliteStorage, /challenge_points_per_hole/)
+  assert.match(jsonStorage, /challengeScoringType/)
+  assert.match(jsonStorage, /challengePointsPerHole/)
+
+  assert.match(migrations, /20260624_057/)
+  assert.match(migrations, /team_challenge_skins_points/)
+  assert.match(migrationSql, /challenge_scoring_type/)
+  assert.match(migrationSql, /challenge_points_per_hole/)
+  assert.match(migrationSql, /idx_inbox_messages_team_challenge_scoring/)
+
+  assert.match(directionsPage, /Skins Team Challenge/)
+  assert.match(directionsPage, /Skins - Push Team Challenge/)
+  assert.match(directionsPage, /carries over/)
+  assert.match(css, /\.teamChallengeTypeIndicator/)
+  assert.match(css, /\.inboxLeaderboardPoints/)
+})
+
+
+test('team challenge skins score entry supports optional messages, partial saves, close saves, and hides standard points column', () => {
+  const challengesPage = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
+  const inboxService = fs.readFileSync(new URL('../server/lib/inbox-service.js', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(challengesPage, /const canSubmitChallenge = Boolean\(teamChallengeDate && teamChallengeState && teamChallengeCourse\)/)
+  assert.match(challengesPage, /isTeamChallenge \? Boolean\(proposerTeamId && challengedTeamName\.trim\(\)\) : Boolean\(challengeBody\.trim\(\)/)
+  assert.match(challengesPage, /placeholder=\{isTeamChallenge \? 'Optional: write your Team Challenge details'/)
+  assert.doesNotMatch(challengesPage, /id="challengeMessageBody"[\s\S]{0,160}required/)
+  assert.match(inboxService, /normalizeOptionalInboxMessageBody/)
+  assert.match(inboxService, /messageType === 'challenge_request' && !replyToMessageId/)
+
+  assert.match(challengesPage, /const showPointsColumn = isSkinsTeamChallenge\(pointSummary\.scoringType\)/)
+  assert.match(challengesPage, /showPointsColumn \? <span>PTS<\/span> : null/)
+  assert.match(challengesPage, /showPointsColumn \? \([\s\S]{0,80}<div className="inboxLeaderboardPoints">/)
+  assert.match(css, /inboxLeaderboardHeaderRow--teamNoPoints/)
+  assert.match(css, /inboxLeaderboardRow--teamNoPoints/)
+  assert.match(challengesPage, /const ownPoints = entry\.side === 'proposer' \? pointSummary\.proposerPoints : pointSummary\.challengedPoints/)
+  assert.match(challengesPage, /const opponentPoints = entry\.side === 'proposer' \? pointSummary\.challengedPoints : pointSummary\.proposerPoints/)
+  assert.match(challengesPage, /const points = entry\.side === 'proposer' \? pointSummary\.proposerNetPoints : pointSummary\.challengedNetPoints/)
+  assert.match(challengesPage, /formatOpponentAdjustedPointLabel\(ownPoints, opponentPoints\)/)
+  assert.match(challengesPage, /if \(isSkinsTeamChallenge\(pointSummary\.scoringType\) && a\.points !== b\.points\) return b\.points - a\.points/)
+
+  assert.match(challengesPage, /persistTeamChallengeScoreProgress/)
+  assert.match(challengesPage, /source: 'manual_save'/)
+  assert.match(challengesPage, /source: 'modal_close'/)
+  assert.match(challengesPage, /allowEmptyClose: true/)
+  assert.match(challengesPage, /registerPendingHoleSave=\{\(handler\) => \{ teamChallengePendingHoleSaveRef\.current = handler \}\}/)
+  assert.match(challengesPage, /if \(!skinsScoring && missingHoleNumbers\.length\)/)
+  assert.match(challengesPage, /providedCount === 0/)
+  assert.match(challengesPage, /Team Challenge score saved\. \$\{providedCount\} of \$\{holes\.length \|\| 18\} holes entered\./)
 })

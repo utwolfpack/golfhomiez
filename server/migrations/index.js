@@ -1752,6 +1752,97 @@ LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
     },
   },
 
+
+  {
+    version: '20260624_057',
+    name: 'team_challenge_skins_points',
+    filename: '20260624_057_team_challenge_skins_points.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_messages') &&
+        await columnExists(db, 'inbox_messages', 'challenge_scoring_type') &&
+        await columnExists(db, 'inbox_messages', 'challenge_points_per_hole') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_scoring')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'inbox_messages', 'challenge_scoring_type'))) statements.push("ALTER TABLE inbox_messages ADD COLUMN challenge_scoring_type VARCHAR(32) NOT NULL DEFAULT 'stroke_play' AFTER challenge_tee_color")
+      if (!(await columnExists(db, 'inbox_messages', 'challenge_points_per_hole'))) statements.push('ALTER TABLE inbox_messages ADD COLUMN challenge_points_per_hole DECIMAL(10,2) NULL AFTER challenge_scoring_type')
+      statements.push("UPDATE inbox_messages SET challenge_scoring_type = 'stroke_play' WHERE challenge_scoring_type IS NULL OR TRIM(challenge_scoring_type) = ''")
+      if (!(await indexExists(db, 'inbox_messages', 'idx_inbox_messages_team_challenge_scoring'))) statements.push('CREATE INDEX idx_inbox_messages_team_challenge_scoring ON inbox_messages(message_type, challenge_scoring_type, challenge_status, created_at)')
+      return statements.join(';\n') || '-- team challenge skins points schema already exists'
+    },
+  },
+
+
+  {
+    version: '20260630_058',
+    name: 'golfcourseapi_datasource_cleanup',
+    filename: '20260630_058_golfcourseapi_datasource_cleanup.sql',
+    async isSatisfied(db) {
+      return !(await tableExists(db, 'golf_course_hole_scorecards')) &&
+        !(await tableExists(db, 'golf_course_holes')) &&
+        !(await tableExists(db, 'golf_courses'))
+    },
+    async getSql() {
+      return loadMigrationSql('20260630_058_golfcourseapi_datasource_cleanup.sql')
+    },
+  },
+
+
+  {
+    version: '20260630_059',
+    name: 'opengolfapi_database_catalog',
+    filename: '20260630_059_opengolfapi_database_catalog.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'golf_courses') &&
+        await tableExists(db, 'golf_course_holes') &&
+        await columnExists(db, 'golf_courses', 'external_course_id') &&
+        await columnExists(db, 'golf_courses', 'state_code') &&
+        await columnExists(db, 'golf_courses', 'county') &&
+        await columnExists(db, 'golf_courses', 'total_yardage') &&
+        await columnExists(db, 'golf_courses', 'raw_detail_payload') &&
+        await columnExists(db, 'golf_course_holes', 'tee_name') &&
+        await columnExists(db, 'golf_course_holes', 'yards') &&
+        await columnExists(db, 'golf_course_holes', 'stroke_index') &&
+        await indexExists(db, 'golf_courses', 'idx_golf_courses_active_state') &&
+        await indexExists(db, 'golf_course_holes', 'idx_golf_course_holes_course_hole')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260630_059_opengolfapi_database_catalog.sql')
+    },
+  },
+
+  {
+    version: '20260702_060',
+    name: 'opengolfapi_hole_endpoint_geometry',
+    filename: '20260702_060_opengolfapi_hole_endpoint_geometry.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'golf_course_holes') &&
+        await columnExists(db, 'golf_course_holes', 'tee_latitude') &&
+        await columnExists(db, 'golf_course_holes', 'tee_longitude') &&
+        await indexExists(db, 'golf_course_holes', 'idx_golf_course_holes_tee_coordinates')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'golf_course_holes', 'tee_latitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN tee_latitude DECIMAL(10,7) NULL AFTER stroke_index')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'tee_longitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN tee_longitude DECIMAL(10,7) NULL AFTER tee_latitude')
+      }
+      if (!(await indexExists(db, 'golf_course_holes', 'idx_golf_course_holes_tee_coordinates'))) {
+        statements.push('CREATE INDEX idx_golf_course_holes_tee_coordinates ON golf_course_holes (tee_latitude, tee_longitude)')
+      }
+      return statements.join(';\n')
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {
