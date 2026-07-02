@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { searchGolfCourses, type GolfCourseOption } from '../lib/golf-courses'
 
-export function useGolfCourseOptions({ state, query, enabled = true }: { state?: string; query?: string; enabled?: boolean; limit?: number }) {
+export function useGolfCourseOptions({ state, query, enabled = true, limit, minQueryLength = 0 }: { state?: string; query?: string; enabled?: boolean; limit?: number; minQueryLength?: number }) {
   const [courses, setCourses] = useState<GolfCourseOption[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -18,7 +18,8 @@ export function useGolfCourseOptions({ state, query, enabled = true }: { state?:
     }
 
     const trimmedQuery = String(query || '').trim()
-    if (!trimmedQuery && !state) {
+    const requiredLength = Math.max(0, Math.trunc(Number(minQueryLength) || 0))
+    if (!state || trimmedQuery.length < requiredLength) {
       setCourses([])
       setLoading(false)
       setError(null)
@@ -31,7 +32,7 @@ export function useGolfCourseOptions({ state, query, enabled = true }: { state?:
     setError(null)
     const timer = globalThis.setTimeout(async () => {
       try {
-        const next = await searchGolfCourses({ state, query: trimmedQuery })
+        const next = await searchGolfCourses({ state, query: trimmedQuery, limit })
         if (active) setCourses(next)
       } catch (err) {
         if (active) {
@@ -41,13 +42,13 @@ export function useGolfCourseOptions({ state, query, enabled = true }: { state?:
       } finally {
         if (active) setLoading(false)
       }
-    }, 150)
+    }, 400)
 
     return () => {
       active = false
       globalThis.clearTimeout(timer)
     }
-  }, [enabled, state, query])
+  }, [enabled, state, query, limit, minQueryLength])
 
   return { courses, loading, error }
 }

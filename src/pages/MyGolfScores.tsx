@@ -6,7 +6,7 @@ import HandicapBreakdownModal from '../components/HandicapBreakdownModal'
 import HandicapSummaryCard from '../components/HandicapSummaryCard'
 import StatCard from '../components/StatCard'
 import { useAuth } from '../context/AuthContext'
-import { US_STATES } from '../data/usStates'
+import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { api } from '../lib/api'
 import { fetchTeamChallengeScoreRecords } from '../lib/inbox'
 import { logFrontendEvent } from '../lib/frontend-logger'
@@ -131,6 +131,7 @@ function MyGolfScoresInner() {
   const [courseFilter, setCourseFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
   const [page, setPage] = useState(1)
+  const { states: apiStateOptions } = useGolfCourseStates()
 
   useEffect(() => {
     ;(async () => {
@@ -158,7 +159,7 @@ function MyGolfScoresInner() {
   }, [user?.email])
 
   const scopedByView = useMemo(() => scores.filter((s) => (view === 'all' ? true : view === 'solo' ? isSoloScore(s) : isTeamChallengeScore(s))), [scores, view])
-  const nameByAbbr = useMemo(() => new Map(US_STATES.map((s) => [s.abbr, s.name])), [])
+  const nameByAbbr = useMemo(() => new Map(apiStateOptions.map((s) => [s.abbr, s.name])), [apiStateOptions])
   const stateOptions = useMemo(() => Array.from(new Set(scopedByView.map((s: any) => String(s.state || '').toUpperCase()).filter(Boolean))).sort(), [scopedByView])
   const courseOptions = useMemo(() => Array.from(new Set(scopedByView.filter((s) => scoreMatchesState(s, stateFilter)).map((s) => s.course).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [scopedByView, stateFilter])
   const teamOptions = useMemo(() => Array.from(new Set(scopedByView.filter(isTeamScore).filter((s) => scoreMatchesState(s, stateFilter)).filter((s) => courseFilter === 'all' ? true : s.course === courseFilter).map((s) => s.team).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [scopedByView, stateFilter, courseFilter])

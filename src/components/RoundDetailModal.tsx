@@ -138,6 +138,13 @@ function buildEditableHoleScores(round: ScoreEntry | null, keys: string[]): Hole
   return holes
 }
 
+function formatHoleDetailMetadata(hole: { par?: number | null; yards?: number | null }) {
+  const items = [`Par ${hole.par || '—'}`]
+  const yards = Number(hole.yards)
+  if (hole.yards != null && Number.isFinite(yards) && yards > 0) items.push(`${Math.trunc(yards)} yds`)
+  return items.join(' • ')
+}
+
 function providedHoleScoreTotal(holes: HoleScoreDetail[]) {
   return holes
     .filter((hole) => hole.scoreProvided)
@@ -177,7 +184,7 @@ function renderHoleDetails(holes: DisplayHoleScore[], ownerLabel?: string) {
           <div key={hole.hole} className={`roundHoleDetailPill ${outcome.outcomeClass}`}>
             {ownerLabel ? <span className="roundHoleDetailOwner">{ownerLabel}</span> : null}
             <strong>Hole {hole.hole}</strong>
-            <span>Par {hole.par || '—'} • {hole.yards || '—'} yds</span>
+            <span>{formatHoleDetailMetadata(hole)}</span>
             <span className="roundHoleDetailScore">{outcome.outcome}</span>
           </div>
         )
@@ -214,7 +221,7 @@ function renderTeamHoleComparison(teamHoles: DisplayHoleScore[], opponentHoles: 
           <div key={holeNumber} className="roundHoleCompareRow">
             <div className="roundHoleCompareMeta">
               <strong>Hole {holeNumber}</strong>
-              <span>Par {detailHole?.par || '—'} • {detailHole?.yards || '—'} yds</span>
+              <span>{formatHoleDetailMetadata(detailHole || {})}</span>
             </div>
             <div className="roundHoleCompareScores">
               {renderComparisonScoreCell(teamHole, teamLabel)}

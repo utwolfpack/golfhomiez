@@ -13,8 +13,8 @@ import { isValidPastOrTodayDate } from './lib/date-utils.js'
 import { buildSuggestedTeamName, isValidTeamSize, normalizeCreateTeamMembers, normalizeEmail, isEmail, normalizeTeamMemberStatus } from './lib/team-utils.js'
 import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInfo, logScheduledJob, requestContext, requestCorrelationMiddleware } from './lib/logger.js'
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
-import { findGolfCourseForState, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCoursesForState } from './lib/golf-course-service.js'
-import { calculateHoleScoreTotal, getHoleScorecardForCourse, normalizeHoleScorePayload } from './lib/hole-scorecard.js'
+import { findGolfCourseForState, findNearestGolfCourse, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseStates, listGolfCoursesForState } from './lib/golf-course-service.js'
+import { calculateHoleScoreTotal, calculateProvidedHoleScoreTotal, getHoleScorecardForCourse, normalizeHoleScorePayload } from './lib/hole-scorecard.js'
 import { clearScorecardDraftHoles, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
@@ -139,25 +139,71 @@ app.get('/api/locations/search', (req, res) => {
   }
 })
 
+app.get('/api/golf-course-states', async (req, res) => {
+  try {
+    const states = await listGolfCourseStates()
+    logApi('golf_course_states_completed', {
+      ...requestContext(req),
+      source: 'database',
+      resultCount: states.length,
+    })
+    return res.json(states)
+  } catch (error) {
+    logRouteError('Golf course database state list error', req, error)
+    const status = /database|ER_|ECONN|ETIMEDOUT/i.test(error?.message || error?.code || '') ? 503 : 500
+    return res.status(status).json({ message: 'Golf course states are temporarily unavailable.' })
+  }
+})
+
 app.get('/api/golf-courses', async (req, res) => {
   try {
     const state = String(req.query.state || '').trim().toUpperCase()
     const query = String(req.query.q || req.query.query || '').trim()
     if (!state && !query) return res.status(400).json({ message: 'state or q query parameter required' })
 
-    const courses = await listGolfCoursesForState(state, { query })
+    const limit = Math.min(Math.max(Number(req.query.limit) || 1000, 1), 1000)
+    const courses = await listGolfCoursesForState(state, { query, limit })
     logApi('golf_courses_list_completed', {
       ...requestContext(req),
       state,
       query,
-      source: 'golfbert-api',
+      source: 'database',
+      limit,
       resultCount: courses.length,
     })
     return res.json(courses)
   } catch (error) {
-    logRouteError('Golfbert golf course list error', req, error)
-    const status = /GOLFBERT_API_KEY/.test(error?.message || '') ? 503 : 500
-    return res.status(status).json({ message: 'Golfbert course catalog is temporarily unavailable.' })
+    logRouteError('Golf course database list error', req, error)
+    const status = /database|ER_|ECONN|ETIMEDOUT/i.test(error?.message || error?.code || '') ? 503 : 500
+    return res.status(status).json({ message: 'Golf course catalog is temporarily unavailable.' })
+  }
+})
+
+
+app.get('/api/golf-courses/nearest', async (req, res) => {
+  try {
+    const latitude = Number(req.query.lat ?? req.query.latitude)
+    const longitude = Number(req.query.lng ?? req.query.longitude)
+    const state = String(req.query.state || '').trim().toUpperCase()
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return res.status(400).json({ message: 'lat and lng query parameters are required' })
+
+    const nearest = await findNearestGolfCourse({ latitude, longitude, state })
+    logApi('golf_courses_nearest_completed', {
+      ...requestContext(req),
+      latitude,
+      longitude,
+      state: state || null,
+      source: 'database',
+      found: Boolean(nearest),
+      courseId: nearest?.id || null,
+      course: nearest?.name || null,
+      distanceYards: nearest?.distanceYards ?? null,
+    })
+    return res.json(nearest || null)
+  } catch (error) {
+    logRouteError('Golf course nearest lookup error', req, error)
+    const status = /database|ER_|ECONN|ETIMEDOUT/i.test(error?.message || error?.code || '') ? 503 : 500
+    return res.status(status).json({ message: 'Nearest golf course is temporarily unavailable.' })
   }
 })
 
@@ -171,8 +217,8 @@ app.get('/api/golf-courses/scorecard', async (req, res) => {
     const teeColor = normalizeTeeColor(req.query.teeColor || req.query.tee_color || DEFAULT_TEE_COLOR)
     if (!state || (!course && !courseId)) return res.status(400).json({ message: 'state and course or courseId query parameters are required' })
 
-    const matchedCourse = courseId ? await findGolfCourseForState(state, course || courseId) : await findGolfCourseForState(state, course)
-    if (!matchedCourse && !courseId) return res.status(404).json({ message: 'Select a golf course from the Golfbert catalog for the selected state' })
+    const matchedCourse = await findGolfCourseForState(state, course, courseId)
+    if (!matchedCourse && !courseId) return res.status(404).json({ message: 'Select a golf course from the database catalog for the selected state' })
 
     const scorecard = await getHoleScorecardForCourse({
       state: matchedCourse?.state_code || matchedCourse?.state || state,
@@ -193,7 +239,6 @@ app.get('/api/golf-courses/scorecard', async (req, res) => {
       availableTeeColors: scorecard.availableTeeColors || [],
       golferLocationProvided: Number.isFinite(golferLatitude) && Number.isFinite(golferLongitude),
       holeCount: Array.isArray(scorecard.holes) ? scorecard.holes.length : 0,
-      holeMapReadyCount: Array.isArray(scorecard.holes) ? scorecard.holes.filter((hole) => Number.isFinite(Number(hole.flagLatitude)) && Number.isFinite(Number(hole.flagLongitude))).length : 0,
       distanceToFlagCount: Array.isArray(scorecard.holes) ? scorecard.holes.filter((hole) => Number.isFinite(Number(hole.distanceToFlagYards))).length : 0,
       parTotal: scorecard.parTotal,
       scoreTotal: scorecard.scoreTotal,
@@ -201,9 +246,9 @@ app.get('/api/golf-courses/scorecard', async (req, res) => {
 
     return res.json(scorecard)
   } catch (error) {
-    logRouteError('Golfbert golf course scorecard error', req, error)
-    const status = /Select a golf course|did not return hole data/.test(error?.message || '') ? 404 : (/GOLFBERT_API_KEY/.test(error?.message || '') ? 503 : 500)
-    return res.status(status).json({ message: 'Golfbert course scorecard is temporarily unavailable.' })
+    logRouteError('Golf course database scorecard error', req, error)
+    const status = /Select a golf course|did not return hole data/.test(error?.message || '') ? 404 : (/database|ER_|ECONN|ETIMEDOUT/i.test(error?.message || error?.code || '') ? 503 : 500)
+    return res.status(status).json({ message: 'Golf course scorecard is temporarily unavailable.' })
   }
 })
 
@@ -2897,6 +2942,8 @@ async function resolveTeamChallengeForNewMessage(req, payload) {
       challengeState: payload.challengeState,
       challengeCourse: payload.challengeCourse,
       challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || DEFAULT_TEE_COLOR),
+      challengeScoringType: payload.challengeScoringType || 'stroke_play',
+      challengePointsPerHole: payload.challengePointsPerHole ?? null,
     },
   }
 }
@@ -2927,6 +2974,8 @@ async function resolveTeamChallengeForReply(req, parentMessage) {
       challengeState: parentMessage.challengeState || null,
       challengeCourse: parentMessage.challengeCourse || null,
       challengeTeeColor: normalizeTeeColor(parentMessage.challengeTeeColor || DEFAULT_TEE_COLOR),
+      challengeScoringType: parentMessage.challengeScoringType || 'stroke_play',
+      challengePointsPerHole: parentMessage.challengePointsPerHole ?? null,
       proposerTeamScore: parentMessage.proposerTeamScore ?? null,
       challengedTeamScore: parentMessage.challengedTeamScore ?? null,
       proposerTeamHoles: parentMessage.proposerTeamHoles || null,
@@ -3187,6 +3236,8 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
       challengeState: payload.challengeState || null,
       challengeCourse: payload.challengeCourse || null,
       challengeTeeColor: payload.challengeTeeColor || DEFAULT_TEE_COLOR,
+      challengeScoringType: payload.challengeScoringType || 'stroke_play',
+      challengePointsPerHole: payload.challengePointsPerHole ?? null,
       messageType: payload.messageType,
       replyToMessageId: payload.replyToMessageId,
       bodyLength: payload.body.length,
@@ -3217,6 +3268,8 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
           recipientEmail,
           proposerTeamId: teamContext?.proposerTeamId || null,
           challengedTeamId: teamContext?.challengedTeamId || null,
+          challengeScoringType: teamContext?.challengeScoringType || 'stroke_play',
+          challengePointsPerHole: teamContext?.challengePointsPerHole ?? null,
         })
       } else if (messageType === 'individual_challenge') {
         const resolvedChallenge = await resolveIndividualChallengeForReply(req, parentMessage)
@@ -3260,6 +3313,8 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
         challengeState: teamContext?.challengeState || null,
         challengeCourse: teamContext?.challengeCourse || null,
         challengeTeeColor: teamContext?.challengeTeeColor || DEFAULT_TEE_COLOR,
+        challengeScoringType: teamContext?.challengeScoringType || 'stroke_play',
+        challengePointsPerHole: teamContext?.challengePointsPerHole ?? null,
         recipientEmail,
       })
     } else if (payload.messageType === 'individual_challenge') {
@@ -3276,6 +3331,8 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
         challengeState: teamContext?.challengeState || null,
         challengeCourse: teamContext?.challengeCourse || null,
         challengeTeeColor: teamContext?.challengeTeeColor || DEFAULT_TEE_COLOR,
+        challengeScoringType: teamContext?.challengeScoringType || 'stroke_play',
+        challengePointsPerHole: teamContext?.challengePointsPerHole ?? null,
         recipientEmail,
       })
     }
@@ -3316,6 +3373,8 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
       challengeDate: message?.challengeDate || teamContext?.challengeDate || null,
       challengeState: message?.challengeState || teamContext?.challengeState || null,
       challengeCourse: message?.challengeCourse || teamContext?.challengeCourse || null,
+      challengeScoringType: message?.challengeScoringType || teamContext?.challengeScoringType || 'stroke_play',
+      challengePointsPerHole: message?.challengePointsPerHole ?? teamContext?.challengePointsPerHole ?? null,
       individualParticipantCount: message?.individualChallengeParticipants?.length || teamContext?.individualChallengeParticipants?.length || 0,
     })
     res.status(201).json({ ok: true, message, notice: messageType === 'challenge_request' ? 'Your Team Challenge was sent successfully.' : (messageType === 'individual_challenge' ? 'Your Individual Challenge was sent successfully.' : 'Your message was sent successfully.') })
@@ -3910,29 +3969,35 @@ function sameTeamName(a, b) {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
 }
 
-function findMatchingTeamRound(scores, { date, state, course, team, opponentTeam }) {
+function scoreCourseMatches(entry, { state, course, courseId }) {
   const normalizedState = String(state || '').trim().toUpperCase()
+  if (String(entry?.state || '').trim().toUpperCase() !== normalizedState) return false
+
+  const normalizedCourseId = String(courseId || '').trim()
+  const entryCourseId = String(entry?.golfCourseId || entry?.golf_course_id || '').trim()
+  if (normalizedCourseId && entryCourseId && normalizedCourseId === entryCourseId) return true
+
   const normalizedCourse = String(course || '').trim().toLowerCase()
+  return Boolean(normalizedCourse) && String(entry?.course || '').trim().toLowerCase() === normalizedCourse
+}
+
+function findMatchingTeamRound(scores, { date, state, course, courseId, team, opponentTeam }) {
   return (scores || []).find((entry) => {
     if (entry?.mode !== 'team') return false
     if (String(entry.date || '') !== String(date || '')) return false
-    if (String(entry.state || '').trim().toUpperCase() !== normalizedState) return false
-    if (String(entry.course || '').trim().toLowerCase() !== normalizedCourse) return false
+    if (!scoreCourseMatches(entry, { state, course, courseId })) return false
     const normal = sameTeamName(entry.team, team) && sameTeamName(entry.opponentTeam, opponentTeam)
     const reversed = sameTeamName(entry.team, opponentTeam) && sameTeamName(entry.opponentTeam, team)
     return normal || reversed
   }) || null
 }
 
-function findMatchingSoloRound(scores, { date, state, course, user }) {
-  const normalizedState = String(state || '').trim().toUpperCase()
-  const normalizedCourse = String(course || '').trim().toLowerCase()
+function findMatchingSoloRound(scores, { date, state, course, courseId, user }) {
   return (scores || []).find((entry) => {
     if (entry?.mode !== 'solo') return false
     if (entry?.source === 'individual_challenge') return false
     if (String(entry.date || '') !== String(date || '')) return false
-    if (String(entry.state || '').trim().toUpperCase() !== normalizedState) return false
-    if (String(entry.course || '').trim().toLowerCase() !== normalizedCourse) return false
+    if (!scoreCourseMatches(entry, { state, course, courseId })) return false
     return isScoreCreator(entry, user)
   }) || null
 }
@@ -4000,19 +4065,24 @@ async function buildUpdatedScorePayload(existing, body, req) {
   const date = body.date ?? existing.date
   const state = String(body.state ?? existing.state ?? '').trim().toUpperCase()
   const courseInput = String(body.course ?? existing.course ?? '').trim()
+  const courseIdInput = String(body.courseId ?? body.course_id ?? existing.golfCourseId ?? existing.golf_course_id ?? '').trim()
 
   if (!date || !courseInput) throw new Error('date and course required')
   if (!isValidPastOrTodayDate(date, req.headers['x-user-timezone'])) throw new Error('Date must be today or earlier in your local time zone')
   if (!state) throw new Error('state required')
 
-  const matchedCourse = await findGolfCourseForState(state, courseInput)
+  const matchedCourse = await findGolfCourseForState(state, courseInput, courseIdInput)
   if (!matchedCourse) throw new Error('Select a golf course from the catalog for the selected state')
 
   const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
   const teeColor = normalizeTeeColor(body.teeColor ?? body.tee_color ?? existing.teeColor ?? DEFAULT_TEE_COLOR)
 
   if (mode === 'solo') {
-    const roundScore = coerceScoreNumber(body.roundScore ?? existing.roundScore, 'roundScore')
+    const normalizedHoles = body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes)
+    const providedHoleCount = countProvidedHoleScores(normalizedHoles)
+    const roundScore = providedHoleCount > 0
+      ? calculateProvidedHoleScoreTotal(normalizedHoles)
+      : coerceScoreNumber(body.roundScore ?? existing.roundScore, 'roundScore')
     return {
       ...existing,
       mode: 'solo',
@@ -4026,7 +4096,7 @@ async function buildUpdatedScorePayload(existing, body, req) {
       teamTotal: null,
       opponentTotal: null,
       won: null,
-      holes: body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes),
+      holes: normalizedHoles,
       opponentHoles: null,
       ...courseMetadata,
     }
@@ -4049,8 +4119,12 @@ async function buildUpdatedScorePayload(existing, body, req) {
   if ((body.teamTotal !== undefined || body.holes !== undefined) && !userOnTeam) throw new Error('Only members of the selected team can modify that team score')
   if ((body.opponentTotal !== undefined || body.opponentHoles !== undefined) && !userOnOpponentTeam) throw new Error('Only members of the opponent team can modify the opponent score')
 
-  const teamTotal = coerceOptionalScoreNumber(body.teamTotal ?? existing.teamTotal, 'teamTotal')
-  const opponentTotal = coerceOptionalScoreNumber(body.opponentTotal ?? existing.opponentTotal, 'opponentTotal')
+  const normalizedHoles = body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes)
+  const normalizedOpponentHoles = body.opponentHoles === undefined ? existing.opponentHoles : normalizeHoleScorePayload(body.opponentHoles)
+  const submittedTeamTotal = coerceOptionalScoreNumber(body.teamTotal ?? existing.teamTotal, 'teamTotal')
+  const submittedOpponentTotal = coerceOptionalScoreNumber(body.opponentTotal ?? existing.opponentTotal, 'opponentTotal')
+  const teamTotal = countProvidedHoleScores(normalizedHoles) > 0 ? calculateProvidedHoleScoreTotal(normalizedHoles) : submittedTeamTotal
+  const opponentTotal = countProvidedHoleScores(normalizedOpponentHoles) > 0 ? calculateProvidedHoleScoreTotal(normalizedOpponentHoles) : submittedOpponentTotal
   if (teamTotal === null) throw new Error('teamTotal must be a number')
   const won = opponentTotal === null ? null : (teamTotal < opponentTotal ? true : (teamTotal > opponentTotal ? false : null))
 
@@ -4067,8 +4141,8 @@ async function buildUpdatedScorePayload(existing, body, req) {
     roundScore: null,
     teeColor,
     won,
-    holes: body.holes === undefined ? existing.holes : normalizeHoleScorePayload(body.holes),
-    opponentHoles: body.opponentHoles === undefined ? existing.opponentHoles : normalizeHoleScorePayload(body.opponentHoles),
+    holes: normalizedHoles,
+    opponentHoles: normalizedOpponentHoles,
     ...courseMetadata,
   }
 }
@@ -4079,6 +4153,7 @@ app.get('/api/solo-round-score', requireStorage, authMiddleware, async (req, res
       date: String(req.query.date || '').trim(),
       state: String(req.query.state || '').trim().toUpperCase(),
       course: String(req.query.course || '').trim(),
+      courseId: String(req.query.courseId || req.query.course_id || '').trim(),
     }
     if (!context.date || !context.state || !context.course) {
       return res.status(400).json({ message: 'date, state, and course are required' })
@@ -4087,7 +4162,7 @@ app.get('/api/solo-round-score', requireStorage, authMiddleware, async (req, res
       return res.status(400).json({ message: 'Date must be today or earlier in your local time zone' })
     }
 
-    const matchedCourse = await findGolfCourseForState(context.state, context.course)
+    const matchedCourse = await findGolfCourseForState(context.state, context.course, context.courseId)
     if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
     const scores = await storage.listScores()
@@ -4116,6 +4191,7 @@ app.get('/api/team-round-score', requireStorage, authMiddleware, async (req, res
       date: String(req.query.date || '').trim(),
       state: String(req.query.state || '').trim().toUpperCase(),
       course: String(req.query.course || '').trim(),
+      courseId: String(req.query.courseId || req.query.course_id || '').trim(),
       team: String(req.query.team || '').trim(),
       opponentTeam: String(req.query.opponentTeam || '').trim(),
     }
@@ -4126,7 +4202,7 @@ app.get('/api/team-round-score', requireStorage, authMiddleware, async (req, res
       logApi('team_round_score_lookup_forbidden', { ...requestContext(req), ...context })
       return res.status(403).json({ message: 'Only members of the teams involved can view this team round score.' })
     }
-    const matchedCourse = await findGolfCourseForState(context.state, context.course)
+    const matchedCourse = await findGolfCourseForState(context.state, context.course, context.courseId)
     if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
     const scores = await storage.listScores()
     const entry = findMatchingTeamRound(scores, { ...context, course: matchedCourse.name })
@@ -4169,20 +4245,21 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       if (typeof roundScore !== 'number' || Number.isNaN(roundScore)) return res.status(400).json({ message: 'roundScore must be a number' })
       if (roundScore < 0) return res.status(400).json({ message: 'roundScore must be zero or greater' })
 
-      const matchedCourse = await findGolfCourseForState(state, course)
+      const matchedCourse = await findGolfCourseForState(state, course, body.courseId || body.course_id || '')
       if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
       const teeColor = normalizeTeeColor(body.teeColor || body.tee_color || DEFAULT_TEE_COLOR)
       const normalizedHoles = normalizeHoleScorePayload(holes)
-      const holeScoreTotal = calculateHoleScoreTotal(normalizedHoles)
       const providedHoleCount = countProvidedHoleScores(normalizedHoles)
+      const currentHoleScoreTotal = calculateProvidedHoleScoreTotal(normalizedHoles)
+      const storedRoundScore = providedHoleCount > 0 ? currentHoleScoreTotal : roundScore
       const courseMetadata = resolveScoreCourseMetadata(state, matchedCourse)
       const entry = await storage.createScore({
         mode: 'solo',
         date,
         state: String(state).toUpperCase(),
         course: matchedCourse.name,
-        roundScore,
+        roundScore: storedRoundScore,
         teeColor,
         holes: normalizedHoles,
         ...courseMetadata,
@@ -4202,14 +4279,14 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
         ...requestContext(req),
         scoreId: entry.id,
         course: matchedCourse.name,
-        roundScore,
+        roundScore: storedRoundScore,
         teeColor,
         courseRating: courseMetadata.courseRating,
         slopeRating: courseMetadata.slopeRating,
         holeCount: normalizedHoles?.length || 0,
         providedHoleCount,
         incomplete: providedHoleCount > 0 && providedHoleCount < 18,
-        holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
+        currentHoleScoreTotal: normalizedHoles ? currentHoleScoreTotal : null,
       })
       return res.status(201).json(entry)
     }
@@ -4222,11 +4299,10 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
     if (String(opponentTeam).trim().toLowerCase() === String(team).trim().toLowerCase()) {
       return res.status(400).json({ message: 'Opponent team must be different from your team' })
     }
-    const normalizedTeamTotal = coerceOptionalScoreNumber(teamTotal, 'teamTotal')
-    const normalizedOpponentTotal = coerceOptionalScoreNumber(opponentTotal, 'opponentTotal')
-    if (normalizedTeamTotal === null) return res.status(400).json({ message: 'teamTotal must be a number' })
+    const submittedTeamTotal = coerceOptionalScoreNumber(teamTotal, 'teamTotal')
+    const submittedOpponentTotal = coerceOptionalScoreNumber(opponentTotal, 'opponentTotal')
 
-    const matchedCourse = await findGolfCourseForState(state, course)
+    const matchedCourse = await findGolfCourseForState(state, course, body.courseId || body.course_id || '')
     if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the catalog for the selected state' })
 
     const myTeam = await findTeamByName(team)
@@ -4253,8 +4329,13 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       opponentHoles: userOnOpponentTeam ? opponentHoles : null,
     })
     const persistedOpponentHoles = userOnOpponentTeam ? normalizedOpponentHoles : null
-    const holeScoreTotal = calculateHoleScoreTotal(normalizedHoles)
-    const opponentHoleScoreTotal = calculateHoleScoreTotal(persistedOpponentHoles)
+    const providedTeamHoleCount = countProvidedHoleScores(normalizedHoles)
+    const providedOpponentHoleCount = countProvidedHoleScores(persistedOpponentHoles)
+    const currentTeamHoleScoreTotal = calculateProvidedHoleScoreTotal(normalizedHoles)
+    const currentOpponentHoleScoreTotal = calculateProvidedHoleScoreTotal(persistedOpponentHoles)
+    const normalizedTeamTotal = providedTeamHoleCount > 0 ? currentTeamHoleScoreTotal : submittedTeamTotal
+    const normalizedOpponentTotal = providedOpponentHoleCount > 0 ? currentOpponentHoleScoreTotal : submittedOpponentTotal
+    if (normalizedTeamTotal === null) return res.status(400).json({ message: 'teamTotal must be a number' })
     const won = normalizedOpponentTotal === null ? null : (normalizedTeamTotal < normalizedOpponentTotal ? true : (normalizedTeamTotal > normalizedOpponentTotal ? false : null))
 
     const entry = await storage.createScore({
@@ -4297,8 +4378,8 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
       teeColor,
       holeCount: normalizedHoles?.length || 0,
       opponentHoleCount: persistedOpponentHoles?.length || 0,
-      holeScoreTotal: normalizedHoles ? holeScoreTotal : null,
-      opponentHoleScoreTotal: persistedOpponentHoles ? opponentHoleScoreTotal : null,
+      currentTeamHoleScoreTotal: normalizedHoles ? currentTeamHoleScoreTotal : null,
+      currentOpponentHoleScoreTotal: persistedOpponentHoles ? currentOpponentHoleScoreTotal : null,
       won,
     })
     res.status(201).json(entry)
@@ -4334,6 +4415,102 @@ app.patch('/api/scores/:id', requireStorage, authMiddleware, async (req, res) =>
     const message = error?.message || 'Could not update score'
     const status = /not a member/.test(message) ? 403 : (/required|must be|must be today|Select a golf course|known team|different/.test(message) ? 400 : 500)
     if (status >= 500) logRouteError('Update score error', req, error)
+    res.status(status).json({ message })
+  }
+})
+
+
+async function clearRoundScorecardDraftsForCancel(req, context) {
+  if (!context.date || !context.state || !context.course) return { clearedDraftHoles: 0, clearedTeamDraftHoles: 0, clearedOpponentDraftHoles: 0 }
+
+  const db = getPool()
+  if (context.mode === 'solo') {
+    const draftContext = normalizeDraftContext({ mode: 'solo', date: context.date, state: context.state, course: context.course }, req.user)
+    const clearedDraftHoles = await clearScorecardDraftHoles(db, draftContext)
+    return { clearedDraftHoles, clearedTeamDraftHoles: 0, clearedOpponentDraftHoles: 0 }
+  }
+
+  const baseDraftContext = { mode: 'team', date: context.date, state: context.state, course: context.course, team: context.team, opponentTeam: context.opponentTeam }
+  const teamDraftContext = normalizeDraftContext({ ...baseDraftContext, scoringSide: 'team' }, req.user)
+  const opponentDraftContext = normalizeDraftContext({ ...baseDraftContext, scoringSide: 'opponent' }, req.user)
+  const clearedTeamDraftHoles = await clearScorecardDraftHoles(db, teamDraftContext)
+  const clearedOpponentDraftHoles = await clearScorecardDraftHoles(db, opponentDraftContext)
+  return { clearedDraftHoles: clearedTeamDraftHoles + clearedOpponentDraftHoles, clearedTeamDraftHoles, clearedOpponentDraftHoles }
+}
+
+function scoreMatchesCancelContext(entry, context, user) {
+  if (!entry || entry.mode !== context.mode) return false
+  if (String(entry.date || '') !== String(context.date || '')) return false
+  if (!scoreCourseMatches(entry, context)) return false
+  if (context.mode === 'solo') return isScoreCreator(entry, user)
+
+  const normal = sameTeamName(entry.team, context.team) && sameTeamName(entry.opponentTeam, context.opponentTeam)
+  const reversed = sameTeamName(entry.team, context.opponentTeam) && sameTeamName(entry.opponentTeam, context.team)
+  return normal || reversed
+}
+
+async function findScoreForRoundCancel(req, context) {
+  const scoreId = String(context.scoreId || '').trim()
+  if (scoreId) {
+    const entry = await storage.getScoreById(scoreId)
+    if (entry && scoreMatchesCancelContext(entry, context, req.user)) return entry
+    return null
+  }
+
+  const scores = await storage.listScores()
+  return context.mode === 'solo'
+    ? findMatchingSoloRound(scores, { ...context, user: req.user })
+    : findMatchingTeamRound(scores, context)
+}
+
+app.delete('/api/scores/cancel-round', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const body = { ...(req.query || {}), ...(req.body || {}) }
+    const mode = body.mode === 'solo' ? 'solo' : 'team'
+    const context = {
+      mode,
+      date: String(body.date || '').trim(),
+      state: String(body.state || '').trim().toUpperCase(),
+      course: String(body.course || '').trim(),
+      courseId: String(body.courseId || body.course_id || '').trim(),
+      team: String(body.team || '').trim(),
+      opponentTeam: String(body.opponentTeam || body.opponent_team || '').trim(),
+      scoreId: String(body.scoreId || body.score_id || '').trim(),
+    }
+
+    if (!context.date || !context.state || !context.course) return res.status(400).json({ message: 'date, state, and course are required to cancel a round' })
+    if (mode === 'team' && (!context.team || !context.opponentTeam)) return res.status(400).json({ message: 'team and opponentTeam are required to cancel a team round' })
+
+    const draftResult = await clearRoundScorecardDraftsForCancel(req, context)
+    const entry = await findScoreForRoundCancel(req, context)
+    let deletedScoreId = null
+    if (entry) {
+      if (!(await canMutateScore(entry, req.user))) return res.status(403).json({ message: 'Only the round creator or members of the teams involved can cancel this round' })
+      await storage.deleteScoreById(entry.id)
+      deletedScoreId = entry.id
+    }
+
+    logApi('round_cancelled', {
+      ...requestContext(req),
+      mode: context.mode,
+      date: context.date,
+      state: context.state,
+      course: context.course,
+      courseId: context.courseId || null,
+      team: context.team || null,
+      opponentTeam: context.opponentTeam || null,
+      requestedScoreId: context.scoreId || null,
+      deletedScoreId,
+      clearedDraftHoles: draftResult.clearedDraftHoles,
+      clearedTeamDraftHoles: draftResult.clearedTeamDraftHoles,
+      clearedOpponentDraftHoles: draftResult.clearedOpponentDraftHoles,
+    })
+
+    res.json({ ok: true, deletedScoreId, ...draftResult })
+  } catch (error) {
+    const message = error?.message || 'Could not cancel this round'
+    const status = /required|authenticated/.test(message) ? 400 : 500
+    if (status >= 500) logRouteError('Cancel round error', req, error)
     res.status(status).json({ message })
   }
 })

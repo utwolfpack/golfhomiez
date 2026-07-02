@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PageHero from '../components/PageHero'
-import { US_STATES } from '../data/usStates'
+import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { requestHostAccount } from '../lib/host-auth'
 import { golfCourseNames, searchGolfCourses } from '../lib/golf-courses'
 
@@ -18,11 +18,19 @@ export default function CreateHostAccount() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showThankYou, setShowThankYou] = useState(false)
+  const { states: stateOptions, loading: statesLoading, error: statesError } = useGolfCourseStates()
 
   const selectedStateName = useMemo(
-    () => US_STATES.find((entry) => entry.abbr === state)?.name || state,
-    [state],
+    () => stateOptions.find((entry) => entry.abbr === state)?.name || state,
+    [stateOptions, state],
   )
+
+  useEffect(() => {
+    if (stateOptions.length && !stateOptions.some(option => option.abbr === state)) {
+      setState(stateOptions[0].abbr)
+      setCourse('')
+    }
+  }, [stateOptions, state])
 
   useEffect(() => {
     let cancelled = false
@@ -134,11 +142,13 @@ export default function CreateHostAccount() {
           <div className="grid grid2" style={{ gap: 12 }}>
             <div>
               <label className="label">State</label>
-              <select className="input" value={state} onChange={(e) => { setState(e.target.value); setCourse('') }}>
-                {US_STATES.map((entry) => (
+              <select className="input" value={state} onChange={(e) => { setState(e.target.value); setCourse('') }} disabled={statesLoading && !stateOptions.length}>
+                {!stateOptions.length ? <option value={state}>{statesLoading ? 'Loading golf course states…' : (state || 'No golf course states available')}</option> : null}
+                {stateOptions.map((entry) => (
                   <option key={entry.abbr} value={entry.abbr}>{entry.name}</option>
                 ))}
               </select>
+              {statesError ? <div className="small">{statesError}</div> : null}
             </div>
 
             <div>

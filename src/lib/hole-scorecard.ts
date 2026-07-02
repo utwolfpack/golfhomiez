@@ -52,6 +52,16 @@ function finiteNumber(value: unknown) {
   return Number.isFinite(numberValue) ? numberValue : null
 }
 
+function optionalNumberField(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      const value = finiteNumber(record[key])
+      if (value != null) return value
+    }
+  }
+  return null
+}
+
 export function calculateDistanceYards(latitudeA: unknown, longitudeA: unknown, latitudeB: unknown, longitudeB: unknown) {
   const lat1 = finiteNumber(latitudeA)
   const lon1 = finiteNumber(longitudeA)
@@ -93,7 +103,7 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
   const normalized = holes.slice(0, 18).map((hole, index) => {
     if (typeof hole === 'number') {
       const score = Number.isFinite(hole) ? Math.max(0, Math.trunc(hole)) : 0
-      return { hole: index + 1, par: null, yards: null, strokeIndex: index + 1, teeColor: selectedTeeColor, teeBoxType: selectedTeeColor, distanceToFlagYards: null, score, scoreProvided: true }
+      return { hole: index + 1, par: null, yards: null, strokeIndex: null, teeColor: selectedTeeColor, teeBoxType: selectedTeeColor, distanceToFrontYards: null, distanceToCenterYards: null, distanceToBackYards: null, distanceToFlagYards: null, frontLatitude: null, frontLongitude: null, centerLatitude: null, centerLongitude: null, backLatitude: null, backLongitude: null, flagLatitude: null, flagLongitude: null, score, scoreProvided: true }
     }
 
     const record = hole as Record<string, unknown>
@@ -101,6 +111,9 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
     const par = Number(record.par)
     const yards = Number(record.yards)
     const strokeIndex = Number(record.strokeIndex ?? record.stroke_index)
+    const distanceToFrontYards = Number(record.distanceToFrontYards ?? record.distance_to_front_yards)
+    const distanceToCenterYards = Number(record.distanceToCenterYards ?? record.distance_to_center_yards)
+    const distanceToBackYards = Number(record.distanceToBackYards ?? record.distance_to_back_yards)
     const distanceToFlagYards = Number(record.distanceToFlagYards ?? record.distance_to_flag_yards)
     const teeColor = normalizeTeeColor(record.teeColor ?? record.tee_color ?? selectedTeeColor)
     const teeBoxType = String(record.teeBoxType ?? record.tee_box_type ?? teeColor ?? '').trim() || teeColor
@@ -110,10 +123,19 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
       hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
       par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : null,
       yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : null,
-      strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : index + 1,
+      strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : null,
       teeColor,
       teeBoxType,
+      distanceToFrontYards: Number.isFinite(distanceToFrontYards) && distanceToFrontYards >= 0 ? Math.trunc(distanceToFrontYards) : null,
+      distanceToCenterYards: Number.isFinite(distanceToCenterYards) && distanceToCenterYards >= 0 ? Math.trunc(distanceToCenterYards) : null,
+      distanceToBackYards: Number.isFinite(distanceToBackYards) && distanceToBackYards >= 0 ? Math.trunc(distanceToBackYards) : null,
       distanceToFlagYards: Number.isFinite(distanceToFlagYards) && distanceToFlagYards >= 0 ? Math.trunc(distanceToFlagYards) : null,
+      frontLatitude: optionalNumberField(record, 'frontLatitude', 'front_latitude'),
+      frontLongitude: optionalNumberField(record, 'frontLongitude', 'front_longitude'),
+      centerLatitude: optionalNumberField(record, 'centerLatitude', 'center_latitude'),
+      centerLongitude: optionalNumberField(record, 'centerLongitude', 'center_longitude'),
+      backLatitude: optionalNumberField(record, 'backLatitude', 'back_latitude'),
+      backLongitude: optionalNumberField(record, 'backLongitude', 'back_longitude'),
       flagLatitude: Number.isFinite(Number(record.flagLatitude ?? record.flag_latitude)) ? Number(record.flagLatitude ?? record.flag_latitude) : null,
       flagLongitude: Number.isFinite(Number(record.flagLongitude ?? record.flag_longitude)) ? Number(record.flagLongitude ?? record.flag_longitude) : null,
       score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 0),
@@ -130,10 +152,19 @@ function normalizePartialProvidedHoleScore(hole: unknown, index: number): HoleSc
       hole: index + 1,
       par: null,
       yards: null,
-      strokeIndex: index + 1,
+      strokeIndex: null,
       teeColor: 'white',
       teeBoxType: 'white',
+      distanceToFrontYards: null,
+      distanceToCenterYards: null,
+      distanceToBackYards: null,
       distanceToFlagYards: null,
+      frontLatitude: null,
+      frontLongitude: null,
+      centerLatitude: null,
+      centerLongitude: null,
+      backLatitude: null,
+      backLongitude: null,
       flagLatitude: null,
       flagLongitude: null,
       score: Number.isFinite(hole) ? Math.max(0, Math.trunc(hole)) : 0,
@@ -147,9 +178,18 @@ function normalizePartialProvidedHoleScore(hole: unknown, index: number): HoleSc
   const par = Number(record.par)
   const yards = Number(record.yards)
   const strokeIndex = Number(record.strokeIndex ?? record.stroke_index)
+  const distanceToFrontYards = Number(record.distanceToFrontYards ?? record.distance_to_front_yards)
+  const distanceToCenterYards = Number(record.distanceToCenterYards ?? record.distance_to_center_yards)
+  const distanceToBackYards = Number(record.distanceToBackYards ?? record.distance_to_back_yards)
   const distanceToFlagYards = Number(record.distanceToFlagYards ?? record.distance_to_flag_yards)
   const teeColor = normalizeTeeColor(record.teeColor ?? record.tee_color)
   const teeBoxType = String(record.teeBoxType ?? record.tee_box_type ?? teeColor ?? '').trim() || teeColor
+  const frontLatitude = optionalNumberField(record, 'frontLatitude', 'front_latitude')
+  const frontLongitude = optionalNumberField(record, 'frontLongitude', 'front_longitude')
+  const centerLatitude = optionalNumberField(record, 'centerLatitude', 'center_latitude')
+  const centerLongitude = optionalNumberField(record, 'centerLongitude', 'center_longitude')
+  const backLatitude = optionalNumberField(record, 'backLatitude', 'back_latitude')
+  const backLongitude = optionalNumberField(record, 'backLongitude', 'back_longitude')
   const flagLatitude = Number(record.flagLatitude ?? record.flag_latitude)
   const flagLongitude = Number(record.flagLongitude ?? record.flag_longitude)
   const score = Number(record.score)
@@ -163,10 +203,19 @@ function normalizePartialProvidedHoleScore(hole: unknown, index: number): HoleSc
     hole: Math.trunc(holeNumber),
     par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : null,
     yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : null,
-    strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : Math.trunc(holeNumber),
+    strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : null,
     teeColor,
     teeBoxType,
+    distanceToFrontYards: Number.isFinite(distanceToFrontYards) && distanceToFrontYards >= 0 ? Math.trunc(distanceToFrontYards) : null,
+    distanceToCenterYards: Number.isFinite(distanceToCenterYards) && distanceToCenterYards >= 0 ? Math.trunc(distanceToCenterYards) : null,
+    distanceToBackYards: Number.isFinite(distanceToBackYards) && distanceToBackYards >= 0 ? Math.trunc(distanceToBackYards) : null,
     distanceToFlagYards: Number.isFinite(distanceToFlagYards) && distanceToFlagYards >= 0 ? Math.trunc(distanceToFlagYards) : null,
+    frontLatitude,
+    frontLongitude,
+    centerLatitude,
+    centerLongitude,
+    backLatitude,
+    backLongitude,
     flagLatitude: Number.isFinite(flagLatitude) ? flagLatitude : null,
     flagLongitude: Number.isFinite(flagLongitude) ? flagLongitude : null,
     score: Math.max(0, Math.trunc(score)),
@@ -193,7 +242,16 @@ export function mergeProvidedHoleScores(baseHoles: HoleScoreDetail[], savedHoles
       strokeIndex: Number.isFinite(saved.strokeIndex) && Number(saved.strokeIndex) > 0 ? saved.strokeIndex : hole.strokeIndex,
       teeColor: saved.teeColor || hole.teeColor,
       teeBoxType: saved.teeBoxType || hole.teeBoxType,
+      distanceToFrontYards: Number.isFinite(saved.distanceToFrontYards) && Number(saved.distanceToFrontYards) >= 0 ? saved.distanceToFrontYards : hole.distanceToFrontYards,
+      distanceToCenterYards: Number.isFinite(saved.distanceToCenterYards) && Number(saved.distanceToCenterYards) >= 0 ? saved.distanceToCenterYards : hole.distanceToCenterYards,
+      distanceToBackYards: Number.isFinite(saved.distanceToBackYards) && Number(saved.distanceToBackYards) >= 0 ? saved.distanceToBackYards : hole.distanceToBackYards,
       distanceToFlagYards: Number.isFinite(saved.distanceToFlagYards) && Number(saved.distanceToFlagYards) >= 0 ? saved.distanceToFlagYards : hole.distanceToFlagYards,
+      frontLatitude: Number.isFinite(Number(saved.frontLatitude)) ? saved.frontLatitude : hole.frontLatitude,
+      frontLongitude: Number.isFinite(Number(saved.frontLongitude)) ? saved.frontLongitude : hole.frontLongitude,
+      centerLatitude: Number.isFinite(Number(saved.centerLatitude)) ? saved.centerLatitude : hole.centerLatitude,
+      centerLongitude: Number.isFinite(Number(saved.centerLongitude)) ? saved.centerLongitude : hole.centerLongitude,
+      backLatitude: Number.isFinite(Number(saved.backLatitude)) ? saved.backLatitude : hole.backLatitude,
+      backLongitude: Number.isFinite(Number(saved.backLongitude)) ? saved.backLongitude : hole.backLongitude,
       flagLatitude: Number.isFinite(Number(saved.flagLatitude)) ? saved.flagLatitude : hole.flagLatitude,
       flagLongitude: Number.isFinite(Number(saved.flagLongitude)) ? saved.flagLongitude : hole.flagLongitude,
       score: Number.isFinite(saved.score) && saved.score >= 0 ? saved.score : hole.score,
@@ -222,6 +280,12 @@ export function allHoleScoresProvided(holes: HoleScoreDetail[]) {
 
 export function holeScoreTotal(holes: HoleScoreDetail[]) {
   return holes.reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
+}
+
+export function providedHoleScoreTotal(holes: HoleScoreDetail[]) {
+  return holes
+    .filter((hole) => hole.scoreProvided)
+    .reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
 }
 
 export function holeParTotal(holes: HoleScoreDetail[]) {

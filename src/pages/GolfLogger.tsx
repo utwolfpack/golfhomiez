@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import { golfCourseNames, searchGolfCourses } from '../lib/golf-courses'
 import ProtectedRoute from '../components/ProtectedRoute'
 import type { HoleScoreDetail, ScoreEntry, TeamMember } from '../types'
-import { US_STATES } from '../data/usStates'
+import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { createTeam, fetchTeams, lookupUserByEmail, sendHomieInvite } from '../lib/teams'
 import { getUserTodayISO } from '../lib/date'
 import { useAuth } from '../context/AuthContext'
@@ -13,7 +12,8 @@ import { useNavigate } from 'react-router-dom'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import HoleByHoleScorecard from '../components/HoleByHoleScorecard'
 import TeeColorSelector from '../components/TeeColorSelector'
-import { buildClientDefaultHoleScorecard, holeScoreTotal, missingHoleScoreNumbers } from '../lib/hole-scorecard'
+import GolfCourseInput from '../components/GolfCourseInput'
+import { buildClientDefaultHoleScorecard, missingHoleScoreNumbers, providedHoleScoreTotal } from '../lib/hole-scorecard'
 import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from '../lib/tee-colors'
 
@@ -51,6 +51,8 @@ function GolfLoggerInner() {
   const [allTeams, setAllTeams] = useState<string[]>([])
   const [myTeams, setMyTeams] = useState<string[]>([])
   const [course, setCourse] = useState('')
+  const [courseId, setCourseId] = useState('')
+  const [courseSearch, setCourseSearch] = useState('')
   const [teeColor, setTeeColor] = useState<TeeColorSelection>('')
   const [team, setTeam] = useState('')
   const [opponentTeam, setOpponentTeam] = useState('')
@@ -81,6 +83,7 @@ function GolfLoggerInner() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteMessage, setInviteMessage] = useState<string | null>(null)
   const [existingTeamRoundScoreId, setExistingTeamRoundScoreId] = useState<string | null>(null)
+  const { states: stateOptions, loading: statesLoading, error: statesError } = useGolfCourseStates()
   const [opponentScoreStatus, setOpponentScoreStatus] = useState<string | null>(null)
 
   async function loadTeams() {
@@ -122,28 +125,15 @@ function GolfLoggerInner() {
   }, [leadMember])
 
   useEffect(() => {
-    let cancelled = false
-
-    async function loadCourses() {
-      try {
-        const options = await searchGolfCourses({ state: stateAbbr, limit: 100 })
-        const names = golfCourseNames(options)
-        if (cancelled) return
-        setCourseOptions(names)
-        setCourse(prev => (prev && names.includes(prev) ? prev : (names[0] || '')))
-      } catch {
-        if (cancelled) return
-        setCourseOptions([])
-        setCourse('')
-      }
+    if (stateOptions.length && !stateOptions.some(option => option.abbr === stateAbbr)) {
+      setStateAbbr(stateOptions[0].abbr)
+      setCourse('')
+      setCourseId('')
+      setCourseSearch('')
     }
+  }, [stateOptions, stateAbbr])
 
-    loadCourses()
-    return () => { cancelled = true }
-  }, [stateAbbr])
-
-  const holesTotal = useMemo(() => holeScoreTotal(holes), [holes])
-  const opponentHolesTotal = useMemo(() => holeScoreTotal(opponentHoles), [opponentHoles])
+  const holesTotal = useMemo(() => providedHoleScoreTotal(holes), [holes])
   const missingHoleNumbers = useMemo(() => missingHoleScoreNumbers(holes), [holes])
   const missingOpponentHoleNumbers = useMemo(() => missingHoleScoreNumbers(opponentHoles), [opponentHoles])
   const teamScoreProvidedCount = useMemo(() => holes.filter((hole) => hole.scoreProvided).length, [holes])
@@ -155,8 +145,6 @@ function GolfLoggerInner() {
     if (!useHoles) return
     setTeamTotal(String(holesTotal))
   }, [useHoles, holesTotal])
-  const [courseOptions, setCourseOptions] = useState<string[]>([])
-
   useEffect(() => {
     let cancelled = false
     async function loadExistingTeamRoundScore() {
@@ -167,6 +155,7 @@ function GolfLoggerInner() {
       }
 
       const params = new URLSearchParams({ date, state: stateAbbr, course, team, opponentTeam })
+      if (courseId) params.set('courseId', courseId)
       try {
         const result = await api<TeamRoundScoreLookup>(`/api/team-round-score?${params.toString()}`)
         if (cancelled) return
@@ -186,7 +175,7 @@ function GolfLoggerInner() {
     }
     void loadExistingTeamRoundScore()
     return () => { cancelled = true }
-  }, [date, stateAbbr, course, team, opponentTeam])
+  }, [date, stateAbbr, course, courseId, team, opponentTeam])
 
   const totals = useMemo(() => {
     const your = Number(teamTotal)
@@ -264,30 +253,9 @@ function GolfLoggerInner() {
 
 
 
-  function resetGolfLoggerPage() {
-    setDate(getUserTodayISO())
-    setStateAbbr('UT')
-    setCourse('')
-    setTeeColor('')
-    setTeam(myTeams[0] || '')
-    setOpponentTeam('')
-    setTeamTotal('')
-    setOpponentTotal('')
-    setUseHoles(false)
-    setHoles(buildClientDefaultHoleScorecard('UT', '', DEFAULT_TEE_COLOR))
-    setOpponentHoles(buildClientDefaultHoleScorecard('UT', '', DEFAULT_TEE_COLOR))
-    setExistingTeamRoundScoreId(null)
-    setOpponentScoreStatus(null)
-    setActiveScorecardSide(null)
-    setMsg(null)
-    setErr(null)
-    setLocationMessage(null)
-    setShowRoundValidation(false)
-  }
-
-  async function clearTeamScorecardDrafts() {
-    if (!useHoles || !date || !stateAbbr || !course || !team.trim() || !opponentTeam.trim()) return
-    const baseParams = new URLSearchParams({
+  async function cancelTeamRoundRecords() {
+    if (!useHoles || !date || !stateAbbr || !course || !team.trim() || !opponentTeam.trim()) return null
+    const params = new URLSearchParams({
       mode: 'team',
       date,
       state: stateAbbr,
@@ -295,9 +263,9 @@ function GolfLoggerInner() {
       team,
       opponentTeam,
     })
-    const teamParams = new URLSearchParams(baseParams)
-    teamParams.set('scoringSide', 'team')
-    await api(`/api/scorecard-drafts?${teamParams.toString()}`, { method: 'DELETE' })
+    if (courseId) params.set('courseId', courseId)
+    if (existingTeamRoundScoreId) params.set('scoreId', existingTeamRoundScoreId)
+    return api(`/api/scores/cancel-round?${params.toString()}`, { method: 'DELETE' })
   }
 
   async function handleCancelRound() {
@@ -307,15 +275,15 @@ function GolfLoggerInner() {
     logFrontendEvent({
       category: 'team.round.cancel',
       message: 'started',
-      data: { correlationId, date, stateAbbr, course, teeColor, team, opponentTeam, useHoles, teamScoreProvidedCount, opponentScoreProvidedCount },
+      data: { correlationId, date, stateAbbr, course, courseId, teeColor, team, opponentTeam, useHoles, teamScoreProvidedCount, opponentScoreProvidedCount, scoreId: existingTeamRoundScoreId },
     })
     try {
-      await clearTeamScorecardDrafts()
-      resetGolfLoggerPage()
-      logFrontendEvent({ category: 'team.round.cancel', message: 'succeeded', data: { correlationId } })
+      const cancelResult = await cancelTeamRoundRecords()
+      logFrontendEvent({ category: 'team.round.cancel', message: 'succeeded', data: { correlationId, scoreId: existingTeamRoundScoreId, cancelResult } })
+      navigate('/my-golf-scores')
     } catch (e: any) {
       const message = e?.message || 'Could not cancel this round.'
-      logFrontendEvent({ category: 'team.round.cancel', level: 'error', message: 'failed', data: { correlationId, error: message } })
+      logFrontendEvent({ category: 'team.round.cancel', level: 'error', message: 'failed', data: { correlationId, scoreId: existingTeamRoundScoreId, error: message } })
       setErr(message)
     } finally {
       setCanceling(false)
@@ -331,11 +299,11 @@ function GolfLoggerInner() {
     const effectiveTeeColor = normalizeTeeColor(teeColor)
     if (side === 'opponent') {
       setErr('Opponent score is read-only. Only members of the opponent team can modify that score.')
-      logFrontendEvent({ category: 'team.scorecard.modal', level: 'warn', message: 'opponent_score_read_only_blocked', data: { side, date, stateAbbr, course, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), team, opponentTeam } })
+      logFrontendEvent({ category: 'team.scorecard.modal', level: 'warn', message: 'opponent_score_read_only_blocked', data: { side, date, stateAbbr, course, courseId, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), team, opponentTeam } })
       return
     }
     setActiveScorecardSide(side)
-    logFrontendEvent({ category: 'team.scorecard.modal', message: 'opened', data: { side, date, stateAbbr, course, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), team, opponentTeam } })
+    logFrontendEvent({ category: 'team.scorecard.modal', message: 'opened', data: { side, date, stateAbbr, course, courseId, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), team, opponentTeam } })
   }
 
   function scorecardButtonLabel(side: 'team' | 'opponent') {
@@ -488,25 +456,45 @@ function GolfLoggerInner() {
           </div>
           <div>
             <label className="label">State</label>
-            <select className="input" value={stateAbbr} onChange={(e) => { setStateAbbr(e.target.value); setCourse('') }}>
-              {US_STATES.map(s => (
+            <select className="input" value={stateAbbr} onChange={(e) => { setStateAbbr(e.target.value); setCourse(''); setCourseId(''); setCourseSearch('') }} disabled={statesLoading && !stateOptions.length}>
+              {!stateOptions.length ? <option value={stateAbbr}>{statesLoading ? 'Loading golf course states…' : (stateAbbr || 'No golf course states available')}</option> : null}
+              {stateOptions.map(s => (
                 <option key={s.abbr} value={s.abbr}>{s.name}</option>
               ))}
             </select>
+            {statesError ? <div className="small">{statesError}</div> : null}
           </div>
           <div>
-            <label className="label">Course</label>
-            <select className="input" value={course} onChange={e => setCourse(e.target.value)} disabled={!courseOptions.length}>
-              {!courseOptions.length ? <option value="">No courses available</option> : null}
-              {courseOptions.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            <GolfCourseInput
+              label="Course"
+              state={stateAbbr}
+              searchValue={courseSearch}
+              selectedCourseName={course}
+              selectedCourseId={courseId}
+              onSearchChange={(next) => {
+                setCourseSearch(next)
+                setCourse('')
+                setCourseId('')
+              }}
+              onCourseSelected={(selected) => {
+                setCourseId(selected.id || '')
+                setCourse(selected.name || '')
+                setCourseSearch(selected.name || '')
+              }}
+              placeholder="Search courses in the selected state"
+              helperText="Search checks every available course for the selected state."
+              inputId="teamRoundCourseSearch"
+              enableNearestDefault
+              onStateChange={setStateAbbr}
+              required
+            />
             <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
               <UseMyLocationButton
                 onResolved={(location) => {
                   setStateAbbr(location.stateCode)
                   setCourse('')
+                  setCourseId('')
+                  setCourseSearch('')
                   setLocationMessage(`Location set to ${location.label}.`)
                 }}
                 onStatus={setLocationMessage}
@@ -596,14 +584,6 @@ function GolfLoggerInner() {
 
         {teamRoundContextLocked ? (
           <div className="soloLockedRoundSummary teamLockedRoundSummary" aria-label="Locked team round details">
-            <div className="roundSummaryDate">
-              <span>Date</span>
-              <strong>{date}</strong>
-            </div>
-            <div className="roundSummaryCourse">
-              <span>Course</span>
-              <strong>{course || 'Selected course'}</strong>
-            </div>
             <div>
               <span>Your Team</span>
               <strong>{team || 'Selected team'}</strong>
@@ -662,7 +642,7 @@ function GolfLoggerInner() {
               setBusy(true)
               setErr(null)
               setMsg(null)
-              logFrontendEvent({ category: 'team.round.save', message: 'started', data: { correlationId, date, stateAbbr, course, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), team, opponentTeam, useHoles } })
+              logFrontendEvent({ category: 'team.round.save', message: 'started', data: { correlationId, date, stateAbbr, course, courseId, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), team, opponentTeam, useHoles } })
               try {
                 const trimmedTeam = String(team || '').trim()
                 const trimmedOpp = String(opponentTeam || '').trim()
@@ -679,6 +659,7 @@ function GolfLoggerInner() {
                   date,
                   state: stateAbbr,
                   course,
+                  courseId,
                   teeColor: effectiveTeeColor,
                   team: trimmedTeam,
                   opponentTeam: trimmedOpp,
@@ -691,6 +672,7 @@ function GolfLoggerInner() {
                 logFrontendEvent({ category: 'team.round.save', message: 'succeeded', data: { correlationId, team: trimmedTeam, opponentTeam: trimmedOpp, course, teeColor: effectiveTeeColor, teeColorSelected: Boolean(teeColor), result: totals.result, useHoles, cumulativeScore: useHoles ? holesTotal : null, existingTeamRoundScoreId, opponentScoreReadOnly: true } })
                 setMsg('Round saved. Opponent score remains read-only for the opponent team.')
                 setCourse('')
+                setCourseId('')
                 setTeam(myTeams[0] || '')
                 setOpponentTeam('')
                 setTeamTotal('')
@@ -736,6 +718,7 @@ function GolfLoggerInner() {
                 enabled={true}
                 stateCode={stateAbbr}
                 course={course}
+                courseId={courseId}
                 holes={activeScorecardSide === 'team' ? holes : opponentHoles}
                 onChange={activeScorecardSide === 'team' ? setHoles : setOpponentHoles}
                 draftContext={{ mode: 'team', date, team, opponentTeam, scoringSide: activeScorecardSide }}

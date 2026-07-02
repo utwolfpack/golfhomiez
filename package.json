@@ -16,7 +16,11 @@
     "test": "node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js",
     "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js",
     "db:rollback:chat": "node server/scripts/run-one-time-chat-schema-rollback.js",
-    "db:migrate": "node server/run-migrations.js"
+    "db:migrate": "node server/run-migrations.js",
+    "golf-courses:import-opengolfapi": "node server/scripts/import-opengolfapi-courses.js",
+    "golf-courses:import": "node server/scripts/import-opengolfapi-courses.js",
+    "golf-courses:backfill-opengolfapi-details": "node server/scripts/backfill-opengolfapi-course-details.js",
+    "golf-courses:import-opengolfapi-details": "node server/scripts/backfill-opengolfapi-course-details.js"
   },
   "engines": {
     "node": ">=18"

@@ -3,7 +3,7 @@ import { getCorrelationId, logApi, logWarn } from './logger.js'
 
 export const EXTERNAL_API_TYPES = Object.freeze({
   BREVO: 'brevo',
-  GOLFBERT: 'golfbert',
+  OPENGOLFAPI: 'opengolfapi',
   OTHER: 'other',
 })
 
@@ -20,7 +20,7 @@ export function normalizeExternalApiType(value) {
   const normalized = normalizeText(value).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
   if (!normalized) return EXTERNAL_API_TYPES.OTHER
   if (normalized.includes('brevo') || normalized.includes('sendinblue')) return EXTERNAL_API_TYPES.BREVO
-  if (normalized.includes('golfbert')) return EXTERNAL_API_TYPES.GOLFBERT
+  if (normalized.includes('opengolfapi') || normalized.includes('open_golf_api') || normalized.includes('open_golfapi')) return EXTERNAL_API_TYPES.OPENGOLFAPI
   return VALID_API_TYPES.has(normalized) ? normalized : EXTERNAL_API_TYPES.OTHER
 }
 

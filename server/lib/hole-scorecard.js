@@ -1,4 +1,4 @@
-import { getGolfbertCourseHoles } from './golfbert-client.js'
+import { getGolfCourseHolesForCourse } from './golf-course-service.js'
 import { normalizeTeeColor } from './tee-colors.js'
 
 const DEFAULT_PAR_VALUES = [3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5]
@@ -56,6 +56,25 @@ export function calculateHoleScoreTotal(holes) {
   }, 0)
 }
 
+function isHoleScoreProvided(hole) {
+  if (typeof hole === 'number') return Number.isFinite(hole)
+  if (!hole || typeof hole !== 'object') return false
+  if (Object.prototype.hasOwnProperty.call(hole, 'scoreProvided') || Object.prototype.hasOwnProperty.call(hole, 'score_provided')) {
+    return hole.scoreProvided === true || hole.scoreProvided === 1 || hole.scoreProvided === '1' || hole.scoreProvided === 'true' || hole.score_provided === true || hole.score_provided === 1 || hole.score_provided === '1' || hole.score_provided === 'true'
+  }
+  return Number.isFinite(Number(hole.score))
+}
+
+export function calculateProvidedHoleScoreTotal(holes) {
+  if (!Array.isArray(holes)) return 0
+  return holes.reduce((sum, hole) => {
+    if (!isHoleScoreProvided(hole)) return sum
+    if (typeof hole === 'number') return sum + (Number.isFinite(hole) ? hole : 0)
+    const score = Number(hole?.score)
+    return sum + (Number.isFinite(score) ? score : 0)
+  }, 0)
+}
+
 export function calculateParTotal(holes) {
   if (!Array.isArray(holes)) return 0
   return holes.reduce((sum, hole) => {
@@ -104,10 +123,19 @@ export function normalizeHoleScorePayload(holes) {
           hole: index + 1,
           par: null,
           yards: null,
-          strokeIndex: index + 1,
+          strokeIndex: null,
           teeColor: 'white',
           teeBoxType: 'white',
+          distanceToFrontYards: null,
+          distanceToCenterYards: null,
+          distanceToBackYards: null,
           distanceToFlagYards: null,
+          frontLatitude: null,
+          frontLongitude: null,
+          centerLatitude: null,
+          centerLongitude: null,
+          backLatitude: null,
+          backLongitude: null,
           flagLatitude: null,
           flagLongitude: null,
           score: Number.isFinite(hole) ? Math.max(0, Math.trunc(hole)) : 0,
@@ -120,22 +148,40 @@ export function normalizeHoleScorePayload(holes) {
       const yards = Number(hole?.yards)
       const strokeIndex = Number(hole?.strokeIndex ?? hole?.stroke_index)
       const distanceToFlagYards = Number(hole?.distanceToFlagYards ?? hole?.distance_to_flag_yards)
+      const distanceToFrontYards = Number(hole?.distanceToFrontYards ?? hole?.distance_to_front_yards)
+      const distanceToCenterYards = Number(hole?.distanceToCenterYards ?? hole?.distance_to_center_yards)
+      const distanceToBackYards = Number(hole?.distanceToBackYards ?? hole?.distance_to_back_yards)
       const teeColor = normalizeTeeColor(hole?.teeColor ?? hole?.tee_color)
       const teeBoxType = normalizeText(hole?.teeBoxType ?? hole?.tee_box_type ?? teeColor) || teeColor
       const flagLatitude = Number(hole?.flagLatitude ?? hole?.flag_latitude)
       const flagLongitude = Number(hole?.flagLongitude ?? hole?.flag_longitude)
+      const frontLatitude = Number(hole?.frontLatitude ?? hole?.front_latitude)
+      const frontLongitude = Number(hole?.frontLongitude ?? hole?.front_longitude)
+      const centerLatitude = Number(hole?.centerLatitude ?? hole?.center_latitude)
+      const centerLongitude = Number(hole?.centerLongitude ?? hole?.center_longitude)
+      const backLatitude = Number(hole?.backLatitude ?? hole?.back_latitude)
+      const backLongitude = Number(hole?.backLongitude ?? hole?.back_longitude)
       const score = Number(hole?.score)
 
       return {
         hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
         par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : null,
         yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : null,
-        strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : index + 1,
+        strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : null,
         teeColor,
         teeBoxType,
         distanceToFlagYards: Number.isFinite(distanceToFlagYards) && distanceToFlagYards >= 0 ? Math.trunc(distanceToFlagYards) : null,
+        distanceToFrontYards: Number.isFinite(distanceToFrontYards) && distanceToFrontYards >= 0 ? Math.trunc(distanceToFrontYards) : null,
+        distanceToCenterYards: Number.isFinite(distanceToCenterYards) && distanceToCenterYards >= 0 ? Math.trunc(distanceToCenterYards) : null,
+        distanceToBackYards: Number.isFinite(distanceToBackYards) && distanceToBackYards >= 0 ? Math.trunc(distanceToBackYards) : null,
         flagLatitude: Number.isFinite(flagLatitude) ? flagLatitude : null,
         flagLongitude: Number.isFinite(flagLongitude) ? flagLongitude : null,
+        frontLatitude: Number.isFinite(frontLatitude) ? frontLatitude : null,
+        frontLongitude: Number.isFinite(frontLongitude) ? frontLongitude : null,
+        centerLatitude: Number.isFinite(centerLatitude) ? centerLatitude : null,
+        centerLongitude: Number.isFinite(centerLongitude) ? centerLongitude : null,
+        backLatitude: Number.isFinite(backLatitude) ? backLatitude : null,
+        backLongitude: Number.isFinite(backLongitude) ? backLongitude : null,
         score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : 0,
         scoreProvided: hole?.scoreProvided === false || hole?.score_provided === false ? false : true,
       }
@@ -146,15 +192,16 @@ export function normalizeHoleScorePayload(holes) {
 
 export async function getHoleScorecardForCourse({ state = '', course = '', courseId = '', golferLatitude = null, golferLongitude = null, teeColor = 'white' } = {}) {
   const selectedTeeColor = normalizeTeeColor(teeColor)
-  const result = await getGolfbertCourseHoles({ state, course, courseId, golferLatitude, golferLongitude, teeColor: selectedTeeColor })
+  const result = await getGolfCourseHolesForCourse({ state, course, courseId, golferLatitude, golferLongitude, teeColor: selectedTeeColor })
   const holes = result.holes.map((hole) => ({
     ...hole,
     score: Number.isFinite(Number(hole.par)) && Number(hole.par) > 0 ? Number(hole.par) : 0,
     scoreProvided: false,
   }))
+  if (!holes.length) throw new Error('Database did not return hole data for the selected course')
 
   return {
-    source: 'golfbert-api',
+    source: 'database',
     state: normalizeState(result.course?.state || result.course?.state_code || state),
     course: normalizeText(result.course?.name || course),
     courseId: normalizeText(result.course?.id || courseId) || null,

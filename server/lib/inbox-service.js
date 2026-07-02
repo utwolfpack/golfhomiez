@@ -7,10 +7,29 @@ const MAX_TEAM_ID_LENGTH = 191
 const MAX_TEAM_NAME_LENGTH = 255
 const MAX_CHALLENGE_COURSE_LENGTH = 255
 const INBOX_MESSAGE_TYPES = new Set(['message', 'challenge_request', 'individual_challenge'])
+const TEAM_CHALLENGE_SCORING_TYPES = new Set(['stroke_play', 'skins', 'skins_push'])
+const DEFAULT_TEAM_CHALLENGE_SCORING_TYPE = 'stroke_play'
+const DEFAULT_TEAM_CHALLENGE_POINTS_PER_HOLE = 1
 
 export function normalizeInboxMessageType(value) {
   const normalized = String(value || 'message').trim().toLowerCase()
   return INBOX_MESSAGE_TYPES.has(normalized) ? normalized : 'message'
+}
+
+export function normalizeTeamChallengeScoringType(value) {
+  const normalized = String(value || DEFAULT_TEAM_CHALLENGE_SCORING_TYPE).trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (normalized === 'skinspush' || normalized === 'push_skins') return 'skins_push'
+  return TEAM_CHALLENGE_SCORING_TYPES.has(normalized) ? normalized : DEFAULT_TEAM_CHALLENGE_SCORING_TYPE
+}
+
+export function normalizeTeamChallengePointsPerHole(value, scoringType = DEFAULT_TEAM_CHALLENGE_SCORING_TYPE) {
+  const normalizedScoringType = normalizeTeamChallengeScoringType(scoringType)
+  if (normalizedScoringType === DEFAULT_TEAM_CHALLENGE_SCORING_TYPE) return null
+  if (value === null || value === undefined || value === '') return DEFAULT_TEAM_CHALLENGE_POINTS_PER_HOLE
+  const points = Number(value)
+  if (!Number.isFinite(points) || points <= 0) throw new Error('Team Challenge points per hole must be greater than zero.')
+  if (points > 10000) throw new Error('Team Challenge points per hole is too high.')
+  return Math.round(points * 100) / 100
 }
 
 export function validateInboxRecipientEmail(value) {
@@ -22,6 +41,12 @@ export function validateInboxRecipientEmail(value) {
 export function validateInboxMessageBody(value) {
   const body = String(value || '').trim()
   if (!body) throw new Error('Message is required.')
+  if (body.length > MAX_INBOX_MESSAGE_LENGTH) throw new Error(`Message must be ${MAX_INBOX_MESSAGE_LENGTH} characters or less.`)
+  return body
+}
+
+export function normalizeOptionalInboxMessageBody(value) {
+  const body = String(value || '').trim()
   if (body.length > MAX_INBOX_MESSAGE_LENGTH) throw new Error(`Message must be ${MAX_INBOX_MESSAGE_LENGTH} characters or less.`)
   return body
 }
@@ -140,8 +165,8 @@ export function normalizeTeamChallengeHoles(value) {
     return {
       hole: Math.trunc(holeNumber),
       par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : 4,
-      yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : 0,
-      strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : Math.trunc(holeNumber),
+      yards: Number.isFinite(yards) && yards > 0 ? Math.trunc(yards) : null,
+      strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : null,
       teeColor,
       teeBoxType: record.teeBoxType || record.tee_box_type || teeColor,
       score: Math.max(0, Math.trunc(score)),
@@ -167,7 +192,9 @@ export function normalizeIndividualChallengeScore(value) {
 export function normalizeInboxMessagePayload(payload = {}) {
   const messageType = normalizeInboxMessageType(payload.messageType || payload.type)
   const replyToMessageId = normalizeInboxMessageId(payload.replyToMessageId || payload.parentMessageId)
-  const body = validateInboxMessageBody(payload.body || payload.message)
+  const body = messageType === 'challenge_request' && !replyToMessageId
+    ? normalizeOptionalInboxMessageBody(payload.body || payload.message)
+    : validateInboxMessageBody(payload.body || payload.message)
 
   if (replyToMessageId) {
     return {
@@ -181,6 +208,8 @@ export function normalizeInboxMessagePayload(payload = {}) {
       challengeState: payload.challengeState ? validateTeamChallengeState(payload.challengeState) : null,
       challengeCourse: payload.challengeCourse ? validateTeamChallengeCourse(payload.challengeCourse) : null,
       challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
+      challengeScoringType: normalizeTeamChallengeScoringType(payload.challengeScoringType),
+      challengePointsPerHole: normalizeTeamChallengePointsPerHole(payload.challengePointsPerHole, payload.challengeScoringType),
       individualParticipantEmails: null,
     }
   }
@@ -197,6 +226,8 @@ export function normalizeInboxMessagePayload(payload = {}) {
       challengeState: validateTeamChallengeState(payload.challengeState || payload.state || payload.stateCode),
       challengeCourse: validateTeamChallengeCourse(payload.challengeCourse || payload.course),
       challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
+      challengeScoringType: normalizeTeamChallengeScoringType(payload.challengeScoringType || payload.scoringType),
+      challengePointsPerHole: normalizeTeamChallengePointsPerHole(payload.challengePointsPerHole ?? payload.pointsPerHole, payload.challengeScoringType || payload.scoringType),
     }
   }
 
@@ -212,6 +243,8 @@ export function normalizeInboxMessagePayload(payload = {}) {
       challengeState: validateTeamChallengeState(payload.challengeState || payload.state || payload.stateCode),
       challengeCourse: validateTeamChallengeCourse(payload.challengeCourse || payload.course),
       challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
+      challengeScoringType: DEFAULT_TEAM_CHALLENGE_SCORING_TYPE,
+      challengePointsPerHole: null,
       individualParticipantEmails: normalizeIndividualChallengeParticipantEmails(payload.individualParticipantEmails || payload.recipientEmails || payload.participantEmails || payload.recipients),
     }
   }
@@ -251,6 +284,8 @@ export function mapInboxMessageRow(row = {}) {
     challengeState: row.challenge_state || row.challengeState || null,
     challengeCourse: row.challenge_course || row.challengeCourse || null,
     challengeTeeColor: normalizeTeeColor(row.challenge_tee_color || row.challengeTeeColor || DEFAULT_TEE_COLOR),
+    challengeScoringType: normalizeTeamChallengeScoringType(row.challenge_scoring_type || row.challengeScoringType),
+    challengePointsPerHole: row.challenge_points_per_hole ?? row.challengePointsPerHole ?? null,
     proposerTeamScore: row.proposer_team_score ?? row.proposerTeamScore ?? null,
     challengedTeamScore: row.challenged_team_score ?? row.challengedTeamScore ?? null,
     proposerTeamHoles: parseTeamChallengeHoles(row.proposer_team_holes_json ?? row.proposerTeamHoles ?? row.proposerTeamHolesJson),
