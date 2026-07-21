@@ -17,7 +17,7 @@ export type HoleScoreDetail = {
   backLongitude?: number | null
   flagLatitude?: number | null
   flagLongitude?: number | null
-  score: number
+  score: number | null
   scoreProvided?: boolean
 }
 
@@ -48,6 +48,8 @@ export type TeamScoreEntry = {
   source?: ScoreRecordSource
   sourceMessageId?: string | null
   challengeStatus?: string | null
+  challengeScoringType?: string | null
+  challengePointsPerHole?: number | string | null
   createdAt: string
 }
 

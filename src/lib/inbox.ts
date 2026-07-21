@@ -175,14 +175,14 @@ export async function completeInboxChallenge(messageId: string): Promise<InboxMe
   return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/complete`, { method: 'PATCH' })
 }
 
-export async function updateTeamChallengeScore(messageId: string, score: number, holes?: HoleScoreDetail[]): Promise<InboxMessage> {
+export async function updateTeamChallengeScore(messageId: string, score: number | null, holes?: HoleScoreDetail[]): Promise<InboxMessage> {
   return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/team-score`, {
     method: 'PATCH',
     body: JSON.stringify({ score, holes: holes || [] }),
   })
 }
 
-export async function updateIndividualChallengeScore(messageId: string, score: number, holes?: HoleScoreDetail[]): Promise<InboxMessage> {
+export async function updateIndividualChallengeScore(messageId: string, score: number | null, holes?: HoleScoreDetail[]): Promise<InboxMessage> {
   return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/individual-score`, {
     method: 'PATCH',
     body: JSON.stringify({ score, holes: holes || [] }),

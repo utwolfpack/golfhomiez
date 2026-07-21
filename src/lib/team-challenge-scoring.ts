@@ -40,6 +40,8 @@ export type TeamChallengeHolePointResult = {
   challengedScore: number | null
   pointsAwarded: number
   carryoverAfterHole: number
+  strokeDifferential: number
+  strokeDifferentialBonus: number
 }
 
 export type TeamChallengePointSummary = {
@@ -55,7 +57,7 @@ export type TeamChallengePointSummary = {
 }
 
 function scoreProvided(hole?: HoleScoreDetail | null): boolean {
-  return Boolean(hole && (hole.scoreProvided === true || (hole.scoreProvided !== false && Number.isFinite(Number(hole.score)))))
+  return Boolean(hole && (hole.scoreProvided === true || (hole.scoreProvided !== false && hole.score !== null && hole.score !== undefined && Number.isFinite(Number(hole.score)))))
 }
 
 function holeScore(hole?: HoleScoreDetail | null): number | null {
@@ -93,22 +95,24 @@ export function calculateTeamChallengePoints(
     const proposerScore = holeScore(proposerByHole.get(hole))
     const challengedScore = holeScore(challengedByHole.get(hole))
     if (proposerScore === null || challengedScore === null) {
-      holeResults.push({ hole, winner: 'pending', proposerScore, challengedScore, pointsAwarded: 0, carryoverAfterHole: scoringType === 'skins_push' ? carryoverPoints : 0 })
+      holeResults.push({ hole, winner: 'pending', proposerScore, challengedScore, pointsAwarded: 0, carryoverAfterHole: scoringType === 'skins_push' ? carryoverPoints : 0, strokeDifferential: 0, strokeDifferentialBonus: 0 })
       continue
     }
 
     completedHoles += 1
     if (proposerScore === challengedScore) {
       if (scoringType === 'skins_push') carryoverPoints += pointsPerHole
-      holeResults.push({ hole, winner: 'tie', proposerScore, challengedScore, pointsAwarded: 0, carryoverAfterHole: scoringType === 'skins_push' ? carryoverPoints : 0 })
+      holeResults.push({ hole, winner: 'tie', proposerScore, challengedScore, pointsAwarded: 0, carryoverAfterHole: scoringType === 'skins_push' ? carryoverPoints : 0, strokeDifferential: 0, strokeDifferentialBonus: 0 })
       continue
     }
 
     const winner: Exclude<PointSide, 'tie' | 'pending'> = proposerScore < challengedScore ? 'proposer' : 'challenged'
-    const awarded = scoringType === 'skins_push' ? carryoverPoints : pointsPerHole
+    const strokeDifferential = Math.abs(proposerScore - challengedScore)
+    const strokeDifferentialBonus = scoringType === 'skins_push' && strokeDifferential > 1 ? (strokeDifferential - 1) * pointsPerHole : 0
+    const awarded = (scoringType === 'skins_push' ? carryoverPoints : pointsPerHole) + strokeDifferentialBonus
     if (winner === 'proposer') proposerPoints += awarded
     if (winner === 'challenged') challengedPoints += awarded
-    holeResults.push({ hole, winner, proposerScore, challengedScore, pointsAwarded: awarded, carryoverAfterHole: 0 })
+    holeResults.push({ hole, winner, proposerScore, challengedScore, pointsAwarded: awarded, carryoverAfterHole: 0, strokeDifferential, strokeDifferentialBonus })
     carryoverPoints = pointsPerHole
   }
 

@@ -55,6 +55,7 @@ export default function Directions() {
               <li>Optionally enter how many <strong>points per hole</strong> each hole starts with. Blank values use 1 point per hole.</li>
               <li>Both teams enter hole-by-hole scores from the challenge scorecard.</li>
               <li>The team with the lower score on a hole wins the available points.</li>
+              <li>When the winning team wins by more than one stroke, each additional stroke adds the selected points-per-hole value again.</li>
               <li>If the hole is tied, the point value carries over to the next hole and keeps carrying over until a team wins a hole.</li>
               <li>The leaderboard shows awarded points and any pending carryover points that have not been won yet.</li>
             </ol>

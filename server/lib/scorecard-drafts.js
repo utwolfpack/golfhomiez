@@ -173,6 +173,35 @@ export async function upsertScorecardDraftHole(db, context, hole) {
   return { ...hole, scoreProvided: true }
 }
 
+export async function deleteScorecardDraftHole(db, context, holeNumber) {
+  const normalizedHoleNumber = Number(holeNumber)
+  if (!Number.isFinite(normalizedHoleNumber) || normalizedHoleNumber < 1 || normalizedHoleNumber > 18) throw new Error('hole must be between 1 and 18')
+  const [result] = await db.execute(
+    `DELETE FROM scorecard_hole_drafts
+      WHERE created_by_user_id = ?
+        AND mode = ?
+        AND scoring_side = ?
+        AND date = ?
+        AND state = ?
+        AND course = ?
+        AND team_key = ?
+        AND opponent_team_key = ?
+        AND hole_number = ?`,
+    [
+      context.userId,
+      context.mode,
+      context.scoringSide,
+      context.date,
+      context.state,
+      context.course,
+      context.teamKey,
+      context.opponentTeamKey,
+      Math.trunc(normalizedHoleNumber),
+    ],
+  )
+  return Number(result?.affectedRows || 0)
+}
+
 export async function clearScorecardDraftHoles(db, context) {
   const [result] = await db.execute(
     `DELETE FROM scorecard_hole_drafts

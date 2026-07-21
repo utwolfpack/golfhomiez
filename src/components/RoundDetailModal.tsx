@@ -6,6 +6,7 @@ import { formatFriendlyDateTime } from '../lib/time-format'
 import { formatHoleScoreOutcome, holeScoreTotal as calculateClientHoleScoreTotal, missingHoleScoreNumbers, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
 import { normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
 import { getIncompleteRoundStatus } from '../lib/round-status'
+import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType } from '../lib/team-challenge-scoring'
 import { api } from '../lib/api'
 import HoleByHoleScorecard from './HoleByHoleScorecard'
 import type { PendingHoleScoreSaveHandler } from './HoleByHoleScorecard'
@@ -18,6 +19,10 @@ type DisplayHoleScore = {
   yards: number | null
   strokeIndex: number | null
   teeColor?: string | null
+  distanceToFrontYards?: number | null
+  distanceToCenterYards?: number | null
+  distanceToBackYards?: number | null
+  distanceToFlagYards?: number | null
 }
 
 type RoundEditForm = {
@@ -74,16 +79,24 @@ function readHoleScores(record: Record<string, unknown>, keys: string[]): unknow
   return null
 }
 
+function optionalDisplayNumber(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = Number(record[key])
+    if (Number.isFinite(value) && value >= 0) return Math.trunc(value)
+  }
+  return null
+}
+
 function normalizeDisplayHoles(input: unknown): DisplayHoleScore[] {
   const parsedInput = parseHoleInput(input)
   return Array.isArray(parsedInput)
     ? parsedInput
         .map((value: unknown, index: number) => {
-          if (typeof value === 'number') return { hole: index + 1, score: value, par: null, yards: null, strokeIndex: null }
+          if (typeof value === 'number') return { hole: index + 1, score: value, par: null, yards: null, strokeIndex: null, distanceToFrontYards: null, distanceToCenterYards: null, distanceToBackYards: null, distanceToFlagYards: null }
           const record = value as Record<string, unknown>
           const explicitProvided = Object.prototype.hasOwnProperty.call(record, 'scoreProvided') || Object.prototype.hasOwnProperty.call(record, 'score_provided')
           const providedValue = record.scoreProvided ?? record.score_provided
-          const provided = explicitProvided ? (providedValue === true || providedValue === 1 || providedValue === '1' || providedValue === 'true') : Number.isFinite(Number(record.score))
+          const provided = explicitProvided ? (providedValue === true || providedValue === 1 || providedValue === '1' || providedValue === 'true') : record.score !== undefined && record.score !== null && record.score !== '' && Number.isFinite(Number(record.score))
           const score = Number(record.score)
           return {
             hole: Number(record.hole) || index + 1,
@@ -92,6 +105,10 @@ function normalizeDisplayHoles(input: unknown): DisplayHoleScore[] {
             yards: Number.isFinite(Number(record.yards)) ? Number(record.yards) : null,
             strokeIndex: Number.isFinite(Number(record.strokeIndex ?? record.stroke_index)) ? Number(record.strokeIndex ?? record.stroke_index) : null,
             teeColor: normalizeTeeColor(record.teeColor ?? record.tee_color),
+            distanceToFrontYards: optionalDisplayNumber(record, 'distanceToFrontYards', 'distance_to_front_yards'),
+            distanceToCenterYards: optionalDisplayNumber(record, 'distanceToCenterYards', 'distance_to_center_yards'),
+            distanceToBackYards: optionalDisplayNumber(record, 'distanceToBackYards', 'distance_to_back_yards'),
+            distanceToFlagYards: optionalDisplayNumber(record, 'distanceToFlagYards', 'distance_to_flag_yards'),
           }
         })
         .filter((value: DisplayHoleScore) => value.score != null)
@@ -148,7 +165,7 @@ function formatHoleDetailMetadata(hole: { par?: number | null; yards?: number | 
 function providedHoleScoreTotal(holes: HoleScoreDetail[]) {
   return holes
     .filter((hole) => hole.scoreProvided)
-    .reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
+    .reduce((sum, hole) => sum + (Number.isFinite(Number(hole.score)) ? Number(hole.score) : 0), 0)
 }
 
 function teamEditResult(teamTotal: number, opponentTotal: number) {
@@ -175,17 +192,31 @@ function holeOutcome(hole: DisplayHoleScore | undefined) {
   }
 }
 
-function renderHoleDetails(holes: DisplayHoleScore[], ownerLabel?: string) {
+function formatHoleDistance(hole: { yards?: number | null; distanceToCenterYards?: number | null; distanceToFlagYards?: number | null; distanceToBackYards?: number | null; distanceToFrontYards?: number | null }) {
+  const distance = Number(hole.yards ?? hole.distanceToCenterYards ?? hole.distanceToFlagYards ?? hole.distanceToBackYards ?? hole.distanceToFrontYards)
+  return Number.isFinite(distance) && distance > 0 ? `${Math.trunc(distance)} yds` : '—'
+}
+
+function renderHoleDetails(holes: DisplayHoleScore[]) {
   return (
-    <div className="roundHoleDetailGrid" style={{ marginTop: 8 }}>
+    <div className="roundHoleLineItemTable" role="table" aria-label="Round hole review line-item summary" style={{ marginTop: 8 }}>
+      <div className="roundHoleLineItemHeader" role="row">
+        <span>Hole</span>
+        <span>Par</span>
+        <span>Score</span>
+        <span>Distance</span>
+      </div>
       {holes.map((hole) => {
         const outcome = holeOutcome(hole)
         return (
-          <div key={hole.hole} className={`roundHoleDetailPill ${outcome.outcomeClass}`}>
-            {ownerLabel ? <span className="roundHoleDetailOwner">{ownerLabel}</span> : null}
-            <strong>Hole {hole.hole}</strong>
-            <span>{formatHoleDetailMetadata(hole)}</span>
-            <span className="roundHoleDetailScore">{outcome.outcome}</span>
+          <div key={hole.hole} className="roundHoleLineItemRow" role="row">
+            <strong>{hole.hole}</strong>
+            <span>{hole.par == null ? '—' : hole.par}</span>
+            <span className={`roundHoleLineItemScore ${outcome.outcomeClass}`}>
+              <strong>{hole.score == null ? '—' : hole.score}</strong>
+              <small>{outcome.outcome}</small>
+            </span>
+            <span>{formatHoleDistance(hole)}</span>
           </div>
         )
       })}
@@ -193,44 +224,113 @@ function renderHoleDetails(holes: DisplayHoleScore[], ownerLabel?: string) {
   )
 }
 
-function renderComparisonScoreCell(hole: DisplayHoleScore | undefined, label: string) {
-  const outcome = holeOutcome(hole)
-  return (
-    <div className={`roundHoleCompareCell ${outcome.outcomeClass}`}>
-      <span className="roundHoleCompareLabel" title={label}>{label}</span>
-      <span className="roundHoleCompareOutcome">{outcome.outcome}</span>
-      <span className="roundHoleCompareStrokes">{outcome.strokes}</span>
-    </div>
-  )
+function formatPointNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
 }
 
-function renderTeamHoleComparison(teamHoles: DisplayHoleScore[], opponentHoles: DisplayHoleScore[], teamLabel: string, opponentLabel: string) {
+function getTeamChallengeRoundSideInitial(label: string, fallback: string) {
+  return String(label || '').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || fallback
+}
+
+function getTeamChallengeRoundWinnerLabel(winner: 'proposer' | 'challenged' | 'tie' | 'pending', teamLabel: string, opponentLabel: string) {
+  if (winner === 'pending' || winner === 'tie') return '—'
+  return winner === 'proposer'
+    ? getTeamChallengeRoundSideInitial(teamLabel, 'T')
+    : getTeamChallengeRoundSideInitial(opponentLabel, 'O')
+}
+
+function getTeamChallengeRoundSummaryScoreClass(winner: 'proposer' | 'challenged' | 'tie' | 'pending', side: 'proposer' | 'challenged') {
+  if (winner === side) return 'inboxTeamChallengeSummaryScore--winner'
+  if (winner === 'tie' || winner === 'pending') return 'inboxTeamChallengeSummaryScore--push'
+  return 'inboxTeamChallengeSummaryScore--loss'
+}
+
+function getTeamChallengeRoundPushPoints(result: { winner: 'proposer' | 'challenged' | 'tie' | 'pending'; pointsAwarded: number; carryoverAfterHole: number; strokeDifferentialBonus: number }, pointSummary: ReturnType<typeof calculateTeamChallengePoints>) {
+  if (pointSummary.scoringType !== 'skins_push') return 0
+  if (result.winner === 'tie') return Math.max(0, result.carryoverAfterHole - pointSummary.pointsPerHole)
+  if (result.winner === 'proposer' || result.winner === 'challenged') return Math.max(0, result.pointsAwarded - pointSummary.pointsPerHole - result.strokeDifferentialBonus)
+  return 0
+}
+
+function formatTeamChallengeRoundPointLeadLabel(teamLabel: string, opponentLabel: string, teamPoints: number, opponentPoints: number) {
+  if (teamPoints === opponentPoints) return '—'
+  const leaderLabel = teamPoints > opponentPoints
+    ? getTeamChallengeRoundSideInitial(teamLabel, 'T')
+    : getTeamChallengeRoundSideInitial(opponentLabel, 'O')
+  return `${leaderLabel} +${formatPointNumber(Math.abs(teamPoints - opponentPoints))}`
+}
+
+function renderTeamHoleComparison(teamHoles: DisplayHoleScore[], opponentHoles: DisplayHoleScore[], teamLabel: string, opponentLabel: string, round: ScoreEntry) {
   const teamByHole = new Map(teamHoles.map((hole) => [hole.hole, hole]))
   const opponentByHole = new Map(opponentHoles.map((hole) => [hole.hole, hole]))
-  const holeNumbers = Array.from(new Set([...teamByHole.keys(), ...opponentByHole.keys()])).sort((left, right) => left - right)
+  const scoringType = normalizeTeamChallengeScoringType((round as any).challengeScoringType)
+  const pointsPerHole = normalizeTeamChallengePointsPerHole((round as any).challengePointsPerHole)
+  const pointSummary = calculateTeamChallengePoints(teamHoles as unknown as HoleScoreDetail[], opponentHoles as unknown as HoleScoreDetail[], scoringType, pointsPerHole)
+  const resultsByHole = new Map(pointSummary.holeResults.map((result) => [result.hole, result]))
+  const holeNumbers = Array.from(new Set([
+    ...pointSummary.holeResults.map((result) => result.hole),
+    ...teamByHole.keys(),
+    ...opponentByHole.keys(),
+  ])).sort((left, right) => left - right)
 
   if (!holeNumbers.length) return null
 
+  let runningTeamPoints = 0
+  let runningOpponentPoints = 0
+  let pushedPointsTotal = 0
+  const rows = holeNumbers.map((holeNumber) => {
+    const teamHole = teamByHole.get(holeNumber)
+    const opponentHole = opponentByHole.get(holeNumber)
+    const result = resultsByHole.get(holeNumber) || { hole: holeNumber, winner: 'pending' as const, proposerScore: null, challengedScore: null, pointsAwarded: 0, carryoverAfterHole: 0, strokeDifferential: 0, strokeDifferentialBonus: 0 }
+    if (result.winner === 'proposer') runningTeamPoints += result.pointsAwarded
+    if (result.winner === 'challenged') runningOpponentPoints += result.pointsAwarded
+    const pushedPoints = getTeamChallengeRoundPushPoints(result, pointSummary)
+    pushedPointsTotal += pushedPoints
+    return {
+      holeNumber,
+      par: teamHole?.par ?? opponentHole?.par ?? null,
+      teamHole,
+      opponentHole,
+      result,
+      pushedPoints,
+      pointLeadLabel: isSkinsTeamChallenge(scoringType) ? formatTeamChallengeRoundPointLeadLabel(teamLabel, opponentLabel, runningTeamPoints, runningOpponentPoints) : '—',
+    }
+  })
+  const finalLeadLabel = isSkinsTeamChallenge(scoringType) ? formatTeamChallengeRoundPointLeadLabel(teamLabel, opponentLabel, pointSummary.proposerPoints, pointSummary.challengedPoints) : '—'
+
   return (
-    <div className="roundHoleCompareGrid" style={{ marginTop: 10 }}>
-      {holeNumbers.map((holeNumber) => {
-        const teamHole = teamByHole.get(holeNumber)
-        const opponentHole = opponentByHole.get(holeNumber)
-        const detailHole = teamHole || opponentHole
-        return (
-          <div key={holeNumber} className="roundHoleCompareRow">
-            <div className="roundHoleCompareMeta">
-              <strong>Hole {holeNumber}</strong>
-              <span>{formatHoleDetailMetadata(detailHole || {})}</span>
-            </div>
-            <div className="roundHoleCompareScores">
-              {renderComparisonScoreCell(teamHole, teamLabel)}
-              <span className="roundHoleCompareVs">vs</span>
-              {renderComparisonScoreCell(opponentHole, opponentLabel)}
-            </div>
+    <div className="roundTeamChallengeSummaryView" aria-label="Round Team Challenge line-item comparison" style={{ marginTop: 10 }}>
+      <div className="inboxTeamChallengeSummaryTable roundTeamChallengeSummaryTable" role="table" aria-label="Hole-by-hole Team Challenge round review summary">
+        <div className="inboxTeamChallengeSummaryHeader" role="row">
+          <span>Hole</span>
+          <span>Par</span>
+          <span title={teamLabel}>{teamLabel}</span>
+          <span title={opponentLabel}>{opponentLabel}</span>
+          <span>Winner</span>
+          <span>Push</span>
+          <span>Points</span>
+        </div>
+        {rows.map((row) => (
+          <div key={row.holeNumber} className="inboxTeamChallengeSummaryRow" role="row">
+            <strong>{row.holeNumber}</strong>
+            <span>{row.par == null ? '—' : row.par}</span>
+            <span className={`inboxTeamChallengeSummaryScore ${getTeamChallengeRoundSummaryScoreClass(row.result.winner, 'proposer')}`}>{row.teamHole?.score == null ? '—' : row.teamHole.score}</span>
+            <span className={`inboxTeamChallengeSummaryScore ${getTeamChallengeRoundSummaryScoreClass(row.result.winner, 'challenged')}`}>{row.opponentHole?.score == null ? '—' : row.opponentHole.score}</span>
+            <span className={`inboxTeamChallengeSummaryWinner inboxTeamChallengeSummaryWinner--${row.result.winner}`}>{getTeamChallengeRoundWinnerLabel(row.result.winner, teamLabel, opponentLabel)}</span>
+            <span>{isSkinsTeamChallenge(scoringType) && row.pushedPoints > 0 ? formatPointNumber(row.pushedPoints) : '—'}</span>
+            <strong className="inboxTeamChallengeSummaryPoints">{row.pointLeadLabel}</strong>
           </div>
-        )
-      })}
+        ))}
+        <div className="inboxTeamChallengeSummaryRow inboxTeamChallengeSummaryRow--total" role="row">
+          <strong>Total</strong>
+          <span>{rows.reduce((sum, row) => sum + (row.par || 0), 0)}</span>
+          <span>{teamHoles.reduce((sum, hole) => sum + (hole.score || 0), 0)}</span>
+          <span>{opponentHoles.reduce((sum, hole) => sum + (hole.score || 0), 0)}</span>
+          <span>—</span>
+          <span>{isSkinsTeamChallenge(scoringType) && pushedPointsTotal > 0 ? formatPointNumber(pushedPointsTotal) : '—'}</span>
+          <strong className="inboxTeamChallengeSummaryPoints">{finalLeadLabel}</strong>
+        </div>
+      </div>
     </div>
   )
 }
@@ -291,6 +391,30 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
       },
     })
   }, [roundId, isEditing])
+
+  useEffect(() => {
+    if (!round || isEditing) return
+    const record = round as unknown as Record<string, unknown>
+    const primaryHoles = normalizeDisplayHoles(readHoleScores(record, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']) ?? (round as any).holes)
+    const secondaryHoles = getDisplayRoundMode(round) === 'team'
+      ? normalizeDisplayHoles(readHoleScores(record, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']) ?? (round as any).opponentHoles)
+      : []
+    logFrontendEvent({
+      category: 'round.detail.review',
+      message: 'round_hole_line_item_review_viewed',
+      data: {
+        correlationId: getCorrelationId(),
+        roundId: (round as any).id || null,
+        mode: getDisplayRoundMode(round),
+        detailView,
+        lineItemReviewView: true,
+        reviewColumns: ['Hole', 'Par', 'Score', 'Distance'],
+        teamComparisonColumns: getDisplayRoundMode(round) === 'team' ? ['Hole', 'Par', displayName((round as any).team, 'Team'), displayName((round as any).opponentTeam, 'Opponent Team'), 'Winner', 'Push', 'Points'] : null,
+        primaryHoleCount: primaryHoles.length,
+        opponentHoleCount: secondaryHoles.length,
+      },
+    })
+  }, [roundId, isEditing, detailView])
 
   if (!round) return null
 
@@ -713,22 +837,22 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
                   {showingOpponentHoles ? (
                     <>
                       <strong>{opponentLabel} hole detail:</strong> {opponentHoles.length ? `Cumulative score ${opponentHoleScoreTotal}` : 'No hole-by-hole detail saved'}
-                      {opponentHoles.length ? renderHoleDetails(opponentHoles, opponentLabel) : null}
+                      {opponentHoles.length ? renderHoleDetails(opponentHoles) : null}
                     </>
                   ) : showingTeamHoles ? (
                     <>
                       <strong>{teamLabel} hole detail:</strong> {holes.length ? `Cumulative score ${holeScoreTotal}` : 'No hole-by-hole detail saved'}
-                      {holes.length ? renderHoleDetails(holes, teamLabel) : null}
+                      {holes.length ? renderHoleDetails(holes) : null}
                     </>
                   ) : canShowTeamComparison ? (
                     <>
                       <strong>Hole-by-hole comparison:</strong> {teamLabel} {holeScoreTotal} • {opponentLabel} {opponentHoleScoreTotal}
-                      {renderTeamHoleComparison(holes, opponentHoles, teamLabel, opponentLabel)}
+                      {renderTeamHoleComparison(holes, opponentHoles, teamLabel, opponentLabel, round)}
                     </>
                   ) : (
                     <>
                       <strong>{teamLabel} hole detail:</strong> {holes.length ? `Cumulative score ${holeScoreTotal}` : 'No hole-by-hole detail saved'}
-                      {holes.length ? renderHoleDetails(holes, teamLabel) : null}
+                      {holes.length ? renderHoleDetails(holes) : null}
                     </>
                   )}
                 </div>

@@ -785,6 +785,7 @@ export async function listPortalData() {
   const organizerColumns = await getTableColumns('organizer_role_accounts')
   const appUserColumns = await getTableColumns('app_users')
   const teamColumns = await getTableColumns('teams')
+  const teamMemberColumns = await getTableColumns('team_members')
   const scoreColumns = await getTableColumns('scores')
   const tournamentColumns = await getTableColumns('tournaments')
   const hostRoleColumns = await getTableColumns('host_role_accounts')
@@ -830,10 +831,14 @@ export async function listPortalData() {
     selectColumn(appUserColumns, 'au', ['created_at'], 'created_at'),
     selectColumn(appUserColumns, 'au', ['updated_at'], 'updated_at'),
   ].join(', ')} FROM app_users au ORDER BY au.created_at DESC LIMIT 50`)
+  const teamMemberEmailsSelect = teamMemberColumns.has('team_id') && teamMemberColumns.has('email')
+    ? `(SELECT GROUP_CONCAT(DISTINCT NULLIF(tmm.email, '') ORDER BY tmm.email SEPARATOR ', ') FROM team_members tmm WHERE tmm.team_id = tm.id) AS team_member_emails`
+    : 'NULL AS team_member_emails'
   const [teams] = await db.query(`SELECT ${[
     selectColumn(teamColumns, 'tm', ['id'], 'id'),
     selectColumn(teamColumns, 'tm', ['name'], 'name'),
     selectColumn(teamColumns, 'tm', ['created_by_email'], 'created_by_email'),
+    teamMemberEmailsSelect,
     selectColumn(teamColumns, 'tm', ['created_at'], 'created_at'),
     selectColumn(teamColumns, 'tm', ['updated_at'], 'updated_at'),
   ].join(', ')} FROM teams tm ORDER BY tm.created_at DESC LIMIT 50`)
