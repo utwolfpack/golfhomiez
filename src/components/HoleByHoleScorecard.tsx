@@ -8,6 +8,7 @@ import {
   mergeProvidedHoleScores,
   missingHoleScoreNumbers,
   normalizeHoleScorecard,
+  resetHoleScore,
   updateHoleScore,
 } from '../lib/hole-scorecard'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
@@ -57,7 +58,7 @@ type Props = {
   courseId?: string | null
   holes: HoleScoreDetail[]
   onChange: (holes: HoleScoreDetail[]) => void
-  onHoleSaved?: (holes: HoleScoreDetail[], savedHole: HoleScoreDetail) => void | Promise<unknown>
+  onHoleSaved?: (holes: HoleScoreDetail[], savedHole: HoleScoreDetail, action?: 'save' | 'reset') => void | Promise<unknown>
   draftContext?: DraftContext
   scoreOwnerLabel?: string
   loadScorecardOnMount?: boolean
@@ -127,7 +128,8 @@ function buildDraftSearchParams(stateCode: string, course: string, draftContext?
 }
 
 function getScoreOrPar(hole: HoleScoreDetail) {
-  return Number.isFinite(hole.score) ? hole.score : getPlayablePar(hole.par)
+  const score = Number(hole.score)
+  return hole.score != null && Number.isFinite(score) ? score : getPlayablePar(hole.par)
 }
 
 
@@ -184,6 +186,21 @@ function findNextUnscoredHoleIndex(holes: HoleScoreDetail[], savedHoleNumber: nu
 }
 
 
+function findFirstUnscoredHoleIndex(holes: HoleScoreDetail[]) {
+  if (!Array.isArray(holes) || holes.length === 0) return null
+  const activeHoleCount = getScorecardHoleCount(holes)
+  for (let holeNumber = 1; holeNumber <= activeHoleCount; holeNumber += 1) {
+    const holeIndex = holes.findIndex((candidate) => Number(candidate?.hole) === holeNumber)
+    if (holeIndex >= 0 && !holes[holeIndex]?.scoreProvided) return holeIndex
+  }
+  return null
+}
+
+function defaultHoleIndexForInputFlow(holes: HoleScoreDetail[]) {
+  return findFirstUnscoredHoleIndex(holes) ?? 0
+}
+
+
 function getProvidedHoleNumbers(holes: HoleScoreDetail[]) {
   return holes
     .filter((hole) => hole.scoreProvided)
@@ -199,6 +216,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   const [savingHole, setSavingHole] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [activeScoreDirty, setActiveScoreDirty] = useState(false)
+  const defaultHoleSelectionKeyRef = useRef('')
   const selectedTeeColor = normalizeTeeColor(teeColor)
   const persistedHolesRef = useRef<HoleScoreDetail[] | null>(persistedHoles)
   persistedHolesRef.current = persistedHoles
@@ -237,6 +255,29 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     () => buildDraftSearchParams(stateCode, course, draftContext),
     [stateCode, course, draftContext?.mode, draftContext?.date, draftContext?.team, draftContext?.opponentTeam, draftContext?.scoringSide],
   )
+
+  const defaultHoleSelectionKey = useMemo(() => [
+    enabled ? 'enabled' : 'disabled',
+    stateCode,
+    course,
+    courseId || '',
+    selectedTeeColor,
+    draftParams?.toString() || '',
+    String(loadScorecardOnMount),
+  ].join('|'), [enabled, stateCode, course, courseId, selectedTeeColor, draftParams, loadScorecardOnMount])
+
+  useEffect(() => {
+    if (!enabled) return
+    if (defaultHoleSelectionKeyRef.current === defaultHoleSelectionKey) return
+    defaultHoleSelectionKeyRef.current = defaultHoleSelectionKey
+    const nextDefaultIndex = defaultHoleIndexForInputFlow(holes)
+    setActiveHoleIndex(nextDefaultIndex)
+    logFrontendEvent({
+      category: 'scorecard.hole.default_selection',
+      message: 'first_unscored_hole_selected',
+      data: { correlationId: getCorrelationId(), stateCode, course, courseId, teeColor: selectedTeeColor, activeHole: holes[nextDefaultIndex]?.hole || nextDefaultIndex + 1, providedHoleNumbers: getProvidedHoleNumbers(holes) },
+    })
+  }, [enabled, defaultHoleSelectionKey])
 
   useEffect(() => {
     if (!enabled || !loadScorecardOnMount) return
@@ -295,11 +336,12 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
         nextHoles = withSelectedTeeColor(nextHoles, selectedTeeColor)
         const loadedProvidedHoleNumbers = getProvidedHoleNumbers(nextHoles)
         onChange(nextHoles)
-        setActiveHoleIndex(0)
+        const defaultHoleIndex = defaultHoleIndexForInputFlow(nextHoles)
+        setActiveHoleIndex(defaultHoleIndex)
         logFrontendEvent({
           category: 'scorecard.load',
           message: 'succeeded',
-          data: { correlationId, stateCode, course, courseId, teeColor: selectedTeeColor, source, parTotal: responseParTotal, holeCount: nextHoles.length, providedCount: loadedProvidedHoleNumbers.length, providedHoleNumbers: loadedProvidedHoleNumbers },
+          data: { correlationId, stateCode, course, courseId, teeColor: selectedTeeColor, source, parTotal: responseParTotal, holeCount: nextHoles.length, providedCount: loadedProvidedHoleNumbers.length, providedHoleNumbers: loadedProvidedHoleNumbers, defaultHole: nextHoles[defaultHoleIndex]?.hole || defaultHoleIndex + 1 },
         })
       } catch (error) {
         if (cancelled) return
@@ -322,6 +364,8 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     const mergedHoles = withSelectedTeeColor(mergeProvidedHoleScores(holes, persistedHoles), selectedTeeColor)
     const mergedProvidedHoleNumbers = getProvidedHoleNumbers(mergedHoles)
     onChange(mergedHoles)
+    const defaultHoleIndex = defaultHoleIndexForInputFlow(mergedHoles)
+    if (activeHole.scoreProvided && defaultHoleIndex !== activeHoleIndex) setActiveHoleIndex(defaultHoleIndex)
     logFrontendEvent({
       category: 'scorecard.persisted_holes.merge',
       message: 'merged_without_navigation_reset',
@@ -334,6 +378,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
         providedCount: mergedProvidedHoleNumbers.length,
         providedHoleNumbers: mergedProvidedHoleNumbers,
         activeHole: activeHole.hole,
+        defaultHole: mergedHoles[defaultHoleIndex]?.hole || defaultHoleIndex + 1,
       },
     })
   }, [persistedHoles, selectedTeeColor])
@@ -393,7 +438,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
         })
       }
       if (onHoleSaved) {
-        await onHoleSaved(next, savedHole)
+        await onHoleSaved(next, savedHole, 'save')
       }
       const remainingHoleCount = missingHoleScoreNumbers(next).length
       const nextUnscoredHoleIndex = options.autoAdvanceAfterSave ? findNextUnscoredHoleIndex(next, hole.hole) : null
@@ -426,6 +471,57 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
       setSavingHole(false)
     }
   }
+
+  async function clearActiveHoleScore(source = 'dedicated_hole_page_reset') {
+    if (savingHole) return
+    const next = withSelectedTeeColor(resetHoleScore(holes, activeHole.hole), selectedTeeColor)
+    const resetHole = {
+      ...activeHole,
+      teeColor: selectedTeeColor,
+      teeBoxType: selectedTeeColor,
+      score: null,
+      scoreProvided: false,
+    }
+    const correlationId = getCorrelationId()
+    const remainingProvidedHoleNumbers = getProvidedHoleNumbers(next)
+    onChange(next)
+    setSavingHole(true)
+    setActiveScoreDirty(false)
+    setSaveStatus('Clearing hole score…')
+    logFrontendEvent({
+      category: 'scorecard.hole.reset',
+      message: 'started',
+      data: { correlationId, hole: activeHole.hole, source, teeColor: selectedTeeColor, remainingProvidedHoleNumbers, draftContext },
+    })
+
+    try {
+      if (draftParams) {
+        const params = new URLSearchParams(draftParams)
+        params.set('hole', String(activeHole.hole))
+        await api(`/api/scorecard-drafts/hole?${params.toString()}`, { method: 'DELETE' })
+      }
+      if (onHoleSaved) {
+        await onHoleSaved(next, resetHole, 'reset')
+      }
+      const nextDefaultIndex = defaultHoleIndexForInputFlow(next)
+      setActiveHoleIndex(nextDefaultIndex)
+      setSaveStatus(`Hole ${activeHole.hole} cleared.`)
+      logFrontendEvent({
+        category: 'scorecard.hole.reset',
+        message: 'succeeded',
+        data: { correlationId, hole: activeHole.hole, source, nextHole: next[nextDefaultIndex]?.hole || nextDefaultIndex + 1, remainingProvidedHoleNumbers },
+      })
+      return { saved: true, hole: activeHole.hole, providedHoleNumbers: remainingProvidedHoleNumbers, holes: next }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not clear this hole score.'
+      setSaveStatus('Cleared on this page, but database persistence failed. Try clearing again before leaving.')
+      logFrontendEvent({ category: 'scorecard.hole.reset', level: 'error', message: 'failed', data: { correlationId, hole: activeHole.hole, source, error: message } })
+      throw error
+    } finally {
+      setSavingHole(false)
+    }
+  }
+
 
   async function savePendingActiveHoleScore(source = 'pending_hole_score_flush'): Promise<PendingHoleScoreSaveResult> {
     const pendingState = latestPendingStateRef.current
@@ -556,6 +652,16 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
           >
             {savingHole ? 'Saving…' : currentHoleProvided ? 'Update Hole Score' : 'Save Hole Score'}
           </button>
+          {currentHoleProvided ? (
+            <button
+              type="button"
+              className="btn btnSmall holeInputResetButton"
+              disabled={savingHole}
+              onClick={() => { void clearActiveHoleScore() }}
+            >
+              Reset Hole Score
+            </button>
+          ) : null}
           {saveStatus ? <div className="small holeInputSaveStatus">{saveStatus}</div> : null}
         </div>
 

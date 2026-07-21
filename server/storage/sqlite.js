@@ -462,7 +462,8 @@ export async function updateInboxIndividualChallengeScore(messageId, user, score
     const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail
     if (!isCurrentParticipant) return participant
     userCanEditOwnScore = true
-    return { ...participant, score, holes: Array.isArray(holes) && holes.length ? holes : [], soloScoreId: options?.soloScoreId || participant.soloScoreId || null }
+    const nextSoloScoreId = Object.prototype.hasOwnProperty.call(options || {}, 'soloScoreId') ? options.soloScoreId : participant.soloScoreId
+    return { ...participant, score: score ?? null, holes: Array.isArray(holes) && holes.length ? holes : [], soloScoreId: nextSoloScoreId || null }
   })
   if (!userCanEditOwnScore) return null
   db.prepare('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?').run(JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge')

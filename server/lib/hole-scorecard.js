@@ -62,7 +62,7 @@ function isHoleScoreProvided(hole) {
   if (Object.prototype.hasOwnProperty.call(hole, 'scoreProvided') || Object.prototype.hasOwnProperty.call(hole, 'score_provided')) {
     return hole.scoreProvided === true || hole.scoreProvided === 1 || hole.scoreProvided === '1' || hole.scoreProvided === 'true' || hole.score_provided === true || hole.score_provided === 1 || hole.score_provided === '1' || hole.score_provided === 'true'
   }
-  return Number.isFinite(Number(hole.score))
+  return hole.score !== undefined && hole.score !== null && hole.score !== '' && Number.isFinite(Number(hole.score))
 }
 
 export function calculateProvidedHoleScoreTotal(holes) {
@@ -161,7 +161,9 @@ export function normalizeHoleScorePayload(holes) {
       const centerLongitude = Number(hole?.centerLongitude ?? hole?.center_longitude)
       const backLatitude = Number(hole?.backLatitude ?? hole?.back_latitude)
       const backLongitude = Number(hole?.backLongitude ?? hole?.back_longitude)
-      const score = Number(hole?.score)
+      const rawScore = hole?.score
+      const score = Number(rawScore)
+      const hasScoreValue = rawScore !== undefined && rawScore !== null && rawScore !== ''
 
       return {
         hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
@@ -182,8 +184,8 @@ export function normalizeHoleScorePayload(holes) {
         centerLongitude: Number.isFinite(centerLongitude) ? centerLongitude : null,
         backLatitude: Number.isFinite(backLatitude) ? backLatitude : null,
         backLongitude: Number.isFinite(backLongitude) ? backLongitude : null,
-        score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : 0,
-        scoreProvided: hole?.scoreProvided === false || hole?.score_provided === false ? false : true,
+        score: hasScoreValue && Number.isFinite(score) && score >= 0 ? Math.trunc(score) : null,
+        scoreProvided: hole?.scoreProvided === false || hole?.score_provided === false ? false : hasScoreValue && Number.isFinite(score) && score >= 0,
       }
     })
 

@@ -15,7 +15,7 @@ import { accessLogMiddleware, getLogPaths, logApi, logError, logFrontend, logInf
 import { getNearestLocation as getNearestServerLocation, searchLocations as searchServerLocations } from './lib/location-service.js'
 import { findGolfCourseForState, findNearestGolfCourse, formatGolfCoursePhysicalAddress, getGolfCourseByName, listGolfCourseStates, listGolfCoursesForState } from './lib/golf-course-service.js'
 import { calculateHoleScoreTotal, calculateProvidedHoleScoreTotal, getHoleScorecardForCourse, normalizeHoleScorePayload } from './lib/hole-scorecard.js'
-import { clearScorecardDraftHoles, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
+import { clearScorecardDraftHoles, deleteScorecardDraftHole, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
 import { listScheduledJobs, runScheduledJob, startScheduledJobRunner } from './lib/scheduled-jobs.js'
@@ -1803,7 +1803,7 @@ app.post('/api/admin/reset-password', async (req, res) => {
 app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
   try {
     const data = await listPortalData()
-    logApi('admin_portal_metadata_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, summary: data.summary })
+    logApi('admin_portal_metadata_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, summary: data.summary, teamRows: data.teams?.length || 0, teamsWithMemberEmails: (data.teams || []).filter((team) => team.team_member_emails).length })
     res.json({ ...data, adminUser: { id: req.adminUser.id, username: req.adminUser.username, email: req.adminUser.email, isActive: !!req.adminUser.is_active } })
   } catch (error) {
     logRouteError('Admin portal load error', req, error)
@@ -2868,6 +2868,8 @@ function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds) {
       id: `team-challenge-${threadId}`,
       source: 'team_challenge',
       sourceMessageId: message.id,
+      challengeScoringType: message.challengeScoringType || 'stroke_play',
+      challengePointsPerHole: message.challengePointsPerHole ?? null,
       mode: 'team',
       date: teamChallengeRecordDate(message),
       state: message.challengeState || '',
@@ -3081,6 +3083,30 @@ async function resolveIndividualChallengeForNewMessage(req, payload) {
 
 async function createOrUpdateIndividualChallengeSoloScore(message, user, score, holes, participant = null) {
   const normalizedHoles = Array.isArray(holes) && holes.length ? holes : null
+  const existingSoloScoreId = String(participant?.soloScoreId || '').trim()
+
+  if (score == null) {
+    if (existingSoloScoreId) {
+      const existingScore = await storage.getScoreById(existingSoloScoreId)
+      const ownsExistingScore = existingScore && (
+        String(existingScore.createdByUserId || '') === String(user?.id || '') ||
+        normalizeEmail(existingScore.createdByEmail) === normalizeEmail(user?.email)
+      )
+      if (ownsExistingScore && storage.deleteScoreById) {
+        await storage.deleteScoreById(existingSoloScoreId)
+      }
+      logApi('individual_challenge_solo_score_cleared', {
+        userId: user?.id || null,
+        userEmail: normalizeEmail(user?.email),
+        messageId: message?.id || null,
+        threadId: message?.threadId || message?.id || null,
+        scoreId: existingSoloScoreId,
+        deletedScore: Boolean(ownsExistingScore && storage.deleteScoreById),
+      })
+    }
+    return null
+  }
+
   const scoreState = String(message?.challengeState || '').trim().toUpperCase()
   const scoreCourse = String(message?.challengeCourse || '').trim() || 'Individual Challenge'
   const courseMetadata = resolveScoreCourseMetadata(scoreState, { name: scoreCourse })
@@ -3098,7 +3124,6 @@ async function createOrUpdateIndividualChallengeSoloScore(message, user, score, 
     sourceMessageId: message?.threadId || message?.id || null,
   }
 
-  const existingSoloScoreId = String(participant?.soloScoreId || '').trim()
   if (existingSoloScoreId) {
     const existingScore = await storage.getScoreById(existingSoloScoreId)
     const ownsExistingScore = existingScore && (
@@ -3519,7 +3544,7 @@ app.patch('/api/inbox/messages/:id/individual-score', requireStorage, authMiddle
       return res.status(403).json({ message: 'Only golfers in an Individual Challenge can update their own score.' })
     }
     const soloScore = await createOrUpdateIndividualChallengeSoloScore(participantMessage, req.user, score, holes, participant)
-    const message = await storage.updateInboxIndividualChallengeScore(req.params.id, req.user, score, holes, { soloScoreId: soloScore?.id || participant.soloScoreId || null })
+    const message = await storage.updateInboxIndividualChallengeScore(req.params.id, req.user, score, holes, { soloScoreId: soloScore?.id || null })
     if (!message) {
       logApi('individual_challenge_score_update_missing', { ...requestContext(req), messageId: req.params.id, score })
       return res.status(404).json({ message: 'Individual Challenge not found' })
@@ -3900,6 +3925,33 @@ app.put('/api/scorecard-drafts/hole', requireStorage, authMiddleware, async (req
   }
 })
 
+
+app.delete('/api/scorecard-drafts/hole', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const context = normalizeDraftContext({ ...(req.query || {}), ...(req.body || {}) }, req.user)
+    const holeNumber = req.query?.hole ?? req.body?.hole ?? req.body?.holeNumber
+    const db = getPool()
+    const clearedDraftHoles = await deleteScorecardDraftHole(db, context, holeNumber)
+    logApi('scorecard_draft_hole_cleared', {
+      ...requestContext(req),
+      mode: context.mode,
+      scoringSide: context.scoringSide,
+      date: context.date,
+      state: context.state,
+      course: context.course,
+      team: context.team,
+      opponentTeam: context.opponentTeam,
+      hole: Number(holeNumber),
+      clearedDraftHoles,
+    })
+    res.json({ clearedDraftHoles })
+  } catch (error) {
+    const status = /required|between|authenticated/.test(String(error?.message || '')) ? 400 : 500
+    logRouteError('Clear scorecard draft hole error', req, error)
+    res.status(status).json({ message: error?.message || 'Could not clear saved hole score' })
+  }
+})
+
 app.delete('/api/scorecard-drafts', requireStorage, authMiddleware, async (req, res) => {
   try {
     const context = normalizeDraftContext(req.query || {}, req.user)
@@ -3961,7 +4013,7 @@ function countProvidedHoleScores(holes) {
     if (Object.prototype.hasOwnProperty.call(hole, 'scoreProvided') || Object.prototype.hasOwnProperty.call(hole, 'score_provided')) {
       return hole.scoreProvided === true || hole.scoreProvided === 1 || hole.scoreProvided === '1' || hole.scoreProvided === 'true' || hole.score_provided === true || hole.score_provided === 1 || hole.score_provided === '1' || hole.score_provided === 'true'
     }
-    return Number.isFinite(Number(hole.score))
+    return hole.score !== undefined && hole.score !== null && hole.score !== '' && Number.isFinite(Number(hole.score))
   }).length
 }
 
@@ -4625,7 +4677,7 @@ app.post('/api/admin/reset-password', async (req, res) => {
 app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
   try {
     const data = await listPortalData()
-    logApi('admin_portal_metadata_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, summary: data.summary })
+    logApi('admin_portal_metadata_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, summary: data.summary, teamRows: data.teams?.length || 0, teamsWithMemberEmails: (data.teams || []).filter((team) => team.team_member_emails).length })
     res.json({ ...data, adminUser: { id: req.adminUser.id, username: req.adminUser.username, email: req.adminUser.email, isActive: !!req.adminUser.is_active } })
   } catch (error) {
     logRouteError('Admin portal load error', req, error)

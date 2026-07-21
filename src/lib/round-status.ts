@@ -47,7 +47,7 @@ function holeHasProvidedScore(hole: unknown) {
 
   const record = hole as Record<string, unknown>
   if (hasExplicitProvidedFlag(record)) return flagIsProvided(record.scoreProvided ?? record.score_provided)
-  return Number.isFinite(Number(record.score))
+  return record.score !== undefined && record.score !== null && record.score !== '' && Number.isFinite(Number(record.score))
 }
 
 function scorePart(label: string, holes: unknown[] | null): HoleStatusPart | null {

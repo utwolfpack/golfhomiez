@@ -1287,23 +1287,6 @@ button.navDropdownItem{font:inherit;}
   font-size:13px;
 }
 
-.roundHoleDetailOwner{
-  display:inline-flex;
-  align-items:center;
-  width:max-content;
-  max-width:100%;
-  padding:1px 6px;
-  border-radius:999px;
-  background:rgba(255,255,255,.75);
-  color:#0f3d2e;
-  font-size:10px;
-  font-weight:800;
-  line-height:1.2;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
 .roundHoleDetailPill--eagleBetter{
   background:#ccfbf1;
   border-color:#5eead4;
@@ -1340,120 +1323,83 @@ button.navDropdownItem{font:inherit;}
   border-color:#d4d4d8;
 }
 
+.roundHoleLineItemTable{
+  overflow:hidden;
+  border:1px solid rgba(15,23,42,.12);
+  border-radius:14px;
+  background:#fff;
+}
 
-.roundHoleCompareGrid{
+.roundHoleLineItemHeader,
+.roundHoleLineItemRow{
   display:grid;
-  gap:6px;
-}
-
-.roundHoleCompareRow{
-  display:grid;
-  grid-template-columns:minmax(74px, .35fr) minmax(0, 1.65fr);
-  gap:6px;
-  align-items:stretch;
-  padding:5px;
-  border:1px solid rgba(215,234,220,.95);
-  border-radius:13px;
-  background:linear-gradient(180deg,#ffffff,#fbfefc);
-}
-
-.roundHoleCompareMeta{
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  gap:2px;
-  min-width:0;
-  padding:6px 7px;
-  border-radius:10px;
-  background:rgba(255,255,255,.78);
-}
-
-.roundHoleCompareMeta strong{
-  color:#0b3d1d;
-  font-size:14px;
-  line-height:1.05;
-}
-
-.roundHoleCompareMeta span{
-  color:#31533c;
-  font-size:10px;
-  line-height:1.25;
-}
-
-.roundHoleCompareScores{
-  display:grid;
-  grid-template-columns:minmax(0,1fr) 30px minmax(0,1fr);
+  grid-template-columns:54px 50px minmax(96px,1fr) 88px;
   align-items:center;
-  gap:0;
+  gap:6px;
+}
+
+.roundHoleLineItemHeader{
+  padding:8px 10px;
+  background:#0b3d1d;
+  color:#fff;
+  font-size:.7rem;
+  font-weight:950;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+}
+
+.roundHoleLineItemRow{
+  min-height:40px;
+  padding:6px 10px;
+  border-top:1px solid rgba(15,23,42,.08);
+  color:#0f172a;
+  font-size:.86rem;
+}
+
+.roundHoleLineItemHeader > span,
+.roundHoleLineItemRow > span,
+.roundHoleLineItemRow > strong{
   min-width:0;
-}
-
-.roundHoleCompareCell{
-  min-height:60px;
-  display:grid;
-  place-items:center;
-  align-content:center;
-  gap:1px;
-  padding:6px 7px;
-  border:1px solid rgba(215,234,220,.95);
   text-align:center;
-}
-
-.roundHoleCompareCell:first-child{
-  border-radius:14px 0 0 14px;
-}
-
-.roundHoleCompareCell:last-child{
-  border-radius:0 14px 14px 0;
-}
-
-.roundHoleCompareLabel{
-  max-width:100%;
-  color:#0b2b16;
-  font-size:11px;
-  font-weight:900;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
 }
 
-.roundHoleCompareOutcome{
-  font-size:17px;
-  line-height:1.05;
-  font-weight:950;
-}
-
-.roundHoleCompareStrokes{
-  color:#31533c;
-  font-size:11px;
-  font-weight:700;
-}
-
-.roundHoleCompareVs{
-  position:relative;
-  z-index:1;
-  display:grid;
-  place-items:center;
-  justify-self:center;
-  width:30px;
-  height:30px;
-  margin:0 -1px;
-  border:1px solid rgba(215,234,220,.95);
-  border-radius:999px;
-  background:#fff;
+.roundHoleLineItemRow > strong:first-child{
   color:#0b3d1d;
-  font-size:10px;
-  font-weight:950;
-  box-shadow:0 4px 12px rgba(9,46,24,.08);
 }
+
+.roundHoleLineItemScore{
+  display:inline-grid;
+  justify-self:center;
+  min-width:72px;
+  max-width:100%;
+  padding:4px 8px;
+  border:1px solid transparent;
+  border-radius:10px;
+  line-height:1.1;
+}
+
+.roundHoleLineItemScore strong{
+  font-size:.95rem;
+  font-weight:950;
+}
+
+.roundHoleLineItemScore small{
+  font-size:.64rem;
+  font-weight:850;
+}
+
 
 @media (max-width: 640px){
-  .roundHoleCompareRow{grid-template-columns:minmax(70px,.35fr) minmax(0,1.65fr);gap:5px;}
-  .roundHoleCompareMeta{padding:5px 6px;}
-  .roundHoleCompareScores{grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr);}
-  .roundHoleCompareCell{min-height:52px;padding:5px 4px;}
-  .roundHoleCompareOutcome{font-size:15px;}
-  .roundHoleCompareVs{width:26px;height:26px;font-size:9px;}
+  .roundHoleLineItemHeader,
+  .roundHoleLineItemRow{grid-template-columns:40px 34px minmax(72px,1fr) 62px;gap:3px;}
+  .roundHoleLineItemHeader{padding:7px 6px;font-size:.56rem;}
+  .roundHoleLineItemRow{min-height:34px;padding:5px 6px;font-size:.72rem;}
+  .roundHoleLineItemScore{min-width:56px;padding:3px 5px;border-radius:8px;}
+  .roundHoleLineItemScore strong{font-size:.78rem;}
+  .roundHoleLineItemScore small{font-size:.52rem;}
 }
 
 @media (max-width: 540px){
@@ -2356,6 +2302,160 @@ button.navDropdownItem{font:inherit;}
   padding:10px 0 0;
 }
 
+
+.inboxTeamChallengeHoleReview{
+  margin:0 18px 18px;
+  padding:16px;
+  border-radius:24px;
+  border:1px solid rgba(11,61,29,.14);
+  background:#fff;
+  box-shadow:0 16px 34px rgba(15,23,42,.1);
+  display:grid;
+  gap:8px;
+}
+
+.inboxTeamChallengeHoleReviewTitle{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.inboxTeamChallengeHoleReviewTitle strong{
+  color:#0b3d1d;
+  font-size:1.05rem;
+}
+
+.inboxTeamChallengeHoleReviewTitle span{
+  color:#475569;
+  font-size:.86rem;
+}
+
+.inboxTeamChallengeHoleReviewHeader,
+.inboxTeamChallengeHoleReviewRow{
+  display:grid;
+  grid-template-columns:76px minmax(0,1fr) minmax(0,1fr) minmax(130px,.9fr);
+  gap:8px;
+  align-items:stretch;
+}
+
+.inboxTeamChallengeHoleReviewHeader{
+  padding:4px 8px;
+  color:#0f2f21;
+  font-size:.76rem;
+  font-weight:950;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+
+.inboxTeamChallengeHoleReviewRow{
+  padding:8px;
+  border:1px solid rgba(15,23,42,.08);
+  border-radius:16px;
+  background:#fbfefc;
+}
+
+.inboxTeamChallengeHoleReviewRow > strong{
+  display:grid;
+  place-items:center;
+  border-radius:12px;
+  background:#f8fafc;
+  color:#0b3d1d;
+  font-size:.9rem;
+  text-align:center;
+}
+
+.inboxTeamChallengeHoleReviewCell,
+.inboxTeamChallengeHoleReviewWinner{
+  display:grid;
+  align-content:center;
+  gap:2px;
+  min-height:54px;
+  padding:8px;
+  border-radius:12px;
+  border:1px solid rgba(15,23,42,.08);
+  background:#f8fafc;
+}
+
+.inboxTeamChallengeHoleReviewCell span,
+.inboxTeamChallengeHoleReviewWinner strong{
+  color:#0f172a;
+  font-weight:950;
+  font-size:1.05rem;
+  line-height:1.05;
+}
+
+.inboxTeamChallengeHoleReviewCell small,
+.inboxTeamChallengeHoleReviewWinner small{
+  color:#475569;
+  font-size:.74rem;
+  line-height:1.25;
+}
+
+.inboxTeamChallengeHoleReviewCell--winner,
+.inboxTeamChallengeHoleReviewRow--tie .inboxTeamChallengeHoleReviewWinner{
+  background:#dcfce7;
+  border-color:#86efac;
+}
+
+.inboxTeamChallengeHoleReviewCell--loss{
+  background:#fee2e2;
+  border-color:#fca5a5;
+}
+
+.inboxTeamChallengeHoleReviewCell--push{
+  background:#fef9c3;
+  border-color:#fde68a;
+}
+
+.inboxTeamChallengeHoleReviewCell--pending{
+  background:#f4f4f5;
+  border-color:#d4d4d8;
+}
+
+.inboxTeamChallengeHoleReviewWinner{
+  background:#eff6ff;
+  border-color:#bfdbfe;
+}
+
+.inboxTeamChallengeHoleReviewRow--proposer .inboxTeamChallengeHoleReviewWinner,
+.inboxTeamChallengeHoleReviewRow--challenged .inboxTeamChallengeHoleReviewWinner{
+  background:#dcfce7;
+  border-color:#86efac;
+}
+
+.inboxTeamChallengeHoleReviewRow--pending .inboxTeamChallengeHoleReviewWinner{
+  background:#f4f4f5;
+  border-color:#d4d4d8;
+}
+
+@media (max-width:680px){
+  .inboxTeamChallengeHoleReview{
+    margin:0 10px 10px;
+    padding:10px;
+    border-radius:20px;
+  }
+  .inboxTeamChallengeHoleReviewHeader{
+    display:none;
+  }
+  .inboxTeamChallengeHoleReviewRow{
+    grid-template-columns:52px minmax(0,1fr) minmax(0,1fr);
+    gap:6px;
+    padding:6px;
+  }
+  .inboxTeamChallengeHoleReviewWinner{
+    grid-column:1 / -1;
+    min-height:42px;
+  }
+  .inboxTeamChallengeHoleReviewRow > strong{
+    font-size:.76rem;
+  }
+  .inboxTeamChallengeHoleReviewCell span,
+  .inboxTeamChallengeHoleReviewWinner strong{
+    font-size:.9rem;
+  }
+}
 @media (max-width:680px){
   .inboxLeaderboardModal{border-radius:26px;}
   .inboxLeaderboardBoard{margin:-26px 10px 10px;padding:12px;border-radius:22px;}
@@ -3092,18 +3192,28 @@ button.navDropdownItem{font:inherit;}
 }
 
 .holeInputTrackerChip--saved{
-  background:#dbeafe;
-  border-color:#93c5fd;
-  color:#1e3a8a;
-}
-
-.holeInputTrackerChip--active{
-  border-color:#1d4ed8;
-  box-shadow:0 0 0 3px rgba(147,197,253,.42);
+  background:#bbf7d0;
+  border-color:#86efac;
+  color:#166534;
 }
 
 .holeInputTrackerChip--missing{
-  background:#fff;
+  background:transparent;
+  border-color:#cbd5e1;
+  color:#334155;
+}
+
+.holeInputTrackerChip--active,
+.holeInputTrackerChip--active.holeInputTrackerChip--saved,
+.holeInputTrackerChip--active.holeInputTrackerChip--missing{
+  background:#bfdbfe;
+  border-color:#60a5fa;
+  color:#1e3a8a;
+  box-shadow:0 0 0 3px rgba(147,197,253,.42);
+}
+
+.holeInputResetButton{
+  margin-top:8px;
 }
 
 .roundIncompleteBadge {
@@ -3211,3 +3321,307 @@ button.navDropdownItem{font:inherit;}
 .btnTiny{border:1px solid #16a34a;border-radius:999px;background:#fff;color:#166534;padding:4px 9px;font-size:.78rem;font-weight:900;cursor:pointer}
 .btnTiny:hover,.btnTiny:focus-visible{outline:2px solid rgba(22,163,74,.25);outline-offset:2px}
 .btnTinySecondary{border-color:#cbd5e1;color:#334155}
+
+.inboxTeamChallengeSummaryView{
+  margin:0 18px 18px;
+  padding:14px;
+  border-radius:24px;
+  border:1px solid rgba(11,61,29,.14);
+  background:#fff;
+  box-shadow:0 16px 34px rgba(15,23,42,.1);
+  display:grid;
+  gap:12px;
+}
+
+.inboxTeamChallengeSummaryScorebar{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr);
+  align-items:center;
+  gap:8px;
+  padding:10px;
+  border:1px solid rgba(11,61,29,.12);
+  border-radius:18px;
+  background:linear-gradient(180deg,#fbfefc,#f8faf9);
+}
+
+.inboxTeamChallengeSummaryTeamTotal{
+  min-width:0;
+  display:grid;
+  justify-items:center;
+  gap:2px;
+  text-align:center;
+}
+
+.inboxTeamChallengeSummaryTeamTotal strong{
+  max-width:100%;
+  color:#0b3d1d;
+  font-size:.92rem;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.inboxTeamChallengeSummaryTeamTotal span{
+  font-size:2rem;
+  font-weight:950;
+  line-height:1;
+  color:#0f172a;
+}
+
+.inboxTeamChallengeSummaryTeamTotal small{
+  color:#64748b;
+  font-size:.68rem;
+  font-weight:900;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+}
+
+.inboxTeamChallengeSummaryVs{
+  width:46px;
+  height:46px;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  justify-self:center;
+  border:1px solid rgba(15,23,42,.12);
+  background:#f8fafc;
+  color:#0f2f21;
+  font-weight:950;
+}
+
+.inboxTeamChallengeSummaryTotalScore--winner,
+.inboxTeamChallengeSummaryTotalScore--winner span,
+.inboxTeamChallengeSummaryScore--winner{
+  color:#0a7f28;
+}
+
+.inboxTeamChallengeSummaryTotalScore--loss,
+.inboxTeamChallengeSummaryTotalScore--loss span,
+.inboxTeamChallengeSummaryScore--loss{
+  color:#c1121f;
+}
+
+.inboxTeamChallengeSummaryTotalScore--push,
+.inboxTeamChallengeSummaryTotalScore--push span,
+.inboxTeamChallengeSummaryScore--push{
+  color:#475569;
+}
+
+.inboxTeamChallengeSummaryTable{
+  overflow:hidden;
+  border:1px solid rgba(15,23,42,.12);
+  border-radius:14px;
+  background:#fff;
+}
+
+.inboxTeamChallengeSummaryHeader,
+.inboxTeamChallengeSummaryRow{
+  display:grid;
+  grid-template-columns:44px 40px minmax(72px,1fr) minmax(72px,1fr) 58px 48px 74px;
+  align-items:center;
+  gap:6px;
+}
+
+.inboxTeamChallengeSummaryHeader{
+  padding:8px 10px;
+  background:#0b3d1d;
+  color:#fff;
+  font-size:.7rem;
+  font-weight:950;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+}
+
+.inboxTeamChallengeSummaryHeader span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.inboxTeamChallengeSummaryRow{
+  min-height:36px;
+  padding:6px 10px;
+  border-top:1px solid rgba(15,23,42,.08);
+  color:#0f172a;
+  font-size:.86rem;
+}
+
+.inboxTeamChallengeSummaryRow > span,
+.inboxTeamChallengeSummaryRow > strong{
+  min-width:0;
+  text-align:center;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.inboxTeamChallengeSummaryRow > strong:first-child,
+.inboxTeamChallengeSummaryRow--total > strong:first-child{
+  color:#0b3d1d;
+  text-transform:uppercase;
+}
+
+.inboxTeamChallengeSummaryScore,
+.inboxTeamChallengeSummaryPoints{
+  font-weight:950;
+}
+
+.inboxTeamChallengeSummaryScore{
+  display:inline-grid;
+  justify-self:center;
+  min-width:30px;
+  padding:2px 6px;
+  border:1px solid transparent;
+  border-radius:999px;
+}
+
+.inboxTeamChallengeSummaryScore--winner{
+  background:#dcfce7;
+  border-color:#86efac;
+}
+
+.inboxTeamChallengeSummaryScore--loss{
+  background:#fee2e2;
+  border-color:#fca5a5;
+}
+
+.inboxTeamChallengeSummaryScore--push{
+  background:#f8fafc;
+  border-color:#e2e8f0;
+}
+
+.roundTeamChallengeSummaryView{
+  display:grid;
+  gap:8px;
+  min-width:0;
+}
+
+.roundTeamChallengeSummaryTable{
+  width:100%;
+}
+
+.inboxTeamChallengeSummaryWinner{
+  width:28px;
+  height:28px;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  justify-self:center;
+  background:#e5e7eb;
+  color:#475569;
+  font-weight:950;
+}
+
+.inboxTeamChallengeSummaryWinner--proposer{
+  background:#16a34a;
+  color:#fff;
+}
+
+.inboxTeamChallengeSummaryWinner--challenged{
+  background:#c1121f;
+  color:#fff;
+}
+
+.inboxTeamChallengeSummaryWinner--tie,
+.inboxTeamChallengeSummaryWinner--pending{
+  background:#e5e7eb;
+  color:#64748b;
+}
+
+.inboxTeamChallengeSummaryRow--total{
+  min-height:42px;
+  background:#f0fdf4;
+  font-weight:950;
+}
+
+.inboxTeamChallengeSummaryLegend{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  flex-wrap:wrap;
+  color:#475569;
+  font-size:.78rem;
+}
+
+.inboxTeamChallengeSummaryLegend span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+
+.inboxTeamChallengeSummaryLegendDot{
+  width:14px;
+  height:14px;
+  border-radius:999px;
+  background:#e5e7eb;
+  border:1px solid #cbd5e1;
+}
+
+.inboxTeamChallengeSummaryLegendDot--win{
+  background:#bbf7d0;
+  border-color:#86efac;
+}
+
+.inboxTeamChallengeSummaryLegendDot--loss{
+  background:#fecaca;
+  border-color:#fca5a5;
+}
+
+@media (max-width:680px){
+  .inboxTeamChallengeSummaryView{
+    margin:0 10px 10px;
+    padding:10px;
+    border-radius:20px;
+  }
+
+  .inboxTeamChallengeSummaryScorebar{
+    grid-template-columns:minmax(0,1fr) 42px minmax(0,1fr);
+    padding:8px;
+  }
+
+  .inboxTeamChallengeSummaryTeamTotal strong{font-size:.72rem;}
+  .inboxTeamChallengeSummaryTeamTotal span{font-size:1.55rem;}
+  .inboxTeamChallengeSummaryTeamTotal small{font-size:.56rem;}
+  .inboxTeamChallengeSummaryVs{width:36px;height:36px;font-size:.78rem;}
+
+  .inboxTeamChallengeSummaryHeader,
+  .inboxTeamChallengeSummaryRow{
+    grid-template-columns:32px 30px minmax(42px,.9fr) minmax(42px,.9fr) 38px 34px 48px;
+    gap:3px;
+  }
+
+  .inboxTeamChallengeSummaryHeader{
+    padding:7px 6px;
+    font-size:.56rem;
+  }
+
+  .inboxTeamChallengeSummaryRow{
+    min-height:31px;
+    padding:5px 6px;
+    font-size:.7rem;
+  }
+
+  .inboxTeamChallengeSummaryWinner{
+    width:22px;
+    height:22px;
+    font-size:.66rem;
+  }
+
+  .inboxTeamChallengeSummaryLegend{
+    gap:9px;
+    font-size:.68rem;
+  }
+}
+
+@media (max-width:420px){
+  .inboxTeamChallengeSummaryHeader,
+  .inboxTeamChallengeSummaryRow{
+    grid-template-columns:28px 26px minmax(36px,.9fr) minmax(36px,.9fr) 32px 30px 42px;
+    gap:2px;
+  }
+
+  .inboxTeamChallengeSummaryHeader{font-size:.5rem;}
+  .inboxTeamChallengeSummaryRow{font-size:.64rem;}
+  .inboxTeamChallengeSummaryLegend span{gap:4px;}
+}

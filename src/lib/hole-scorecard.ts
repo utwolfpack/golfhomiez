@@ -90,7 +90,7 @@ export function buildClientDefaultHoleScorecard(state = '', course = '', teeColo
     strokeIndex: strokeIndexes[index] || index + 1,
     teeColor: selectedTeeColor,
     teeBoxType: selectedTeeColor,
-    score: par,
+    score: null,
     scoreProvided: false,
   }))
 }
@@ -117,7 +117,12 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
     const distanceToFlagYards = Number(record.distanceToFlagYards ?? record.distance_to_flag_yards)
     const teeColor = normalizeTeeColor(record.teeColor ?? record.tee_color ?? selectedTeeColor)
     const teeBoxType = String(record.teeBoxType ?? record.tee_box_type ?? teeColor ?? '').trim() || teeColor
-    const score = Number(record.score)
+    const rawScore = record.score
+    const score = Number(rawScore)
+    const explicitScoreProvided = hasScoreProvidedFlag(record)
+    const scoreProvided = explicitScoreProvided
+      ? isProvided(record.scoreProvided ?? record.score_provided)
+      : rawScore !== undefined && rawScore !== null && rawScore !== '' && Number.isFinite(score) && score >= 0
 
     return {
       hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
@@ -138,8 +143,8 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
       backLongitude: optionalNumberField(record, 'backLongitude', 'back_longitude'),
       flagLatitude: Number.isFinite(Number(record.flagLatitude ?? record.flag_latitude)) ? Number(record.flagLatitude ?? record.flag_latitude) : null,
       flagLongitude: Number.isFinite(Number(record.flagLongitude ?? record.flag_longitude)) ? Number(record.flagLongitude ?? record.flag_longitude) : null,
-      score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 0),
-      scoreProvided: isProvided(record.scoreProvided ?? record.score_provided),
+      score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : (scoreProvided ? (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 0) : null),
+      scoreProvided,
     }
   })
 
@@ -192,12 +197,15 @@ function normalizePartialProvidedHoleScore(hole: unknown, index: number): HoleSc
   const backLongitude = optionalNumberField(record, 'backLongitude', 'back_longitude')
   const flagLatitude = Number(record.flagLatitude ?? record.flag_latitude)
   const flagLongitude = Number(record.flagLongitude ?? record.flag_longitude)
-  const score = Number(record.score)
+  const rawScore = record.score
+  const score = Number(rawScore)
   const scoreProvidedValue = record.scoreProvided ?? record.score_provided
+  const provided = isProvided(scoreProvidedValue)
+  const hasScoreValue = rawScore !== undefined && rawScore !== null && rawScore !== ''
 
   if (!Number.isFinite(holeNumber) || holeNumber < 1 || holeNumber > 18) return null
-  if (!Number.isFinite(score) || score < 0) return null
-  if (hasScoreProvidedFlag(record) && !isProvided(scoreProvidedValue)) return null
+  if (hasScoreProvidedFlag(record) && !provided) return null
+  if (!hasScoreValue || !Number.isFinite(score) || score < 0) return null
 
   return {
     hole: Math.trunc(holeNumber),
@@ -254,7 +262,7 @@ export function mergeProvidedHoleScores(baseHoles: HoleScoreDetail[], savedHoles
       backLongitude: Number.isFinite(Number(saved.backLongitude)) ? saved.backLongitude : hole.backLongitude,
       flagLatitude: Number.isFinite(Number(saved.flagLatitude)) ? saved.flagLatitude : hole.flagLatitude,
       flagLongitude: Number.isFinite(Number(saved.flagLongitude)) ? saved.flagLongitude : hole.flagLongitude,
-      score: Number.isFinite(saved.score) && saved.score >= 0 ? saved.score : hole.score,
+      score: Number.isFinite(Number(saved.score)) && Number(saved.score) >= 0 ? Number(saved.score) : hole.score,
       scoreProvided: true,
     }
   })
@@ -264,6 +272,12 @@ export function updateHoleScore(holes: HoleScoreDetail[], holeNumber: number, sc
   const normalizedScore = Math.max(0, Math.trunc(score))
   return holes.map((hole) => (
     hole.hole === holeNumber ? { ...hole, score: normalizedScore, scoreProvided: true } : hole
+  ))
+}
+
+export function resetHoleScore(holes: HoleScoreDetail[], holeNumber: number): HoleScoreDetail[] {
+  return holes.map((hole) => (
+    hole.hole === holeNumber ? { ...hole, score: null, scoreProvided: false } : hole
   ))
 }
 
@@ -279,13 +293,13 @@ export function allHoleScoresProvided(holes: HoleScoreDetail[]) {
 }
 
 export function holeScoreTotal(holes: HoleScoreDetail[]) {
-  return holes.reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
+  return holes.reduce((sum, hole) => sum + (Number.isFinite(Number(hole.score)) ? Number(hole.score) : 0), 0)
 }
 
 export function providedHoleScoreTotal(holes: HoleScoreDetail[]) {
   return holes
     .filter((hole) => hole.scoreProvided)
-    .reduce((sum, hole) => sum + (Number.isFinite(hole.score) ? hole.score : 0), 0)
+    .reduce((sum, hole) => sum + (Number.isFinite(Number(hole.score)) ? Number(hole.score) : 0), 0)
 }
 
 export function holeParTotal(holes: HoleScoreDetail[]) {
@@ -298,7 +312,7 @@ export function holeParTotal(holes: HoleScoreDetail[]) {
 export function holeScoreRelativeToPar(hole: Pick<HoleScoreDetail, 'par' | 'score'>) {
   const par = Number(hole.par)
   const score = Number(hole.score)
-  if (!Number.isFinite(par) || !Number.isFinite(score)) return null
+  if (hole.score == null || !Number.isFinite(par) || !Number.isFinite(score)) return null
   return Math.trunc(score) - Math.trunc(par)
 }
 

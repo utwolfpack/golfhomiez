@@ -10,7 +10,7 @@
     "start": "node server/scripts/reset-session-logs.js && node server/index.js",
     "prebuild": "node server/scripts/cleanup-logs.js",
     "build": "vite build",
-    "postinstall": "npm run db:migrate && npm run build",
+    "postinstall": "npm run cleanup:project-files && npm run db:migrate && npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js",
@@ -20,7 +20,8 @@
     "golf-courses:import-opengolfapi": "node server/scripts/import-opengolfapi-courses.js",
     "golf-courses:import": "node server/scripts/import-opengolfapi-courses.js",
     "golf-courses:backfill-opengolfapi-details": "node server/scripts/backfill-opengolfapi-course-details.js",
-    "golf-courses:import-opengolfapi-details": "node server/scripts/backfill-opengolfapi-course-details.js"
+    "golf-courses:import-opengolfapi-details": "node server/scripts/backfill-opengolfapi-course-details.js",
+    "cleanup:project-files": "node server/scripts/cleanup-project-files.js"
   },
   "engines": {
     "node": ">=18"

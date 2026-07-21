@@ -157,11 +157,14 @@ export function normalizeTeamChallengeHoles(value) {
     const par = Number(record.par)
     const yards = Number(record.yards)
     const strokeIndex = Number(record.strokeIndex ?? record.stroke_index)
-    const score = Number(record.score)
+    const rawScore = record.score
+    const score = Number(rawScore)
     const teeColor = normalizeTeeColor(record.teeColor || record.tee_color || record.teeBoxType || DEFAULT_TEE_COLOR)
     const scoreProvided = record.scoreProvided === true || record.score_provided === true || record.scoreProvided === 1 || record.score_provided === 1 || record.scoreProvided === 'true' || record.score_provided === 'true'
+    const hasScoreValue = rawScore !== undefined && rawScore !== null && rawScore !== ''
+    const normalizedScore = hasScoreValue && Number.isFinite(score) && score >= 0 ? Math.max(0, Math.trunc(score)) : null
     if (!Number.isFinite(holeNumber) || holeNumber < 1 || holeNumber > 18) throw new Error('Team Challenge hole score is invalid.')
-    if (!Number.isFinite(score) || score < 0) throw new Error('Team Challenge hole score must be zero or greater.')
+    if (scoreProvided && normalizedScore == null) throw new Error('Team Challenge hole score must be zero or greater.')
     return {
       hole: Math.trunc(holeNumber),
       par: Number.isFinite(par) && par > 0 ? Math.trunc(par) : 4,
@@ -169,13 +172,14 @@ export function normalizeTeamChallengeHoles(value) {
       strokeIndex: Number.isFinite(strokeIndex) && strokeIndex > 0 ? Math.min(18, Math.trunc(strokeIndex)) : null,
       teeColor,
       teeBoxType: record.teeBoxType || record.tee_box_type || teeColor,
-      score: Math.max(0, Math.trunc(score)),
+      score: normalizedScore,
       scoreProvided,
     }
   })
 }
 
 export function normalizeTeamChallengeScore(value) {
+  if (value === undefined || value === null || value === '') return null
   const score = Number(value)
   if (!Number.isFinite(score)) throw new Error('Team Challenge score must be a number.')
   if (score < 0) throw new Error('Team Challenge score must be zero or greater.')
@@ -183,6 +187,7 @@ export function normalizeTeamChallengeScore(value) {
 }
 
 export function normalizeIndividualChallengeScore(value) {
+  if (value === undefined || value === null || value === '') return null
   const score = Number(value)
   if (!Number.isFinite(score)) throw new Error('Individual Challenge score must be a number.')
   if (score < 0) throw new Error('Individual Challenge score must be zero or greater.')

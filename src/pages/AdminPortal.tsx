@@ -463,6 +463,7 @@ const appUserColumns: DetailColumn[] = [
 const teamColumns: DetailColumn[] = [
   { key: 'name', label: 'Team' },
   { key: 'created_by_email', label: 'Created by' },
+  { key: 'team_member_emails', label: 'Team member emails' },
   { key: 'created_at', label: 'Created' },
   { key: 'updated_at', label: 'Updated' },
 ]
@@ -535,7 +536,7 @@ export default function AdminPortal() {
     logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_load_started' })
     const portalData = await fetchAdminPortal()
     setPortal(portalData)
-    logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_loaded', data: { summary: portalData.summary } })
+    logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_loaded', data: { summary: portalData.summary, teamsWithMemberEmails: (portalData.teams || []).filter((team) => team.team_member_emails).length } })
   }
 
   async function loadExternalApiCalls(filters: ExternalApiCallFilters = apiCallFilters) {
