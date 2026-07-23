@@ -31,6 +31,7 @@ export type InboxMessage = {
   challengedTeamId?: string | null
   challengedTeamName?: string | null
   challengeStatus?: TeamChallengeStatus | null
+  challengeDeletedAt?: string | null
   challengeDate?: string | null
   challengeState?: string | null
   challengeCourse?: string | null
@@ -72,7 +73,7 @@ export type SendInboxMessageInput = {
   body: string
   replyToMessageId?: string | null
   proposerTeamId?: string | null
-  challengedTeamName?: string | null
+  challengedTeamIdentifier?: number | string | null
   challengeDate?: string | null
   challengeState?: string | null
   challengeCourse?: string | null
@@ -95,13 +96,13 @@ export class RecipientNotFoundError extends Error {
 }
 
 export class TeamNotFoundError extends Error {
-  challengedTeamName: string
+  challengedTeamIdentifier: string
   teamNotFound: boolean
 
-  constructor(message: string, challengedTeamName: string) {
+  constructor(message: string, challengedTeamIdentifier: string) {
     super(message)
     this.name = 'TeamNotFoundError'
-    this.challengedTeamName = challengedTeamName
+    this.challengedTeamIdentifier = challengedTeamIdentifier
     this.teamNotFound = true
   }
 }
@@ -123,7 +124,7 @@ export async function fetchTeamChallengeScoreRecords(): Promise<TeamChallengeSco
 }
 
 export async function sendInboxMessage(input: SendInboxMessageInput): Promise<{ ok: boolean; message: InboxMessage; notice: string }> {
-  const { data, response, correlationId } = await requestJson<{ ok?: boolean; message?: InboxMessage | string; notice?: string; inviteRequired?: boolean; recipientEmail?: string; teamNotFound?: boolean; challengedTeamName?: string }>('/api/inbox/messages', {
+  const { data, response, correlationId } = await requestJson<{ ok?: boolean; message?: InboxMessage | string; notice?: string; inviteRequired?: boolean; recipientEmail?: string; teamNotFound?: boolean; challengedTeamIdentifier?: number | string }>('/api/inbox/messages', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -134,8 +135,9 @@ export async function sendInboxMessage(input: SendInboxMessageInput): Promise<{ 
   }
 
   if (response.status === 404 && data?.teamNotFound) {
-    logFrontendEvent({ category: 'inbox.teamChallenge', level: 'warn', message: 'team_challenge_team_not_found', data: { challengedTeamName: data.challengedTeamName || input.challengedTeamName, correlationId } })
-    throw new TeamNotFoundError(typeof data.message === 'string' ? data.message : 'Team does not exist.', data.challengedTeamName || input.challengedTeamName || '')
+    const challengedTeamIdentifier = String(data.challengedTeamIdentifier || input.challengedTeamIdentifier || '')
+    logFrontendEvent({ category: 'inbox.teamChallenge', level: 'warn', message: 'team_challenge_team_not_found', data: { challengedTeamIdentifier, correlationId } })
+    throw new TeamNotFoundError(typeof data.message === 'string' ? data.message : 'GolfHomiez Team ID does not exist.', challengedTeamIdentifier)
   }
 
   if (!response.ok) {
@@ -170,6 +172,14 @@ export async function updateTeamChallengeStatus(messageId: string, status: TeamC
   })
 }
 
+
+
+export async function setInboxChallengeDeleted(messageId: string, deleted: boolean): Promise<InboxMessage> {
+  return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/deleted`, {
+    method: 'PATCH',
+    body: JSON.stringify({ deleted }),
+  })
+}
 
 export async function completeInboxChallenge(messageId: string): Promise<InboxMessage> {
   return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/complete`, { method: 'PATCH' })

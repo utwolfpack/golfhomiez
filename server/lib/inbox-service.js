@@ -4,7 +4,6 @@ import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './tee-colors.js'
 const MAX_INBOX_MESSAGE_LENGTH = 2000
 const MAX_INBOX_MESSAGE_ID_LENGTH = 191
 const MAX_TEAM_ID_LENGTH = 191
-const MAX_TEAM_NAME_LENGTH = 255
 const MAX_CHALLENGE_COURSE_LENGTH = 255
 const INBOX_MESSAGE_TYPES = new Set(['message', 'challenge_request', 'individual_challenge'])
 const TEAM_CHALLENGE_SCORING_TYPES = new Set(['stroke_play', 'skins', 'skins_push'])
@@ -65,11 +64,13 @@ export function normalizeInboxTeamId(value) {
   return id
 }
 
-export function validateTeamChallengeName(value) {
-  const name = String(value || '').trim()
-  if (!name) throw new Error('Team to Challenge is required.')
-  if (name.length > MAX_TEAM_NAME_LENGTH) throw new Error(`Team to Challenge must be ${MAX_TEAM_NAME_LENGTH} characters or less.`)
-  return name
+export function validateTeamChallengeIdentifier(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) throw new Error('GolfHomiez Team ID is required.')
+  if (!/^\d+$/.test(raw)) throw new Error('GolfHomiez Team ID must contain numbers only.')
+  const identifier = Number(raw)
+  if (!Number.isSafeInteger(identifier) || identifier < 100) throw new Error('GolfHomiez Team ID must be 100 or greater.')
+  return identifier
 }
 
 const MAX_INDIVIDUAL_CHALLENGE_GOLFERS = 25
@@ -208,7 +209,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
       messageType,
       replyToMessageId,
       proposerTeamId: payload.proposerTeamId ? normalizeInboxTeamId(payload.proposerTeamId) : null,
-      challengedTeamName: payload.challengedTeamName ? validateTeamChallengeName(payload.challengedTeamName) : null,
+      challengedTeamIdentifier: payload.challengedTeamIdentifier ? validateTeamChallengeIdentifier(payload.challengedTeamIdentifier) : null,
       challengeDate: payload.challengeDate ? validateTeamChallengeDate(payload.challengeDate) : null,
       challengeState: payload.challengeState ? validateTeamChallengeState(payload.challengeState) : null,
       challengeCourse: payload.challengeCourse ? validateTeamChallengeCourse(payload.challengeCourse) : null,
@@ -226,7 +227,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
       messageType,
       replyToMessageId,
       proposerTeamId: normalizeInboxTeamId(payload.proposerTeamId || payload.senderTeamId || payload.teamId),
-      challengedTeamName: validateTeamChallengeName(payload.challengedTeamName || payload.teamChallenge || payload.recipientTeamName),
+      challengedTeamIdentifier: validateTeamChallengeIdentifier(payload.challengedTeamIdentifier || payload.teamIdentifier || payload.teamChallenge),
       challengeDate: validateTeamChallengeDate(payload.challengeDate || payload.date),
       challengeState: validateTeamChallengeState(payload.challengeState || payload.state || payload.stateCode),
       challengeCourse: validateTeamChallengeCourse(payload.challengeCourse || payload.course),
@@ -243,7 +244,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
       messageType,
       replyToMessageId,
       proposerTeamId: null,
-      challengedTeamName: null,
+      challengedTeamIdentifier: null,
       challengeDate: validateTeamChallengeDate(payload.challengeDate || payload.date),
       challengeState: validateTeamChallengeState(payload.challengeState || payload.state || payload.stateCode),
       challengeCourse: validateTeamChallengeCourse(payload.challengeCourse || payload.course),
@@ -260,7 +261,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
     messageType,
     replyToMessageId,
     proposerTeamId: null,
-    challengedTeamName: null,
+    challengedTeamIdentifier: null,
     challengeDate: null,
     challengeState: null,
     challengeCourse: null,

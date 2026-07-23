@@ -163,6 +163,21 @@ function TeamsInner() {
     setDraftNamePlaceholder('Team name')
   }
 
+  function openTeamDetails(team: Team) {
+    setEditTeamId(team.id)
+    logFrontendEvent({
+      category: 'teams.page',
+      message: 'team_line_item_selected',
+      data: {
+        teamId: team.id,
+        teamIdentifier: team.teamIdentifier,
+        teamName: team.name,
+        memberCount: team.members?.length || 0,
+        status: teamStatusLabel(team),
+      },
+    })
+  }
+
   function resetCreateForm() {
     setCreateName('')
     setCreateNamePlaceholder('e.g. Fairway Finders')
@@ -275,10 +290,10 @@ function TeamsInner() {
     try {
       const created = await createTeam(createName.trim(), normalizedCreateMembers as Omit<TeamMember, 'id'>[])
       setTeams(prev => [...prev.filter(t => t.id !== created.id), created].sort((a, b) => a.name.localeCompare(b.name)))
-      setMsg(`Team ${created.name} created.`)
+      setMsg(`Team ${created.name} created. GolfHomiez Team ID: ${created.teamIdentifier}.`)
       setCreateOpen(false)
       resetCreateForm()
-      logFrontendEvent({ category: 'teams.create', message: 'succeeded', data: { correlationId, teamId: created.id, teamName: created.name, memberCount: created.members?.length || normalizedCreateMembers.length } })
+      logFrontendEvent({ category: 'teams.create', message: 'succeeded', data: { correlationId, teamId: created.id, teamIdentifier: created.teamIdentifier, teamName: created.name, memberCount: created.members?.length || normalizedCreateMembers.length } })
     } catch (e: any) {
       const apiError = e as TeamNameApiError
       const suggestedTeamName = apiError.suggestedTeamName || buildSuggestedTeamName(createName, teams)
@@ -315,10 +330,10 @@ function TeamsInner() {
         normalizedEmails.add(member.email)
       }
 
-      logFrontendEvent({ category: 'teams.update', message: 'started', data: { correlationId, teamId: editTeam.id, teamName: draftName.trim(), memberCount: members.length } })
+      logFrontendEvent({ category: 'teams.update', message: 'started', data: { correlationId, teamId: editTeam.id, teamIdentifier: editTeam.teamIdentifier, teamName: draftName.trim(), memberCount: members.length } })
       const updated = await updateTeam(editTeam.id, draftName.trim(), members)
       setTeams(prev => prev.map(t => (t.id === updated.id ? updated : t)).sort((a, b) => a.name.localeCompare(b.name)))
-      logFrontendEvent({ category: 'teams.update', message: 'succeeded', data: { correlationId, teamId: updated.id, teamName: updated.name, memberCount: updated.members?.length || members.length } })
+      logFrontendEvent({ category: 'teams.update', message: 'succeeded', data: { correlationId, teamId: updated.id, teamIdentifier: updated.teamIdentifier, teamName: updated.name, memberCount: updated.members?.length || members.length } })
       closeModal()
     } catch (e: any) {
       const apiError = e as TeamNameApiError
@@ -370,7 +385,7 @@ function TeamsInner() {
         <PageHero
           eyebrow="Rosters and records"
           title="Your teams at a glance"
-          subtitle="Create teams, keep rosters clean, and review team records before your next round."
+          subtitle="Create teams, keep rosters clean, and use each team's numeric GolfHomiez Team ID when creating a Team Challenge."
           actions={
             <Link
               className="btn btnLightGreen btnSmall"
@@ -454,50 +469,30 @@ function TeamsInner() {
             You are not listed as a member of any team yet. Create a team here so it can be selected for Challenges page Team Challenges.
           </div>
         ) : (
-          <div className="grid grid3" style={{ marginTop: 14 }}>
+          <div className="compactLineItemList teamLineItemList" style={{ marginTop: 14 }}>
             {myTeams.map(t => {
               const r = recordByTeam.get(t.name) || { wins: 0, losses: 0, ties: 0 }
+              const members = t.members || []
               return (
-                <div
+                <button
+                  type="button"
                   key={t.id}
-                  className="card cardClickable"
-                  onClick={() => setEditTeamId(t.id)}
-                  style={{ textAlign: 'left' }}
+                  className="compactLineItem teamLineItem"
+                  onClick={() => openTeamDetails(t)}
                   aria-label={`Edit ${t.name}`}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setEditTeamId(t.id)
-                    }
-                  }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 10 }}>
-                    <div style={{ fontSize: 20, fontWeight: 900, marginTop: 6 }}>{t.name}</div>
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={deletingTeamId === t.id}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void handleDeleteTeam(t)
-                      }}
-                    >
-                      {deletingTeamId === t.id ? 'Deleting…' : 'Delete Team'}
-                    </button>
-                  </div>
-                  <div className="small" style={{ marginTop: 8 }}>
-                    Record: <strong>{r.wins}-{r.losses}</strong>{r.ties ? <span> (T{r.ties})</span> : null}
-                  </div>
-                  <div className="small" style={{ marginTop: 4 }}>{(t.members?.length || 0)} member(s)</div>
-                  <div className="small" style={{ marginTop: 4 }}>Status: <strong>{teamStatusLabel(t)}</strong></div>
-                  <div style={{ display: 'grid', gap: 6, marginTop: 12 }}>
-                    {(t.members || []).map(member => (
-                      <div key={member.id} style={{ fontWeight: 700 }}>{member.name}</div>
-                    ))}
-                  </div>
-                </div>
+                  <span className="compactLineItemType compactLineItemType--identifier" aria-label={`GolfHomiez Team ID ${t.teamIdentifier}`}>Team ID {t.teamIdentifier}</span>
+                  <span className="compactLineItemMain">
+                    <strong className="compactLineItemTitle">{t.name}</strong>
+                    <span className="compactLineItemMeta">{members.length} member{members.length === 1 ? '' : 's'} • Status: <strong>{teamStatusLabel(t)}</strong></span>
+                    <span className="compactLineItemSecondary">{members.map(member => member.name).join(', ')}</span>
+                  </span>
+                  <span className="compactLineItemSummary">
+                    <strong className="compactLineItemValue">{r.wins}-{r.losses}{r.ties ? `-${r.ties}` : ''}</strong>
+                    <span>Record</span>
+                  </span>
+                  <span className="compactLineItemChevron" aria-hidden="true">›</span>
+                </button>
               )
             })}
           </div>
@@ -510,6 +505,7 @@ function TeamsInner() {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
               <div>
                 <div className="small">Edit team</div>
+                <div className="teamIdentifierBadge" style={{ marginTop: 4 }}>Team ID {editTeam.teamIdentifier}</div>
                 <div style={{ fontSize: 20, fontWeight: 900 }}>{editTeam.name}</div>
                 <div className="small" style={{ marginTop: 6 }}>
                   {(() => {

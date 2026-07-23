@@ -90,6 +90,7 @@ export type TeamStatus = 'pending' | 'verified'
 export type Team = {
   id: string
   name: string
+  teamIdentifier: number
   members: TeamMember[]
   createdAt: string
   status?: TeamStatus

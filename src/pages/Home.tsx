@@ -3,8 +3,7 @@ import { Link } from 'react-router-dom'
 import bannerImg from '../assets/GolfHomiezEmblem.png'
 import RoundDetailModal from '../components/RoundDetailModal'
 import HandicapBreakdownModal from '../components/HandicapBreakdownModal'
-import HandicapSummaryCard from '../components/HandicapSummaryCard'
-import StatCard from '../components/StatCard'
+import FilteredGolfProfileSummary from '../components/FilteredGolfProfileSummary'
 import { useAuth } from '../context/AuthContext'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { api } from '../lib/api'
@@ -246,26 +245,46 @@ export default function Home() {
   }, [soloScores])
   const handicapStats = useMemo(() => calculateHandicapFromScores(filteredScores), [filteredScores])
 
-  const tileCards = useMemo(() => {
-    const cards = [
-      <StatCard key="rounds" title="Rounds" value={String(filteredScores.length)} subtitle="Current filtered view" />,
-    ]
+  useEffect(() => {
+    logFrontendEvent({
+      category: 'home.filters',
+      message: 'filtered_golf_profile_summary_updated',
+      data: {
+        view,
+        stateFilter,
+        courseFilter,
+        teamFilter,
+        roundCount: filteredScores.length,
+        teamRoundCount: teamStats.total,
+        soloRoundCount: soloStats.total,
+        handicap: handicapStats.handicap,
+      },
+    })
+  }, [view, stateFilter, courseFilter, teamFilter, filteredScores.length, teamStats.total, soloStats.total, handicapStats.handicap])
 
-    if (view !== 'solo') {
-      cards.push(
-        <StatCard key="record" title="Team Record" value={`${teamStats.wins}-${teamStats.losses}${teamStats.ties ? `-${teamStats.ties}` : ''}`} subtitle={`${teamStats.winPct.toFixed(0)}% win rate`} />,
-      )
-    }
+  function openHandicapDetails() {
+    setShowHandicapModal(true)
+    logFrontendEvent({
+      category: 'home.handicap',
+      message: 'filtered_profile_handicap_link_selected',
+      data: {
+        view,
+        stateFilter,
+        courseFilter,
+        teamFilter,
+        handicap: handicapStats.handicap,
+        ratedRounds: handicapStats.ratedRounds,
+      },
+    })
+  }
 
-    if (view !== 'team') {
-      cards.push(
-        <StatCard key="soloAvg" title="Solo Avg" value={soloStats.total ? soloStats.avg.toFixed(1) : '—'} subtitle={soloStats.total ? `Best ${soloStats.best}` : 'No solo rounds'} />,
-        <HandicapSummaryCard key="soloHandicap" stats={handicapStats} onClick={() => setShowHandicapModal(true)} />,
-      )
-    }
+  function clearFilters() {
+    setStateFilter('all')
+    setCourseFilter('all')
+    setTeamFilter('all')
+    logFrontendEvent({ category: 'home.filters', message: 'score_filters_cleared', data: { view } })
+  }
 
-    return cards
-  }, [filteredScores.length, view, teamStats, soloStats, handicapStats])
 
   function handleRoundUpdated(updatedRound: ScoreEntry) {
     const normalized = normalizeScoreEntry(updatedRound)
@@ -289,61 +308,58 @@ export default function Home() {
       </div>
 
       <div className="card">
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h2 style={{ margin: 0 }}>Dashboard</h2>
-            <div className="small">Smaller stats up top, bigger score rows below.</div>
-          </div>
-          {!user ? <div className="small">Showing homepage demo data. <Link to="/login"><strong>Log in</strong></Link> to view and track your own rounds.</div> : null}
-        </div>
+        {!user ? <div className="small homeDemoNotice">Showing homepage demo data. <Link to="/login"><strong>Log in</strong></Link> to view and track your own rounds.</div> : null}
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-          <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} onClick={() => { setView('all'); setTeamFilter('all') }}>All Rounds</button>
-          <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
-          <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} onClick={() => { setView('solo'); setTeamFilter('all') }}>Solo Rounds</button>
-        </div>
+        <div className="scoreFilterToolbar">
+          <div className="scoreViewTabs" role="group" aria-label="Round type filters">
+            <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'all'} onClick={() => { setView('all'); setTeamFilter('all') }}>All Rounds</button>
+            <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'team'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
+            <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'solo'} onClick={() => { setView('solo'); setTeamFilter('all') }}>Solo Rounds</button>
+          </div>
 
-        <div className="filtersCompactGrid" style={{ marginTop: 14 }}>
-          <div>
-            <label className="label">State</label>
-            <select className="input" value={stateFilter} onChange={(e) => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, stateOptions.map((value) => ({ value })), (v) => { setStateFilter(v); setCourseFilter('all'); setTeamFilter('all') }, stateFilter)}>
-              {stateOptions.length > 1 || stateFilter === 'all' ? <option value="all">All states</option> : null}
-              {stateOptions.map((abbr) => <option key={abbr} value={abbr}>{nameByAbbr.get(abbr) || abbr}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Course</label>
-            <select className="input" value={courseFilter} onChange={(e) => { setCourseFilter(e.target.value); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, courseOptions.map((value) => ({ value })), (v) => { setCourseFilter(v); setTeamFilter('all') }, courseFilter)}>
-              <option value="all">All courses</option>
-              {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
-            </select>
-          </div>
-          {view !== 'solo' ? (
-            <div>
-              <label className="label">Team</label>
-              <select className="input" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} onKeyDown={(e) => jumpToFirstByLetter(e.key, teamOptions.map((value) => ({ value })), (v) => setTeamFilter(v), teamFilter)}>
-                <option value="all">All teams</option>
-                {teamOptions.map((teamName) => <option key={teamName} value={teamName}>{teamName}</option>)}
+          <div className={`scoreFilterGrid ${view === 'solo' ? 'scoreFilterGrid--solo' : ''}`}>
+            <label className="scoreFilterControl scoreFilterControl--state">
+              <span>State</span>
+              <select className="input" value={stateFilter} onChange={(e) => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, stateOptions.map((value) => ({ value })), (v) => { setStateFilter(v); setCourseFilter('all'); setTeamFilter('all') }, stateFilter)}>
+                {stateOptions.length > 1 || stateFilter === 'all' ? <option value="all">All states</option> : null}
+                {stateOptions.map((abbr) => <option key={abbr} value={abbr}>{nameByAbbr.get(abbr) || abbr}</option>)}
               </select>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="compactTilesGrid" style={{ marginTop: 14 }}>
-          {tileCards}
-        </div>
-
-        {view !== 'team' ? (
-          <div className="small" style={{ marginTop: 10 }}>
+            </label>
+            <label className="scoreFilterControl scoreFilterControl--course">
+              <span>Course</span>
+              <select className="input" value={courseFilter} onChange={(e) => { setCourseFilter(e.target.value); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, courseOptions.map((value) => ({ value })), (v) => { setCourseFilter(v); setTeamFilter('all') }, courseFilter)}>
+                <option value="all">All courses</option>
+                {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
+              </select>
+            </label>
+            {view !== 'solo' ? (
+              <label className="scoreFilterControl scoreFilterControl--team">
+                <span>Team</span>
+                <select className="input" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} onKeyDown={(e) => jumpToFirstByLetter(e.key, teamOptions.map((value) => ({ value })), (v) => setTeamFilter(v), teamFilter)}>
+                  <option value="all">All teams</option>
+                  {teamOptions.map((teamName) => <option key={teamName} value={teamName}>{teamName}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <button type="button" className="scoreFiltersClear" onClick={clearFilters}>Clear filters</button>
           </div>
-        ) : null}
+        </div>
+
+        <FilteredGolfProfileSummary
+          view={view}
+          roundCount={filteredScores.length}
+          teamStats={teamStats}
+          soloStats={soloStats}
+          handicapStats={handicapStats}
+          onHandicapClick={openHandicapDetails}
+        />
 
         {loading ? <div className="small" style={{ marginTop: 12 }}>Loading…</div> : null}
         {error ? <div className="small" style={{ marginTop: 12, color: 'crimson' }}>{error}</div> : null}
 
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16, gap: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>Most Recent 10 Logged Events</h3>
-          {!user ? <Link className="small" to="/login">Log in to save rounds</Link> : view === 'team' ? <Link className="small" to="/challenges">Open Team Challenges</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">Open My Golf Scores</Link>}
+          {!user ? <Link className="small" to="/login">Log in to save rounds</Link> : view === 'team' ? <Link className="small" to="/challenges">Open Team Challenges</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">View all rounds</Link>}
         </div>
 
         <div className="roundRowsStack" style={{ marginTop: 12 }}>

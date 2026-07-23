@@ -46,6 +46,7 @@ function ProfileInner() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [needsEnrichment, setNeedsEnrichment] = useState(false)
+  const [hasSavedPhoneNumber, setHasSavedPhoneNumber] = useState(false)
   const [profileSummary, setProfileSummary] = useState<ProfileSummary | null>(null)
   const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({})
   const [citySuggestions, setCitySuggestions] = useState<ResolvedLocation[]>([])
@@ -82,9 +83,12 @@ function ProfileInner() {
           cannabisPreference: profile.cannabisPreference || '',
           sobrietyPreference: profile.sobrietyPreference || '',
         })
+        const savedPhoneAvailable = Boolean(sanitizePhoneInput(profile.phone || '').trim())
+        setHasSavedPhoneNumber(savedPhoneAvailable)
         setNeedsEnrichment(Boolean(profile.needsEnrichment))
         setProfileSummary(profile.summary || null)
         setFeatureFlags(profile.featureFlags || {})
+        logFrontendEvent({ category: 'profile.navigation', message: 'profile_header_links_state_loaded', data: { enabled: savedPhoneAvailable, reason: savedPhoneAvailable ? 'saved_phone_available' : 'saved_phone_required' } })
       } catch (err) {
         if (!active) return
         setError(err instanceof Error ? err.message : 'Failed to load profile.')
@@ -229,6 +233,7 @@ function ProfileInner() {
       }
       const payload = !socialPreferencesEnabled || isPreferenceRestricted ? { ...form, alcoholPreference: '', cannabisPreference: '', sobrietyPreference: '' } : form
       const saved = await saveProfile(payload)
+      setHasSavedPhoneNumber(Boolean(sanitizePhoneInput(saved.phone || '').trim()))
       setNeedsEnrichment(Boolean(saved.needsEnrichment))
       setProfileSummary(saved.summary || null)
       setFeatureFlags(saved.featureFlags || {})
@@ -260,11 +265,14 @@ function ProfileInner() {
           title={isGuidedEnrichment || needsEnrichment ? 'Complete your profile' : 'Your Profile'}
           subtitle={isGuidedEnrichment || needsEnrichment ? 'We only ask this once on your first sign-in. After that, you can come back here any time to edit it.' : ''}
           actions={
-            <div className="profileHeaderLinks" aria-label="Profile page links">
-              <Link className="btn btnLightGreen btnSmall" to="/support">Support</Link>
-              <Link className="btn btnLightGreen btnSmall" to="/invite-homie">Invite Homie</Link>
-              <Link className="btn btnLightGreen btnSmall" to="/teams">Teams</Link>
-              <Link className="btn btnLightGreen btnSmall" to="/inbox">Messages</Link>
+            <div>
+              <div className="profileHeaderLinks" aria-label="Profile page links">
+                {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/support">Support</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Support.">Support</span>}
+                {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/invite-homie">Invite Homie</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Invite Homie.">Invite Homie</span>}
+                {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/teams">Teams</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Teams.">Teams</span>}
+                {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/inbox">Messages</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Messages.">Messages</span>}
+              </div>
+              {!hasSavedPhoneNumber ? <div className="profileHeaderLinksHint">Save your phone number to unlock these profile actions.</div> : null}
             </div>
           }
         />

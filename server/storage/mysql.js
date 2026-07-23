@@ -70,6 +70,7 @@ function mapTeam(rows, memberRows) {
     return {
       id: row.id,
       name: row.name,
+      teamIdentifier: Number(row.team_identifier),
       createdAt: toIso(row.created_at),
       members,
       status: members.some((member) => member.status !== 'active') ? 'pending' : 'verified',
@@ -156,6 +157,17 @@ export async function getTeamByName(name) {
   return mapTeam([row], memberRows)[0] || null
 }
 
+export async function getTeamByIdentifier(identifier) {
+  const normalizedIdentifier = Number(identifier)
+  if (!Number.isSafeInteger(normalizedIdentifier) || normalizedIdentifier < 100) return null
+  const db = getPool()
+  const [rows] = await db.execute('SELECT * FROM teams WHERE team_identifier = ? LIMIT 1', [normalizedIdentifier])
+  const row = rows[0]
+  if (!row) return null
+  const memberRows = await fetchTeamMembers(db, row.id)
+  return mapTeam([row], memberRows)[0] || null
+}
+
 export async function createTeam({ name, members }) {
   const db = getPool()
   const team = { id: uuidv4(), name: String(name).trim(), members, createdAt: new Date().toISOString() }
@@ -170,8 +182,11 @@ export async function createTeam({ name, members }) {
       )
     }
     await conn.commit()
-    logInfo('Created team', { teamId: team.id, teamName: team.name, memberCount: members.length })
-    return getTeamById(team.id)
+    const [createdRows] = await conn.execute('SELECT * FROM teams WHERE id = ? LIMIT 1', [team.id])
+    const createdMemberRows = await fetchTeamMembers(conn, team.id)
+    const createdTeam = mapTeam(createdRows, createdMemberRows)[0] || null
+    logInfo('Created team', { teamId: team.id, teamIdentifier: createdTeam?.teamIdentifier || null, teamName: team.name, memberCount: members.length })
+    return createdTeam
   } catch (error) {
     await conn.rollback()
     logError('Failed to create team in MySQL storage', { error, teamName: team.name })
@@ -463,6 +478,17 @@ async function getInboxUserTeamIds(user) {
   return new Set(teams.filter((team) => (team.members || []).some((member) => normalizeEmail(member.email) === normalizedEmail)).map((team) => String(team.id)))
 }
 
+
+function inboxChallengeUserKey(user) {
+  return `${String(user?.id || '').trim()}|${normalizeEmail(user?.email)}`
+}
+
+async function getInboxChallengeDeletedMap(user) {
+  const db = getPool()
+  const [rows] = await db.execute('SELECT thread_id, deleted_at FROM inbox_challenge_user_state WHERE user_key = ?', [inboxChallengeUserKey(user)])
+  return new Map(rows.map((row) => [String(row.thread_id), toIso(row.deleted_at)]))
+}
+
 function isInboxDirectRecipient(message, user, normalizedEmail) {
   return String(message.recipientUserId || '') === String(user?.id || '') || normalizeEmail(message.recipientEmail) === normalizedEmail
 }
@@ -512,7 +538,8 @@ export async function listInboxMessagesForUser(user) {
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
   const [rows] = await db.execute('SELECT * FROM inbox_messages ORDER BY created_at DESC')
-  return rows.map(mapInboxMessage).filter((message) => canReadInboxMessage(message, user, normalizedEmail, userTeamIds))
+  const deletedMap = await getInboxChallengeDeletedMap(user)
+  return rows.map(mapInboxMessage).filter((message) => canReadInboxMessage(message, user, normalizedEmail, userTeamIds)).map((message) => ({ ...message, challengeDeletedAt: deletedMap.get(String(message.threadId || message.id)) || null }))
 }
 
 export async function listSentInboxMessagesForUser(user) {
@@ -520,7 +547,8 @@ export async function listSentInboxMessagesForUser(user) {
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
   const [rows] = await db.execute('SELECT * FROM inbox_messages ORDER BY created_at DESC')
-  return rows.map(mapInboxMessage).filter((message) => canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds))
+  const deletedMap = await getInboxChallengeDeletedMap(user)
+  return rows.map(mapInboxMessage).filter((message) => canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds)).map((message) => ({ ...message, challengeDeletedAt: deletedMap.get(String(message.threadId || message.id)) || null }))
 }
 
 export async function getInboxMessageForParticipant(messageId, user) {
@@ -645,4 +673,14 @@ export async function updateInboxIndividualChallengeScore(messageId, user, score
   await db.execute('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?', [JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge'])
   const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
   return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
+export async function setInboxChallengeDeleted(messageId, user, deleted) {
+  const db = getPool()
+  const message = await getInboxMessageForParticipant(messageId, user)
+  if (!message || !isInboxChallengeMessage(message)) return null
+  const threadId = String(message.threadId || message.id)
+  const deletedAt = deleted ? new Date() : null
+  await db.execute(`INSERT INTO inbox_challenge_user_state (user_key, thread_id, deleted_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE deleted_at = VALUES(deleted_at), updated_at = CURRENT_TIMESTAMP`, [inboxChallengeUserKey(user), threadId, deletedAt])
+  return { ...message, challengeDeletedAt: deletedAt ? deletedAt.toISOString() : null }
 }

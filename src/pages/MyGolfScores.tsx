@@ -3,8 +3,7 @@ import { Link } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute'
 import RoundDetailModal from '../components/RoundDetailModal'
 import HandicapBreakdownModal from '../components/HandicapBreakdownModal'
-import HandicapSummaryCard from '../components/HandicapSummaryCard'
-import StatCard from '../components/StatCard'
+import FilteredGolfProfileSummary from '../components/FilteredGolfProfileSummary'
 import { useAuth } from '../context/AuthContext'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { api } from '../lib/api'
@@ -68,9 +67,9 @@ function teamResultLabel(round: TeamScoreEntry) {
   if (round.won === false) return 'Loss'
   return 'Tie'
 }
-function rowClass(round: ScoreEntry) {
-  if (round.mode !== 'team') return 'roundRow'
-  return `roundRow ${round.won === true ? 'rowWin' : round.won === false ? 'rowLoss' : 'rowTie'}`
+function scoreLineItemClass(round: ScoreEntry) {
+  if (round.mode !== 'team') return 'compactLineItem loggedRoundLineItem'
+  return `compactLineItem loggedRoundLineItem ${round.won === true ? 'rowWin' : round.won === false ? 'rowLoss' : 'rowTie'}`
 }
 
 function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => void }) {
@@ -79,16 +78,18 @@ function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => voi
 
   if (round.mode === 'solo') {
     return (
-      <button type="button" className={rowClass(round)} onClick={onClick}>
-        <div>
-          <div className="roundRowTitle">{round.course}</div>
-          <div className="roundRowMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo round</div>
+      <button type="button" className={scoreLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.course} solo round details`}>
+        <span className="compactLineItemType">Solo Round</span>
+        <span className="compactLineItemMain">
+          <strong className="compactLineItemTitle">{round.course}</strong>
+          <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()}</span>
           {incompleteBadge}
-        </div>
-        <div className="roundRowSummary">
-          <div className="roundRowValue">{round.roundScore}</div>
-          <div className="small">Tap for details</div>
-        </div>
+        </span>
+        <span className="compactLineItemSummary">
+          <strong className="compactLineItemValue">{round.roundScore}</strong>
+          <span>Score</span>
+        </span>
+        <span className="compactLineItemChevron" aria-hidden="true">›</span>
       </button>
     )
   }
@@ -96,16 +97,18 @@ function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => voi
   const result = teamResultLabel(round)
   const rowType = 'Team Challenge'
   return (
-    <button type="button" className={rowClass(round)} onClick={onClick}>
-      <div>
-        <div className="roundRowTitle">{round.course}</div>
-        <div className="roundRowMeta">{round.date} • {rowType} • {round.team} vs {round.opponentTeam}</div>
+    <button type="button" className={scoreLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.team} versus ${round.opponentTeam} Team Challenge details`}>
+      <span className="compactLineItemType">{rowType}</span>
+      <span className="compactLineItemMain">
+        <strong className="compactLineItemTitle">{round.course}</strong>
+        <span className="compactLineItemMeta">{round.date} • {round.team} vs {round.opponentTeam}</span>
         {incompleteBadge}
-      </div>
-      <div className="roundRowSummary">
-        <div className="roundRowValue">{formatTeamScoreValue(round)}</div>
-        <div className="small">{result}</div>
-      </div>
+      </span>
+      <span className="compactLineItemSummary">
+        <strong className="compactLineItemValue">{formatTeamScoreValue(round)}</strong>
+        <span>{result}</span>
+      </span>
+      <span className="compactLineItemChevron" aria-hidden="true">›</span>
     </button>
   )
 }
@@ -206,26 +209,46 @@ function MyGolfScoresInner() {
   }, [soloFiltered])
   const handicapStats = useMemo(() => calculateHandicapFromScores(filteredScores), [filteredScores])
 
-  const tileCards = useMemo(() => {
-    const cards = [
-      <StatCard key="rounds" title="Rounds" value={`${filteredScores.length}`} subtitle="Current filtered set" />,
-    ]
+  useEffect(() => {
+    logFrontendEvent({
+      category: 'myGolfScores.filters',
+      message: 'filtered_golf_profile_summary_updated',
+      data: {
+        view,
+        stateFilter,
+        courseFilter,
+        teamFilter,
+        roundCount: filteredScores.length,
+        teamRoundCount: teamStats.total,
+        soloRoundCount: soloStats.total,
+        handicap: handicapStats.handicap,
+      },
+    })
+  }, [view, stateFilter, courseFilter, teamFilter, filteredScores.length, teamStats.total, soloStats.total, handicapStats.handicap])
 
-    if (view !== 'solo') {
-      cards.push(
-        <StatCard key="record" title="Team Record" value={`${teamStats.wins}-${teamStats.losses}${teamStats.ties ? `-${teamStats.ties}` : ''}`} subtitle={`${teamStats.winPct.toFixed(0)}% win rate`} />,
-      )
-    }
+  function openHandicapDetails() {
+    setShowHandicapModal(true)
+    logFrontendEvent({
+      category: 'myGolfScores.handicap',
+      message: 'filtered_profile_handicap_link_selected',
+      data: {
+        view,
+        stateFilter,
+        courseFilter,
+        teamFilter,
+        handicap: handicapStats.handicap,
+        ratedRounds: handicapStats.ratedRounds,
+      },
+    })
+  }
 
-    if (view !== 'team') {
-      cards.push(
-        <StatCard key="soloAvg" title="Solo Avg" value={soloStats.total ? soloStats.avg.toFixed(1) : '—'} subtitle={soloStats.total ? `Best ${soloStats.best}` : 'No solo rounds'} />,
-        <HandicapSummaryCard key="soloHandicap" stats={handicapStats} onClick={() => setShowHandicapModal(true)} />,
-      )
-    }
+  function clearFilters() {
+    setStateFilter('all')
+    setCourseFilter('all')
+    setTeamFilter('all')
+    logFrontendEvent({ category: 'myGolfScores.filters', message: 'score_filters_cleared', data: { view } })
+  }
 
-    return cards
-  }, [filteredScores.length, view, teamStats, soloStats, handicapStats])
 
   function handleRoundUpdated(updatedRound: ScoreEntry) {
     const normalized = normalizeScoreEntry(updatedRound)
@@ -238,13 +261,24 @@ function MyGolfScoresInner() {
     setSelectedRound(null)
   }
 
+  function handleRoundSelected(round: ScoreEntry) {
+    setSelectedRound(round)
+    logFrontendEvent({
+      category: 'myGolfScores.rounds',
+      message: 'logged_round_line_item_selected',
+      data: {
+        roundId: round.id,
+        mode: round.mode,
+        course: round.course,
+        source: (round as any).source || 'scores',
+      },
+    })
+  }
+
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <div className="myScoresHeader">
-          <div>
-            <h2 style={{ margin: 0 }}>My Golf Scores</h2>
-          </div>
+        <div className="myScoresHeader myScoresHeader--actionsOnly">
           <div className="myScoresActions">
             <Link
               className="btn btnLightGreen btnLogRoundCta"
@@ -256,52 +290,55 @@ function MyGolfScoresInner() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-          <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} onClick={() => setView('all')}>All Rounds</button>
-          <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
-          <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} onClick={() => setView('solo')}>Solo Rounds</button>
-          <button type="button" className="btn btnSmall" onClick={() => { setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Clear filters</button>
+        <div className="scoreFilterToolbar">
+          <div className="scoreViewTabs" role="group" aria-label="Round type filters">
+            <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'all'} onClick={() => setView('all')}>All Rounds</button>
+            <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'team'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
+            <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'solo'} onClick={() => setView('solo')}>Solo Rounds</button>
+          </div>
+
+          <div className={`scoreFilterGrid ${view === 'solo' ? 'scoreFilterGrid--solo' : ''}`}>
+            <label className="scoreFilterControl scoreFilterControl--state">
+              <span>State</span>
+              <select className="input" value={stateFilter} onChange={e => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }}>
+                <option value="all">All states</option>
+                {stateOptions.map((state) => <option key={state} value={state}>{nameByAbbr.get(state) || state}</option>)}
+              </select>
+            </label>
+            <label className="scoreFilterControl scoreFilterControl--course">
+              <span>Course</span>
+              <select className="input" value={courseFilter} onChange={e => { setCourseFilter(e.target.value); setTeamFilter('all') }}>
+                <option value="all">All courses</option>
+                {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
+              </select>
+            </label>
+            {view !== 'solo' ? (
+              <label className="scoreFilterControl scoreFilterControl--team">
+                <span>Team</span>
+                <select className="input" value={teamFilter} onChange={e => setTeamFilter(e.target.value)}>
+                  <option value="all">All teams</option>
+                  {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <button type="button" className="scoreFiltersClear" onClick={clearFilters}>Clear filters</button>
+          </div>
         </div>
 
-        <div className="filtersCompactGrid" style={{ marginTop: 14 }}>
-          <div>
-            <label className="label">State</label>
-            <select className="input" value={stateFilter} onChange={e => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }}>
-              <option value="all">All states</option>
-              {stateOptions.map((state) => <option key={state} value={state}>{nameByAbbr.get(state) || state}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Course</label>
-            <select className="input" value={courseFilter} onChange={e => { setCourseFilter(e.target.value); setTeamFilter('all') }}>
-              <option value="all">All courses</option>
-              {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Team</label>
-            <select className="input" value={teamFilter} onChange={e => setTeamFilter(e.target.value)} disabled={view === 'solo'}>
-              <option value="all">All teams</option>
-              {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div className="compactTilesGrid" style={{ marginTop: 14 }}>
-          {tileCards}
-        </div>
-
-        {view !== 'team' ? (
-          <div className="small" style={{ marginTop: 10 }}>
-            Handicap is relative to the filters currently applied on this page.
-          </div>
-        ) : null}
+        <FilteredGolfProfileSummary
+          view={view}
+          roundCount={filteredScores.length}
+          teamStats={teamStats}
+          soloStats={soloStats}
+          handicapStats={handicapStats}
+          onHandicapClick={openHandicapDetails}
+        />
 
         {loading ? <div className="small" style={{ marginTop: 12 }}>Loading…</div> : null}
         {error ? <div className="small" style={{ marginTop: 12, color: 'crimson' }}>{error}</div> : null}
 
-        <div className="roundRowsStack" style={{ marginTop: 14 }}>
-          {pagedScores.map((round) => <ScoreButton key={round.id} round={round} onClick={() => setSelectedRound(round)} />)}
+        <div className="compactLineItemList loggedRoundLineItemList" style={{ marginTop: 14 }}>
+          {pagedScores.map((round) => <ScoreButton key={round.id} round={round} onClick={() => handleRoundSelected(round)} />)}
           {!pagedScores.length ? <div className="small">No rounds match the current filters.</div> : null}
         </div>
 

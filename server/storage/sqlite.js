@@ -15,6 +15,25 @@ function toIso(value) {
   return dt.toISOString()
 }
 
+function ensureTeamIdentifierSchema() {
+  const db = getSqliteDb()
+  const columns = db.prepare('PRAGMA table_info(teams)').all()
+  if (!columns.some((column) => column.name === 'team_identifier')) {
+    db.exec('ALTER TABLE teams ADD COLUMN team_identifier INTEGER')
+  }
+  const teamsMissingIdentifiers = db.prepare('SELECT id FROM teams WHERE team_identifier IS NULL ORDER BY created_at ASC, id ASC').all()
+  let nextIdentifier = Number(db.prepare('SELECT COALESCE(MAX(team_identifier), 99) AS max_identifier FROM teams').get()?.max_identifier || 99)
+  const updateIdentifier = db.prepare('UPDATE teams SET team_identifier = ? WHERE id = ?')
+  const transaction = db.transaction(() => {
+    for (const team of teamsMissingIdentifiers) {
+      nextIdentifier += 1
+      updateIdentifier.run(nextIdentifier, team.id)
+    }
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_team_identifier ON teams (team_identifier)')
+  })
+  transaction()
+}
+
 function mapTeamRow(row, memberRows) {
   const members = memberRows
     .filter((member) => member.team_id === row.id)
@@ -26,6 +45,7 @@ function mapTeamRow(row, memberRows) {
   return {
     id: row.id,
     name: row.name,
+    teamIdentifier: Number(row.team_identifier),
     createdAt: toIso(row.created_at),
     members,
     status: members.some((member) => member.status !== 'active') ? 'pending' : 'verified',
@@ -57,6 +77,7 @@ function mapScoreRow(row) {
 
 export async function initStorage() {
   await initDb()
+  ensureTeamIdentifierSchema()
 }
 
 export async function getBackendName() {
@@ -64,6 +85,7 @@ export async function getBackendName() {
 }
 
 export async function listTeams() {
+  ensureTeamIdentifierSchema()
   const db = getSqliteDb()
   const teamRows = db.prepare('SELECT * FROM teams ORDER BY name ASC').all()
   const memberRows = db.prepare('SELECT * FROM team_members ORDER BY name ASC').all()
@@ -71,6 +93,7 @@ export async function listTeams() {
 }
 
 export async function getTeamById(id) {
+  ensureTeamIdentifierSchema()
   const db = getSqliteDb()
   const row = db.prepare('SELECT * FROM teams WHERE id = ? LIMIT 1').get(String(id))
   if (!row) return null
@@ -79,6 +102,7 @@ export async function getTeamById(id) {
 }
 
 export async function getTeamByName(name) {
+  ensureTeamIdentifierSchema()
   const db = getSqliteDb()
   const row = db.prepare('SELECT * FROM teams WHERE lower(name) = lower(?) LIMIT 1').get(String(name || '').trim())
   if (!row) return null
@@ -86,14 +110,27 @@ export async function getTeamByName(name) {
   return mapTeamRow(row, memberRows)
 }
 
-export async function createTeam({ name, members }) {
+export async function getTeamByIdentifier(identifier) {
+  const normalizedIdentifier = Number(identifier)
+  if (!Number.isSafeInteger(normalizedIdentifier) || normalizedIdentifier < 100) return null
+  ensureTeamIdentifierSchema()
   const db = getSqliteDb()
-  const team = { id: uuidv4(), name: String(name).trim(), members, createdAt: new Date().toISOString() }
-  const insertTeam = db.prepare('INSERT INTO teams (id, name, created_at) VALUES (?, ?, ?)')
+  const row = db.prepare('SELECT * FROM teams WHERE team_identifier = ? LIMIT 1').get(normalizedIdentifier)
+  if (!row) return null
+  const memberRows = db.prepare('SELECT * FROM team_members WHERE team_id = ? ORDER BY name ASC').all(row.id)
+  return mapTeamRow(row, memberRows)
+}
+
+export async function createTeam({ name, members }) {
+  ensureTeamIdentifierSchema()
+  const db = getSqliteDb()
+  const teamIdentifier = Number(db.prepare('SELECT COALESCE(MAX(team_identifier), 99) + 1 AS next_identifier FROM teams').get()?.next_identifier || 100)
+  const team = { id: uuidv4(), name: String(name).trim(), teamIdentifier, members, createdAt: new Date().toISOString() }
+  const insertTeam = db.prepare('INSERT INTO teams (id, name, team_identifier, created_at) VALUES (?, ?, ?, ?)')
   const insertMember = db.prepare('INSERT INTO team_members (id, team_id, name, email, status, verified) VALUES (?, ?, ?, ?, ?, ?)')
 
   const transaction = db.transaction(() => {
-    insertTeam.run(team.id, team.name, team.createdAt)
+    insertTeam.run(team.id, team.name, team.teamIdentifier, team.createdAt)
     for (const member of members) {
       insertMember.run(member.id, team.id, member.name, member.email, normalizeMemberStatus(member.status, Boolean(member.verified)), member.verified ? 1 : 0)
     }
@@ -292,6 +329,18 @@ async function getInboxUserTeamIds(user) {
   return new Set(teams.filter((team) => (team.members || []).some((member) => normalizeEmail(member.email) === normalizedEmail)).map((team) => String(team.id)))
 }
 
+
+function inboxChallengeUserKey(user) { return `${String(user?.id || '').trim()}|${normalizeEmail(user?.email)}` }
+function ensureInboxChallengeUserStateTable(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS inbox_challenge_user_state (user_key TEXT NOT NULL, thread_id TEXT NOT NULL, deleted_at TEXT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (user_key, thread_id))`)
+}
+function applyInboxChallengeDeletedState(db, messages, user) {
+  ensureInboxChallengeUserStateTable(db)
+  const rows = db.prepare('SELECT thread_id, deleted_at FROM inbox_challenge_user_state WHERE user_key = ?').all(inboxChallengeUserKey(user))
+  const byThread = new Map(rows.map((row) => [String(row.thread_id), row.deleted_at || null]))
+  return messages.map((message) => ({ ...message, challengeDeletedAt: byThread.get(String(message.threadId || message.id)) || null }))
+}
+
 function isInboxDirectRecipient(message, user, normalizedEmail) {
   return String(message.recipientUserId || '') === String(user?.id || '') || normalizeEmail(message.recipientEmail) === normalizedEmail
 }
@@ -341,7 +390,7 @@ export async function listInboxMessagesForUser(user) {
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
   const rows = db.prepare('SELECT * FROM inbox_messages ORDER BY created_at DESC').all()
-  return rows.map(mapInboxMessageRow).filter((message) => canReadInboxMessage(message, user, normalizedEmail, userTeamIds))
+  return applyInboxChallengeDeletedState(db, rows.map(mapInboxMessageRow).filter((message) => canReadInboxMessage(message, user, normalizedEmail, userTeamIds)), user)
 }
 
 export async function listSentInboxMessagesForUser(user) {
@@ -349,7 +398,7 @@ export async function listSentInboxMessagesForUser(user) {
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
   const rows = db.prepare('SELECT * FROM inbox_messages ORDER BY created_at DESC').all()
-  return rows.map(mapInboxMessageRow).filter((message) => canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds))
+  return applyInboxChallengeDeletedState(db, rows.map(mapInboxMessageRow).filter((message) => canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds)), user)
 }
 
 export async function getInboxMessageForParticipant(messageId, user) {
@@ -469,4 +518,14 @@ export async function updateInboxIndividualChallengeScore(messageId, user, score
   db.prepare('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?').run(JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge')
   const row = db.prepare('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1').get(String(messageId || ''))
   return row ? mapInboxMessageRow(row) : null
+}
+
+export async function setInboxChallengeDeleted(messageId, user, deleted) {
+  const db = getSqliteDb()
+  const message = await getInboxMessageForParticipant(messageId, user)
+  if (!message || !isInboxChallengeMessage(message)) return null
+  ensureInboxChallengeUserStateTable(db)
+  const deletedAt = deleted ? new Date().toISOString() : null
+  db.prepare(`INSERT INTO inbox_challenge_user_state (user_key, thread_id, deleted_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_key, thread_id) DO UPDATE SET deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`).run(inboxChallengeUserKey(user), String(message.threadId || message.id), deletedAt, new Date().toISOString())
+  return { ...message, challengeDeletedAt: deletedAt }
 }
