@@ -2914,10 +2914,10 @@ async function resolveTeamChallengeForNewMessage(req, payload) {
     return { status: 403, body: { message: 'You must be a member of the proposing team.' } }
   }
 
-  const challengedTeam = await storage.getTeamByName(payload.challengedTeamName)
+  const challengedTeam = await storage.getTeamByIdentifier(payload.challengedTeamIdentifier)
   if (!challengedTeam) {
-    logApi('team_challenge_team_not_found', { ...requestContext(req), challengedTeamName: payload.challengedTeamName, proposerTeamId: proposerTeam.id })
-    return { status: 404, body: { message: 'Team does not exist.', teamNotFound: true, challengedTeamName: payload.challengedTeamName } }
+    logApi('team_challenge_team_not_found', { ...requestContext(req), challengedTeamIdentifier: payload.challengedTeamIdentifier, proposerTeamId: proposerTeam.id })
+    return { status: 404, body: { message: 'GolfHomiez Team ID does not exist.', teamNotFound: true, challengedTeamIdentifier: payload.challengedTeamIdentifier } }
   }
   if (String(challengedTeam.id) === String(proposerTeam.id)) {
     logApi('team_challenge_same_team_rejected', { ...requestContext(req), proposerTeamId: proposerTeam.id, challengedTeamId: challengedTeam.id })
@@ -2939,6 +2939,7 @@ async function resolveTeamChallengeForNewMessage(req, payload) {
       proposerTeamName: proposerTeam.name,
       challengedTeamId: challengedTeam.id,
       challengedTeamName: challengedTeam.name,
+      challengedTeamIdentifier: challengedTeam.teamIdentifier,
       challengeStatus: 'proposed',
       challengeDate: payload.challengeDate,
       challengeState: payload.challengeState,
@@ -3255,7 +3256,7 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
     logApi('inbox_message_send_started', {
       ...requestContext(req),
       recipientEmail,
-      challengedTeamName: payload.challengedTeamName || null,
+      challengedTeamIdentifier: payload.challengedTeamIdentifier || null,
       proposerTeamId: payload.proposerTeamId || null,
       challengeDate: payload.challengeDate || null,
       challengeState: payload.challengeState || null,
@@ -3334,6 +3335,7 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
         proposerTeamName: teamContext?.proposerTeamName || null,
         challengedTeamId: teamContext?.challengedTeamId || null,
         challengedTeamName: teamContext?.challengedTeamName || null,
+        challengedTeamIdentifier: teamContext?.challengedTeamIdentifier || null,
         challengeDate: teamContext?.challengeDate || null,
         challengeState: teamContext?.challengeState || null,
         challengeCourse: teamContext?.challengeCourse || null,
@@ -3439,6 +3441,22 @@ app.patch('/api/inbox/messages/:id/complete', requireStorage, authMiddleware, as
   } catch (error) {
     logRouteError('Challenge complete error', req, error)
     res.status(500).json({ message: 'Could not complete challenge' })
+  }
+})
+
+app.patch('/api/inbox/messages/:id/deleted', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const deleted = req.body?.deleted === true
+    const message = await storage.setInboxChallengeDeleted(req.params.id, req.user, deleted)
+    if (!message) {
+      logApi('inbox_challenge_user_delete_not_found', { ...requestContext(req), messageId: req.params.id, deleted })
+      return res.status(404).json({ message: 'Challenge not found' })
+    }
+    logApi(deleted ? 'inbox_challenge_user_deleted' : 'inbox_challenge_user_restored', { ...requestContext(req), messageId: message.id, threadId: message.threadId || message.id, challengeDeletedAt: message.challengeDeletedAt || null })
+    res.json(message)
+  } catch (error) {
+    logRouteError('Challenge user delete state error', req, error)
+    res.status(500).json({ message: 'Could not update challenge visibility' })
   }
 })
 
@@ -3729,7 +3747,7 @@ app.post('/api/teams', requireStorage, authMiddleware, async (req, res) => {
 
     try {
       const team = await storage.createTeam({ name: trimmed, members: normalizedMembers })
-      logApi('team_created', { ...requestContext(req), teamId: team?.id || null, teamName: team?.name || trimmed, memberCount: normalizedMembers.length })
+      logApi('team_created', { ...requestContext(req), teamId: team?.id || null, teamIdentifier: team?.teamIdentifier || null, teamName: team?.name || trimmed, memberCount: normalizedMembers.length })
       res.status(201).json(team)
     } catch (error) {
       if (/duplicate|ER_DUP_ENTRY|unique/i.test(String(error?.code || '') + ' ' + String(error?.message || ''))) {
@@ -3821,7 +3839,7 @@ app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
 
     try {
       const updated = await storage.updateTeam(id, { name: trimmed, members: normalizedMembers })
-      logApi('team_updated', { ...requestContext(req), teamId: id, teamName: updated?.name || trimmed, memberCount: normalizedMembers.length })
+      logApi('team_updated', { ...requestContext(req), teamId: id, teamIdentifier: updated?.teamIdentifier || existing.teamIdentifier || null, teamName: updated?.name || trimmed, memberCount: normalizedMembers.length })
       res.json(updated)
     } catch (error) {
       if (/duplicate|ER_DUP_ENTRY|unique/i.test(String(error?.code || '') + ' ' + String(error?.message || ''))) {

@@ -12,6 +12,7 @@ const scoresPath = path.join(dataDir, 'scores.json')
 const teamsPath = path.join(dataDir, 'teams.json')
 const sessionsPath = path.join(dataDir, 'sessions.json')
 const passwordResetsPath = path.join(dataDir, 'password_resets.json')
+const inboxChallengeUserStatePath = path.join(dataDir, 'inbox_challenge_user_state.json')
 
 function ensureDataFiles() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
@@ -20,6 +21,7 @@ function ensureDataFiles() {
   if (!fs.existsSync(teamsPath)) writeJson(teamsPath, [])
   if (!fs.existsSync(sessionsPath)) writeJson(sessionsPath, [])
   if (!fs.existsSync(passwordResetsPath)) writeJson(passwordResetsPath, [])
+  if (!fs.existsSync(inboxChallengeUserStatePath)) writeJson(inboxChallengeUserStatePath, [])
 }
 
 function readJson(filePath, fallback) {
@@ -45,6 +47,31 @@ function normalizeMemberStatus(status, verified = false) {
   return 'invited'
 }
 
+function normalizeTeamIdentifier(value) {
+  const identifier = Number(value)
+  return Number.isSafeInteger(identifier) && identifier >= 100 ? identifier : null
+}
+
+function ensureTeamIdentifiers(teams) {
+  const used = new Set()
+  let nextIdentifier = Math.max(99, ...teams.map((team) => normalizeTeamIdentifier(team.teamIdentifier) || 99))
+  let changed = false
+  const nextTeams = teams.map((team) => {
+    const identifier = normalizeTeamIdentifier(team.teamIdentifier)
+    if (identifier != null && !used.has(identifier)) {
+      used.add(identifier)
+      return team
+    }
+    do {
+      nextIdentifier += 1
+    } while (used.has(nextIdentifier))
+    used.add(nextIdentifier)
+    changed = true
+    return { ...team, teamIdentifier: nextIdentifier }
+  })
+  return { teams: nextTeams, changed }
+}
+
 function normalizeTeamForResponse(team) {
   const members = (team.members || []).map((member) => {
     const verified = Boolean(member.verified)
@@ -53,6 +80,7 @@ function normalizeTeamForResponse(team) {
   })
   return {
     ...team,
+    teamIdentifier: normalizeTeamIdentifier(team.teamIdentifier),
     members,
     status: members.some((member) => member.status !== 'active') ? 'pending' : 'verified',
     hasPendingMembers: members.some((member) => member.status !== 'active'),
@@ -164,11 +192,14 @@ export async function markPasswordResetUsed(token) {
 }
 
 export async function listTeams() {
-  return withSortedTeams(readJson(teamsPath, []))
+  const current = readJson(teamsPath, [])
+  const { teams, changed } = ensureTeamIdentifiers(current)
+  if (changed) writeJson(teamsPath, teams)
+  return withSortedTeams(teams)
 }
 
 export async function getTeamById(id) {
-  const teams = readJson(teamsPath, [])
+  const teams = await listTeams()
   const team = teams.find((t) => String(t.id) === String(id)) || null
   return team ? normalizeTeamForResponse(team) : null
 }
@@ -176,14 +207,22 @@ export async function getTeamById(id) {
 export async function getTeamByName(name) {
   const n = String(name || '').trim().toLowerCase()
   if (!n) return null
-  const teams = readJson(teamsPath, [])
+  const teams = await listTeams()
   const team = teams.find((t) => String(t.name || '').trim().toLowerCase() === n) || null
   return team ? normalizeTeamForResponse(team) : null
 }
 
+export async function getTeamByIdentifier(identifier) {
+  const normalizedIdentifier = normalizeTeamIdentifier(identifier)
+  if (normalizedIdentifier == null) return null
+  const teams = await listTeams()
+  return teams.find((team) => team.teamIdentifier === normalizedIdentifier) || null
+}
+
 export async function createTeam({ name, members }) {
-  const teams = readJson(teamsPath, [])
-  const team = { id: uuidv4(), name: String(name).trim(), members, createdAt: new Date().toISOString() }
+  const teams = await listTeams()
+  const teamIdentifier = Math.max(99, ...teams.map((team) => normalizeTeamIdentifier(team.teamIdentifier) || 99)) + 1
+  const team = { id: uuidv4(), name: String(name).trim(), teamIdentifier, members, createdAt: new Date().toISOString() }
   const next = withSortedTeams([...teams, team])
   writeJson(teamsPath, next)
   return normalizeTeamForResponse(team)
@@ -325,6 +364,14 @@ function canReadInboxMessage(message, user, normalizedEmail, userTeamIds) {
     (isInboxIndividualChallenge(message) && isInboxIndividualChallengeParticipant(message, user, normalizedEmail))
 }
 
+function inboxChallengeUserKey(user) { return `${String(user?.id || '').trim()}|${normalizeEmail(user?.email)}` }
+function applyInboxChallengeDeletedState(messages, user) {
+  const key = inboxChallengeUserKey(user)
+  const states = readJson(inboxChallengeUserStatePath, [])
+  const byThread = new Map(states.filter((state) => state.userKey === key).map((state) => [String(state.threadId), state.deletedAt || null]))
+  return messages.map((message) => ({ ...message, challengeDeletedAt: byThread.get(String(message.threadId || message.id)) || null }))
+}
+
 function canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds) {
   return isInboxDirectSender(message, user, normalizedEmail) ||
     (isInboxTeamChallenge(message) && userTeamIds.has(String(message.proposerTeamId || ''))) ||
@@ -342,20 +389,20 @@ export async function listInboxMessagesForUser(user) {
   ensureInboxMessagesFile()
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
-  return readJson(inboxMessagesPath, [])
+  return applyInboxChallengeDeletedState(readJson(inboxMessagesPath, [])
     .map(hydrateInboxMessage)
     .filter((message) => canReadInboxMessage(message, user, normalizedEmail, userTeamIds))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))), user)
 }
 
 export async function listSentInboxMessagesForUser(user) {
   ensureInboxMessagesFile()
   const normalizedEmail = normalizeEmail(user?.email)
   const userTeamIds = await getInboxUserTeamIds(user)
-  return readJson(inboxMessagesPath, [])
+  return applyInboxChallengeDeletedState(readJson(inboxMessagesPath, [])
     .map(hydrateInboxMessage)
     .filter((message) => canSendOrUpdateInboxMessage(message, user, normalizedEmail, userTeamIds))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))), user)
 }
 
 export async function getInboxMessageForParticipant(messageId, user) {
@@ -504,4 +551,17 @@ export async function updateInboxIndividualChallengeScore(messageId, user, score
   if (!userCanEditOwnScore) return null
   writeJson(inboxMessagesPath, nextMessages)
   return hydrateInboxMessage(nextMessages.find((message) => String(message.id) === String(messageId || '')))
+}
+
+export async function setInboxChallengeDeleted(messageId, user, deleted) {
+  ensureInboxMessagesFile()
+  const message = await getInboxMessageForParticipant(messageId, user)
+  if (!message || !isInboxChallengeMessage(message)) return null
+  const states = readJson(inboxChallengeUserStatePath, [])
+  const userKey = inboxChallengeUserKey(user)
+  const threadId = String(message.threadId || message.id)
+  const next = states.filter((state) => !(state.userKey === userKey && String(state.threadId) === threadId))
+  next.push({ userKey, threadId, deletedAt: deleted ? new Date().toISOString() : null })
+  writeJson(inboxChallengeUserStatePath, next)
+  return { ...message, challengeDeletedAt: deleted ? next[next.length - 1].deletedAt : null }
 }

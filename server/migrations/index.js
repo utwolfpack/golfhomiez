@@ -53,6 +53,19 @@ async function columnIsNullable(db, tableName, columnName) {
   return !row || row.isNullable === 'YES'
 }
 
+async function columnIsAutoIncrement(db, tableName, columnName) {
+  const [[row] = []] = await db.execute(
+    `SELECT EXTRA AS extra
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1`,
+    [tableName, columnName],
+  )
+  return String(row?.extra || '').toLowerCase().includes('auto_increment')
+}
+
 async function blankTextRowCount(db, tableName, columnName) {
   const [[row = {}] = []] = await db.execute(
     `SELECT COUNT(*) AS blankCount
@@ -1839,6 +1852,58 @@ LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
       if (!(await indexExists(db, 'golf_course_holes', 'idx_golf_course_holes_tee_coordinates'))) {
         statements.push('CREATE INDEX idx_golf_course_holes_tee_coordinates ON golf_course_holes (tee_latitude, tee_longitude)')
       }
+      return statements.join(';\n')
+    },
+  },
+
+
+  {
+    version: '20260723_061',
+    name: 'inbox_challenge_user_state',
+    filename: '20260723_061_inbox_challenge_user_state.sql',
+    async isSatisfied(db) {
+      return await tableExists(db, 'inbox_challenge_user_state') &&
+        await columnExists(db, 'inbox_challenge_user_state', 'deleted_at') &&
+        await indexExists(db, 'inbox_challenge_user_state', 'idx_inbox_challenge_user_state_deleted')
+    },
+    async getSql() {
+      return loadMigrationSql('20260723_061_inbox_challenge_user_state.sql')
+    },
+  },
+
+  {
+    version: '20260723_062',
+    name: 'team_identifiers',
+    filename: '20260723_062_team_identifiers.sql',
+    async isSatisfied(db) {
+      return await columnExists(db, 'teams', 'team_identifier') &&
+        await indexExists(db, 'teams', 'idx_teams_team_identifier') &&
+        !(await columnIsNullable(db, 'teams', 'team_identifier')) &&
+        await columnIsAutoIncrement(db, 'teams', 'team_identifier')
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'teams', 'team_identifier'))) {
+        statements.push('ALTER TABLE teams ADD COLUMN team_identifier BIGINT UNSIGNED NULL AFTER name')
+      }
+      statements.push(`SET @next_team_identifier := GREATEST(
+  99,
+  COALESCE((SELECT MAX(team_identifier) FROM teams), 99)
+)`)
+      statements.push(`UPDATE teams
+   SET team_identifier = (@next_team_identifier := @next_team_identifier + 1)
+ WHERE team_identifier IS NULL
+ ORDER BY created_at ASC, id ASC`)
+      if (await columnIsNullable(db, 'teams', 'team_identifier')) {
+        statements.push('ALTER TABLE teams MODIFY COLUMN team_identifier BIGINT UNSIGNED NOT NULL')
+      }
+      if (!(await indexExists(db, 'teams', 'idx_teams_team_identifier'))) {
+        statements.push('CREATE UNIQUE INDEX idx_teams_team_identifier ON teams (team_identifier)')
+      }
+      if (!(await columnIsAutoIncrement(db, 'teams', 'team_identifier'))) {
+        statements.push('ALTER TABLE teams MODIFY COLUMN team_identifier BIGINT UNSIGNED NOT NULL AUTO_INCREMENT')
+      }
+      statements.push('ALTER TABLE teams AUTO_INCREMENT = 100')
       return statements.join(';\n')
     },
   },

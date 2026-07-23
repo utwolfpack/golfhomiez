@@ -458,10 +458,176 @@ button.card{
   box-shadow:0 10px 22px rgba(22, 163, 74, .16);
 }
 
+
+.homeDemoNotice{
+  margin-bottom:10px;
+}
+
+.myScoresHeader--actionsOnly{
+  justify-content:flex-end;
+}
+
+.scoreFilterToolbar{
+  display:grid;
+  gap:10px;
+}
+
+.scoreViewTabs{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  width:min(100%,560px);
+}
+
+.scoreViewTabs .btn,
+.scoreViewTabs .btnPrimary{
+  width:100%;
+  min-height:40px;
+  padding:8px 10px;
+  line-height:1.15;
+}
+
+.scoreFilterGrid{
+  display:grid;
+  grid-template-columns:minmax(100px,.7fr) minmax(180px,1.6fr) minmax(140px,1fr) auto;
+  gap:8px;
+  align-items:end;
+}
+
+.scoreFilterGrid--solo{
+  grid-template-columns:minmax(100px,.7fr) minmax(180px,1.6fr) auto;
+}
+
+.scoreFilterControl{
+  display:grid;
+  gap:4px;
+  min-width:0;
+}
+
+.scoreFilterControl > span{
+  color:var(--muted);
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.02em;
+  line-height:1.1;
+}
+
+.scoreFilterControl .input{
+  min-height:40px;
+  padding:8px 10px;
+}
+
+.scoreFiltersClear{
+  min-height:40px;
+  padding:7px 4px;
+  border:0;
+  background:transparent;
+  color:#166534;
+  font:inherit;
+  font-size:12px;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+  white-space:nowrap;
+}
+
+.scoreFiltersClear:hover{
+  color:#14532d;
+}
+
+.filteredGolfProfileSummary{
+  margin-top:12px;
+  padding:12px 14px;
+  border:1px solid rgba(134,239,172,.72);
+  border-radius:14px;
+  background:linear-gradient(180deg,rgba(240,253,244,.96),rgba(247,254,249,.96));
+}
+
+.filteredGolfProfileSummaryLabel{
+  color:#166534;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.06em;
+  line-height:1.1;
+  text-transform:uppercase;
+}
+
+.filteredGolfProfileSummaryText{
+  margin:5px 0 0;
+  color:#1f2937;
+  font-size:14px;
+  line-height:1.5;
+}
+
+.filteredGolfProfileHandicapLink{
+  display:inline;
+  margin:0;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#166534;
+  font:inherit;
+  font-weight:900;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+
+.filteredGolfProfileHandicapLink:hover{
+  color:#14532d;
+}
+
 @media (max-width: 640px){
   .myScoresHeader{align-items:stretch;}
+  .myScoresHeader--actionsOnly{justify-content:stretch;}
   .myScoresActions{width:100%;}
   .btnLogRoundCta{width:100%;min-height:58px;font-size:17px;}
+  .scoreViewTabs{
+    width:100%;
+    gap:5px;
+  }
+  .scoreViewTabs .btn,
+  .scoreViewTabs .btnPrimary{
+    min-height:38px;
+    padding:7px 5px;
+    font-size:12px;
+  }
+  .scoreFilterGrid,
+  .scoreFilterGrid--solo{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+  }
+  .scoreFilterControl--state{
+    grid-column:1;
+    grid-row:1;
+  }
+  .scoreFilterControl--team{
+    grid-column:2;
+    grid-row:1;
+  }
+  .scoreFilterControl--course{
+    grid-column:1 / -1;
+    grid-row:2;
+  }
+  .scoreFilterGrid--solo .scoreFilterControl--course{
+    grid-column:2;
+    grid-row:1;
+  }
+  .scoreFiltersClear{
+    grid-column:1 / -1;
+    min-height:28px;
+    padding:2px 0;
+    justify-self:end;
+  }
+  .filteredGolfProfileSummary{
+    margin-top:10px;
+    padding:10px 12px;
+  }
+  .filteredGolfProfileSummaryText{
+    font-size:13px;
+    line-height:1.45;
+  }
 }
 
 .filtersCompactGrid{
@@ -551,6 +717,137 @@ button.card{
   line-height:1;
 }
 
+/* Shared compact clickable line items used by scores, tournaments, and teams. */
+.compactLineItemList{
+  display:grid;
+  gap:8px;
+}
+
+.compactLineItem{
+  width:100%;
+  min-width:0;
+  display:grid;
+  grid-template-columns:minmax(104px,auto) minmax(0,1fr) auto 24px;
+  align-items:center;
+  gap:12px;
+  padding:11px 14px;
+  border:1px solid rgba(215,234,220,.92);
+  border-radius:14px;
+  background:#fff;
+  color:inherit;
+  text-align:left;
+  text-decoration:none;
+  cursor:pointer;
+  box-shadow:none;
+  transition:background .12s ease,border-color .12s ease,box-shadow .12s ease;
+}
+
+.compactLineItem:hover,
+.compactLineItem:focus-visible{
+  background:#f4faf6;
+  border-color:rgba(11,61,29,.28);
+  box-shadow:0 6px 16px rgba(9,46,24,.08);
+  outline:none;
+}
+
+.compactLineItem.rowWin{background:rgba(46,204,113,.10);}
+.compactLineItem.rowLoss{background:rgba(231,76,60,.10);}
+.compactLineItem.rowTie{background:rgba(52,152,219,.08);}
+
+.compactLineItemType{
+  color:#166534;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.compactLineItemType--identifier{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:28px;
+  padding:3px 9px;
+  border:1px solid rgba(22,101,52,.22);
+  border-radius:999px;
+  background:#f0fdf4;
+  letter-spacing:.02em;
+  text-transform:none;
+}
+
+.compactLineItemMain{
+  min-width:0;
+  display:grid;
+  gap:3px;
+}
+
+.compactLineItemTitle,
+.compactLineItemMeta,
+.compactLineItemSecondary{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.compactLineItemTitle{
+  color:#0b3d1d;
+  font-size:15px;
+  line-height:1.25;
+}
+
+.compactLineItemMeta,
+.compactLineItemSecondary,
+.compactLineItemSummary{
+  color:#4b6353;
+  font-size:12px;
+  line-height:1.3;
+}
+
+.compactLineItemSecondary{
+  color:#64748b;
+}
+
+.compactLineItemSummary{
+  min-width:92px;
+  display:grid;
+  justify-items:end;
+  gap:3px;
+  text-align:right;
+}
+
+.compactLineItemValue{
+  color:#0b3d1d;
+  font-size:18px;
+  line-height:1;
+}
+
+.compactLineItemStatus{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:26px;
+  padding:2px 8px;
+  border:1px solid rgba(22,101,52,.20);
+  border-radius:999px;
+  background:#f0fdf4;
+  color:#166534;
+  font-size:11px;
+  font-weight:900;
+  text-transform:capitalize;
+}
+
+.compactLineItemChevron{
+  color:#0b3d1d;
+  font-size:24px;
+  line-height:1;
+  text-align:center;
+}
+
+.tournamentLineItemList{
+  margin-top:14px;
+}
+
 .detailGrid{
   display:grid;
   grid-template-columns:repeat(2, minmax(0, 1fr));
@@ -571,6 +868,32 @@ button.card{
   .roundRow{padding:13px 14px;}
   .roundRow{flex-direction:column;align-items:flex-start;}
   .roundRowSummary{justify-items:start;min-width:0;}
+  .compactLineItem{
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:5px 10px;
+    padding:10px 12px;
+  }
+  .compactLineItemType{
+    grid-column:1;
+    grid-row:1;
+    justify-self:start;
+  }
+  .compactLineItemSummary{
+    grid-column:2;
+    grid-row:1;
+    min-width:0;
+    justify-items:end;
+  }
+  .compactLineItemMain{
+    grid-column:1 / span 2;
+    grid-row:2;
+  }
+  .compactLineItemChevron{
+    display:none;
+  }
+  .compactLineItemSecondary{
+    font-size:11px;
+  }
   .detailGrid{grid-template-columns:1fr;}
 }
 
@@ -2650,18 +2973,38 @@ button.navDropdownItem{font:inherit;}
   .profileHeaderLinks .btn{flex:1 1 calc(50% - 8px);text-align:center;}
 }
 
-.challengeActiveCountLabel{
+.inboxChallengeViewButtons{
   display:inline-flex;
   align-items:center;
-  min-height:30px;
-  padding:3px 10px;
-  border-radius:999px;
-  background:#fff;
+  gap:6px;
+  padding:3px;
   border:1px solid rgba(15,23,42,.10);
-  color:var(--primaryDark);
-  font-size:12px;
-  font-weight:800;
+  border-radius:12px;
+  background:#f7fbf7;
+}
+
+.inboxChallengeViewButton{
+  min-width:76px;
+  border-color:transparent;
   box-shadow:none;
+}
+
+.inboxChallengeViewButton[aria-pressed="false"]{
+  background:transparent;
+}
+
+@media (max-width:560px){
+  .inboxChallengeViewButtons{
+    order:3;
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+
+  .inboxChallengeViewButton{
+    width:100%;
+    min-width:0;
+  }
 }
 
 .profileHeaderLinks .btnLightGreen{
@@ -2673,6 +3016,25 @@ button.navDropdownItem{font:inherit;}
 
 .profileHeaderLinks .btnLightGreen:hover{
   background:#dcfce7;
+}
+
+.profileHeaderLinks .btn[aria-disabled="true"]{
+  pointer-events:none;
+  cursor:not-allowed;
+  opacity:.5;
+  box-shadow:none;
+}
+
+.profileHeaderLinksHint{
+  margin-top:6px;
+  color:#64748b;
+  font-size:11px;
+  line-height:1.3;
+  text-align:right;
+}
+
+@media (max-width:640px){
+  .profileHeaderLinksHint{text-align:left;}
 }
 
 .profileSummaryCard{
@@ -3624,4 +3986,301 @@ button.navDropdownItem{font:inherit;}
   .inboxTeamChallengeSummaryHeader{font-size:.5rem;}
   .inboxTeamChallengeSummaryRow{font-size:.64rem;}
   .inboxTeamChallengeSummaryLegend span{gap:4px;}
+}
+
+/* Individual Challenge leaderboard round-summary navigation */
+.inboxLeaderboardRow--clickable{
+  width:100%;
+  appearance:none;
+  font:inherit;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
+}
+
+.inboxLeaderboardRow--clickable:hover,
+.inboxLeaderboardRow--clickable:focus-visible{
+  border-color:rgba(11,61,29,.38);
+  box-shadow:0 8px 20px rgba(15,23,42,.1);
+  outline:none;
+}
+
+.inboxIndividualLeaderboardHint{
+  padding:12px 0 2px;
+}
+
+.inboxIndividualRoundSummaryBoard{
+  gap:14px;
+}
+
+.inboxIndividualRoundSummaryActions{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.inboxIndividualRoundSummaryTable{
+  display:grid;
+  gap:6px;
+}
+
+.inboxIndividualRoundSummaryHeader,
+.inboxIndividualRoundSummaryRow{
+  display:grid;
+  grid-template-columns:48px 48px 58px minmax(72px,1fr) minmax(72px,1fr);
+  align-items:center;
+  gap:8px;
+  text-align:center;
+}
+
+.inboxIndividualRoundSummaryHeader{
+  padding:0 8px 4px;
+  color:#0f2f21;
+  font-size:.76rem;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+.inboxIndividualRoundSummaryRow{
+  min-height:48px;
+  padding:8px;
+  border:1px solid rgba(15,23,42,.1);
+  border-radius:12px;
+  background:#fff;
+}
+
+.inboxIndividualRoundSummaryRow > strong:first-child{
+  width:34px;
+  height:34px;
+  margin:auto;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  color:#fff;
+  background:#0b3d1d;
+}
+
+.inboxIndividualRoundSummaryRow > strong:nth-last-child(-n+2){
+  color:#0b5a34;
+}
+
+.inboxIndividualRoundSummaryLegend{
+  color:#64748b;
+  text-align:center;
+  font-size:.84rem;
+}
+
+@media (max-width:480px){
+  .inboxIndividualRoundSummaryHeader,
+  .inboxIndividualRoundSummaryRow{
+    grid-template-columns:34px 32px 38px minmax(54px,1fr) minmax(54px,1fr);
+    gap:4px;
+  }
+  .inboxIndividualRoundSummaryHeader{
+    padding-inline:4px;
+    font-size:.58rem;
+  }
+  .inboxIndividualRoundSummaryRow{
+    min-height:42px;
+    padding:5px 4px;
+    font-size:.78rem;
+  }
+  .inboxIndividualRoundSummaryRow > strong:first-child{
+    width:28px;
+    height:28px;
+  }
+}
+
+/* Compact, clickable challenge list rows */
+.inboxChallengeLineItem{
+  overflow:hidden;
+  border:1px solid rgba(215,234,220,.92);
+  border-radius:14px;
+  background:#fff;
+}
+
+.inboxChallengeLineItem--unread{
+  border-color:rgba(245,158,11,.58);
+  box-shadow:0 6px 16px rgba(245,158,11,.10);
+}
+
+.inboxChallengeLineItem--read{
+  opacity:.94;
+}
+
+.inboxChallengeLineItem--expanded{
+  border-color:rgba(11,61,29,.28);
+}
+
+.inboxChallengeLineItemButton{
+  width:100%;
+  display:grid;
+  grid-template-columns:minmax(112px,auto) minmax(0,1fr) auto auto 24px;
+  align-items:center;
+  gap:12px;
+  padding:12px 14px;
+  border:0;
+  background:transparent;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
+}
+
+.inboxChallengeLineItemButton:hover,
+.inboxChallengeLineItemButton:focus-visible{
+  background:#f4faf6;
+  outline:none;
+}
+
+.inboxChallengeLineItemType{
+  color:#166534;
+  font-size:12px;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+
+.inboxChallengeLineItemMain,
+.inboxChallengeLineItemActivity{
+  min-width:0;
+  display:grid;
+  gap:3px;
+}
+
+.inboxChallengeLineItemMain strong,
+.inboxChallengeLineItemMain span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.inboxChallengeLineItemMain strong{
+  color:#0b3d1d;
+}
+
+.inboxChallengeLineItemMain span,
+.inboxChallengeLineItemActivity{
+  color:#4b6353;
+  font-size:13px;
+}
+
+.inboxChallengeLineItemActivity{
+  justify-items:end;
+  text-align:right;
+}
+
+.inboxChallengeLineItemActivity strong{
+  color:#9a5b00;
+}
+
+.inboxChallengeLineItemStatus{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:76px;
+  min-height:28px;
+  padding:3px 9px;
+  border:1px solid rgba(15,23,42,.12);
+  border-radius:999px;
+  background:#f8fafc;
+  color:#334155;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.02em;
+}
+
+.inboxChallengeLineItemStatus--active{
+  border-color:rgba(22,101,52,.22);
+  background:#f0fdf4;
+  color:#166534;
+}
+
+.inboxChallengeLineItemStatus--completed{
+  border-color:rgba(30,64,175,.20);
+  background:#eff6ff;
+  color:#1e40af;
+}
+
+.inboxChallengeLineItemStatus--deleted{
+  border-color:rgba(153,27,27,.18);
+  background:#fef2f2;
+  color:#991b1b;
+}
+
+.inboxChallengeLineItemChevron{
+  color:#0b3d1d;
+  font-size:24px;
+  line-height:1;
+  text-align:center;
+}
+
+.inboxChallengeLineItemDetails{
+  display:grid;
+  gap:12px;
+  padding:14px;
+  border-top:1px solid rgba(215,234,220,.92);
+  background:#fbfdfb;
+}
+
+@media (max-width:700px){
+  .inboxMessageList{
+    gap:8px;
+  }
+
+  .inboxChallengeLineItemButton{
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:6px 10px;
+    padding:10px 12px;
+  }
+
+  .inboxChallengeLineItemType{
+    grid-column:1;
+    grid-row:1;
+  }
+
+  .inboxChallengeLineItemStatus{
+    grid-column:2;
+    grid-row:1;
+    min-width:68px;
+    min-height:24px;
+    padding:2px 8px;
+  }
+
+  .inboxChallengeLineItemMain{
+    grid-column:1 / span 2;
+    grid-row:2;
+  }
+
+  .inboxChallengeLineItemActivity{
+    grid-column:1 / span 2;
+    grid-row:3;
+    justify-items:start;
+    text-align:left;
+    font-size:11px;
+  }
+
+  .inboxChallengeLineItemChevron{
+    display:none;
+  }
+
+  .inboxChallengeLineItemDetails{
+    padding:12px;
+  }
+}
+
+.teamIdentifierBadge{
+  display:inline-flex;
+  align-items:center;
+  min-height:28px;
+  padding:4px 10px;
+  border:1px solid rgba(11,61,29,.22);
+  border-radius:999px;
+  background:#f0fdf4;
+  color:#0b3d1d;
+  font-size:13px;
+  font-weight:900;
+  letter-spacing:.02em;
 }

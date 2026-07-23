@@ -44,8 +44,10 @@ async function ensureAppTables(db) {
     CREATE TABLE IF NOT EXISTS teams (
       id VARCHAR(191) PRIMARY KEY,
       name VARCHAR(191) NOT NULL UNIQUE,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+      team_identifier BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_teams_team_identifier (team_identifier)
+    ) AUTO_INCREMENT=100;
 
     CREATE TABLE IF NOT EXISTS team_members (
       id VARCHAR(191) NOT NULL,

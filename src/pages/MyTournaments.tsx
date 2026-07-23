@@ -51,21 +51,40 @@ export default function MyTournaments() {
             <p className="small">Published tournament registrations will appear here after you register.</p>
           </div>
         ) : null}
-        <div className="formStack">
-          {tournaments.map((tournament) => (
-            <Link key={`${tournament.id}-${tournament.registration.id}`} className="card cardClickable" style={{ padding: 16, textDecoration: 'none', color: 'inherit' }} to={tournament.portalPath || `/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}`}>
-              <div>
-                <h3 style={{ margin: 0 }}>{tournament.name}</h3>
-                <p className="small" style={{ margin: '4px 0 0' }}>{tournament.description || 'No description provided.'}</p>
-              </div>
-              <div className="small" style={{ marginTop: 12 }}><strong>Date:</strong> {formatDate(tournament.startDate)}</div>
-              <div className="small"><strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</div>
-              <div className="small"><strong>Location:</strong> {(tournament.templateData as any)?.locationAddress || tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || 'Location to be announced'}</div>
-              <div className="small"><strong>Organizer:</strong> {tournament.organizerName || 'Golf Homiez organizer'}</div>
-              <div className="small"><strong>Your registration:</strong> {formatDateTime(tournament.registration.registeredAt)}</div>
-              {tournament.portalUrl ? <div className="small"><strong>Tournament URL:</strong> {tournament.portalUrl}</div> : null}
-            </Link>
-          ))}
+        <div className="compactLineItemList tournamentLineItemList">
+          {tournaments.map((tournament) => {
+            const destination = tournament.portalPath || `/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}`
+            return (
+              <Link
+                key={`${tournament.id}-${tournament.registration.id}`}
+                className="compactLineItem tournamentLineItem"
+                to={destination}
+                aria-label={`Open ${tournament.name} tournament details`}
+                onClick={() => logFrontendEvent({
+                  category: 'user.tournaments',
+                  message: 'tournament_line_item_selected',
+                  data: {
+                    tournamentId: tournament.id,
+                    registrationId: tournament.registration.id,
+                    registrationStatus: tournament.registration.status,
+                    destination,
+                  },
+                })}
+              >
+                <span className="compactLineItemType">Tournament</span>
+                <span className="compactLineItemMain">
+                  <strong className="compactLineItemTitle">{tournament.name}</strong>
+                  <span className="compactLineItemMeta"><strong>Date:</strong> {formatDate(tournament.startDate)} • <strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</span>
+                  <span className="compactLineItemSecondary"><strong>Location:</strong> {(tournament.templateData as any)?.locationAddress || tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || 'Location to be announced'}</span>
+                </span>
+                <span className="compactLineItemSummary">
+                  <strong className="compactLineItemStatus">{tournament.registration.status || 'Registered'}</strong>
+                  <span>{formatDateTime(tournament.registration.registeredAt)}</span>
+                </span>
+                <span className="compactLineItemChevron" aria-hidden="true">›</span>
+              </Link>
+            )
+          })}
         </div>
       </div>
     </div>
