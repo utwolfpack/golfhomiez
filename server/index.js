@@ -3709,7 +3709,7 @@ app.post('/api/teams', requireStorage, authMiddleware, async (req, res) => {
     }
     if (!isValidTeamSize(normalizedMembers.length)) {
       logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'invalid_team_size', memberCount: normalizedMembers.length })
-      return res.status(400).json({ message: 'Teams can only have 2 to 5 team members.' })
+      return res.status(400).json({ message: 'Teams can only have 2 to 4 team members.' })
     }
 
     for (const m of normalizedMembers) {
@@ -3788,7 +3788,7 @@ app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
     }
     if (!isValidTeamSize(normalizedMembers.length)) {
       logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'invalid_team_size', memberCount: normalizedMembers.length })
-      return res.status(400).json({ message: 'Teams can only have 2 to 5 team members.' })
+      return res.status(400).json({ message: 'Teams can only have 2 to 4 team members.' })
     }
 
     for (const m of normalizedMembers) {

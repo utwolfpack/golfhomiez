@@ -82,9 +82,9 @@ function teamResultLabel(round: TeamScoreEntry) {
   return 'Tie'
 }
 
-function roundRowClass(round: ScoreEntry) {
-  if (round.mode !== 'team') return 'roundRow'
-  return `roundRow ${round.won === true ? 'rowWin' : round.won === false ? 'rowLoss' : 'rowTie'}`
+function roundLineItemClass(round: ScoreEntry) {
+  if (round.mode !== 'team') return 'compactLineItem loggedRoundLineItem homeLoggedRoundLineItem'
+  return `compactLineItem loggedRoundLineItem homeLoggedRoundLineItem ${round.won === true ? 'rowWin' : round.won === false ? 'rowLoss' : 'rowTie'}`
 }
 
 function RoundRow({ round, onClick }: { round: ScoreEntry; onClick: () => void }) {
@@ -93,16 +93,17 @@ function RoundRow({ round, onClick }: { round: ScoreEntry; onClick: () => void }
 
   if (round.mode === 'solo') {
     return (
-      <button type="button" className={roundRowClass(round)} onClick={onClick}>
-        <div>
-          <div className="roundRowTitle">{round.course}</div>
-          <div className="roundRowMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo round</div>
+      <button type="button" className={roundLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.course} solo round details`}>
+        <span className="compactLineItemMain">
+          <strong className="compactLineItemTitle">{round.course}</strong>
+          <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo Round</span>
           {incompleteBadge}
-        </div>
-        <div className="roundRowSummary">
-          <div className="roundRowValue">{round.roundScore}</div>
-          <div className="small">Tap for details</div>
-        </div>
+        </span>
+        <span className="compactLineItemSummary">
+          <strong className="compactLineItemValue">{round.roundScore}</strong>
+          <span>Score</span>
+        </span>
+        <span className="compactLineItemChevron" aria-hidden="true">›</span>
       </button>
     )
   }
@@ -110,16 +111,17 @@ function RoundRow({ round, onClick }: { round: ScoreEntry; onClick: () => void }
   const result = teamResultLabel(round)
   const rowType = isTeamChallengeScore(round) ? 'Team Challenge' : 'Team round'
   return (
-    <button type="button" className={roundRowClass(round)} onClick={onClick}>
-      <div>
-        <div className="roundRowTitle">{round.course}</div>
-        <div className="roundRowMeta">{round.date} • {rowType} • {round.team} vs {round.opponentTeam}</div>
+    <button type="button" className={roundLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.team} versus ${round.opponentTeam} ${rowType} details`}>
+      <span className="compactLineItemMain">
+        <strong className="compactLineItemTitle">{round.course}</strong>
+        <span className="compactLineItemMeta">{round.date} • {rowType} • {round.team} vs {round.opponentTeam}</span>
         {incompleteBadge}
-      </div>
-      <div className="roundRowSummary">
-        <div className="roundRowValue">{formatTeamScoreValue(round)}</div>
-        <div className="small">{result}</div>
-      </div>
+      </span>
+      <span className="compactLineItemSummary">
+        <strong className="compactLineItemValue">{formatTeamScoreValue(round)}</strong>
+        <span>{result}</span>
+      </span>
+      <span className="compactLineItemChevron" aria-hidden="true">›</span>
     </button>
   )
 }
@@ -137,6 +139,7 @@ export default function Home() {
   const { states: apiStateOptions } = useGolfCourseStates()
   const [courseFilter, setCourseFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
+  const [showFilters, setShowFilters] = useState(false)
 
   useEffect(() => {
     ;(async () => {
@@ -285,6 +288,32 @@ export default function Home() {
     logFrontendEvent({ category: 'home.filters', message: 'score_filters_cleared', data: { view } })
   }
 
+  function toggleFilters() {
+    setShowFilters((current) => {
+      const next = !current
+      logFrontendEvent({
+        category: 'home.filters',
+        message: next ? 'score_filters_shown' : 'score_filters_hidden',
+        data: { view, stateFilter, courseFilter, teamFilter, filtersVisible: next },
+      })
+      return next
+    })
+  }
+
+  function handleRoundSelected(round: ScoreEntry) {
+    setSelectedRound(round)
+    logFrontendEvent({
+      category: 'home.rounds',
+      message: 'logged_round_line_item_selected',
+      data: {
+        roundId: round.id,
+        mode: round.mode,
+        course: round.course,
+        source: (round as any).source || 'scores',
+      },
+    })
+  }
+
 
   function handleRoundUpdated(updatedRound: ScoreEntry) {
     const normalized = normalizeScoreEntry(updatedRound)
@@ -310,38 +339,45 @@ export default function Home() {
       <div className="card">
         {!user ? <div className="small homeDemoNotice">Showing homepage demo data. <Link to="/login"><strong>Log in</strong></Link> to view and track your own rounds.</div> : null}
 
-        <div className="scoreFilterToolbar">
-          <div className="scoreViewTabs" role="group" aria-label="Round type filters">
-            <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'all'} onClick={() => { setView('all'); setTeamFilter('all') }}>All Rounds</button>
-            <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'team'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
-            <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'solo'} onClick={() => { setView('solo'); setTeamFilter('all') }}>Solo Rounds</button>
-          </div>
+        <div className={`scoreFilterToolbar ${showFilters ? '' : 'scoreFilterToolbar--collapsed'}`}>
+          {showFilters ? (
+            <>
+              <div className="scoreViewTabs" role="group" aria-label="Round type filters">
+                <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'all'} onClick={() => { setView('all'); setTeamFilter('all') }}>All Rounds</button>
+                <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'team'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
+                <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'solo'} onClick={() => { setView('solo'); setTeamFilter('all') }}>Solo Rounds</button>
+              </div>
 
-          <div className={`scoreFilterGrid ${view === 'solo' ? 'scoreFilterGrid--solo' : ''}`}>
-            <label className="scoreFilterControl scoreFilterControl--state">
-              <span>State</span>
-              <select className="input" value={stateFilter} onChange={(e) => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, stateOptions.map((value) => ({ value })), (v) => { setStateFilter(v); setCourseFilter('all'); setTeamFilter('all') }, stateFilter)}>
-                {stateOptions.length > 1 || stateFilter === 'all' ? <option value="all">All states</option> : null}
-                {stateOptions.map((abbr) => <option key={abbr} value={abbr}>{nameByAbbr.get(abbr) || abbr}</option>)}
-              </select>
-            </label>
-            <label className="scoreFilterControl scoreFilterControl--course">
-              <span>Course</span>
-              <select className="input" value={courseFilter} onChange={(e) => { setCourseFilter(e.target.value); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, courseOptions.map((value) => ({ value })), (v) => { setCourseFilter(v); setTeamFilter('all') }, courseFilter)}>
-                <option value="all">All courses</option>
-                {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
-              </select>
-            </label>
-            {view !== 'solo' ? (
-              <label className="scoreFilterControl scoreFilterControl--team">
-                <span>Team</span>
-                <select className="input" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} onKeyDown={(e) => jumpToFirstByLetter(e.key, teamOptions.map((value) => ({ value })), (v) => setTeamFilter(v), teamFilter)}>
-                  <option value="all">All teams</option>
-                  {teamOptions.map((teamName) => <option key={teamName} value={teamName}>{teamName}</option>)}
-                </select>
-              </label>
-            ) : null}
+              <div className={`scoreFilterGrid ${view === 'solo' ? 'scoreFilterGrid--solo' : ''}`}>
+                <label className="scoreFilterControl scoreFilterControl--state">
+                  <span>State</span>
+                  <select className="input" value={stateFilter} onChange={(e) => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, stateOptions.map((value) => ({ value })), (v) => { setStateFilter(v); setCourseFilter('all'); setTeamFilter('all') }, stateFilter)}>
+                    {stateOptions.length > 1 || stateFilter === 'all' ? <option value="all">All states</option> : null}
+                    {stateOptions.map((abbr) => <option key={abbr} value={abbr}>{nameByAbbr.get(abbr) || abbr}</option>)}
+                  </select>
+                </label>
+                <label className="scoreFilterControl scoreFilterControl--course">
+                  <span>Course</span>
+                  <select className="input" value={courseFilter} onChange={(e) => { setCourseFilter(e.target.value); setTeamFilter('all') }} onKeyDown={(e) => jumpToFirstByLetter(e.key, courseOptions.map((value) => ({ value })), (v) => { setCourseFilter(v); setTeamFilter('all') }, courseFilter)}>
+                    <option value="all">All courses</option>
+                    {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
+                  </select>
+                </label>
+                {view !== 'solo' ? (
+                  <label className="scoreFilterControl scoreFilterControl--team">
+                    <span>Team</span>
+                    <select className="input" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} onKeyDown={(e) => jumpToFirstByLetter(e.key, teamOptions.map((value) => ({ value })), (v) => setTeamFilter(v), teamFilter)}>
+                      <option value="all">All teams</option>
+                      {teamOptions.map((teamName) => <option key={teamName} value={teamName}>{teamName}</option>)}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+          <div className="scoreFilterActions">
             <button type="button" className="scoreFiltersClear" onClick={clearFilters}>Clear filters</button>
+            <button type="button" className="scoreFiltersToggle" onClick={toggleFilters} aria-expanded={showFilters}>{showFilters ? 'Hide filters' : 'Show filters'}</button>
           </div>
         </div>
 
@@ -362,8 +398,8 @@ export default function Home() {
           {!user ? <Link className="small" to="/login">Log in to save rounds</Link> : view === 'team' ? <Link className="small" to="/challenges">Open Team Challenges</Link> : view === 'solo' ? <Link className="small" to="/solo-logger">Log a solo round</Link> : <Link className="small" to="/my-golf-scores">View all rounds</Link>}
         </div>
 
-        <div className="roundRowsStack" style={{ marginTop: 12 }}>
-          {recentRounds.map((round) => <RoundRow key={round.id} round={round} onClick={() => setSelectedRound(round)} />)}
+        <div className="roundRowsStack compactLineItemList loggedRoundLineItemList" style={{ marginTop: 12 }}>
+          {recentRounds.map((round) => <RoundRow key={round.id} round={round} onClick={() => handleRoundSelected(round)} />)}
           {!recentRounds.length ? <div className="small">No rounds yet for this view and filters.</div> : null}
         </div>
       </div>

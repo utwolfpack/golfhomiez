@@ -27,7 +27,7 @@ export function teamNameKey(value) {
 }
 
 export function isValidTeamSize(count) {
-  return count >= 2 && count <= 5
+  return count >= 2 && count <= 4
 }
 
 export function buildSuggestedTeamName(baseName, existingTeams = [], excludeTeamId = null) {
@@ -86,7 +86,7 @@ export function normalizeCreateTeamMembers(members, user) {
     if (seen.has(member.email)) continue
     seen.add(member.email)
     normalized.push(member)
-    if (normalized.length >= 5) break
+    if (normalized.length >= 4) break
   }
   return normalized
 }

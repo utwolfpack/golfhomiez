@@ -707,13 +707,6 @@ function GolfLoggerInner() {
         {activeScorecardSide ? (
           <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => setActiveScorecardSide(null)}>
             <div className="modalCard teamScorecardModalCard" role="dialog" aria-modal="true" aria-label={activeScorecardSide === 'team' ? 'Your team hole-by-hole scorecard' : 'Opponent team hole-by-hole scorecard'} onClick={(event) => event.stopPropagation()}>
-              <div className="teamScorecardModalHeader">
-                <div>
-                  <div className="small">Hole-by-hole score input</div>
-                  <h2>{activeScorecardSide === 'team' ? `${team || 'Your Team'} Score` : `${opponentTeam || 'Opponent Team'} Score`}</h2>
-                </div>
-                <button type="button" className="btn btnSmall" onClick={() => setActiveScorecardSide(null)}>Close</button>
-              </div>
               <HoleByHoleScorecard
                 enabled={true}
                 stateCode={stateAbbr}
@@ -725,6 +718,9 @@ function GolfLoggerInner() {
                 scoreOwnerLabel={activeScorecardSide === 'team' ? `${team || 'Your Team'} score` : `${opponentTeam || 'Opponent Team'} score`}
                 teeColor={teeColor}
               />
+              <div className="holeInputModalFooter">
+                <button type="button" className="btn btnSmall" onClick={() => setActiveScorecardSide(null)}>Close</button>
+              </div>
             </div>
           </div>
         ) : null}

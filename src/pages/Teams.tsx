@@ -14,9 +14,9 @@ type DraftMember = { id: string; firstName: string; lastName: string; email: str
 type TeamNameApiError = Error & { suggestedTeamName?: string }
 
 const MIN_TEAM_SIZE = 2
-const MAX_TEAM_SIZE = 5
+const MAX_TEAM_SIZE = 4
 const CREATE_EXTRA_MEMBER_LIMIT = MAX_TEAM_SIZE - 1
-const TEAM_SIZE_ERROR = 'Teams can only have 2 to 5 team members.'
+const TEAM_SIZE_ERROR = 'Teams can only have 2 to 4 team members.'
 
 export default function TeamsPage() {
   return (
@@ -38,6 +38,7 @@ function TeamsInner() {
   const [draftName, setDraftName] = useState('')
   const [draftNamePlaceholder, setDraftNamePlaceholder] = useState('Team name')
   const [draftMembers, setDraftMembers] = useState<DraftMember[]>([])
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -118,7 +119,7 @@ function TeamsInner() {
   const createMissing = useMemo(() => {
     const missing: string[] = []
     if (!createName.trim()) missing.push('Team name')
-    if (!isValidTeamSize(normalizedCreateMembers.length)) missing.push('2 to 5 team members')
+    if (!isValidTeamSize(normalizedCreateMembers.length)) missing.push('2 to 4 team members')
     for (const member of normalizedCreateMembers) {
       if (!member.email) missing.push('Each team member email')
       if (member.email && !isValidEmailAddress(member.email)) missing.push('Valid team member emails')
@@ -143,6 +144,7 @@ function TeamsInner() {
         verified: m.verified,
       }
     }))
+    setEditingMemberId(null)
     setSaveError(null)
   }, [editTeam])
 
@@ -158,6 +160,7 @@ function TeamsInner() {
 
   function closeModal() {
     setEditTeamId(null)
+    setEditingMemberId(null)
     setSaving(false)
     setSaveError(null)
     setDraftNamePlaceholder('Team name')
@@ -260,16 +263,77 @@ function TeamsInner() {
   }
 
   function addMember() {
-    if (draftMembers.length >= MAX_TEAM_SIZE) return
-    setDraftMembers(prev => [...prev, makeBlankDraftMember()])
+    if (draftMembers.length >= MAX_TEAM_SIZE || editingMemberId) return
+    const member = makeBlankDraftMember()
+    setDraftMembers(prev => [...prev, member])
+    setEditingMemberId(member.id)
+    logFrontendEvent({ category: 'teams.update.member_edit', message: 'new_member_edit_started', data: { correlationId: getCorrelationId(), teamId: editTeam?.id || null, memberId: member.id, memberCount: draftMembers.length + 1 } })
   }
 
   function patchMember(id: string, field: 'firstName' | 'lastName' | 'email', value: string) {
+    if (editingMemberId !== id) return
     setDraftMembers(prev => prev.map(m => (m.id === id ? { ...m, [field]: value } : m)))
   }
 
   function removeMember(id: string) {
+    if (editingMemberId !== id) return
     setDraftMembers(prev => prev.filter(m => m.id !== id))
+    setEditingMemberId(null)
+    logFrontendEvent({ category: 'teams.update.member_edit', message: 'member_removed_from_draft', data: { correlationId: getCorrelationId(), teamId: editTeam?.id || null, memberId: id, memberCount: Math.max(0, draftMembers.length - 1) } })
+  }
+
+  function beginMemberEdit(member: DraftMember) {
+    if (editingMemberId && editingMemberId !== member.id) return
+    setEditingMemberId(member.id)
+    setSaveError(null)
+    logFrontendEvent({ category: 'teams.update.member_edit', message: 'member_edit_started', data: { correlationId: getCorrelationId(), teamId: editTeam?.id || null, memberId: member.id, memberEmail: member.email || null } })
+  }
+
+  function cancelMemberEdit(member: DraftMember) {
+    const original = editTeam?.members?.find(candidate => candidate.id === member.id)
+    if (original) {
+      const split = splitName(original.name)
+      setDraftMembers(prev => prev.map(candidate => candidate.id === member.id ? {
+        id: original.id,
+        firstName: split.firstName,
+        lastName: split.lastName,
+        email: original.email,
+        status: original.status,
+        verified: original.verified,
+      } : candidate))
+    } else {
+      setDraftMembers(prev => prev.filter(candidate => candidate.id !== member.id))
+    }
+    setEditingMemberId(null)
+    setSaveError(null)
+    logFrontendEvent({ category: 'teams.update.member_edit', message: 'member_edit_cancelled', data: { correlationId: getCorrelationId(), teamId: editTeam?.id || null, memberId: member.id, existingMember: Boolean(original) } })
+  }
+
+  function finishMemberEdit(member: DraftMember) {
+    const firstName = member.firstName.trim()
+    const lastName = member.lastName.trim()
+    const email = member.email.trim().toLowerCase()
+    if (!firstName) {
+      setSaveError('Enter the team member first name before finishing the edit.')
+      return
+    }
+    if (!lastName) {
+      setSaveError('Enter the team member last name before finishing the edit.')
+      return
+    }
+    if (!isValidEmailAddress(email)) {
+      setSaveError('Enter a valid team member email address before finishing the edit.')
+      return
+    }
+    const duplicate = draftMembers.some(candidate => candidate.id !== member.id && candidate.email.trim().toLowerCase() === email)
+    if (duplicate) {
+      setSaveError('You cannot add the same team member twice.')
+      return
+    }
+    setDraftMembers(prev => prev.map(candidate => candidate.id === member.id ? { ...candidate, firstName, lastName, email } : candidate))
+    setEditingMemberId(null)
+    setSaveError(null)
+    logFrontendEvent({ category: 'teams.update.member_edit', message: 'member_edit_finished', data: { correlationId: getCorrelationId(), teamId: editTeam?.id || null, memberId: member.id, memberEmail: email } })
   }
 
   async function handleCreateTeam() {
@@ -316,6 +380,7 @@ function TeamsInner() {
     setSaving(true)
     setSaveError(null)
     try {
+      if (editingMemberId) throw new Error('Finish or cancel the open team member edit before saving the team.')
       const normalizedEmails = new Set<string>()
       const members = draftMembers
         .map(toTeamMemberDraft)
@@ -399,7 +464,7 @@ function TeamsInner() {
 
         <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <button type="button" className="btnPrimary" onClick={toggleCreateTeam}>{createOpen ? 'Hide Create Team' : 'Create Team'}</button>
-          <span className="small">Teams can have 2, 3, 4, or 5 team members. Team names must be unique.</span>
+          <span className="small">Teams can have 2 to 4 members. Team names must be unique.</span>
         </div>
 
         {err ? <div className="small" style={{ color: '#b91c1c', marginTop: 12 }}>{err}</div> : null}
@@ -452,7 +517,7 @@ function TeamsInner() {
                   ))}
                 </div>
                 {createMembers.length < CREATE_EXTRA_MEMBER_LIMIT ? <button type="button" className="btn" style={{ marginTop: 10 }} onClick={addCreateMember}>+ Add member</button> : null}
-                <div className="small" style={{ marginTop: 6 }}>Save is available for teams with 2 to 5 team members.</div>
+                <div className="small" style={{ marginTop: 6 }}>Save is available for teams with 2 to 4 team members.</div>
               </div>
             </div>
             {showCreateValidation && createMissing.length ? <div className="small" style={{ marginTop: 12, color: '#b91c1c' }}>Missing or invalid: {createMissing.join(', ')}</div> : null}
@@ -524,39 +589,60 @@ function TeamsInner() {
 
             <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <label className="label" style={{ margin: 0 }}>Members</label>
-              {draftMembers.length < MAX_TEAM_SIZE ? <button type="button" className="btn" onClick={addMember}>+ Add member</button> : null}
+              {draftMembers.length < MAX_TEAM_SIZE ? <button type="button" className="btn" disabled={Boolean(editingMemberId)} onClick={addMember}>+ Add member</button> : null}
             </div>
 
-            <div className="small" style={{ marginTop: 6 }}>Teams can only have 2 to 5 team members.</div>
+            <div className="small" style={{ marginTop: 6 }}>Teams can have 2 to 4 members. Select Edit on one member at a time to update their information.</div>
 
-            <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
-              {draftMembers.map(m => (
-                <div key={m.id} className="card" style={{ padding: 12 }}>
-                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1.4fr auto', gap: 10, alignItems: 'end' }}>
-                    <div>
-                      <label className="label">First name</label>
-                      <input className="input" value={m.firstName} onChange={e => patchMember(m.id, 'firstName', e.target.value)} />
+            <div className="teamMemberEditList">
+              {draftMembers.map((m, index) => {
+                const memberVerified = m.status === 'active' || m.verified === true
+                const memberEditing = editingMemberId === m.id
+                return (
+                  <div key={m.id} className={`teamMemberLineItem ${memberVerified ? 'teamMemberLineItem--verified' : 'teamMemberLineItem--pending'}${memberEditing ? ' teamMemberLineItem--editing' : ''}`}>
+                    <div className="teamMemberLineItemHeader">
+                      <span className={`teamMemberStatusBadge ${memberVerified ? 'teamMemberStatusBadge--verified' : 'teamMemberStatusBadge--pending'}`}>
+                        {memberVerified ? 'Verified' : 'Pending'}
+                      </span>
+                      <span className="small">Member {index + 1}</span>
+                      <button type="button" className="btn btnSmall teamMemberEditButton" disabled={Boolean(editingMemberId && !memberEditing)} onClick={() => beginMemberEdit(m)}>
+                        {memberEditing ? 'Editing' : 'Edit'}
+                      </button>
                     </div>
-                    <div>
-                      <label className="label">Last name</label>
-                      <input className="input" value={m.lastName} onChange={e => patchMember(m.id, 'lastName', e.target.value)} />
-                    </div>
-                    <div>
-                      <label className="label">Email</label>
-                      <input className="input" type="email" value={m.email} onChange={e => patchMember(m.id, 'email', e.target.value)} />
-                    </div>
-                    <button type="button" className="btn" disabled={draftMembers.length <= 2} onClick={() => removeMember(m.id)}>Remove</button>
+
+                    {memberEditing ? (
+                      <div className="teamMemberEditFields">
+                        <label className="label">First name
+                          <input className="input" value={m.firstName} onChange={e => patchMember(m.id, 'firstName', e.target.value)} />
+                        </label>
+                        <label className="label">Last name
+                          <input className="input" value={m.lastName} onChange={e => patchMember(m.id, 'lastName', e.target.value)} />
+                        </label>
+                        <label className="label teamMemberEmailField">Email
+                          <input className="input" type="email" value={m.email} onChange={e => patchMember(m.id, 'email', e.target.value)} />
+                        </label>
+                        <div className="teamMemberEditActions">
+                          <button type="button" className="btnPrimary btnSmall" onClick={() => finishMemberEdit(m)}>Done</button>
+                          <button type="button" className="btn btnSmall" onClick={() => cancelMemberEdit(m)}>Cancel</button>
+                          <button type="button" className="btn btnSmall btnDanger" disabled={draftMembers.length <= MIN_TEAM_SIZE} onClick={() => removeMember(m.id)}>Remove</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="teamMemberDisplayGrid">
+                        <div><span>First name</span><strong>{m.firstName || '—'}</strong></div>
+                        <div><span>Last name</span><strong>{m.lastName || '—'}</strong></div>
+                        <div className="teamMemberDisplayEmail"><span>Email</span><strong>{m.email || '—'}</strong></div>
+                      </div>
+                    )}
+
+                    {!memberVerified && m.email ? (
+                      <button type="button" className="btn btnSmall teamMemberInviteButton" disabled={Boolean(editingMemberId)} onClick={() => { setInviteTarget({ teamId: editTeam.id, email: m.email, source: 'edit' }); setInviteOpen(true) }}>
+                        Send Registration Invite
+                      </button>
+                    ) : null}
                   </div>
-                  <div className="small" style={{ marginTop: 8 }}>
-                    {m.status === 'active' || m.verified ? 'Verified and active' : 'Pending registration or email verification'}
-                  </div>
-                  {m.status !== 'active' && !m.verified && m.email ? (
-                    <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => { setInviteTarget({ teamId: editTeam.id, email: m.email, source: 'edit' }); setInviteOpen(true) }}>
-                      Send Registration Invite
-                    </button>
-                  ) : null}
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             {saveError ? <div className="small" style={{ marginTop: 12, color: '#b91c1c' }}>{saveError}</div> : null}
@@ -564,7 +650,7 @@ function TeamsInner() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button type="button" className="btn" disabled={deletingTeamId === editTeam.id} onClick={() => { void handleDeleteTeam(editTeam) }}>{deletingTeamId === editTeam.id ? 'Deleting…' : 'Delete Team'}</button>
               <button type="button" className="btn" onClick={closeModal}>Cancel</button>
-              <button type="button" className="btnPrimary" disabled={saving} onClick={handleSave}>{saving ? 'Saving…' : 'Save Team'}</button>
+              <button type="button" className="btnPrimary" disabled={saving || Boolean(editingMemberId)} onClick={handleSave}>{saving ? 'Saving…' : 'Save Team'}</button>
             </div>
           </div>
         </div>

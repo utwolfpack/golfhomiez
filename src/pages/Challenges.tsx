@@ -639,7 +639,7 @@ export default function Challenges() {
 
   function openIndividualLeaderboardRoundSummary(message: InboxMessage, participant: IndividualChallengeParticipant) {
     setActiveIndividualLeaderboardParticipant(participant)
-    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), editable: currentUserCanEditIndividualParticipant(participant), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'] } })
+    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), course: getTeamChallengeCourseName(message), editable: currentUserCanEditIndividualParticipant(participant), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'] } })
   }
 
   function closeIndividualChallengeLeaderboard() {
@@ -1431,14 +1431,6 @@ export default function Challenges() {
     return (
       <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => void closeTeamChallengeScorecard(message, side, editable)}>
         <div className="modalCard teamScorecardModalCard" role="dialog" aria-modal="true" aria-label={`${teamName} Team Challenge scorecard`} onClick={(event) => event.stopPropagation()}>
-          <div className="teamScorecardModalHeader">
-            <div>
-              <div className="small">Team Challenge score input</div>
-              <h2>{teamName} Score</h2>
-              <div className="small">{editable ? 'Enter each hole score, then save the Team Challenge score.' : (completed ? 'This challenge is complete, so scores are locked.' : 'Opponent team score is read-only.')}</div>
-            </div>
-            <button type="button" className="btn btnSmall" onClick={() => void closeTeamChallengeScorecard(message, side, editable)}>Close</button>
-          </div>
           {editable ? (
             <>
               <HoleByHoleScorecard
@@ -1453,6 +1445,7 @@ export default function Challenges() {
                 teeColor={getTeamChallengeTeeColor(message)}
                 registerPendingHoleSave={(handler) => { teamChallengePendingHoleSaveRef.current = handler }}
               />
+              <div className="small holeInputModalHint">Enter each hole score, then save the Team Challenge score.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
                 <button
                   type="button"
@@ -1480,6 +1473,7 @@ export default function Challenges() {
           ) : (
             <div className="card holeInputPanel inboxTeamChallengeReadonlyPanel">
               <div className="holeInputTeamLabel">{teamName} score</div>
+              {!completed ? <div className="small holeInputModalHint">Opponent team score is read-only.</div> : null}
               <div className="holeInputPageTotals" aria-label="Team Challenge totals">
                 <div>
                   <span>Total score</span>
@@ -1526,14 +1520,6 @@ export default function Challenges() {
     return (
       <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => setActiveIndividualChallengeScorecard(null)}>
         <div className="modalCard teamScorecardModalCard" role="dialog" aria-modal="true" aria-label={`${golferName} Individual Challenge scorecard`} onClick={(event) => event.stopPropagation()}>
-          <div className="teamScorecardModalHeader">
-            <div>
-              <div className="small">Individual Challenge score input</div>
-              <h2>{golferName} Score</h2>
-              <div className="small">{editable ? 'Enter each hole score; each completed hole saves automatically.' : (completed ? 'This challenge is complete, so scores are locked.' : 'Other golfer scores are read-only.')}</div>
-            </div>
-            <button type="button" className="btn btnSmall" onClick={() => setActiveIndividualChallengeScorecard(null)}>Close</button>
-          </div>
           {editable ? (
             <>
               <HoleByHoleScorecard
@@ -1547,6 +1533,7 @@ export default function Challenges() {
                 loadScorecardOnMount={!holes.some((hole) => hole.scoreProvided)}
                 teeColor={getTeamChallengeTeeColor(message)}
               />
+              <div className="small holeInputModalHint">Enter each hole score; each completed hole saves automatically.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
                 <button type="button" className="btn btnSmall" onClick={() => setActiveIndividualChallengeScorecard(null)}>Close</button>
                 <button
@@ -1719,6 +1706,7 @@ export default function Challenges() {
             <h2>{selectedParticipant ? 'Round Summary' : 'Individual Challenge Leaderboard'}</h2>
             <div className="inboxLeaderboardDivider" />
             <strong>{selectedParticipant ? selectedName : (message.challengeCourse || 'Individual Challenge')}</strong>
+            {selectedParticipant ? <span className="inboxIndividualRoundSummaryCourse">{message.challengeCourse || 'Course not provided'}</span> : null}
             <span>{[message.challengeDate, message.challengeState, `${teeColorLabel(getTeamChallengeTeeColor(message))} tees`].filter(Boolean).join(' • ')}</span>
           </div>
 
