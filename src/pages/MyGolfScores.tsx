@@ -79,10 +79,9 @@ function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => voi
   if (round.mode === 'solo') {
     return (
       <button type="button" className={scoreLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.course} solo round details`}>
-        <span className="compactLineItemType">Solo Round</span>
         <span className="compactLineItemMain">
           <strong className="compactLineItemTitle">{round.course}</strong>
-          <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()}</span>
+          <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo Round</span>
           {incompleteBadge}
         </span>
         <span className="compactLineItemSummary">
@@ -98,10 +97,9 @@ function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => voi
   const rowType = 'Team Challenge'
   return (
     <button type="button" className={scoreLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.team} versus ${round.opponentTeam} Team Challenge details`}>
-      <span className="compactLineItemType">{rowType}</span>
       <span className="compactLineItemMain">
         <strong className="compactLineItemTitle">{round.course}</strong>
-        <span className="compactLineItemMeta">{round.date} • {round.team} vs {round.opponentTeam}</span>
+        <span className="compactLineItemMeta">{round.date} • {rowType} • {round.team} vs {round.opponentTeam}</span>
         {incompleteBadge}
       </span>
       <span className="compactLineItemSummary">
@@ -133,6 +131,7 @@ function MyGolfScoresInner() {
   const [stateFilter, setStateFilter] = useState('all')
   const [courseFilter, setCourseFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
+  const [showFilters, setShowFilters] = useState(false)
   const [page, setPage] = useState(1)
   const { states: apiStateOptions } = useGolfCourseStates()
 
@@ -249,6 +248,18 @@ function MyGolfScoresInner() {
     logFrontendEvent({ category: 'myGolfScores.filters', message: 'score_filters_cleared', data: { view } })
   }
 
+  function toggleFilters() {
+    setShowFilters((current) => {
+      const next = !current
+      logFrontendEvent({
+        category: 'myGolfScores.filters',
+        message: next ? 'score_filters_shown' : 'score_filters_hidden',
+        data: { view, stateFilter, courseFilter, teamFilter, filtersVisible: next },
+      })
+      return next
+    })
+  }
+
 
   function handleRoundUpdated(updatedRound: ScoreEntry) {
     const normalized = normalizeScoreEntry(updatedRound)
@@ -290,38 +301,45 @@ function MyGolfScoresInner() {
           </div>
         </div>
 
-        <div className="scoreFilterToolbar">
-          <div className="scoreViewTabs" role="group" aria-label="Round type filters">
-            <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'all'} onClick={() => setView('all')}>All Rounds</button>
-            <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'team'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
-            <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'solo'} onClick={() => setView('solo')}>Solo Rounds</button>
-          </div>
+        <div className={`scoreFilterToolbar ${showFilters ? '' : 'scoreFilterToolbar--collapsed'}`}>
+          {showFilters ? (
+            <>
+              <div className="scoreViewTabs" role="group" aria-label="Round type filters">
+                <button type="button" className={view === 'all' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'all'} onClick={() => setView('all')}>All Rounds</button>
+                <button type="button" className={view === 'team' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'team'} onClick={() => { setView('team'); setStateFilter('all'); setCourseFilter('all'); setTeamFilter('all') }}>Team Challenges</button>
+                <button type="button" className={view === 'solo' ? 'btnPrimary btnSmall' : 'btn btnSmall'} aria-pressed={view === 'solo'} onClick={() => setView('solo')}>Solo Rounds</button>
+              </div>
 
-          <div className={`scoreFilterGrid ${view === 'solo' ? 'scoreFilterGrid--solo' : ''}`}>
-            <label className="scoreFilterControl scoreFilterControl--state">
-              <span>State</span>
-              <select className="input" value={stateFilter} onChange={e => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }}>
-                <option value="all">All states</option>
-                {stateOptions.map((state) => <option key={state} value={state}>{nameByAbbr.get(state) || state}</option>)}
-              </select>
-            </label>
-            <label className="scoreFilterControl scoreFilterControl--course">
-              <span>Course</span>
-              <select className="input" value={courseFilter} onChange={e => { setCourseFilter(e.target.value); setTeamFilter('all') }}>
-                <option value="all">All courses</option>
-                {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
-              </select>
-            </label>
-            {view !== 'solo' ? (
-              <label className="scoreFilterControl scoreFilterControl--team">
-                <span>Team</span>
-                <select className="input" value={teamFilter} onChange={e => setTeamFilter(e.target.value)}>
-                  <option value="all">All teams</option>
-                  {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
-                </select>
-              </label>
-            ) : null}
+              <div className={`scoreFilterGrid ${view === 'solo' ? 'scoreFilterGrid--solo' : ''}`}>
+                <label className="scoreFilterControl scoreFilterControl--state">
+                  <span>State</span>
+                  <select className="input" value={stateFilter} onChange={e => { setStateFilter(e.target.value); setCourseFilter('all'); setTeamFilter('all') }}>
+                    <option value="all">All states</option>
+                    {stateOptions.map((state) => <option key={state} value={state}>{nameByAbbr.get(state) || state}</option>)}
+                  </select>
+                </label>
+                <label className="scoreFilterControl scoreFilterControl--course">
+                  <span>Course</span>
+                  <select className="input" value={courseFilter} onChange={e => { setCourseFilter(e.target.value); setTeamFilter('all') }}>
+                    <option value="all">All courses</option>
+                    {courseOptions.map((course) => <option key={course} value={course}>{course}</option>)}
+                  </select>
+                </label>
+                {view !== 'solo' ? (
+                  <label className="scoreFilterControl scoreFilterControl--team">
+                    <span>Team</span>
+                    <select className="input" value={teamFilter} onChange={e => setTeamFilter(e.target.value)}>
+                      <option value="all">All teams</option>
+                      {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+          <div className="scoreFilterActions">
             <button type="button" className="scoreFiltersClear" onClick={clearFilters}>Clear filters</button>
+            <button type="button" className="scoreFiltersToggle" onClick={toggleFilters} aria-expanded={showFilters}>{showFilters ? 'Hide filters' : 'Show filters'}</button>
           </div>
         </div>
 

@@ -200,6 +200,39 @@ function defaultHoleIndexForInputFlow(holes: HoleScoreDetail[]) {
   return findFirstUnscoredHoleIndex(holes) ?? 0
 }
 
+function HoleNumberGolfBall({ holeNumber }: { holeNumber: number }) {
+  return (
+    <div
+      className="holeInputHoleIndicator"
+      data-hole-number={holeNumber}
+      aria-live="polite"
+    >
+      <svg
+        className="holeInputGolfBall"
+        viewBox="0 0 96 96"
+        role="img"
+        aria-label={`Current hole ${holeNumber}`}
+      >
+        <title>{`Current hole ${holeNumber}`}</title>
+        <circle className="holeInputGolfBallShadow" cx="49" cy="50" r="40" />
+        <circle className="holeInputGolfBallBody" cx="48" cy="46" r="39" />
+        <circle className="holeInputGolfBallAccent" cx="48" cy="46" r="25" />
+        <g className="holeInputGolfBallDimples" aria-hidden="true">
+          <circle cx="30" cy="24" r="3.6" />
+          <circle cx="47" cy="18" r="3.2" />
+          <circle cx="65" cy="25" r="3.6" />
+          <circle cx="24" cy="43" r="3.2" />
+          <circle cx="72" cy="44" r="3.2" />
+          <circle cx="29" cy="64" r="3.5" />
+          <circle cx="48" cy="73" r="3.2" />
+          <circle cx="67" cy="64" r="3.5" />
+        </g>
+        <text className="holeInputGolfBallNumber" x="48" y="48" textAnchor="middle" dominantBaseline="central">{holeNumber}</text>
+      </svg>
+    </div>
+  )
+}
+
 
 function getProvidedHoleNumbers(holes: HoleScoreDetail[]) {
   return holes
@@ -241,6 +274,21 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   }), [holes, activeHoleCount])
   const providedCount = trackerHoles.filter((hole) => hole.scoreProvided).length
   const providedHoleNumbers = useMemo(() => trackerHoles.filter((hole) => hole.scoreProvided).map((hole) => hole.holeNumber), [trackerHoles])
+
+  useEffect(() => {
+    if (!enabled) return
+    logFrontendEvent({
+      category: 'scorecard.hole_indicator',
+      message: 'golf_ball_displayed',
+      data: {
+        correlationId: getCorrelationId(),
+        hole: activeHole.hole,
+        indicatorStyle: 'golf_ball',
+        course,
+        mode: draftContext?.mode || 'round',
+      },
+    })
+  }, [enabled, activeHole.hole, course, draftContext?.mode])
 
   latestPendingStateRef.current = {
     enabled,
@@ -604,9 +652,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
       <section className={`holeInputPhone ${compactMobileInput ? 'holeInputPhone--compact' : ''}`} aria-label={`Score entry for hole ${activeHole.hole}`}>
         <div className={`holeInputScorePageCard ${compactMobileInput ? 'holeInputScorePageCard--compact' : ''}`}>
           <div className="holeInputScoreHeader">
-            <span className="holeInputScoreHeaderSpacer" aria-hidden="true" />
-            <div className="holeInputScoreLabel">Hole {activeHole.hole}</div>
-            <span className="holeInputScoreHeaderSpacer" aria-hidden="true" />
+            <HoleNumberGolfBall holeNumber={activeHole.hole} />
           </div>
           {loadError ? <div className="small holeInputLoadWarning">golf course hole data could not be loaded. Try again or choose another course.</div> : null}
           <div className="holeInputContextText" aria-label="Hole and round details">

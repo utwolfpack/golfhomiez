@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { getTodayInTimeZone, isValidPastOrTodayDate } from '../server/lib/date-utils.js'
-import { buildLockedLeadMember, isEmail, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
+import { buildLockedLeadMember, isEmail, isValidTeamSize, normalizeCreateTeamMembers, normalizeEmail } from '../server/lib/team-utils.js'
 import { createQrMatrix, generateQrSvg, MAX_QR_BYTE_LENGTH, QR_SIZE } from '../server/lib/qr-code.js'
 import { deleteTournamentWithSafeAssociations, SAFE_TOURNAMENT_CHILD_DELETES } from '../server/lib/tournament-delete.js'
 import { deleteCancelledTournaments, nextCancelledTournamentCleanupRun, CANCELLED_TOURNAMENT_CLEANUP_TIME_ZONE } from '../server/lib/cancelled-tournament-cleanup.js'
@@ -67,6 +67,28 @@ test('create-team normalization always makes the signed-in user the first member
     'captain@example.com',
     'other@example.com',
     'third@example.com',
+  ])
+})
+
+test('team roster rules allow two through four golfers and cap normalized rosters at four', () => {
+  assert.equal(isValidTeamSize(1), false)
+  assert.equal(isValidTeamSize(2), true)
+  assert.equal(isValidTeamSize(4), true)
+  assert.equal(isValidTeamSize(5), false)
+
+  const normalized = normalizeCreateTeamMembers([
+    { name: 'Golfer Two', email: 'two@example.com' },
+    { name: 'Golfer Three', email: 'three@example.com' },
+    { name: 'Golfer Four', email: 'four@example.com' },
+    { name: 'Golfer Five', email: 'five@example.com' },
+  ], { id: 'captain', name: 'Team Captain', email: 'captain@example.com' })
+
+  assert.equal(normalized.length, 4)
+  assert.deepEqual(normalized.map((member) => member.email), [
+    'captain@example.com',
+    'two@example.com',
+    'three@example.com',
+    'four@example.com',
   ])
 })
 
@@ -203,8 +225,16 @@ test('hole-by-hole input uses the scoreinput reference layout throughout the app
   const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 
-  assert.match(component, /Hole \{activeHole\.hole\}/)
+  assert.match(component, /function HoleNumberGolfBall/)
+  assert.match(component, /<HoleNumberGolfBall holeNumber=\{activeHole\.hole\} \/>/)
   assert.match(component, /holeInputScoreHeader/)
+  assert.match(component, /holeInputHoleIndicator/)
+  assert.match(component, /holeInputGolfBall/)
+  assert.match(component, /aria-label=\{`Current hole \${holeNumber}`\}/)
+  assert.match(component, /category: 'scorecard\.hole_indicator'/)
+  assert.match(component, /message: 'golf_ball_displayed'/)
+  assert.doesNotMatch(component, /holeInputScoreLabel/)
+  assert.doesNotMatch(component, /holeInputScoreHeaderSpacer/)
   assert.match(component, /holeInputContextText/)
   assert.match(component, /holeInputContextValue/)
   assert.doesNotMatch(component, /Score for Hole/)
@@ -238,6 +268,39 @@ test('hole-by-hole input uses the scoreinput reference layout throughout the app
   assert.match(css, /overflow-wrap:anywhere/)
   assert.match(css, /\.holeInputMetadata/)
   assert.match(component, /hasDisplayablePositiveNumber/)
+})
+
+test('hole-by-hole input uses a GolfHomiez-themed numbered golf ball without controls or headings above it', () => {
+  const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
+  const challengesPage = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
+  const golfLogger = fs.readFileSync(new URL('../src/pages/GolfLogger.tsx', import.meta.url), 'utf8')
+  const roundDetailModal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(component, /<svg[\s\S]*className="holeInputGolfBall"[\s\S]*role="img"/)
+  assert.match(component, /className="holeInputGolfBallNumber"/)
+  assert.match(component, /\{holeNumber\}<\/text>/)
+  assert.match(component, /holeInputGolfBallDimples/)
+  assert.match(component, /indicatorStyle: 'golf_ball'/)
+  assert.doesNotMatch(component, />Hole \{activeHole\.hole\}</)
+
+  assert.doesNotMatch(challengesPage, /Team Challenge score input/)
+  assert.doesNotMatch(challengesPage, /Individual Challenge score input/)
+  assert.doesNotMatch(golfLogger, /Hole-by-hole score input/)
+  assert.doesNotMatch(roundDetailModal, /Edit hole-by-hole score input/)
+  assert.doesNotMatch(challengesPage, /teamScorecardModalHeader/)
+  assert.doesNotMatch(golfLogger, /teamScorecardModalHeader/)
+  assert.doesNotMatch(roundDetailModal, /teamScorecardModalHeader/)
+  assert.match(golfLogger, /holeInputModalFooter/)
+  assert.match(roundDetailModal, /holeInputModalFooter/)
+
+  assert.match(css, /\.holeInputGolfBall\{[\s\S]*width:84px/)
+  assert.match(css, /\.holeInputGolfBallBody\{[\s\S]*stroke:#075c27/)
+  assert.match(css, /\.holeInputGolfBallAccent\{[\s\S]*fill:#f7c948/)
+  assert.match(css, /\.holeInputGolfBallNumber\{[\s\S]*fill:#064e20/)
+  assert.match(css, /@media \(max-width:420px\)\{[\s\S]*\.holeInputGolfBall\{[\s\S]*width:74px/)
+  assert.match(css, /\.holeInputModalFooter/)
+  assert.doesNotMatch(css, /\.teamScorecardModalHeader/)
 })
 
 test('hole-by-hole scorecard uses dedicated hole pages, persisted draft scores, completion indicators, and generated par 72 defaults', () => {
@@ -693,8 +756,8 @@ test('round detail modal keeps solo holes single-sided and uses line-item team c
   assert.match(modal, /const opponentHoles: DisplayHoleScore\[\] = displayMode === 'team'/)
   assert.match(modal, /opponent_holes_json/)
   assert.match(modal, /const canShowTeamComparison = displayMode === 'team' && holes\.length > 0 && opponentHoles\.length > 0/)
-  assert.match(modal, /const canOpenTeamScoreView = displayMode === 'team'/)
-  assert.match(modal, /const canOpenOpponentScoreView = displayMode === 'team'/)
+  assert.match(modal, /const canOpenTeamScoreView = isTeamChallengeRound && holes\.length > 0/)
+  assert.match(modal, /const canOpenOpponentScoreView = isTeamChallengeRound && opponentHoles\.length > 0/)
   assert.match(modal, /const roundTypeLabel = displayMode === 'solo' \? 'Solo round' : isTeamChallengeRound \? 'Team Challenge' : 'Team round'/)
   assert.match(modal, /renderTeamSummaryValue\(teamLabel, canOpenTeamScoreView, showingTeamHoles/)
   assert.match(modal, /renderTeamSummaryValue\(opponentLabel, canOpenOpponentScoreView, showingOpponentHoles/)
@@ -726,7 +789,7 @@ test('round detail modal exposes opponent score links plus edit and delete actio
   const sqliteStorage = fs.readFileSync(new URL('../server/storage/sqlite.js', import.meta.url), 'utf8')
   const jsonStorage = fs.readFileSync(new URL('../server/storage/json.js', import.meta.url), 'utf8')
 
-  assert.match(modal, /const canOpenOpponentScoreView = displayMode === 'team'/)
+  assert.match(modal, /const canOpenOpponentScoreView = isTeamChallengeRound && opponentHoles\.length > 0/)
   assert.match(modal, /aria-label=\{`Show \$\{label\} hole-by-hole scores`\}/)
   assert.match(modal, /No hole-by-hole detail saved/)
   assert.match(modal, /onRoundUpdated\?: \(round: ScoreEntry\) => void/)
@@ -744,8 +807,10 @@ test('round detail modal exposes opponent score links plus edit and delete actio
   assert.match(modal, /editSoloHoles/)
   assert.match(modal, /const buildRoundEditPayload/)
   assert.match(modal, /holes: soloEditUsesHoles \? nextSoloHoles : undefined/)
-  assert.match(modal, /roundScore: soloEditUsesHoles \? nextSoloScoreTotal : Number\(editForm\.roundScore\)/)
-  assert.match(modal, /loadScorecardOnMount=\{false\}/)
+  assert.match(modal, /roundScore: soloEditUsesHoles && nextSoloProvidedCount > 0 \? nextSoloScoreTotal : Number\(editForm\.roundScore\)/)
+  assert.match(modal, /teamTotal: teamEditUsesHoles && nextTeamProvidedCount > 0 \? nextTeamScoreTotal : Number\(editForm\.teamTotal\)/)
+  assert.match(modal, /opponentTotal: teamEditUsesHoles && nextOpponentProvidedCount > 0 \? nextOpponentScoreTotal : Number\(editForm\.opponentTotal\)/)
+  assert.match(modal, /loadScorecardOnMount=\{!\(activeEditScorecardSide === 'solo'/)
   assert.match(modal, /opponentHoles: teamEditUsesHoles \? nextOpponentHoles : undefined/)
   assert.match(modal, /onHoleSaved=\{handleEditHoleSaved\}/)
   assert.match(home, /onRoundUpdated=\{handleRoundUpdated\}/)
@@ -858,8 +923,11 @@ test('logged event rows remain clickable compact line items for round detail acc
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
 
   assert.match(home, /function RoundRow\({ round, onClick }/)
-  assert.match(home, /<button type="button" className=\{roundRowClass\(round\)\} onClick=\{onClick\}>/)
-  assert.match(home, /Tap for details/)
+  assert.match(home, /function roundLineItemClass\(round: ScoreEntry\)/)
+  assert.match(home, /<button type="button" className=\{roundLineItemClass\(round\)\} onClick=\{onClick\}/)
+  assert.match(home, /compactLineItem loggedRoundLineItem homeLoggedRoundLineItem/)
+  assert.doesNotMatch(home, /Tap for details/)
+  assert.match(home, /logged_round_line_item_selected/)
 
   assert.match(scoresPage, /function ScoreButton\({ round, onClick }/)
   assert.match(scoresPage, /function scoreLineItemClass\(round: ScoreEntry\)/)
@@ -937,7 +1005,11 @@ test('logged round views show incomplete hole-by-hole indicators', () => {
   assert.match(scoresPage, /getIncompleteRoundStatus/)
   assert.match(scoresPage, /roundIncompleteBadge/)
   assert.match(modal, /getIncompleteRoundStatus/)
-  assert.match(modal, /roundDetailIncompleteBadge/)
+  assert.match(modal, /<strong>Status:<\/strong> Incomplete round/)
+  assert.match(modal, /<strong>Hole detail:<\/strong> \{holes\.length \? `Cumulative score \${holeScoreTotal}` : 'No hole-by-hole detail saved'\}/)
+  assert.match(modal, /holes\.length \? renderHoleDetails\(holes\) : null/)
+  assert.match(modal, /primaryHoleReviewVisible: primaryHoles\.length > 0/)
+  assert.match(modal, /restoredRoundReviewHoleTable: true/)
   assert.match(modal, /scoreProvided/)
   assert.match(modal, /providedHoleScoreTotal/)
   assert.match(css, /\.roundIncompleteBadge/)
@@ -1253,7 +1325,7 @@ test('hole-by-hole controls move date, course, and round type above score contro
 test('solo logged round edit hides the round comparison panel while editing', () => {
   const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
 
-  assert.match(modal, /const showInsightPanel = !\(isEditing && displayMode === 'solo'\)/)
+  assert.match(modal, /const showInsightPanel = !isTeamChallengeRound && !\(isEditing && displayMode === 'solo'\)/)
   assert.match(modal, /\{showInsightPanel \? \([\s\S]*How this round compares[\s\S]*\) : null\}/)
   assert.match(modal, /roundDetail\.soloEdit/)
   assert.match(modal, /comparison_panel_hidden/)
@@ -1439,7 +1511,7 @@ test('navigation uses the styled dropdown menu items and moves user resource lin
   assert.match(css, /color:#15803d/)
 })
 
-test('teams page supports team creation, invite validation, two-to-five roster sizes, pending status, and compact non-edit display', () => {
+test('teams page supports team creation, invite validation, two-to-four roster sizes, status-colored member rows, and one-member-at-a-time editing', () => {
   const teamsPage = fs.readFileSync(new URL('../src/pages/Teams.tsx', import.meta.url), 'utf8')
   const teamsClient = fs.readFileSync(new URL('../src/lib/teams.ts', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
@@ -1457,7 +1529,7 @@ test('teams page supports team creation, invite validation, two-to-five roster s
   assert.match(teamsPage, /Team name already exists\. Suggested team name:/)
   assert.match(teamsPage, /setCreateName\(suggestedTeamName\)/)
   assert.match(teamsPage, /setCreateNamePlaceholder\(suggestedTeamName\)/)
-  assert.match(teamsPage, /Save is available for teams with 2 to 5 team members\./)
+  assert.match(teamsPage, /Save is available for teams with 2 to 4 team members\./)
   assert.match(teamsPage, /lookupUserByEmail/)
   assert.match(teamsPage, /validateCreateMember/)
   assert.match(teamsPage, /Validated/)
@@ -1485,10 +1557,19 @@ test('teams page supports team creation, invite validation, two-to-five roster s
   assert.match(teamsPage, /Logged events for this team will remain saved/)
   assert.match(teamsPage, /teams\.delete/)
   assert.match(teamsPage, /retainedLoggedEventsCount/)
+  assert.match(teamsPage, /const MAX_TEAM_SIZE = 4/)
+  assert.match(teamsPage, /const \[editingMemberId, setEditingMemberId\] = useState<string \| null>\(null\)/)
+  assert.match(teamsPage, /teamMemberLineItem--verified/)
+  assert.match(teamsPage, /teamMemberLineItem--pending/)
+  assert.match(teamsPage, /teamMemberDisplayGrid/)
+  assert.match(teamsPage, /teamMemberEditFields/)
+  assert.match(teamsPage, /finishMemberEdit/)
+  assert.match(teamsPage, /disabled=\{Boolean\(editingMemberId && !memberEditing\)\}/)
+  assert.match(teamsPage, /Finish or cancel the open team member edit before saving the team\./)
   assert.match(teamsClient, /export async function deleteTeam/)
   assert.match(teamsClient, /method: 'DELETE'/)
 
-  assert.match(server, /Teams can only have 2 to 5 team members\./)
+  assert.match(server, /Teams can only have 2 to 4 team members\./)
   assert.match(server, /team_create_duplicate_name/)
   assert.match(server, /team_member_lookup_found/)
   assert.match(server, /lastName: parts\.lastName/)
@@ -1507,7 +1588,8 @@ test('teams page supports team creation, invite validation, two-to-five roster s
   assert.match(teamsClient, /lastName\?: string/)
   assert.match(teamUtils, /export function buildSuggestedTeamName/)
   assert.match(teamUtils, /export function isValidTeamSize/)
-  assert.match(teamUtils, /count <= 5/)
+  assert.match(teamUtils, /count <= 4/)
+  assert.match(teamUtils, /normalized\.length >= 4/)
   assert.match(teamUtils, /normalizeTeamMemberStatus/)
   assert.match(mysqlStorage, /export async function deleteTeamById/)
   assert.match(mysqlStorage, /DELETE FROM team_members WHERE team_id = \?/)
@@ -1524,6 +1606,10 @@ test('teams page supports team creation, invite validation, two-to-five roster s
   const inviteStatusMigration = fs.readFileSync(new URL('../migration_scripts/20260527_055_team_member_invite_status.sql', import.meta.url), 'utf8')
   assert.match(inviteStatusMigration, /ADD COLUMN status VARCHAR\(32\)/)
   assert.match(inviteStatusMigration, /ADD COLUMN verified TINYINT\(1\)/)
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+  assert.match(css, /\.teamMemberLineItem--verified\{[\s\S]*background:#e8f4ff/)
+  assert.match(css, /\.teamMemberLineItem--pending\{[\s\S]*background:#fff0f0/)
+  assert.match(css, /\.teamMemberDisplayEmail\{[\s\S]*grid-column:1 \/ -1/)
 })
 
 test('registration routes stay same-origin and client log ingestion supports both legacy and current endpoints', () => {
@@ -2273,7 +2359,8 @@ test('front-end dates use friendly user-local month day year time formatting', (
   assert.doesNotMatch(timeFormat, /fractionalSecondDigits/)
   assert.match(tournamentPortal, /formatFriendlyDate\(tournament\.startDate\)/)
   assert.match(myTournaments, /formatFriendlyDateTime\(value\)/)
-  assert.match(roundDetail, /formatFriendlyDateTime\(round\.date\)/)
+  assert.match(roundDetail, /formatFriendlyDate\(round\.date\)/)
+  assert.doesNotMatch(roundDetail, /formatFriendlyDateTime\(round\.date\)/)
   assert.match(adminPortal, /formatValue\(row\[column\.key\], column\.key\)/)
 })
 
@@ -3091,6 +3178,9 @@ test('golf user inbox supports messages, Team Challenges, unread indicators, inv
   assert.match(challengesPage, /Current round total stroke score/)
   assert.match(challengesPage, /Back to leaderboard/)
   assert.match(challengesPage, /Edit my score/)
+  assert.match(challengesPage, /className="inboxIndividualRoundSummaryCourse"/)
+  assert.match(challengesPage, /message\.challengeCourse \|\| 'Course not provided'/)
+  assert.match(challengesPage, /course: getTeamChallengeCourseName\(message\)/)
   assert.match(challengesPage, /editableParticipants = getIndividualChallengeParticipants\(message\)\.filter/)
   assert.doesNotMatch(challengesPage, /Read-only score<\/span>/)
   assert.match(inboxFeatureFiles, /renderReadonlyIndividualChallengeHoles/)
@@ -3438,7 +3528,10 @@ test('home and my golf scores use Team Challenges from inbox score records inste
   assert.match(server, /team_challenge_score_records_loaded/)
   assert.match(server, /source: 'team_challenge'/)
   assert.match(modal, /isTeamChallengeRound/)
-  assert.match(modal, /Team Challenge score record is maintained from the Challenges page Team Challenges section/)
+  assert.match(modal, /roundDetailCompareTeamsLink/)
+  assert.match(modal, />Compare Teams</)
+  assert.match(modal, /team_comparison_selected/)
+  assert.match(modal, /const showInsightPanel = !isTeamChallengeRound/)
 })
 
 
@@ -3920,8 +4013,10 @@ test('home and score history use compact mobile filters and a filter-responsive 
   assert.doesNotMatch(home, /Smaller stats up top, bigger score rows below\./)
   assert.doesNotMatch(home, />Open My Golf Scores</)
   assert.doesNotMatch(scores, />My Golf Scores</)
-  assert.match(home, /className="scoreFilterToolbar"/)
-  assert.match(scores, /className="scoreFilterToolbar"/)
+  assert.match(home, /const \[showFilters, setShowFilters\] = useState\(false\)/)
+  assert.match(scores, /const \[showFilters, setShowFilters\] = useState\(false\)/)
+  assert.match(home, /className=\{`scoreFilterToolbar \$\{showFilters \? '' : 'scoreFilterToolbar--collapsed'\}`\}/)
+  assert.match(scores, /className=\{`scoreFilterToolbar \$\{showFilters \? '' : 'scoreFilterToolbar--collapsed'\}`\}/)
   assert.match(home, /className="scoreViewTabs" role="group"/)
   assert.match(scores, /className="scoreViewTabs" role="group"/)
   assert.match(home, /scoreFilterGrid--solo/)
@@ -3941,5 +4036,67 @@ test('home and score history use compact mobile filters and a filter-responsive 
   assert.match(css, /\.scoreFilterGrid--solo \.scoreFilterControl--course\{[\s\S]*grid-column:2/)
   assert.match(css, /\.filteredGolfProfileSummary\{/)
   assert.match(css, /\.filteredGolfProfileHandicapLink\{/)
+  assert.match(home, /scoreFiltersToggle/)
+  assert.match(scores, /scoreFiltersToggle/)
+  assert.match(home, /showFilters \? 'Hide filters' : 'Show filters'/)
+  assert.match(scores, /showFilters \? 'Hide filters' : 'Show filters'/)
+  assert.match(home, /score_filters_shown/)
+  assert.match(scores, /score_filters_hidden/)
+  assert.match(css, /\.scoreFilterActions\{/)
+  assert.match(css, /\.scoreFiltersToggle/)
+})
+
+test('round review popup opens hole-by-hole editing, restores the solo hole review, and supports Team Challenge comparison navigation', () => {
+  const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
+  const scorecard = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
+  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const scores = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(modal, /const beginHoleByHoleEdit = \(\) =>/)
+  assert.match(modal, /setActiveEditScorecardSide\(defaultSide\)/)
+  assert.match(modal, /defaultHoleSelection: 'first_unscored_hole'/)
+  assert.match(modal, /fullViewportScorecard: true/)
+  assert.match(modal, /sharedHoleInputFlow: true/)
+  assert.match(modal, /else beginHoleByHoleEdit\(\)/)
+  assert.match(scorecard, /function defaultHoleIndexForInputFlow\(holes: HoleScoreDetail\[\]\)/)
+  assert.match(scorecard, /return findFirstUnscoredHoleIndex\(holes\) \?\? 0/)
+  assert.match(scorecard, /message: 'first_unscored_hole_selected'/)
+
+  assert.match(modal, /formatFriendlyDate\(round\.date\)/)
+  assert.doesNotMatch(modal, /<strong>Tees:<\/strong>/)
+  assert.doesNotMatch(modal, /<strong>Logged by:<\/strong>/)
+  assert.match(modal, /<strong>Status:<\/strong> Incomplete round/)
+  assert.match(modal, /isTeamChallengeRound && detailView !== 'round'/)
+  assert.match(modal, /Compare Teams/)
+  assert.match(modal, /selectTeamDetailView\('round', 'compare_teams_link'\)/)
+  assert.match(modal, /detailGrid detailGrid--single/)
+  assert.match(modal, /const showInsightPanel = !isTeamChallengeRound/)
+  assert.match(modal, /import \{ createPortal \} from 'react-dom'/)
+  assert.match(modal, /fullViewportEditScorecard/)
+  assert.match(modal, /return createPortal\(fullViewportEditScorecard, document\.body\)/)
+  assert.match(modal, /data-round-edit-viewport="full"/)
+  assert.match(modal, /full_viewport_scorecard_mounted/)
+  assert.match(modal, /portalTarget: 'document\.body'/)
+  assert.match(modal, /document\.body\.style\.overflow = 'hidden'/)
+  assert.match(modal, /roundDetailEditScorecardError/)
+  assert.match(modal, /isClosingEditScorecard \? 'Closing…' : 'Close'/)
+  assert.match(modal, /roundDetailEditScorecardOverlay/)
+  assert.match(modal, /roundDetailEditScorecardCard/)
+  assert.match(modal, /compactMobileInput/)
+  assert.match(modal, /draftContext=\{activeEditScorecardSide === 'solo'/)
+  assert.match(modal, /switchActiveEditScorecardSide/)
+  assert.match(modal, /Round changes save as each hole is completed\./)
+  assert.match(css, /\.roundDetailEditScorecardOverlay\{[\s\S]*height:100dvh/)
+  assert.match(css, /\.roundDetailEditScorecardOverlay\{[\s\S]*overscroll-behavior:contain/)
+  assert.match(css, /\.roundDetailEditScorecardCard\{[\s\S]*height:100dvh/)
+  assert.match(css, /\.roundDetailEditScorecardCard\{[\s\S]*env\(safe-area-inset-top\)/)
+  assert.match(css, /@media \(max-width:720px\)\{[\s\S]*\.roundDetailEditScorecardCard\{[\s\S]*width:100vw/)
+
+  assert.doesNotMatch(home, /Tap for details/)
+  assert.match(home, /loggedRoundLineItem/)
+  assert.match(scores, /loggedRoundLineItem/)
+  assert.match(css, /\.loggedRoundLineItem\{[\s\S]*padding:8px 10px/)
+  assert.match(css, /@media \(max-width: 720px\)\{[\s\S]*\.loggedRoundLineItem\{[\s\S]*padding:7px 9px/)
 })
 
