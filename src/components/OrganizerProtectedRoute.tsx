@@ -1,5 +1,5 @@
 import React from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate } from 'react-router'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 
 export default function OrganizerProtectedRoute({ children }: { children: React.ReactNode }) {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import bannerImg from '../assets/GolfHomiezEmblem.png'
 import RoundDetailModal from '../components/RoundDetailModal'
 import HandicapBreakdownModal from '../components/HandicapBreakdownModal'

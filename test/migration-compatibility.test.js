@@ -89,3 +89,17 @@ test('app feature flags migration is registered with the profile social preferen
   assert.match(sql, /profileSocialPreferences/)
   assert.match(sql, /VALUES \(\s*'profileSocialPreferences',\s*0,/)
 })
+
+test('tournament team score migration is registered with per-tournament team uniqueness and cascading cleanup', async () => {
+  const migrations = await readFile(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
+  const sql = await readFile(new URL('../migration_scripts/20260728_063_tournament_team_scores.sql', import.meta.url), 'utf8')
+
+  assert.match(migrations, /20260728_063/)
+  assert.match(migrations, /tournament_team_scores/)
+  assert.match(migrations, /uniq_tournament_team_scores_team/)
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS tournament_team_scores/)
+  assert.match(sql, /holes_json JSON NULL/)
+  assert.match(sql, /UNIQUE KEY uniq_tournament_team_scores_team \(tournament_id, team_key\)/)
+  assert.match(sql, /correlation_id VARCHAR\(191\) NULL/)
+  assert.match(sql, /ON DELETE CASCADE/)
+})

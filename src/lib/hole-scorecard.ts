@@ -118,11 +118,12 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
     const teeColor = normalizeTeeColor(record.teeColor ?? record.tee_color ?? selectedTeeColor)
     const teeBoxType = String(record.teeBoxType ?? record.tee_box_type ?? teeColor ?? '').trim() || teeColor
     const rawScore = record.score
-    const score = Number(rawScore)
+    const hasScoreValue = rawScore !== undefined && rawScore !== null && rawScore !== ''
+    const score = hasScoreValue ? Number(rawScore) : Number.NaN
     const explicitScoreProvided = hasScoreProvidedFlag(record)
     const scoreProvided = explicitScoreProvided
       ? isProvided(record.scoreProvided ?? record.score_provided)
-      : rawScore !== undefined && rawScore !== null && rawScore !== '' && Number.isFinite(score) && score >= 0
+      : hasScoreValue && Number.isFinite(score) && score >= 0
 
     return {
       hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
@@ -143,7 +144,7 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
       backLongitude: optionalNumberField(record, 'backLongitude', 'back_longitude'),
       flagLatitude: Number.isFinite(Number(record.flagLatitude ?? record.flag_latitude)) ? Number(record.flagLatitude ?? record.flag_latitude) : null,
       flagLongitude: Number.isFinite(Number(record.flagLongitude ?? record.flag_longitude)) ? Number(record.flagLongitude ?? record.flag_longitude) : null,
-      score: Number.isFinite(score) && score >= 0 ? Math.trunc(score) : (scoreProvided ? (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 0) : null),
+      score: hasScoreValue && Number.isFinite(score) && score >= 0 ? Math.trunc(score) : (scoreProvided ? (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 0) : null),
       scoreProvided,
     }
   })

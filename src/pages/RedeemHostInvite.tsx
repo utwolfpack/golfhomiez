@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 
 export default function RedeemHostInvite() {

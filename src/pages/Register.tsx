@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import { logFrontendEvent } from '../lib/frontend-logger'

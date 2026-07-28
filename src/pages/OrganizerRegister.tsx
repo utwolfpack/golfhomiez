@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import LocationInput from '../components/LocationInput'
 import PageHero from '../components/PageHero'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'

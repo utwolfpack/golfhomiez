@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import PageHero from '../components/PageHero'
 import { sendHomieInvite } from '../lib/teams'
 import { logFrontendEvent } from '../lib/frontend-logger'

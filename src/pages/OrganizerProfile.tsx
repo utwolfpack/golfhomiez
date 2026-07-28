@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 import { fetchOrganizerProfile, updateOrganizerProfile, type OrganizerAccount, type OrganizerAccountInput } from '../lib/accounts'

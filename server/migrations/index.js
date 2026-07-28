@@ -1908,6 +1908,130 @@ LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
     },
   },
 
+
+  {
+    version: '20260728_063',
+    name: 'tournament_team_scores',
+    filename: '20260728_063_tournament_team_scores.sql',
+    async isSatisfied(db) {
+      const [scoreTournamentIdRows] = await db.execute(
+        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+           FROM information_schema.COLUMNS
+          WHERE table_schema = DATABASE()
+            AND table_name = 'tournament_team_scores'
+            AND column_name = 'tournament_id'
+          LIMIT 1`
+      )
+      const [tournamentIdRows] = await db.execute(
+        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+           FROM information_schema.COLUMNS
+          WHERE table_schema = DATABASE()
+            AND table_name = 'tournaments'
+            AND column_name = 'id'
+          LIMIT 1`
+      )
+      const scoreTournamentId = scoreTournamentIdRows[0]
+      const tournamentId = tournamentIdRows[0]
+      const tournamentIdCompatible = Boolean(
+        scoreTournamentId &&
+          tournamentId &&
+          String(scoreTournamentId.column_type).toLowerCase() === String(tournamentId.column_type).toLowerCase() &&
+          String(scoreTournamentId.character_set_name || '').toLowerCase() === String(tournamentId.character_set_name || '').toLowerCase() &&
+          String(scoreTournamentId.collation_name || '').toLowerCase() === String(tournamentId.collation_name || '').toLowerCase()
+      )
+      return (
+        await tableExists(db, 'tournament_team_scores') &&
+        tournamentIdCompatible &&
+        await columnExists(db, 'tournament_team_scores', 'team_key') &&
+        await columnExists(db, 'tournament_team_scores', 'holes_json') &&
+        await columnExists(db, 'tournament_team_scores', 'tee_color') &&
+        await columnExists(db, 'tournament_team_scores', 'correlation_id') &&
+        await indexExists(db, 'tournament_team_scores', 'uniq_tournament_team_scores_team') &&
+        await indexExists(db, 'tournament_team_scores', 'idx_tournament_team_scores_updated') &&
+        await foreignKeyExists(db, 'tournament_team_scores', 'fk_tournament_team_scores_tournament')
+      )
+    },
+    async getSql(db) {
+      const quoteIdentifier = (value) => `\`${String(value).replaceAll('`', '``')}\``
+      const [tournamentIdRows] = await db.execute(
+        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+           FROM information_schema.COLUMNS
+          WHERE table_schema = DATABASE()
+            AND table_name = 'tournaments'
+            AND column_name = 'id'
+          LIMIT 1`
+      )
+      const tournamentId = tournamentIdRows[0]
+      const tournamentColumnType = String(tournamentId?.column_type || '').trim()
+      if (!tournamentColumnType) {
+        throw new Error('Cannot build tournament_team_scores migration: tournaments.id column type could not be detected')
+      }
+      const tournamentIdDefinition = [
+        tournamentColumnType.toUpperCase(),
+        tournamentId.character_set_name ? `CHARACTER SET ${quoteIdentifier(tournamentId.character_set_name)}` : '',
+        tournamentId.collation_name ? `COLLATE ${quoteIdentifier(tournamentId.collation_name)}` : '',
+        'NOT NULL',
+      ].filter(Boolean).join(' ')
+
+      const statements = []
+      const hasScoreTable = await tableExists(db, 'tournament_team_scores')
+      if (!hasScoreTable) {
+        statements.push(`CREATE TABLE tournament_team_scores (
+  id VARCHAR(191) NOT NULL PRIMARY KEY,
+  tournament_id ${tournamentIdDefinition},
+  team_key VARCHAR(255) NOT NULL,
+  team_id VARCHAR(191) NULL,
+  team_name VARCHAR(191) NOT NULL,
+  total_score INT NULL,
+  holes_json JSON NULL,
+  tee_color VARCHAR(32) NOT NULL DEFAULT 'white',
+  updated_by_auth_user_id VARCHAR(191) NULL,
+  correlation_id VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_tournament_team_scores_team (tournament_id, team_key),
+  KEY idx_tournament_team_scores_tournament (tournament_id),
+  KEY idx_tournament_team_scores_team_id (team_id),
+  KEY idx_tournament_team_scores_updated (updated_at),
+  KEY idx_tournament_team_scores_correlation (correlation_id),
+  CONSTRAINT fk_tournament_team_scores_tournament
+    FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+      } else {
+        if (await foreignKeyExists(db, 'tournament_team_scores', 'fk_tournament_team_scores_tournament')) {
+          statements.push('ALTER TABLE tournament_team_scores DROP FOREIGN KEY fk_tournament_team_scores_tournament')
+        }
+        const columns = [
+          ['team_key', 'ALTER TABLE tournament_team_scores ADD COLUMN team_key VARCHAR(255) NOT NULL AFTER tournament_id'],
+          ['team_id', 'ALTER TABLE tournament_team_scores ADD COLUMN team_id VARCHAR(191) NULL AFTER team_key'],
+          ['team_name', "ALTER TABLE tournament_team_scores ADD COLUMN team_name VARCHAR(191) NOT NULL DEFAULT 'Tournament team' AFTER team_id"],
+          ['total_score', 'ALTER TABLE tournament_team_scores ADD COLUMN total_score INT NULL AFTER team_name'],
+          ['holes_json', 'ALTER TABLE tournament_team_scores ADD COLUMN holes_json JSON NULL AFTER total_score'],
+          ['tee_color', "ALTER TABLE tournament_team_scores ADD COLUMN tee_color VARCHAR(32) NOT NULL DEFAULT 'white' AFTER holes_json"],
+          ['updated_by_auth_user_id', 'ALTER TABLE tournament_team_scores ADD COLUMN updated_by_auth_user_id VARCHAR(191) NULL AFTER tee_color'],
+          ['correlation_id', 'ALTER TABLE tournament_team_scores ADD COLUMN correlation_id VARCHAR(191) NULL AFTER updated_by_auth_user_id'],
+          ['created_at', 'ALTER TABLE tournament_team_scores ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+          ['updated_at', 'ALTER TABLE tournament_team_scores ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+        ]
+        for (const [columnName, sql] of columns) {
+          if (!(await columnExists(db, 'tournament_team_scores', columnName))) statements.push(sql)
+        }
+        statements.push(`ALTER TABLE tournament_team_scores MODIFY COLUMN tournament_id ${tournamentIdDefinition}`)
+        if (!(await indexExists(db, 'tournament_team_scores', 'uniq_tournament_team_scores_team'))) statements.push('CREATE UNIQUE INDEX uniq_tournament_team_scores_team ON tournament_team_scores (tournament_id, team_key)')
+        if (!(await indexExists(db, 'tournament_team_scores', 'idx_tournament_team_scores_tournament'))) statements.push('CREATE INDEX idx_tournament_team_scores_tournament ON tournament_team_scores (tournament_id)')
+        if (!(await indexExists(db, 'tournament_team_scores', 'idx_tournament_team_scores_team_id'))) statements.push('CREATE INDEX idx_tournament_team_scores_team_id ON tournament_team_scores (team_id)')
+        if (!(await indexExists(db, 'tournament_team_scores', 'idx_tournament_team_scores_updated'))) statements.push('CREATE INDEX idx_tournament_team_scores_updated ON tournament_team_scores (updated_at)')
+        if (!(await indexExists(db, 'tournament_team_scores', 'idx_tournament_team_scores_correlation'))) statements.push('CREATE INDEX idx_tournament_team_scores_correlation ON tournament_team_scores (correlation_id)')
+        statements.push(`ALTER TABLE tournament_team_scores
+  ADD CONSTRAINT fk_tournament_team_scores_tournament
+  FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
+  ON DELETE CASCADE`)
+      }
+      return statements.join(';\n')
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {

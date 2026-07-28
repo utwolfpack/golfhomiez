@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router'
 import PageHero from '../components/PageHero'
 import { requestAdminPasswordReset, resetAdminPassword } from '../lib/admin'
 import { logFrontendEvent } from '../lib/frontend-logger'

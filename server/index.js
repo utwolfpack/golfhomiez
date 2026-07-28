@@ -782,7 +782,7 @@ function sanitizeTournamentTemplateData(value = {}) {
 async function resolveTournamentGolfCourseAddress(row, req = null) {
   if (!row) return row
   const mappedRow = { ...row }
-  if (mappedRow.host_golf_course_address) return mappedRow
+  if (mappedRow.host_golf_course_address && mappedRow.host_golf_course_city) return mappedRow
 
   const courseName = mappedRow.host_golf_course_name || mappedRow.host_account_name || ''
   const courseState = mappedRow.host_golf_course_state || mappedRow.host_account_state || mappedRow.host_state || mappedRow.state || ''
@@ -791,6 +791,10 @@ async function resolveTournamentGolfCourseAddress(row, req = null) {
   try {
     const course = await getGolfCourseByName(courseName, courseState)
     const physicalAddress = formatGolfCoursePhysicalAddress(course)
+    const resolvedCity = String(course?.city || '').trim()
+    const resolvedState = String(course?.state_code || course?.state || '').trim()
+    if (resolvedCity && !mappedRow.host_golf_course_city) mappedRow.host_golf_course_city = resolvedCity
+    if (resolvedState && !mappedRow.host_golf_course_state) mappedRow.host_golf_course_state = resolvedState
     if (physicalAddress) {
       mappedRow.host_golf_course_address = physicalAddress
       logApi('tournament_golf_course_address_resolved', {
@@ -800,6 +804,8 @@ async function resolveTournamentGolfCourseAddress(row, req = null) {
         courseState: courseState || null,
         courseId: course?.id || null,
         addressResolved: true,
+        city: mappedRow.host_golf_course_city || null,
+        state: mappedRow.host_golf_course_state || courseState || null,
       })
     } else {
       logApi('tournament_golf_course_address_missing', {
@@ -837,6 +843,8 @@ function mapTournamentPortalRow(row, req = null) {
     templateData: parseTournamentTemplateData(row.template_data),
     organizerName: row.organizer_name || null,
     hostGolfCourseName: row.host_golf_course_name || row.host_account_name || null,
+    hostGolfCourseCity: row.host_golf_course_city || row.host_account_city || null,
+    hostGolfCourseState: row.host_golf_course_state || row.host_account_state || row.host_state || row.state || null,
     hostGolfCourseAddress: row.host_golf_course_address || null,
     registrationCount: Number(row.registration_count || 0),
     registeredTeamCount: Number(row.registered_team_count || row.registration_count || 0),
@@ -1143,6 +1151,95 @@ async function attachTournamentRegistrations(pool, tournaments = []) {
   }))
 }
 
+
+function tournamentRegistrationIncludesUser(registration, user) {
+  const authUserId = String(user?.id || '').trim()
+  const email = normalizeEmail(user?.email)
+  if (authUserId && String(registration?.authUserId || '').trim() === authUserId) return true
+  if (email && normalizeEmail(registration?.email) === email) return true
+  return (Array.isArray(registration?.teamMembers) ? registration.teamMembers : []).some((member) => {
+    const memberAuthUserId = String(member?.registrationAuthUserId || member?.id || '').trim()
+    return (authUserId && memberAuthUserId === authUserId) || (email && normalizeEmail(member?.email) === email)
+  })
+}
+
+function parseTournamentTeamScoreHoles(value) {
+  if (!value) return []
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    return normalizeHoleScorePayload(parsed) || []
+  } catch (_) {
+    return []
+  }
+}
+
+function mapTournamentTeamScoreRow(row) {
+  if (!row) return null
+  const totalScore = row.total_score == null ? null : Number(row.total_score)
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    teamKey: row.team_key,
+    teamId: row.team_id || null,
+    teamName: row.team_name || 'Tournament team',
+    totalScore: Number.isFinite(totalScore) ? totalScore : null,
+    holes: parseTournamentTeamScoreHoles(row.holes_json),
+    teeColor: normalizeTeeColor(row.tee_color || DEFAULT_TEE_COLOR),
+    updatedAt: row.updated_at || null,
+  }
+}
+
+async function buildTournamentTeamScoreContext(pool, tournamentId, user, req = null) {
+  const portal = await getTournamentPortalById(pool, tournamentId, req)
+  if (!portal) return { status: 404, body: { message: 'Tournament not found' } }
+
+  const registrations = Array.isArray(portal.registrations) ? portal.registrations : []
+  const currentRegistration = registrations.find((registration) => tournamentRegistrationIncludesUser(registration, user)) || null
+  if (!currentRegistration) {
+    return { status: 403, body: { message: 'Register for this tournament before entering or viewing tournament team scores.' } }
+  }
+
+  const [scoreRows] = await pool.execute(
+    `SELECT id, tournament_id, team_key, team_id, team_name, total_score, holes_json, tee_color, updated_at
+       FROM tournament_team_scores
+      WHERE tournament_id = ?`,
+    [portal.tournament.id],
+  )
+  const scoresByTeamKey = new Map(scoreRows.map((row) => [String(row.team_key || ''), mapTournamentTeamScoreRow(row)]))
+  const currentTeamKey = tournamentRegistrationTeamKey(currentRegistration)
+  const teams = registrations.map((registration) => {
+    const teamKey = tournamentRegistrationTeamKey(registration)
+    const storedScore = scoresByTeamKey.get(teamKey) || null
+    return {
+      teamKey,
+      teamId: registration.teamId || storedScore?.teamId || null,
+      teamName: registration.teamName || storedScore?.teamName || registration.name || 'Tournament team',
+      totalScore: storedScore?.totalScore ?? null,
+      holes: storedScore?.holes || [],
+      teeColor: storedScore?.teeColor || DEFAULT_TEE_COLOR,
+      updatedAt: storedScore?.updatedAt || null,
+      canEdit: teamKey === currentTeamKey,
+    }
+  })
+
+  return {
+    status: 200,
+    body: {
+      tournament: {
+        id: portal.tournament.id,
+        tournamentIdentifier: portal.tournament.tournamentIdentifier || null,
+        name: portal.tournament.name,
+        startDate: portal.tournament.startDate || null,
+        status: portal.tournament.status,
+        hostGolfCourseName: portal.tournament.hostGolfCourseName || null,
+        hostGolfCourseState: portal.tournament.hostGolfCourseState || null,
+      },
+      currentTeamKey,
+      teams,
+    },
+  }
+}
+
 async function getTournamentPortalById(pool, tournamentId, req = null) {
   const organizerColumns = await listTableColumns(pool, 'organizer_role_accounts')
   const hostRoleColumns = await listTableColumns(pool, 'host_role_accounts')
@@ -1150,10 +1247,13 @@ async function getTournamentPortalById(pool, tournamentId, req = null) {
   const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
   const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
   const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+  const hostRoleCityExpr = columnExpr(hostRoleColumns, 'hra', ['city', 'course_city'], 'NULL')
+  const hostAccountCityExpr = columnExpr(hostAccountColumns, 'ha', ['city', 'course_city'], 'NULL')
   const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
   const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
   const [rows] = await pool.execute(
     `SELECT t.*, ${organizerNameExpr} AS organizer_name, ${hostRoleGolfCourseExpr} AS host_golf_course_name, ${hostAccountGolfCourseExpr} AS host_account_name,
+            ${hostRoleCityExpr} AS host_golf_course_city, ${hostAccountCityExpr} AS host_account_city,
             ${hostRoleStateExpr} AS host_golf_course_state, ${hostAccountStateExpr} AS host_account_state,
             COUNT(tr.id) AS registration_count
        FROM tournaments t
@@ -2668,14 +2768,18 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
     const organizerNameExpr = columnExpr(organizerColumns, 'ora', ['organization_name', 'organizer_name', 'contact_name', 'email'], 'NULL')
     const hostRoleGolfCourseExpr = columnExpr(hostRoleColumns, 'hra', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
     const hostAccountGolfCourseExpr = columnExpr(hostAccountColumns, 'ha', ['golf_course_name', 'account_name', 'course_name'], 'NULL')
+    const hostRoleCityExpr = columnExpr(hostRoleColumns, 'hra', ['city', 'course_city'], 'NULL')
+    const hostAccountCityExpr = columnExpr(hostAccountColumns, 'ha', ['city', 'course_city'], 'NULL')
     const hostRoleStateExpr = columnExpr(hostRoleColumns, 'hra', ['state_code', 'state', 'course_state'], 'NULL')
     const hostAccountStateExpr = columnExpr(hostAccountColumns, 'ha', ['state_code', 'state', 'course_state'], 'NULL')
     const [rows] = await pool.execute(
       `SELECT t.*, ${organizerNameExpr} AS organizer_name, ${hostRoleGolfCourseExpr} AS host_golf_course_name, ${hostAccountGolfCourseExpr} AS host_account_name,
+              ${hostRoleCityExpr} AS host_golf_course_city, ${hostAccountCityExpr} AS host_account_city,
               ${hostRoleStateExpr} AS host_golf_course_state, ${hostAccountStateExpr} AS host_account_state,
               tr.id AS registration_id, tr.auth_user_id AS registration_auth_user_id, tr.email AS registration_email,
-              tr.name AS registration_name, tr.status AS registration_status, tr.created_at AS registered_at,
-              tr.updated_at AS registration_updated_at,
+              tr.name AS registration_name, tr.status AS registration_status, tr.team_id AS registration_team_id,
+              tr.team_name AS registration_team_name, tr.team_members_json AS registration_team_members_json,
+              tr.created_at AS registered_at, tr.updated_at AS registration_updated_at,
               COUNT(all_tr.id) AS registration_count
          FROM tournament_registrations tr
          JOIN tournaments t ON t.id = tr.tournament_id
@@ -2700,6 +2804,9 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
         email: row.registration_email,
         name: row.registration_name,
         status: row.registration_status,
+        team_id: row.registration_team_id,
+        team_name: row.registration_team_name,
+        team_members_json: row.registration_team_members_json,
         created_at: row.registered_at,
         updated_at: row.registration_updated_at,
       }),
@@ -2711,6 +2818,114 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
     res.status(500).json({ message: 'Could not load registered tournaments' })
   }
 })
+
+app.get('/api/users/tournaments/:id/team-score', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const pool = getPool()
+    const tournamentId = String(req.params.id || '').trim()
+    const context = await buildTournamentTeamScoreContext(pool, tournamentId, req.user, req)
+    if (context.status !== 200) {
+      logApi('tournament_team_score_context_denied', { ...requestContext(req), tournamentId, status: context.status, reason: context.body?.message || null })
+      return res.status(context.status).json(context.body)
+    }
+    const completedTeamCount = context.body.teams.filter((team) => team.totalScore != null).length
+    logApi('tournament_team_score_context_loaded', {
+      ...requestContext(req),
+      tournamentId: context.body.tournament.id,
+      currentTeamKey: context.body.currentTeamKey,
+      teamCount: context.body.teams.length,
+      completedTeamCount,
+      leaderboardMode: 'clickable_team_round_summary',
+      consolidatedTeamView: false,
+    })
+    return res.json(context.body)
+  } catch (error) {
+    logRouteError('Tournament team score context load error', req, error, { tournamentId: req.params.id })
+    return res.status(500).json({ message: 'Could not load tournament team scores' })
+  }
+})
+
+app.patch('/api/users/tournaments/:id/team-score', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const pool = getPool()
+    const tournamentId = String(req.params.id || '').trim()
+    const context = await buildTournamentTeamScoreContext(pool, tournamentId, req.user, req)
+    if (context.status !== 200) {
+      logApi('tournament_team_score_update_denied', { ...requestContext(req), tournamentId, status: context.status, reason: context.body?.message || null })
+      return res.status(context.status).json(context.body)
+    }
+    if (['cancelled', 'completed'].includes(String(context.body.tournament.status || '').toLowerCase())) {
+      logApi('tournament_team_score_update_locked', { ...requestContext(req), tournamentId: context.body.tournament.id, tournamentStatus: context.body.tournament.status })
+      return res.status(409).json({ message: 'Tournament scoring is locked because this tournament is closed.' })
+    }
+
+    const currentTeam = context.body.teams.find((team) => team.teamKey === context.body.currentTeamKey)
+    if (!currentTeam) return res.status(403).json({ message: 'Your registered tournament team could not be resolved.' })
+
+    const holes = normalizeHoleScorePayload(req.body?.holes)
+    if (!holes) return res.status(400).json({ message: 'Tournament team score requires a hole-by-hole scorecard.' })
+    const providedHoles = holes.filter((hole) => hole?.scoreProvided === true)
+    const totalScore = providedHoles.length ? calculateProvidedHoleScoreTotal(holes) : null
+    const teeColor = normalizeTeeColor(req.body?.teeColor || holes.find((hole) => hole?.teeColor)?.teeColor || DEFAULT_TEE_COLOR)
+    const holesJson = JSON.stringify(holes.map((hole) => ({ ...hole, teeColor, teeBoxType: teeColor })))
+
+    logApi('tournament_team_score_update_started', {
+      ...requestContext(req),
+      tournamentId: context.body.tournament.id,
+      teamKey: currentTeam.teamKey,
+      teamId: currentTeam.teamId || null,
+      teamName: currentTeam.teamName,
+      providedHoleCount: providedHoles.length,
+      totalScore,
+      teeColor,
+    })
+
+    await pool.execute(
+      `INSERT INTO tournament_team_scores
+        (id, tournament_id, team_key, team_id, team_name, total_score, holes_json, tee_color, updated_by_auth_user_id, correlation_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         team_id = VALUES(team_id),
+         team_name = VALUES(team_name),
+         total_score = VALUES(total_score),
+         holes_json = VALUES(holes_json),
+         tee_color = VALUES(tee_color),
+         updated_by_auth_user_id = VALUES(updated_by_auth_user_id),
+         correlation_id = VALUES(correlation_id),
+         updated_at = CURRENT_TIMESTAMP`,
+      [
+        uuidv4(),
+        context.body.tournament.id,
+        currentTeam.teamKey,
+        currentTeam.teamId || null,
+        currentTeam.teamName,
+        totalScore,
+        holesJson,
+        teeColor,
+        req.user.id,
+        req.correlationId || null,
+      ],
+    )
+
+    const refreshed = await buildTournamentTeamScoreContext(pool, context.body.tournament.id, req.user, req)
+    if (refreshed.status !== 200) return res.status(refreshed.status).json(refreshed.body)
+    logApi('tournament_team_score_update_succeeded', {
+      ...requestContext(req),
+      tournamentId: context.body.tournament.id,
+      teamKey: currentTeam.teamKey,
+      teamId: currentTeam.teamId || null,
+      providedHoleCount: providedHoles.length,
+      totalScore,
+      teeColor,
+      leaderboardTeamCount: refreshed.body.teams.length,
+    })
+    return res.json(refreshed.body)
+  } catch (error) {
+    logRouteError('Tournament team score update error', req, error, { tournamentId: req.params.id })
+    return res.status(500).json({ message: 'Could not update tournament team score' })
+  }
+})
+
 
 app.get('/api/feature-flags', requireStorage, async (req, res) => {
   try {

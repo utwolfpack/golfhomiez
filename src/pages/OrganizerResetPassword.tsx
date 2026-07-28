@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import PageHero from '../components/PageHero'
 import { resetOrganizerPassword } from '../lib/organizer-auth'
 import { logFrontendEvent } from '../lib/frontend-logger'

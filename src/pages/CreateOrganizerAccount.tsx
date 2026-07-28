@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import PageHero from '../components/PageHero'
 import { createOrganizerAccount, fetchOrganizerAccount, type OrganizerAccountInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
