@@ -66,6 +66,7 @@ type Props = {
   teeColor?: TeeColor | string
   persistedHoles?: HoleScoreDetail[] | null
   registerPendingHoleSave?: (handler: PendingHoleScoreSaveHandler | null) => void
+  showTeeData?: boolean
 }
 
 type ScorePreset = {
@@ -128,8 +129,9 @@ function buildDraftSearchParams(stateCode: string, course: string, draftContext?
 }
 
 function getScoreOrPar(hole: HoleScoreDetail) {
+  if (hole.scoreProvided === false || hole.score == null) return getPlayablePar(hole.par)
   const score = Number(hole.score)
-  return hole.score != null && Number.isFinite(score) ? score : getPlayablePar(hole.par)
+  return Number.isFinite(score) ? score : getPlayablePar(hole.par)
 }
 
 
@@ -241,7 +243,7 @@ function getProvidedHoleNumbers(holes: HoleScoreDetail[]) {
     .filter((holeNumber) => Number.isFinite(holeNumber))
 }
 
-export default function HoleByHoleScorecard({ enabled, stateCode, course, courseId = null, holes, onChange, onHoleSaved, draftContext, scoreOwnerLabel, loadScorecardOnMount = true, compactMobileInput = false, teeColor = 'white', persistedHoles = null, registerPendingHoleSave }: Props) {
+export default function HoleByHoleScorecard({ enabled, stateCode, course, courseId = null, holes, onChange, onHoleSaved, draftContext, scoreOwnerLabel, loadScorecardOnMount = true, compactMobileInput = false, teeColor = 'white', persistedHoles = null, registerPendingHoleSave, showTeeData = true }: Props) {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [activeHoleIndex, setActiveHoleIndex] = useState(0)
@@ -634,12 +636,12 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   const currentOutcome = formatHoleScoreOutcome({ par: activeHole.par, score: activeScore })
   const currentHoleProvided = Boolean(activeHole.scoreProvided)
   const activeHoleParLabel = activeHole.par ?? '—'
-  const activeHoleTeeLabel = teeColorLabel(selectedTeeColor)
+  const activeHoleTeeLabel = showTeeData ? teeColorLabel(selectedTeeColor) : ''
   const roundTypeLabel = getRoundTypeLabel(draftContext, scoreOwnerLabel)
   const holeContextItems = [
     { key: 'par', value: `Par ${activeHoleParLabel}`, emphasis: true },
     { key: 'course', value: course || 'Selected course', emphasis: true },
-    { key: 'tees', value: `${activeHoleTeeLabel} tees`, subtle: false },
+    showTeeData ? { key: 'tees', value: `${activeHoleTeeLabel} tees`, subtle: false } : null,
     hasDisplayablePositiveNumber(activeHole.yards) ? { key: 'yards', value: `${formatYardage(activeHole.yards)} Yards`, subtle: true } : null,
     hasDisplayablePositiveNumber(activeHole.strokeIndex) ? { key: 'strokeIndex', value: `Stroke Index ${Math.trunc(Number(activeHole.strokeIndex))}`, subtle: true } : null,
     draftContext?.date ? { key: 'date', value: draftContext.date, subtle: true } : null,

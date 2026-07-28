@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router'
 import PageHero from '../components/PageHero'
 import clubhouseImg from '../assets/gallery/clubhouse-twilight.svg'
 import { useAuth } from '../context/AuthContext'

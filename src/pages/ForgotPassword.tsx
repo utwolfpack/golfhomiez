@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 import { forgotPassword, getLatestResetLink } from '../lib/auth-api'
 

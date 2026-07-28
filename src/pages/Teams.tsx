@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import ProtectedRoute from '../components/ProtectedRoute'
 import { createTeam, deleteTeam, fetchTeams, lookupUserByEmail, sendRegistrationInvite, updateTeam } from '../lib/teams'
 import type { ScoreEntry, Team, TeamMember } from '../types'

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import ProtectedRoute from '../components/ProtectedRoute'

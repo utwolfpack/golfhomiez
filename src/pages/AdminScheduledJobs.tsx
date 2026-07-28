@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 import { fetchScheduledJobs, runScheduledJob, type ScheduledJob } from '../lib/admin'
 import { logFrontendEvent } from '../lib/frontend-logger'

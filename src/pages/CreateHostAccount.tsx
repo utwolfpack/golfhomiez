@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { requestHostAccount } from '../lib/host-auth'

@@ -1,5 +1,5 @@
 import { api } from './api'
-import type { Team } from '../types'
+import type { HoleScoreDetail, Team } from '../types'
 import type { GolfCourseOption } from './golf-courses'
 
 export type HostAccountInput = {
@@ -88,6 +88,8 @@ export type Tournament = {
   isPublic: boolean
   organizerName?: string | null
   hostGolfCourseName?: string | null
+  hostGolfCourseCity?: string | null
+  hostGolfCourseState?: string | null
   hostGolfCourseAddress?: string | null
   portalPath?: string | null
   portalUrl?: string | null
@@ -180,7 +182,30 @@ export type UserTournamentsSummary = {
   tournaments: UserRegisteredTournament[]
 }
 
+export type TournamentTeamScoreTeam = {
+  teamKey: string
+  teamId?: string | null
+  teamName: string
+  totalScore?: number | null
+  holes: HoleScoreDetail[]
+  teeColor?: string | null
+  updatedAt?: string | null
+  canEdit: boolean
+}
 
+export type TournamentTeamScoreContext = {
+  tournament: {
+    id: string
+    tournamentIdentifier?: string | null
+    name: string
+    startDate?: string | null
+    status: string
+    hostGolfCourseName?: string | null
+    hostGolfCourseState?: string | null
+  }
+  currentTeamKey: string
+  teams: TournamentTeamScoreTeam[]
+}
 
 export type TournamentRegistrationResult = {
   ok: boolean
@@ -288,6 +313,17 @@ export function fetchOrganizerInviteEligibility(email: string) {
 
 export function fetchUserTournaments() {
   return api<UserTournamentsSummary>('/api/users/tournaments')
+}
+
+export function fetchTournamentTeamScore(tournamentId: string) {
+  return api<TournamentTeamScoreContext>(`/api/users/tournaments/${encodeURIComponent(tournamentId)}/team-score`)
+}
+
+export function updateTournamentTeamScore(tournamentId: string, input: { holes: HoleScoreDetail[]; teeColor?: string | null }) {
+  return api<TournamentTeamScoreContext>(`/api/users/tournaments/${encodeURIComponent(tournamentId)}/team-score`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
 }
 
 export function fetchTournamentPortal(id: string) {

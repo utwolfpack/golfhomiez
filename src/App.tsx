@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect } from 'react'
-import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router'
 import NavBar from './components/NavBar'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { HostAuthProvider, useHostAuth } from './context/HostAuthContext'
