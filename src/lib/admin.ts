@@ -125,10 +125,18 @@ export type ScheduledJobLastRun = {
   status?: string | null
   startedAt?: string | null
   completedAt?: string | null
+  durationMs?: number | null
   output?: unknown
   error?: string | null
   correlationId?: string | null
   adminUserEmail?: string | null
+}
+
+export type ScheduledJobSchedule = {
+  type: 'manual' | 'daily' | 'weekly' | 'monthly'
+  time?: string | null
+  dayOfWeek?: number | null
+  dayOfMonth?: number | null
 }
 
 export type ScheduledJob = {
@@ -137,10 +145,14 @@ export type ScheduledJob = {
   description?: string | null
   scheduleLabel?: string | null
   scheduleTimeZone?: string | null
+  schedule?: ScheduledJobSchedule
+  jobConfig?: { matchValues?: string[]; [key: string]: unknown }
   createdAt?: string | null
   nextRunAt?: string | null
   updatedAt?: string | null
   lastRun?: ScheduledJobLastRun | null
+  canCancel?: boolean
+  activeRunId?: string | null
 }
 
 export async function fetchScheduledJobs() {
@@ -149,6 +161,19 @@ export async function fetchScheduledJobs() {
 
 export async function runScheduledJob(jobId: string) {
   return api<{ result: { jobId: string; runId: string; status: string; output?: unknown; nextRunAt?: string | null }; jobs: ScheduledJob[] }>(`/api/admin/scheduled-jobs/${encodeURIComponent(jobId)}/run`, {
+    method: 'POST',
+  })
+}
+
+export async function updateScheduledJobSchedule(jobId: string, input: { schedule: ScheduledJobSchedule; jobConfig?: Record<string, unknown> }) {
+  return api<{ job: ScheduledJob; jobs: ScheduledJob[] }>(`/api/admin/scheduled-jobs/${encodeURIComponent(jobId)}/schedule`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function cancelScheduledJob(jobId: string) {
+  return api<{ result: { jobId: string; runId?: string | null; status: string; correlationId?: string | null; requestCorrelationId?: string | null }; jobs: ScheduledJob[] }>(`/api/admin/scheduled-jobs/${encodeURIComponent(jobId)}/cancel`, {
     method: 'POST',
   })
 }

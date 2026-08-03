@@ -13,7 +13,9 @@ function formatDateTime(value?: string | null) {
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not set'
-  return formatFriendlyDateTime(value)
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00Z`) : new Date(value)
+  if (Number.isNaN(dateOnly.getTime())) return value
+  return new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(dateOnly)
 }
 
 function cleanLocationPart(value: unknown) {
@@ -75,58 +77,73 @@ export default function MyTournaments() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero title="My tournaments" />
-        {loading ? <div className="card">Loading your tournaments…</div> : null}
-        {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
-        {!loading && !error && tournaments.length === 0 ? (
-          <div className="card" style={{ padding: 16 }}>
-            <strong>No tournament registrations yet.</strong>
-            <p className="small">Published tournament registrations will appear here after you register.</p>
+        <PageHero
+          title="My Tournaments"
+          actions={(
+            <Link
+              className="btnPrimary"
+              to="/find-tournament"
+              onClick={() => logFrontendEvent({ category: 'user.tournaments', message: 'find_tournament_selected', data: { destination: '/find-tournament' } })}
+            >
+              Find Tournament
+            </Link>
+          )}
+        />
+
+        <section aria-labelledby="registered-tournaments-heading">
+          <h2 id="registered-tournaments-heading" style={{ marginTop: 24 }}>My registered tournaments</h2>
+          {loading ? <div className="card">Loading your tournaments…</div> : null}
+          {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
+          {!loading && !error && tournaments.length === 0 ? (
+            <div className="card" style={{ padding: 16 }}>
+              <strong>No tournament registrations yet.</strong>
+              <p className="small">Published tournament registrations will appear here after you register.</p>
+            </div>
+          ) : null}
+          <div className="compactLineItemList tournamentLineItemList">
+            {tournaments.map((tournament) => {
+              const destination = tournament.portalPath || `/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}`
+              const openTournament = () => logFrontendEvent({
+                category: 'user.tournaments',
+                message: 'tournament_line_item_selected',
+                data: {
+                  tournamentId: tournament.id,
+                  registrationId: tournament.registration.id,
+                  registrationStatus: tournament.registration.status,
+                  destination,
+                },
+              })
+              return (
+                <div key={`${tournament.id}-${tournament.registration.id}`} className="compactLineItem tournamentLineItem">
+                  <Link className="tournamentLineItemPrimary" to={destination} aria-label={`Open ${tournament.name} tournament details`} onClick={openTournament}>
+                    <span className="compactLineItemMain">
+                      <strong className="compactLineItemTitle">{tournament.name}</strong>
+                      <span className="compactLineItemMeta"><strong>Date:</strong> {formatDate(tournament.startDate)} • <strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</span>
+                      <span className="compactLineItemSecondary"><strong>Location:</strong> {formatTournamentLocation(tournament)}</span>
+                    </span>
+                  </Link>
+                  <span className="compactLineItemSummary tournamentLineItemSummary">
+                    <span className="tournamentLineItemActionRow">
+                      <strong className="compactLineItemStatus">{tournament.registration.status || 'Registered'}</strong>
+                      <button
+                        type="button"
+                        className="btn btnSmall tournamentTeamScoreButton"
+                        onClick={() => {
+                          setActiveScoreTournament(tournament)
+                          logFrontendEvent({ category: 'user.tournaments', message: 'team_score_button_selected', data: { tournamentId: tournament.id, registrationId: tournament.registration.id, teamId: tournament.registration.teamId || null, teamName: tournament.registration.teamName || null } })
+                        }}
+                      >
+                        Team Score
+                      </button>
+                    </span>
+                    <span>{formatDateTime(tournament.registration.registeredAt)}</span>
+                  </span>
+                  <Link className="compactLineItemChevron tournamentLineItemChevronLink" to={destination} aria-label={`Open ${tournament.name} tournament details`} onClick={openTournament}>›</Link>
+                </div>
+              )
+            })}
           </div>
-        ) : null}
-        <div className="compactLineItemList tournamentLineItemList">
-          {tournaments.map((tournament) => {
-            const destination = tournament.portalPath || `/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}`
-            const openTournament = () => logFrontendEvent({
-              category: 'user.tournaments',
-              message: 'tournament_line_item_selected',
-              data: {
-                tournamentId: tournament.id,
-                registrationId: tournament.registration.id,
-                registrationStatus: tournament.registration.status,
-                destination,
-              },
-            })
-            return (
-              <div key={`${tournament.id}-${tournament.registration.id}`} className="compactLineItem tournamentLineItem">
-                <Link className="tournamentLineItemPrimary" to={destination} aria-label={`Open ${tournament.name} tournament details`} onClick={openTournament}>
-                  <span className="compactLineItemMain">
-                    <strong className="compactLineItemTitle">{tournament.name}</strong>
-                    <span className="compactLineItemMeta"><strong>Date:</strong> {formatDate(tournament.startDate)} • <strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</span>
-                    <span className="compactLineItemSecondary"><strong>Location:</strong> {formatTournamentLocation(tournament)}</span>
-                  </span>
-                </Link>
-                <span className="compactLineItemSummary tournamentLineItemSummary">
-                  <span className="tournamentLineItemActionRow">
-                    <strong className="compactLineItemStatus">{tournament.registration.status || 'Registered'}</strong>
-                    <button
-                      type="button"
-                      className="btn btnSmall tournamentTeamScoreButton"
-                      onClick={() => {
-                        setActiveScoreTournament(tournament)
-                        logFrontendEvent({ category: 'user.tournaments', message: 'team_score_button_selected', data: { tournamentId: tournament.id, registrationId: tournament.registration.id, teamId: tournament.registration.teamId || null, teamName: tournament.registration.teamName || null } })
-                      }}
-                    >
-                      Team Score
-                    </button>
-                  </span>
-                  <span>{formatDateTime(tournament.registration.registeredAt)}</span>
-                </span>
-                <Link className="compactLineItemChevron tournamentLineItemChevronLink" to={destination} aria-label={`Open ${tournament.name} tournament details`} onClick={openTournament}>›</Link>
-              </div>
-            )
-          })}
-        </div>
+        </section>
       </div>
       {activeScoreTournament ? <TournamentTeamScoreModal tournament={activeScoreTournament} onClose={() => setActiveScoreTournament(null)} /> : null}
     </div>

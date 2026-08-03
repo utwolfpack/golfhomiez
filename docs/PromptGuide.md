@@ -12,6 +12,8 @@ Create the logging support for the requested these changes to make diagnosing er
 
 if an MD or documentation file is created it should be created and stored in the project docs folder
 
+address npm audit - high vulnerabilities and do not implement dependencies that would introduce high vulnerabilities into the application
+
 <!-- The prompt below is for when you experience deployment issues with nginx or other environment specific issues -->
 deployed this to the stage environment in cloudpanel hostinger.  I uploaded some log files from the application and nginx for you to review and resolve.  Make the changes to address the following issue or issues described as necessary without breaking local development functionality and create a new zip file with  the changes.  Explain the changes you made.
 

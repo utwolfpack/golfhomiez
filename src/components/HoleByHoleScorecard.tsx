@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import {
   buildClientDefaultHoleScorecard,
-  formatHoleScoreOutcome,
+  getHoleScoreSavePresentation,
   holeParTotal,
   providedHoleScoreTotal,
   mergeProvidedHoleScores,
@@ -67,26 +67,14 @@ type Props = {
   persistedHoles?: HoleScoreDetail[] | null
   registerPendingHoleSave?: (handler: PendingHoleScoreSaveHandler | null) => void
   showTeeData?: boolean
-}
-
-type ScorePreset = {
-  key: string
-  label: string
-  className: string
-  getScore: (par: number | null) => number
+  initialHoleNumber?: number | null
+  onActiveHoleChange?: (holeNumber: number) => void
 }
 
 function getPlayablePar(par: number | null) {
   const value = Number(par)
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 4
 }
-
-const SCORE_PRESETS: ScorePreset[] = [
-  { key: 'birdie', label: 'Birdie', className: 'holeInputPreset--birdie', getScore: (par) => Math.max(1, getPlayablePar(par) - 1) },
-  { key: 'par', label: 'Par', className: 'holeInputPreset--par', getScore: (par) => getPlayablePar(par) },
-  { key: 'bogey', label: 'Bogey', className: 'holeInputPreset--bogey', getScore: (par) => getPlayablePar(par) + 1 },
-  { key: 'double-bogey', label: 'Double-Bogey', className: 'holeInputPreset--doubleBogey', getScore: (par) => getPlayablePar(par) + 2 },
-]
 
 function getSafeHole(holes: HoleScoreDetail[], index: number, stateCode: string, course: string, teeColor: TeeColor | string = 'white') {
   return holes[index] || buildClientDefaultHoleScorecard(stateCode, course, teeColor)[Math.max(0, Math.min(17, index))]
@@ -198,8 +186,19 @@ function findFirstUnscoredHoleIndex(holes: HoleScoreDetail[]) {
   return null
 }
 
-function defaultHoleIndexForInputFlow(holes: HoleScoreDetail[]) {
-  return findFirstUnscoredHoleIndex(holes) ?? 0
+function defaultHoleIndexForInputFlow(holes: HoleScoreDetail[], preferredHoleNumber?: number | null) {
+  const firstUnscoredHoleIndex = findFirstUnscoredHoleIndex(holes)
+  // A completed scorecard should always reopen at hole 1. This takes precedence
+  // over a previously remembered/resume hole so every hole-by-hole entry flow
+  // has the same predictable page-load behavior after all scores are saved.
+  if (firstUnscoredHoleIndex == null) return 0
+
+  const normalizedPreferredHole = Number(preferredHoleNumber)
+  if (Number.isFinite(normalizedPreferredHole) && normalizedPreferredHole > 0) {
+    const preferredIndex = holes.findIndex((hole) => Number(hole?.hole) === Math.trunc(normalizedPreferredHole))
+    if (preferredIndex >= 0) return preferredIndex
+  }
+  return firstUnscoredHoleIndex
 }
 
 function HoleNumberGolfBall({ holeNumber }: { holeNumber: number }) {
@@ -243,7 +242,7 @@ function getProvidedHoleNumbers(holes: HoleScoreDetail[]) {
     .filter((holeNumber) => Number.isFinite(holeNumber))
 }
 
-export default function HoleByHoleScorecard({ enabled, stateCode, course, courseId = null, holes, onChange, onHoleSaved, draftContext, scoreOwnerLabel, loadScorecardOnMount = true, compactMobileInput = false, teeColor = 'white', persistedHoles = null, registerPendingHoleSave, showTeeData = true }: Props) {
+export default function HoleByHoleScorecard({ enabled, stateCode, course, courseId = null, holes, onChange, onHoleSaved, draftContext, scoreOwnerLabel, loadScorecardOnMount = true, compactMobileInput = false, teeColor = 'white', persistedHoles = null, registerPendingHoleSave, showTeeData = true, initialHoleNumber = null, onActiveHoleChange }: Props) {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [activeHoleIndex, setActiveHoleIndex] = useState(0)
@@ -254,7 +253,9 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   const defaultHoleSelectionKeyRef = useRef('')
   const selectedTeeColor = normalizeTeeColor(teeColor)
   const persistedHolesRef = useRef<HoleScoreDetail[] | null>(persistedHoles)
+  const initialHoleNumberRef = useRef<number | null>(initialHoleNumber)
   persistedHolesRef.current = persistedHoles
+  initialHoleNumberRef.current = initialHoleNumber
   const latestPendingStateRef = useRef({
     enabled,
     holes,
@@ -292,6 +293,11 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     })
   }, [enabled, activeHole.hole, course, draftContext?.mode])
 
+  useEffect(() => {
+    if (!enabled || !onActiveHoleChange) return
+    onActiveHoleChange(activeHole.hole)
+  }, [enabled, activeHole.hole, onActiveHoleChange])
+
   latestPendingStateRef.current = {
     enabled,
     holes,
@@ -314,20 +320,22 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     selectedTeeColor,
     draftParams?.toString() || '',
     String(loadScorecardOnMount),
-  ].join('|'), [enabled, stateCode, course, courseId, selectedTeeColor, draftParams, loadScorecardOnMount])
+    String(initialHoleNumber || ''),
+  ].join('|'), [enabled, stateCode, course, courseId, selectedTeeColor, draftParams, loadScorecardOnMount, initialHoleNumber])
 
   useEffect(() => {
     if (!enabled) return
     if (defaultHoleSelectionKeyRef.current === defaultHoleSelectionKey) return
     defaultHoleSelectionKeyRef.current = defaultHoleSelectionKey
-    const nextDefaultIndex = defaultHoleIndexForInputFlow(holes)
+    const nextDefaultIndex = defaultHoleIndexForInputFlow(holes, initialHoleNumber)
+    const allHolesSaved = holes.length > 0 && findFirstUnscoredHoleIndex(holes) == null
     setActiveHoleIndex(nextDefaultIndex)
     logFrontendEvent({
       category: 'scorecard.hole.default_selection',
-      message: 'first_unscored_hole_selected',
-      data: { correlationId: getCorrelationId(), stateCode, course, courseId, teeColor: selectedTeeColor, activeHole: holes[nextDefaultIndex]?.hole || nextDefaultIndex + 1, providedHoleNumbers: getProvidedHoleNumbers(holes) },
+      message: allHolesSaved ? 'completed_scorecard_defaulted_to_hole_one' : (initialHoleNumber ? 'resume_hole_selected' : 'first_unscored_hole_selected'),
+      data: { correlationId: getCorrelationId(), stateCode, course, courseId, teeColor: selectedTeeColor, activeHole: holes[nextDefaultIndex]?.hole || nextDefaultIndex + 1, providedHoleNumbers: getProvidedHoleNumbers(holes), allHolesSaved },
     })
-  }, [enabled, defaultHoleSelectionKey])
+  }, [enabled, defaultHoleSelectionKey, initialHoleNumber])
 
   useEffect(() => {
     if (!enabled || !loadScorecardOnMount) return
@@ -386,7 +394,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
         nextHoles = withSelectedTeeColor(nextHoles, selectedTeeColor)
         const loadedProvidedHoleNumbers = getProvidedHoleNumbers(nextHoles)
         onChange(nextHoles)
-        const defaultHoleIndex = defaultHoleIndexForInputFlow(nextHoles)
+        const defaultHoleIndex = defaultHoleIndexForInputFlow(nextHoles, initialHoleNumberRef.current)
         setActiveHoleIndex(defaultHoleIndex)
         logFrontendEvent({
           category: 'scorecard.load',
@@ -450,6 +458,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
 
   async function saveHoleScore(hole: HoleScoreDetail, score: number, source: string, options: { throwOnError?: boolean; autoAdvanceAfterSave?: boolean } = {}, baseHoles: HoleScoreDetail[] = holes): Promise<PendingHoleScoreSaveResult> {
     const normalizedScore = Math.max(0, Math.trunc(score))
+    const savePresentation = getHoleScoreSavePresentation(hole.par, normalizedScore)
     const next = withSelectedTeeColor(updateHoleScore(baseHoles, hole.hole, normalizedScore), selectedTeeColor)
     const correlationId = getCorrelationId()
     const savedHoleNumbers = getProvidedHoleNumbers(next)
@@ -468,7 +477,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     logFrontendEvent({
       category: 'scorecard.hole.save',
       message: 'started',
-      data: { correlationId, hole: hole.hole, score: normalizedScore, source, teeColor: savedHole.teeColor || selectedTeeColor, currentScore: providedHoleScoreTotal(next), providedCount: savedHoleNumbers.length, providedHoleNumbers: savedHoleNumbers, draftContext },
+      data: { correlationId, hole: hole.hole, score: normalizedScore, source, teeColor: savedHole.teeColor || selectedTeeColor, currentScore: providedHoleScoreTotal(next), outcome: savePresentation.outcome, relativeToPar: savePresentation.relative, providedCount: savedHoleNumbers.length, providedHoleNumbers: savedHoleNumbers, draftContext },
     })
 
     try {
@@ -508,7 +517,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
       logFrontendEvent({
         category: 'scorecard.hole.save',
         message: 'succeeded',
-        data: { correlationId, hole: hole.hole, score: normalizedScore, source, teeColor: savedHole.teeColor || selectedTeeColor, providedCount: savedHoleNumbers.length, providedHoleNumbers: savedHoleNumbers, remainingHoleCount, advancedAfterSave: nextUnscoredHoleIndex != null, nextHole: nextAutoAdvanceHole },
+        data: { correlationId, hole: hole.hole, score: normalizedScore, source, teeColor: savedHole.teeColor || selectedTeeColor, outcome: savePresentation.outcome, relativeToPar: savePresentation.relative, providedCount: savedHoleNumbers.length, providedHoleNumbers: savedHoleNumbers, remainingHoleCount, advancedAfterSave: nextUnscoredHoleIndex != null, nextHole: nextAutoAdvanceHole },
       })
       return { saved: true, hole: hole.hole, providedHoleNumbers: savedHoleNumbers, holes: next }
     } catch (error) {
@@ -633,7 +642,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
 
   if (!enabled) return null
 
-  const currentOutcome = formatHoleScoreOutcome({ par: activeHole.par, score: activeScore })
+  const savePresentation = getHoleScoreSavePresentation(activeHole.par, activeScore)
   const currentHoleProvided = Boolean(activeHole.scoreProvided)
   const activeHoleParLabel = activeHole.par ?? '—'
   const activeHoleTeeLabel = showTeeData ? teeColorLabel(selectedTeeColor) : ''
@@ -654,6 +663,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
       <section className={`holeInputPhone ${compactMobileInput ? 'holeInputPhone--compact' : ''}`} aria-label={`Score entry for hole ${activeHole.hole}`}>
         <div className={`holeInputScorePageCard ${compactMobileInput ? 'holeInputScorePageCard--compact' : ''}`}>
           <div className="holeInputScoreHeader">
+            <span className="holeInputScoreHeaderLabel">Hole</span>
             <HoleNumberGolfBall holeNumber={activeHole.hole} />
           </div>
           {loadError ? <div className="small holeInputLoadWarning">golf course hole data could not be loaded. Try again or choose another course.</div> : null}
@@ -671,34 +681,18 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
             <button type="button" className="btn holeInputStepperButton" aria-label="Decrease score" onClick={() => { setActiveScoreDirty(true); setActiveScore((score) => Math.max(0, score - 1)) }}>−</button>
             <div className="holeInputScoreValueBlock">
               <div className="scoreStepperValue" aria-live="polite">{activeScore}</div>
-              <div className="holeInputOutcome" aria-live="polite">{currentOutcome}</div>
             </div>
             <button type="button" className="btn holeInputStepperButton" aria-label="Increase score" onClick={() => { setActiveScoreDirty(true); setActiveScore((score) => score + 1) }}>+</button>
           </div>
 
-          <div className="holeInputPresetGrid" aria-label="Quick score presets">
-            {SCORE_PRESETS.map((preset) => {
-              const presetScore = preset.getScore(activeHole.par)
-              return (
-                <button
-                  key={preset.key}
-                  type="button"
-                  className={`holeInputPreset ${preset.className}${activeScore === presetScore ? ' holeInputPreset--selected' : ''}`}
-                  onClick={() => { setActiveScoreDirty(true); setActiveScore(presetScore) }}
-                >
-                  {preset.label}
-                </button>
-              )
-            })}
-          </div>
-
           <button
             type="button"
-            className="btnPrimary holeInputSaveButton"
+            className={`btn holeInputSaveButton ${savePresentation.className}`}
             disabled={savingHole}
+            aria-label={`Save Hole ${activeHole.hole} score: ${savePresentation.label}`}
             onClick={() => saveHoleScore(activeHole, activeScore, 'dedicated_hole_page', { autoAdvanceAfterSave: true })}
           >
-            {savingHole ? 'Saving…' : currentHoleProvided ? 'Update Hole Score' : 'Save Hole Score'}
+            {savingHole ? 'Saving…' : savePresentation.label}
           </button>
           {currentHoleProvided ? (
             <button

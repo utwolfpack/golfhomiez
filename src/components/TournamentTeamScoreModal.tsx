@@ -7,7 +7,7 @@ import {
   type TournamentTeamScoreTeam,
   type UserRegisteredTournament,
 } from '../lib/accounts'
-import { buildClientDefaultHoleScorecard, normalizeHoleScorecard } from '../lib/hole-scorecard'
+import { buildClientDefaultHoleScorecard, nextUnscoredHoleNumber, normalizeHoleScorecard } from '../lib/hole-scorecard'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDate } from '../lib/time-format'
 import { normalizeTeeColor } from '../lib/tee-colors'
@@ -40,6 +40,49 @@ type SummaryRow = {
 
 function providedHoles(holes: HoleScoreDetail[]) {
   return holes.filter((hole) => hole?.scoreProvided === true && Number.isFinite(Number(hole.score)))
+}
+
+function hasSavedTournamentHoleValue(hole: HoleScoreDetail | undefined) {
+  if (!hole || hole.score == null) return false
+  return Number.isFinite(Number(hole.score))
+}
+
+function normalizeTournamentScorecard(
+  holes: HoleScoreDetail[] | null | undefined,
+  stateCode: string,
+  course: string,
+  teeColor: string,
+) {
+  const defaultHoles = buildClientDefaultHoleScorecard(stateCode, course, teeColor)
+  if (!holes?.length) return defaultHoles
+
+  const normalizedByHole = new Map(
+    normalizeHoleScorecard(holes, stateCode, course, teeColor)
+      .map((hole) => [Math.trunc(Number(hole.hole)), hole] as const)
+      .filter(([holeNumber]) => Number.isFinite(holeNumber) && holeNumber >= 1 && holeNumber <= 18),
+  )
+
+  return defaultHoles.map((defaultHole) => {
+    const persistedHole = normalizedByHole.get(defaultHole.hole)
+    return persistedHole ? { ...defaultHole, ...persistedHole, hole: defaultHole.hole } : defaultHole
+  })
+}
+
+function tournamentScorecardDefaultHole(holes: HoleScoreDetail[]) {
+  const savedHoleNumbers = new Set(
+    holes
+      .filter((hole) => hasSavedTournamentHoleValue(hole))
+      .map((hole) => Math.trunc(Number(hole.hole)))
+      .filter((holeNumber) => Number.isFinite(holeNumber) && holeNumber >= 1 && holeNumber <= 18),
+  )
+
+  for (let holeNumber = 1; holeNumber <= 18; holeNumber += 1) {
+    if (!savedHoleNumbers.has(holeNumber)) {
+      return { hole: holeNumber, allHolesSaved: false, savedHoleCount: savedHoleNumbers.size }
+    }
+  }
+
+  return { hole: 1, allHolesSaved: true, savedHoleCount: savedHoleNumbers.size }
 }
 
 function relativeLabel(value: number | null) {
@@ -117,6 +160,7 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [scorecardResumeHole, setScorecardResumeHole] = useState<number | null>(null)
   const pendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
 
   const applyContext = useCallback((next: TournamentTeamScoreContext, replaceWorkingHoles = false) => {
@@ -127,12 +171,25 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
       const stateCode = next.tournament.hostGolfCourseState || tournament.hostGolfCourseState || ''
       const course = next.tournament.hostGolfCourseName || tournament.hostGolfCourseName || ''
       const teeColor = normalizeTeeColor(currentTeam.teeColor)
-      const normalized = currentTeam.holes?.length
-        ? normalizeHoleScorecard(currentTeam.holes, stateCode, course, teeColor)
-        : buildClientDefaultHoleScorecard(stateCode, course, teeColor)
+      const normalized = normalizeTournamentScorecard(currentTeam.holes, stateCode, course, teeColor)
+      const defaultSelection = tournamentScorecardDefaultHole(normalized)
       setHoles(normalized)
+      setScorecardResumeHole(defaultSelection.hole)
+      logFrontendEvent({
+        category: 'tournament.teamScore',
+        message: defaultSelection.allHolesSaved ? 'completed_scorecard_defaulted_to_hole_one' : 'scorecard_default_hole_selected',
+        data: {
+          tournamentId: tournament.id,
+          teamKey: currentTeam.teamKey,
+          defaultHole: defaultSelection.hole,
+          allHolesSaved: defaultSelection.allHolesSaved,
+          providedHoleCount: providedHoles(normalized).length,
+          savedHoleValueCount: defaultSelection.savedHoleCount,
+          holeCount: normalized.length,
+        },
+      })
     }
-  }, [tournament.hostGolfCourseName, tournament.hostGolfCourseState])
+  }, [tournament.hostGolfCourseName, tournament.hostGolfCourseState, tournament.id])
 
   const loadContext = useCallback(async (source: string, replaceWorkingHoles = false) => {
     const result = await fetchTournamentTeamScore(tournament.id)
@@ -175,9 +232,7 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
   const leaderboardRows = useMemo(() => getLeaderboardRows(context?.teams || []), [context])
   const summaryRows = useMemo(() => {
     if (!selectedTeam) return []
-    const summaryHoles = selectedTeam.holes?.length
-      ? normalizeHoleScorecard(selectedTeam.holes, stateCode, course, selectedTeam.teeColor || teeColor)
-      : buildClientDefaultHoleScorecard(stateCode, course, selectedTeam.teeColor || teeColor)
+    const summaryHoles = normalizeTournamentScorecard(selectedTeam.holes, stateCode, course, selectedTeam.teeColor || teeColor)
     return getSummaryRows({ ...selectedTeam, holes: summaryHoles })
   }, [selectedTeam, stateCode, course, teeColor])
   const completedCount = leaderboardRows.filter((row) => row.totalLabel !== '—').length
@@ -217,9 +272,16 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
   }, [applyContext, context, currentTeam, teeColor, tournament.id])
 
   const flushPendingHole = useCallback(async (source: string) => {
-    if (!pendingHoleSaveRef.current) return { saved: false, holes }
+    if (!pendingHoleSaveRef.current) {
+      return {
+        saved: false,
+        hole: scorecardResumeHole,
+        providedHoleNumbers: providedHoles(holes).map((hole) => hole.hole),
+        holes,
+      }
+    }
     return pendingHoleSaveRef.current(source)
-  }, [holes])
+  }, [holes, scorecardResumeHole])
 
   async function saveTeamScore() {
     if (scoringLocked) return
@@ -236,12 +298,19 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
   async function openLeaderboard() {
     setError(null)
     try {
-      if (!scoringLocked) await flushPendingHole('tournament_team_score_leaderboard')
+      const pendingResult = !scoringLocked
+        ? await flushPendingHole('tournament_team_score_leaderboard')
+        : { saved: false, hole: scorecardResumeHole, holes }
+      const latestHoles = pendingResult.holes || holes
+      const resumeHole = pendingResult.saved
+        ? (nextUnscoredHoleNumber(latestHoles, pendingResult.hole || scorecardResumeHole || 0) || pendingResult.hole || scorecardResumeHole)
+        : (pendingResult.hole || scorecardResumeHole || nextUnscoredHoleNumber(latestHoles, 0))
+      setScorecardResumeHole(resumeHole || null)
       setRefreshing(true)
       const result = await loadContext('leaderboard_open', false)
       setView('leaderboard')
       setSelectedTeamKey(null)
-      logFrontendEvent({ category: 'tournament.teamScore.leaderboard', message: 'leaderboard_opened', data: { tournamentId: tournament.id, teamCount: result.teams.length, consolidatedTeamView: false } })
+      logFrontendEvent({ category: 'tournament.teamScore.leaderboard', message: 'leaderboard_opened', data: { tournamentId: tournament.id, teamCount: result.teams.length, consolidatedTeamView: false, returnToHole: resumeHole || null } })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not open tournament leaderboard.'
       setError(message)
@@ -275,13 +344,22 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
 
   function editSelectedScore() {
     if (!selectedTeam?.canEdit || scoringLocked) return
-    const normalized = selectedTeam.holes?.length
-      ? normalizeHoleScorecard(selectedTeam.holes, stateCode, course, selectedTeam.teeColor || teeColor)
-      : buildClientDefaultHoleScorecard(stateCode, course, teeColor)
+    const normalized = normalizeTournamentScorecard(selectedTeam.holes, stateCode, course, selectedTeam.teeColor || teeColor)
     setHoles(normalized)
+    setScorecardResumeHole(nextUnscoredHoleNumber(normalized, 0) || normalized[0]?.hole || 1)
     setSelectedTeamKey(null)
     setView('scorecard')
     logFrontendEvent({ category: 'tournament.teamScore.leaderboard', message: 'round_summary_edit_score_opened', data: { tournamentId: tournament.id, teamKey: selectedTeam.teamKey } })
+  }
+
+  function returnToScorecard(source: 'leaderboard_back' | 'leaderboard_close' | 'leaderboard_overlay' | 'round_summary_close') {
+    setSelectedTeamKey(null)
+    setView('scorecard')
+    logFrontendEvent({
+      category: 'tournament.teamScore.leaderboard',
+      message: 'returned_to_hole_scorecard',
+      data: { tournamentId: tournament.id, source, returnToHole: scorecardResumeHole },
+    })
   }
 
   async function closeModal() {
@@ -320,23 +398,23 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
 
   if (view === 'leaderboard' || view === 'summary') {
     return (
-      <div className="modalOverlay inboxLeaderboardModalOverlay tournamentTeamScoreModalOverlay" role="presentation" onClick={() => void closeModal()}>
+      <div className="modalOverlay inboxLeaderboardModalOverlay tournamentTeamScoreModalOverlay" role="presentation" onClick={() => returnToScorecard(view === 'summary' ? 'round_summary_close' : 'leaderboard_overlay')}>
         <div className="modalCard inboxLeaderboardModal" role="dialog" aria-modal="true" aria-label={view === 'summary' && selectedTeam ? `${selectedTeam.teamName} round summary` : 'Leaderboard'} onClick={(event) => event.stopPropagation()}>
           <div className="inboxLeaderboardHero">
             <div className="inboxLeaderboardHeroTopline">
-              <button type="button" className="inboxLeaderboardIconButton" aria-label={view === 'summary' ? 'Back to leaderboard' : 'Back to team score'} onClick={() => {
+              <button type="button" className="inboxLeaderboardIconButton" aria-label={view === 'summary' ? 'Back to leaderboard' : `Back to Hole ${scorecardResumeHole || 1}`} onClick={() => {
                 if (view === 'summary') {
                   setSelectedTeamKey(null)
                   setView('leaderboard')
                   logFrontendEvent({ category: 'tournament.teamScore.leaderboard', message: 'round_summary_back_to_leaderboard', data: { tournamentId: tournament.id } })
-                } else setView('scorecard')
+                } else returnToScorecard('leaderboard_back')
               }}>‹</button>
               <div className="inboxLeaderboardCrest" aria-hidden="true">⛳</div>
               <div className="inboxLeaderboardTopRightActions">
                 {view === 'leaderboard' ? (
                   <button type="button" className="inboxLeaderboardIconButton inboxLeaderboardRefreshButton" aria-label="Refresh leaderboard" disabled={refreshing} onClick={() => void refreshLeaderboard()}>{refreshing ? '…' : '↻'}</button>
                 ) : null}
-                <button type="button" className="inboxLeaderboardIconButton" aria-label="Close leaderboard" onClick={() => void closeModal()}>×</button>
+                <button type="button" className="inboxLeaderboardIconButton" aria-label={`Return to Hole ${scorecardResumeHole || 1}`} onClick={() => returnToScorecard(view === 'summary' ? 'round_summary_close' : 'leaderboard_close')}>×</button>
               </div>
             </div>
             <div className="inboxLeaderboardYear">Golf Homiez</div>
@@ -420,6 +498,8 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
           persistedHoles={currentTeam.holes || []}
           registerPendingHoleSave={(handler) => { pendingHoleSaveRef.current = handler }}
           showTeeData={false}
+          initialHoleNumber={scorecardResumeHole}
+          onActiveHoleChange={setScorecardResumeHole}
         />
       </div>
     </div>

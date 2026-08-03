@@ -2032,6 +2032,196 @@ LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
     },
   },
 
+
+  {
+    version: '20260729_064',
+    name: 'golf_course_tournament_search',
+    filename: '20260729_064_golf_course_tournament_search.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'golf_courses', 'golf_course_website') &&
+        await tableExists(db, 'golf_course_tournaments') &&
+        await columnExists(db, 'golf_course_tournaments', 'discovery_key') &&
+        await columnExists(db, 'golf_course_tournaments', 'tournament_date') &&
+        await columnExists(db, 'golf_course_tournaments', 'tournament_website') &&
+        await indexExists(db, 'golf_course_tournaments', 'ux_golf_course_tournaments_discovery_key') &&
+        await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_state_date') &&
+        await tableExists(db, 'golf_course_tournament_crawl_state') &&
+        await columnExists(db, 'golf_course_tournament_crawl_state', 'next_crawl_after') &&
+        await indexExists(db, 'golf_course_tournament_crawl_state', 'idx_golf_course_tournament_crawl_next')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      const hasWebsiteColumn = await columnExists(db, 'golf_courses', 'website')
+      if (!(await columnExists(db, 'golf_courses', 'golf_course_website'))) {
+        statements.push(`ALTER TABLE golf_courses ADD COLUMN golf_course_website VARCHAR(1024) NULL${hasWebsiteColumn ? ' AFTER website' : ''}`)
+      }
+      if (hasWebsiteColumn) {
+        statements.push(`UPDATE golf_courses
+   SET golf_course_website = website
+ WHERE (golf_course_website IS NULL OR TRIM(golf_course_website) = '')
+   AND website IS NOT NULL
+   AND TRIM(website) <> ''`)
+      }
+
+      if (!(await tableExists(db, 'golf_course_tournaments'))) {
+        statements.push(`CREATE TABLE golf_course_tournaments (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  discovery_key CHAR(64) NOT NULL,
+  golf_course_id VARCHAR(64) NULL,
+  golf_course_name VARCHAR(191) NOT NULL,
+  tournament_name VARCHAR(255) NULL,
+  state_code VARCHAR(8) NOT NULL,
+  city VARCHAR(128) NULL,
+  zip_code VARCHAR(32) NULL,
+  tournament_date DATE NOT NULL,
+  tournament_website VARCHAR(1024) NULL,
+  source_url VARCHAR(1024) NOT NULL,
+  discovered_text TEXT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  correlation_id VARCHAR(128) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY ux_golf_course_tournaments_discovery_key (discovery_key),
+  KEY idx_golf_course_tournaments_state_date (state_code, tournament_date),
+  KEY idx_golf_course_tournaments_city_date (city, tournament_date),
+  KEY idx_golf_course_tournaments_zip_date (zip_code, tournament_date),
+  KEY idx_golf_course_tournaments_course_date (golf_course_name, tournament_date),
+  KEY idx_golf_course_tournaments_active_date (active, tournament_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+      } else {
+        const tournamentColumns = [
+          ['discovery_key', 'CHAR(64) NULL'],
+          ['golf_course_id', 'VARCHAR(64) NULL'],
+          ['golf_course_name', "VARCHAR(191) NOT NULL DEFAULT 'Unknown golf course'"],
+          ['tournament_name', 'VARCHAR(255) NULL'],
+          ['state_code', "VARCHAR(8) NOT NULL DEFAULT ''"],
+          ['city', 'VARCHAR(128) NULL'],
+          ['zip_code', 'VARCHAR(32) NULL'],
+          ['tournament_date', 'DATE NULL'],
+          ['tournament_website', 'VARCHAR(1024) NULL'],
+          ['source_url', 'VARCHAR(1024) NULL'],
+          ['discovered_text', 'TEXT NULL'],
+          ['active', 'TINYINT(1) NOT NULL DEFAULT 1'],
+          ['first_seen_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+          ['last_seen_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+          ['correlation_id', 'VARCHAR(128) NULL'],
+          ['created_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+          ['updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+        ]
+        for (const [columnName, definition] of tournamentColumns) {
+          if (!(await columnExists(db, 'golf_course_tournaments', columnName))) {
+            statements.push(`ALTER TABLE golf_course_tournaments ADD COLUMN ${columnName} ${definition}`)
+          }
+        }
+        if (!(await indexExists(db, 'golf_course_tournaments', 'ux_golf_course_tournaments_discovery_key'))) statements.push('CREATE UNIQUE INDEX ux_golf_course_tournaments_discovery_key ON golf_course_tournaments (discovery_key)')
+        if (!(await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_state_date'))) statements.push('CREATE INDEX idx_golf_course_tournaments_state_date ON golf_course_tournaments (state_code, tournament_date)')
+        if (!(await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_city_date'))) statements.push('CREATE INDEX idx_golf_course_tournaments_city_date ON golf_course_tournaments (city, tournament_date)')
+        if (!(await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_zip_date'))) statements.push('CREATE INDEX idx_golf_course_tournaments_zip_date ON golf_course_tournaments (zip_code, tournament_date)')
+        if (!(await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_course_date'))) statements.push('CREATE INDEX idx_golf_course_tournaments_course_date ON golf_course_tournaments (golf_course_name, tournament_date)')
+        if (!(await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_active_date'))) statements.push('CREATE INDEX idx_golf_course_tournaments_active_date ON golf_course_tournaments (active, tournament_date)')
+      }
+
+      if (!(await tableExists(db, 'golf_course_tournament_crawl_state'))) {
+        statements.push(`CREATE TABLE golf_course_tournament_crawl_state (
+  golf_course_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  golf_course_name VARCHAR(191) NOT NULL,
+  website VARCHAR(1024) NOT NULL,
+  last_crawled_at DATETIME NULL,
+  last_success_at DATETIME NULL,
+  next_crawl_after DATETIME NULL,
+  last_status VARCHAR(32) NULL,
+  last_error TEXT NULL,
+  pages_crawled INT UNSIGNED NOT NULL DEFAULT 0,
+  tournaments_found INT UNSIGNED NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(128) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_golf_course_tournament_crawl_next (next_crawl_after),
+  KEY idx_golf_course_tournament_crawl_status (last_status, last_crawled_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+      } else {
+        const crawlColumns = [
+          ['golf_course_name', "VARCHAR(191) NOT NULL DEFAULT 'Unknown golf course'"],
+          ['website', "VARCHAR(1024) NOT NULL DEFAULT ''"],
+          ['last_crawled_at', 'DATETIME NULL'],
+          ['last_success_at', 'DATETIME NULL'],
+          ['next_crawl_after', 'DATETIME NULL'],
+          ['last_status', 'VARCHAR(32) NULL'],
+          ['last_error', 'TEXT NULL'],
+          ['pages_crawled', 'INT UNSIGNED NOT NULL DEFAULT 0'],
+          ['tournaments_found', 'INT UNSIGNED NOT NULL DEFAULT 0'],
+          ['correlation_id', 'VARCHAR(128) NULL'],
+          ['created_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+          ['updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+        ]
+        for (const [columnName, definition] of crawlColumns) {
+          if (!(await columnExists(db, 'golf_course_tournament_crawl_state', columnName))) {
+            statements.push(`ALTER TABLE golf_course_tournament_crawl_state ADD COLUMN ${columnName} ${definition}`)
+          }
+        }
+        if (!(await indexExists(db, 'golf_course_tournament_crawl_state', 'idx_golf_course_tournament_crawl_next'))) statements.push('CREATE INDEX idx_golf_course_tournament_crawl_next ON golf_course_tournament_crawl_state (next_crawl_after)')
+        if (!(await indexExists(db, 'golf_course_tournament_crawl_state', 'idx_golf_course_tournament_crawl_status'))) statements.push('CREATE INDEX idx_golf_course_tournament_crawl_status ON golf_course_tournament_crawl_state (last_status, last_crawled_at)')
+      }
+      return statements.join(';\n')
+    },
+  },
+  {
+    version: '20260729_065',
+    name: 'scheduled_job_configuration',
+    filename: '20260729_065_scheduled_job_configuration.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'scheduled_jobs', 'schedule_type') &&
+        await columnExists(db, 'scheduled_jobs', 'schedule_time') &&
+        await columnExists(db, 'scheduled_jobs', 'schedule_day_of_week') &&
+        await columnExists(db, 'scheduled_jobs', 'schedule_day_of_month') &&
+        await columnExists(db, 'scheduled_jobs', 'job_config_json') &&
+        await indexExists(db, 'scheduled_jobs', 'idx_scheduled_jobs_schedule_type')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'scheduled_jobs', 'schedule_type'))) {
+        statements.push("ALTER TABLE scheduled_jobs ADD COLUMN schedule_type VARCHAR(16) NOT NULL DEFAULT 'manual' AFTER schedule_time_zone")
+      }
+      if (!(await columnExists(db, 'scheduled_jobs', 'schedule_time'))) {
+        statements.push('ALTER TABLE scheduled_jobs ADD COLUMN schedule_time TIME NULL AFTER schedule_type')
+      }
+      if (!(await columnExists(db, 'scheduled_jobs', 'schedule_day_of_week'))) {
+        statements.push('ALTER TABLE scheduled_jobs ADD COLUMN schedule_day_of_week TINYINT UNSIGNED NULL AFTER schedule_time')
+      }
+      if (!(await columnExists(db, 'scheduled_jobs', 'schedule_day_of_month'))) {
+        statements.push('ALTER TABLE scheduled_jobs ADD COLUMN schedule_day_of_month TINYINT UNSIGNED NULL AFTER schedule_day_of_week')
+      }
+      if (!(await columnExists(db, 'scheduled_jobs', 'job_config_json'))) {
+        statements.push('ALTER TABLE scheduled_jobs ADD COLUMN job_config_json LONGTEXT NULL AFTER schedule_day_of_month')
+      }
+      statements.push(`UPDATE scheduled_jobs
+   SET schedule_type = 'daily',
+       schedule_time = '02:00:00',
+       schedule_day_of_week = NULL,
+       schedule_day_of_month = NULL,
+       schedule_label = 'Daily 02:00 MT'
+ WHERE id = 'getTournaments'
+   AND (schedule_type IS NULL OR schedule_type = 'manual')`)
+      statements.push(`UPDATE scheduled_jobs
+   SET schedule_type = 'weekly',
+       schedule_time = '18:00:00',
+       schedule_day_of_week = 0,
+       schedule_day_of_month = NULL,
+       schedule_label = 'Weekly Sunday 18:00 MT'
+ WHERE id = 'cancelled-tournament-cleanup'
+   AND (schedule_type IS NULL OR schedule_type = 'manual')`)
+      if (!(await indexExists(db, 'scheduled_jobs', 'idx_scheduled_jobs_schedule_type'))) {
+        statements.push('CREATE INDEX idx_scheduled_jobs_schedule_type ON scheduled_jobs (schedule_type)')
+      }
+      return statements.join(';\n')
+    },
+  },
 ]
 
 export function sortMigrations(migrations) {

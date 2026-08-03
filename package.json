@@ -13,7 +13,7 @@
     "postinstall": "npm run cleanup:project-files && npm run db:migrate && npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js",
+    "test": "node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js",
     "seed:homepage-demo": "node server/scripts/seed-homepage-demo.js",
     "db:rollback:chat": "node server/scripts/run-one-time-chat-schema-rollback.js",
     "db:migrate": "node server/run-migrations.js",

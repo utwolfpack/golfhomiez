@@ -182,6 +182,42 @@ export type UserTournamentsSummary = {
   tournaments: UserRegisteredTournament[]
 }
 
+
+export type GolfCourseTournamentSearchResult = {
+  id: string
+  golfCourseId?: string | null
+  golfCourseName: string
+  tournamentName?: string | null
+  state: string
+  city?: string | null
+  zipCode?: string | null
+  tournamentDate: string
+  tournamentWebsite?: string | null
+  sourceUrl?: string | null
+  firstSeenAt?: string | null
+  lastSeenAt?: string | null
+}
+
+export type GolfCourseTournamentSearchFilters = {
+  state?: string
+  city?: string
+  zipCode?: string
+  golfCourseName?: string
+  fromDate?: string
+  toDate?: string
+}
+
+export type GolfCourseTournamentSearchResponse = {
+  filters: Required<Pick<GolfCourseTournamentSearchFilters, 'state' | 'city' | 'zipCode' | 'golfCourseName' | 'fromDate' | 'toDate'>>
+  pagination: {
+    page: number
+    pageSize: number
+    totalResults: number
+    totalPages: number
+  }
+  tournaments: GolfCourseTournamentSearchResult[]
+}
+
 export type TournamentTeamScoreTeam = {
   teamKey: string
   teamId?: string | null
@@ -313,6 +349,20 @@ export function fetchOrganizerInviteEligibility(email: string) {
 
 export function fetchUserTournaments() {
   return api<UserTournamentsSummary>('/api/users/tournaments')
+}
+
+
+export function searchGolfCourseTournaments(filters: GolfCourseTournamentSearchFilters, page = 1) {
+  const params = new URLSearchParams()
+  if (filters.state) params.set('state', filters.state)
+  if (filters.city) params.set('city', filters.city)
+  if (filters.zipCode) params.set('zipCode', filters.zipCode)
+  if (filters.golfCourseName) params.set('golfCourseName', filters.golfCourseName)
+  if (filters.fromDate) params.set('fromDate', filters.fromDate)
+  if (filters.toDate) params.set('toDate', filters.toDate)
+  params.set('page', String(Math.max(1, Math.trunc(page) || 1)))
+  const query = params.toString()
+  return api<GolfCourseTournamentSearchResponse>(`/api/users/tournament-search?${query}`)
 }
 
 export function fetchTournamentTeamScore(tournamentId: string) {
