@@ -35,6 +35,19 @@ The My Tournaments team-score flow resolves its initial hole directly in `src/co
 
 The frontend event `completed_scorecard_defaulted_to_hole_one` records the course, correlation ID, selected hole, and saved-hole numbers for troubleshooting.
 
+## Stable Initial-Hole Selection
+
+The active hole is initialized once for each scorecard context. A remembered leaderboard-return hole is read as an initialization input, while active-hole changes are reported back to the parent only for later navigation. The reported active hole is not included in the initialization key, preventing a parent/child feedback loop that could repeatedly switch the view between two holes.
+
+The initial selection runs in a layout effect and the state also uses a lazy initial value, preventing the scorecard from briefly rendering hole 1 before moving to the actual first incomplete hole. Updates that merge persisted server scores preserve the hole the golfer is currently viewing instead of recalculating and changing the active hole.
+
+Saved progression is determined by the stored numeric `score` value. A null or missing score is incomplete even when a stale `scoreProvided` flag is present, while a valid numeric score is treated as saved even if an older record contains an incorrect flag. This same rule is used by tournament, challenge, and round-edit scorecards when deciding whether course data must be loaded and which hole should open first.
+
+Relevant diagnostic events include:
+
+- `scorecard.hole.default_selection`, with `selectionMode: initialize_once_per_scorecard_context`.
+- `scorecard.persisted_holes.merge`, with `navigationPreserved: true`.
+
 ## Leaderboard Return Behavior
 
 ### Tournament score entry
@@ -95,5 +108,16 @@ The application test suite includes coverage for:
 - Active-hole resume behavior and pending-hole saves.
 - Completed scorecards reopening at hole 1.
 - My Tournaments scorecards opening on the first null or missing score in hole order 1–18, with completed scorecards opening on hole 1.
+- Prevention of active-hole/resume-hole feedback loops that could rotate between holes.
+- Persisted-score merges preserving the currently displayed hole.
+- Numeric saved-score values taking precedence over stale `scoreProvided` flags.
 - Challenge ordering by status and challenge date.
 - Selected challenge isolation and full-list restoration when closed.
+
+## Reliable Hole Selection on Mobile
+
+The shared scorecard now tracks the selected hole by its actual hole number rather than by the array position of the hole record. This prevents reordered or partially refreshed score data from leaving the golfer on the wrong hole.
+
+Selecting a hole circle changes the visible hole immediately. If the previous hole has an unsaved score adjustment, persistence starts without blocking navigation. A slow or failed API request no longer traps the golfer on the prior hole; the local score remains available and the page displays an instruction to return to that hole and retry the save.
+
+The tracker buttons use larger mobile tap targets and `touch-action: manipulation` to make hole selection reliable on touch devices. Correlated frontend events include `selected_immediately` and `previous_hole_save_failed_navigation_preserved`, with the source hole, destination hole, and navigation behavior.

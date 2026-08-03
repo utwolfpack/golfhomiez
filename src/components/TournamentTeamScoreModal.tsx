@@ -7,7 +7,7 @@ import {
   type TournamentTeamScoreTeam,
   type UserRegisteredTournament,
 } from '../lib/accounts'
-import { buildClientDefaultHoleScorecard, nextUnscoredHoleNumber, normalizeHoleScorecard } from '../lib/hole-scorecard'
+import { buildClientDefaultHoleScorecard, hasSavedHoleScoreValue, nextUnscoredHoleNumber, normalizeHoleScorecard } from '../lib/hole-scorecard'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDate } from '../lib/time-format'
 import { normalizeTeeColor } from '../lib/tee-colors'
@@ -39,12 +39,11 @@ type SummaryRow = {
 }
 
 function providedHoles(holes: HoleScoreDetail[]) {
-  return holes.filter((hole) => hole?.scoreProvided === true && Number.isFinite(Number(hole.score)))
+  return holes.filter((hole) => hasSavedHoleScoreValue(hole))
 }
 
 function hasSavedTournamentHoleValue(hole: HoleScoreDetail | undefined) {
-  if (!hole || hole.score == null) return false
-  return Number.isFinite(Number(hole.score))
+  return hasSavedHoleScoreValue(hole)
 }
 
 function normalizeTournamentScorecard(

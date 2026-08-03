@@ -25,7 +25,7 @@ import { fetchTeams } from '../lib/teams'
 import { getUserTodayISO } from '../lib/date'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { logFrontendEvent } from '../lib/frontend-logger'
-import { buildClientDefaultHoleScorecard, formatHoleScoreOutcome, missingHoleScoreNumbers, nextUnscoredHoleNumber, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
+import { buildClientDefaultHoleScorecard, formatHoleScoreOutcome, hasSavedHoleScoreValue, missingHoleScoreNumbers, nextUnscoredHoleNumber, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
 import type { HoleScoreDetail, Team } from '../types'
 import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
@@ -1562,7 +1562,7 @@ export default function Challenges() {
                 onChange={(nextHoles) => updateTeamChallengeScorecard(message, side, nextHoles)}
                 onHoleSaved={(nextHoles, _savedHole, action) => persistTeamChallengeScoreProgress(message, side, { closeModal: false, source: action === 'reset' ? 'hole_reset' : 'hole_save', overrideHoles: nextHoles })}
                 scoreOwnerLabel={`${teamName} score`}
-                loadScorecardOnMount={!holes.some((hole) => hole.scoreProvided)}
+                loadScorecardOnMount={!holes.some((hole) => hasSavedHoleScoreValue(hole))}
                 teeColor={getTeamChallengeTeeColor(message)}
                 registerPendingHoleSave={(handler) => { teamChallengePendingHoleSaveRef.current = handler }}
                 initialHoleNumber={scorecardResumeHoles[key] || null}
@@ -1647,7 +1647,7 @@ export default function Challenges() {
                 onChange={(nextHoles) => updateIndividualChallengeScorecard(message, participant, nextHoles)}
                 onHoleSaved={(nextHoles, _savedHole, action) => persistIndividualChallengeScoreProgress(message, participant, nextHoles, { closeModal: false, source: action === 'reset' ? 'hole_reset' : 'hole_save' })}
                 scoreOwnerLabel={`${golferName} score`}
-                loadScorecardOnMount={!holes.some((hole) => hole.scoreProvided)}
+                loadScorecardOnMount={!holes.some((hole) => hasSavedHoleScoreValue(hole))}
                 teeColor={getTeamChallengeTeeColor(message)}
                 registerPendingHoleSave={(handler) => { individualChallengePendingHoleSaveRef.current = handler }}
                 initialHoleNumber={scorecardResumeHoles[getIndividualChallengeScoreKey(message, participant)] || null}
