@@ -41,6 +41,7 @@ export default function ProfilePage() {
 
 function ProfileInner() {
   const [form, setForm] = useState<ProfileInput>(EMPTY_FORM)
+  const [profileEmail, setProfileEmail] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -57,7 +58,7 @@ function ProfileInner() {
   const cityBlurTimer = useRef<number | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
-  const { hasRole, refreshProfileStatus } = useAuth()
+  const { user, hasRole, refreshProfileStatus } = useAuth()
 
   const isGuidedEnrichment = useMemo(() => new URLSearchParams(location.search).get('enrich') === '1', [location.search])
   const isPreferenceRestricted = hasRole('admin') || hasRole('host') || hasRole('organizer')
@@ -83,12 +84,15 @@ function ProfileInner() {
           cannabisPreference: profile.cannabisPreference || '',
           sobrietyPreference: profile.sobrietyPreference || '',
         })
+        const loadedEmail = String(profile.email || user?.email || '').trim()
+        setProfileEmail(loadedEmail)
         const savedPhoneAvailable = Boolean(sanitizePhoneInput(profile.phone || '').trim())
         setHasSavedPhoneNumber(savedPhoneAvailable)
         setNeedsEnrichment(Boolean(profile.needsEnrichment))
         setProfileSummary(profile.summary || null)
         setFeatureFlags(profile.featureFlags || {})
         logFrontendEvent({ category: 'profile.navigation', message: 'profile_header_links_state_loaded', data: { enabled: savedPhoneAvailable, reason: savedPhoneAvailable ? 'saved_phone_available' : 'saved_phone_required' } })
+        logFrontendEvent({ category: 'profile.email', message: 'profile_email_displayed_read_only', data: { correlationId: getCorrelationId(), hasEmail: Boolean(loadedEmail), source: profile.email ? 'profile' : 'session' } })
       } catch (err) {
         if (!active) return
         setError(err instanceof Error ? err.message : 'Failed to load profile.')
@@ -97,7 +101,7 @@ function ProfileInner() {
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [user?.email])
 
   useEffect(() => {
     if (!citySuggestionsOpen) {
@@ -278,6 +282,18 @@ function ProfileInner() {
         />
 
         <div className="formStack" style={{ maxWidth: 860 }}>
+          <div>
+            <div className="label" id="profileEmailLabel">Email</div>
+            <div
+              id="profileEmail"
+              className="profileReadOnlyValue"
+              aria-labelledby="profileEmailLabel"
+              data-read-only="true"
+            >
+              {profileEmail || user?.email || 'Email unavailable'}
+            </div>
+          </div>
+
           <div>
             <label className="label">Phone</label>
             <input className="input" type="tel" inputMode="tel" pattern={PHONE_PATTERN} title={PHONE_VALIDATION_MESSAGE} required aria-invalid={Boolean(validateRequiredPhoneNumber(form.phone))} value={form.phone || ''} onChange={(e) => setPhoneValue(e.target.value)} placeholder="801 743 7000" autoComplete="tel" />

@@ -289,6 +289,19 @@ export function missingHoleScoreNumbers(holes: HoleScoreDetail[]) {
     .filter((hole) => Number.isFinite(hole))
 }
 
+export function nextUnscoredHoleNumber(holes: HoleScoreDetail[], afterHoleNumber = 0) {
+  const missingNumbers = missingHoleScoreNumbers(holes)
+    .map((holeNumber) => Math.trunc(Number(holeNumber)))
+    .filter((holeNumber) => Number.isFinite(holeNumber) && holeNumber > 0)
+    .sort((left, right) => left - right)
+  if (!missingNumbers.length) return null
+
+  const normalizedAfterHole = Number.isFinite(Number(afterHoleNumber))
+    ? Math.max(0, Math.trunc(Number(afterHoleNumber)))
+    : 0
+  return missingNumbers.find((holeNumber) => holeNumber > normalizedAfterHole) ?? missingNumbers[0]
+}
+
 export function allHoleScoresProvided(holes: HoleScoreDetail[]) {
   return holes.length === 18 && missingHoleScoreNumbers(holes).length === 0
 }
@@ -318,15 +331,37 @@ export function holeScoreRelativeToPar(hole: Pick<HoleScoreDetail, 'par' | 'scor
 }
 
 export function formatHoleScoreOutcome(hole: Pick<HoleScoreDetail, 'par' | 'score'>) {
+  const score = Number(hole.score)
   const relative = holeScoreRelativeToPar(hole)
   if (relative == null) return 'Score unavailable'
-  if (relative <= -2) return 'Eagle'
+  if (Number.isFinite(score) && Math.trunc(score) === 1) return 'Hole in One'
+  if (relative === -3) return 'Albatross'
+  if (relative === -2) return 'Eagle'
   if (relative === -1) return 'Birdie'
   if (relative === 0) return 'Par'
   if (relative === 1) return 'Bogey'
   if (relative === 2) return 'Double-Bogey'
-  if (relative === 3) return 'Triple-Bogey'
   return relative > 0 ? `+${relative}` : String(relative)
+}
+
+export function getHoleScoreSavePresentation(par: number | null, score: number) {
+  const normalizedPar = Number.isFinite(Number(par)) && Number(par) > 0 ? Math.trunc(Number(par)) : 4
+  const normalizedScore = Number.isFinite(Number(score)) ? Math.max(0, Math.trunc(Number(score))) : normalizedPar
+  const relative = normalizedScore - normalizedPar
+
+  if (normalizedScore === 1) return { label: 'You got a Hole in One', className: 'holeInputSaveButton--holeInOne', outcome: 'hole_in_one', relative }
+  if (relative === 0) return { label: 'You got a Par', className: 'holeInputSaveButton--par', outcome: 'par', relative }
+  if (relative === -1) return { label: 'You got a Birdie', className: 'holeInputSaveButton--birdie', outcome: 'birdie', relative }
+  if (relative === -2) return { label: 'You got an Eagle', className: 'holeInputSaveButton--eagle', outcome: 'eagle', relative }
+  if (relative === -3) return { label: 'You got an Albatross', className: 'holeInputSaveButton--albatross', outcome: 'albatross', relative }
+  if (relative === 1) return { label: 'You got a Bogey', className: 'holeInputSaveButton--bogey', outcome: 'bogey', relative }
+  if (relative === 2) return { label: 'You got a Double-Bogey', className: 'holeInputSaveButton--doubleBogey', outcome: 'double_bogey', relative }
+  return {
+    label: relative > 0 ? `+${relative}` : String(relative),
+    className: 'holeInputSaveButton--strokeCount',
+    outcome: 'stroke_count',
+    relative,
+  }
 }
 
 export function scoreOutcomeClassName(hole: Pick<HoleScoreDetail, 'par' | 'score'>) {

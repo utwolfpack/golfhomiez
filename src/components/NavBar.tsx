@@ -7,6 +7,58 @@ import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import brandEmblem from '../assets/GolfHomiezEmblem.png'
 
+type NavIconProps = { className?: string }
+
+function ChallengesIcon({ className = '' }: NavIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M7 4.5 17 19.5M17 4.5 7 19.5" />
+      <circle cx="6.2" cy="3.8" r="1.8" />
+      <circle cx="17.8" cy="3.8" r="1.8" />
+      <path d="M4.5 20.5h5M14.5 20.5h5" />
+    </svg>
+  )
+}
+
+function AddScoreIcon({ className = '' }: NavIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="4" y="3.5" width="12.5" height="17" rx="2.2" />
+      <path d="M7.5 8h5.5M7.5 12h4M7.5 16h3" />
+      <circle cx="17.5" cy="16.5" r="4" />
+      <path d="M17.5 14.4v4.2M15.4 16.5h4.2" />
+    </svg>
+  )
+}
+
+function TournamentTrophyIcon({ className = '' }: NavIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M8 4h8v4.2a4 4 0 0 1-8 0V4Z" />
+      <path d="M8 6H4.8v1.2A3.8 3.8 0 0 0 8.6 11M16 6h3.2v1.2a3.8 3.8 0 0 1-3.8 3.8" />
+      <path d="M12 12.2V17M8.5 20h7M9.5 17h5v3h-5z" />
+    </svg>
+  )
+}
+
+function GolfHomiezUserIcon({ className = '' }: NavIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="9.2" />
+      <path d="M8.3 9.2c.7-2.7 2.1-4 4.2-4 1.7 0 3.1.8 4.1 2.5-2.4-.3-5.2.2-8.3 1.5Z" />
+      <path d="M9.2 9.5a3.1 3.1 0 1 0 5.8 1.5 3 3 0 0 0-.4-1.5" />
+      <path d="M6.8 18.7c.9-2.7 2.7-4.1 5.2-4.1s4.3 1.4 5.2 4.1" />
+      <circle cx="17.8" cy="15.3" r=".55" className="navIconDimple" />
+    </svg>
+  )
+}
+
+const mobileGolferLinks = [
+  { to: '/challenges', label: 'Challenges', event: 'mobile_challenges_selected', Icon: ChallengesIcon },
+  { to: '/my-golf-scores', label: 'My Scores', event: 'mobile_add_score_selected', Icon: AddScoreIcon },
+  { to: '/my-tournaments', label: 'My Tournaments', event: 'mobile_tournaments_selected', Icon: TournamentTrophyIcon },
+]
+
 export default function NavBar() {
   const { user, logout, roles } = useAuth()
   const { adminUser, logoutAdmin } = useAdminAuth()
@@ -29,6 +81,7 @@ export default function NavBar() {
   const navHomePath = adminUser ? '/golfadmin' : hostAccount ? '/host/portal' : (organizerAccount || roles.includes('organizer')) ? '/organizer/portal' : '/'
   const navHomeLabel = adminUser ? 'admin home' : hostAccount ? 'host portal home' : (organizerAccount || roles.includes('organizer')) ? 'organizer portal home' : 'Golf Homiez home'
   const navBrandCorrelationId = getCorrelationId()
+  const showMobileGolferLinks = Boolean(user && !restrictedSession)
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -38,6 +91,13 @@ export default function NavBar() {
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
 
+  function logMobileNavigation(message: string, destination: string) {
+    logFrontendEvent({
+      category: 'app.nav.mobile',
+      message,
+      data: { destination, correlationId: getCorrelationId() },
+    })
+  }
 
   async function handleLogout() {
     setOpen(false)
@@ -82,48 +142,81 @@ export default function NavBar() {
             onError={() => logFrontendEvent({ category: 'app.nav', level: 'error', message: 'nav_brand_emblem_load_failed', data: { navHomePath, correlationId: navBrandCorrelationId } })}
           />
         </Link>
-        <div className="navMenuWrap" ref={menuRef}>
-          {!user && !hostAccount && !adminUser && !organizerAccount ? (
-            <NavLink to="/login" className="navMenuTrigger">Login/Register</NavLink>
-          ) : (
-            <>
-              <button type="button" className="navMenuTrigger" onClick={() => setOpen((v) => !v)}>
-                <span className="navMenuLabel">{menuLabel}</span>
-                <span className={`navMenuCaret ${open ? 'navMenuCaretOpen' : ''}`}>▾</span>
-              </button>
-              {open ? (
-                <div className="navDropdown">
-                  {adminUser ? (
-                    <>
-                      <NavLink className="navDropdownItem" to="/golfadmin" onClick={() => setOpen(false)}>Admin portal</NavLink>
-                      <NavLink className="navDropdownItem" to="/golfadmin/scheduled-jobs" onClick={() => setOpen(false)}>Scheduled jobs</NavLink>
-                    </>
-                  ) : null}
-                  {hostAccount ? (
-                    <>
-                      <NavLink className="navDropdownItem" to="/host/portal" onClick={() => setOpen(false)}>Host portal</NavLink>
-                      <NavLink className="navDropdownItem" to="/host/portal/profile" onClick={() => setOpen(false)}>Host profile</NavLink>
-                    </>
-                  ) : null}
-                  {organizerAccount ? (
-                    <>
-                      <NavLink className="navDropdownItem" to="/organizer/portal" onClick={() => setOpen(false)}>Organizer portal</NavLink>
-                      <NavLink className="navDropdownItem" to="/organizer/portal/profile" onClick={() => setOpen(false)}>Organizer profile</NavLink>
-                    </>
-                  ) : null}
-                  {restrictedSession ? null : (
-                    <>
-                      <NavLink className="navDropdownItem" to="/challenges" onClick={() => setOpen(false)}>Challenges</NavLink>
-                      <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => setOpen(false)}>My Scores</NavLink>
-                      <NavLink className="navDropdownItem" to="/my-tournaments" onClick={() => setOpen(false)}>My Tournaments</NavLink>
-                      <NavLink className="navDropdownItem" to="/profile" onClick={() => setOpen(false)}>Profile</NavLink>
-                    </>
-                  )}
-                  <button type="button" className="navDropdownItem" onClick={() => void handleLogout()}>Logout</button>
-                </div>
-              ) : null}
-            </>
-          )}
+
+        <div className="navActions">
+          {showMobileGolferLinks ? (
+            <nav className="navMobileQuickLinks" aria-label="Golfer shortcuts">
+              {mobileGolferLinks.map(({ to, label, event, Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) => `navMobileQuickLink${isActive ? ' active' : ''}`}
+                  aria-label={label}
+                  title={label}
+                  onClick={() => logMobileNavigation(event, to)}
+                >
+                  <Icon className="navMobileQuickLinkIcon" />
+                  <span className="visuallyHidden">{label}</span>
+                </NavLink>
+              ))}
+            </nav>
+          ) : null}
+
+          <div className="navMenuWrap" ref={menuRef}>
+            {!user && !hostAccount && !adminUser && !organizerAccount ? (
+              <NavLink to="/login" className="navMenuTrigger">Login/Register</NavLink>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="navMenuTrigger navMenuTrigger--account"
+                  aria-label="Open account menu"
+                  aria-expanded={open}
+                  aria-controls="app-account-menu"
+                  onClick={() => {
+                    const nextOpen = !open
+                    setOpen(nextOpen)
+                    logFrontendEvent({ category: 'app.nav', message: 'account_menu_toggled', data: { open: nextOpen, restrictedRole, correlationId: getCorrelationId() } })
+                  }}
+                >
+                  <GolfHomiezUserIcon className="navMenuAccountIcon" />
+                  <span className="navMenuLabel">{menuLabel}</span>
+                  <span className={`navMenuCaret ${open ? 'navMenuCaretOpen' : ''}`} aria-hidden="true">▾</span>
+                </button>
+                {open ? (
+                  <div className="navDropdown" id="app-account-menu">
+                    {adminUser ? (
+                      <>
+                        <NavLink className="navDropdownItem" to="/golfadmin" onClick={() => setOpen(false)}>Admin portal</NavLink>
+                        <NavLink className="navDropdownItem" to="/golfadmin/scheduled-jobs" onClick={() => setOpen(false)}>Scheduled jobs</NavLink>
+                      </>
+                    ) : null}
+                    {hostAccount ? (
+                      <>
+                        <NavLink className="navDropdownItem" to="/host/portal" onClick={() => setOpen(false)}>Host portal</NavLink>
+                        <NavLink className="navDropdownItem" to="/host/portal/profile" onClick={() => setOpen(false)}>Host profile</NavLink>
+                      </>
+                    ) : null}
+                    {organizerAccount ? (
+                      <>
+                        <NavLink className="navDropdownItem" to="/organizer/portal" onClick={() => setOpen(false)}>Organizer portal</NavLink>
+                        <NavLink className="navDropdownItem" to="/organizer/portal/profile" onClick={() => setOpen(false)}>Organizer profile</NavLink>
+                      </>
+                    ) : null}
+                    {restrictedSession ? null : (
+                      <>
+                        <NavLink className="navDropdownItem" to="/challenges" onClick={() => setOpen(false)}>Challenges</NavLink>
+                        <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => setOpen(false)}>My Scores</NavLink>
+                        <NavLink className="navDropdownItem" to="/my-tournaments" onClick={() => setOpen(false)}>My Tournaments</NavLink>
+                        <NavLink className="navDropdownItem" to="/profile" onClick={() => setOpen(false)}>Profile</NavLink>
+                      </>
+                    )}
+                    <button type="button" className="navDropdownItem" onClick={() => void handleLogout()}>Logout</button>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </>

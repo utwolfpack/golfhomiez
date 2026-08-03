@@ -138,7 +138,8 @@ function normalizeCourseRow(row = {}) {
     postalCode: normalizeText(row.postal_code || row.postalCode) || null,
     postal_code: normalizeText(row.postal_code || row.postalCode) || null,
     phone: normalizeText(row.phone) || null,
-    website: normalizeText(row.website) || null,
+    website: normalizeText(row.golf_course_website || row.website) || null,
+    golfCourseWebsite: normalizeText(row.golf_course_website || row.website) || null,
     latitude: toNumber(row.latitude),
     longitude: toNumber(row.longitude),
     isManual: Boolean(row.is_manual ?? row.isManual),
@@ -406,8 +407,8 @@ export async function upsertOpenGolfCourse(listRecord = {}, detailPayload = {}, 
     `INSERT INTO golf_courses (
        id, external_course_id, source, name, normalized_name, state_code, state_name, county, city,
        country, course_type, holes_count, par_total, total_yardage, course_rating, slope_rating, address, postal_code, phone,
-       website, latitude, longitude, is_manual, active, raw_list_payload, raw_detail_payload, imported_at
-     ) VALUES (?, ?, 'opengolfapi', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, UTC_TIMESTAMP())
+       website, golf_course_website, latitude, longitude, is_manual, active, raw_list_payload, raw_detail_payload, imported_at
+     ) VALUES (?, ?, 'opengolfapi', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, UTC_TIMESTAMP())
      ON DUPLICATE KEY UPDATE
        external_course_id = VALUES(external_course_id),
        source = 'opengolfapi',
@@ -428,6 +429,7 @@ export async function upsertOpenGolfCourse(listRecord = {}, detailPayload = {}, 
        postal_code = VALUES(postal_code),
        phone = VALUES(phone),
        website = VALUES(website),
+       golf_course_website = VALUES(golf_course_website),
        latitude = VALUES(latitude),
        longitude = VALUES(longitude),
        active = 1,
@@ -453,6 +455,7 @@ export async function upsertOpenGolfCourse(listRecord = {}, detailPayload = {}, 
       course.address,
       course.postalCode,
       course.phone,
+      course.website,
       course.website,
       course.latitude,
       course.longitude,

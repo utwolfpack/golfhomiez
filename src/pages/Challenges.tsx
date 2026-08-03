@@ -25,7 +25,7 @@ import { fetchTeams } from '../lib/teams'
 import { getUserTodayISO } from '../lib/date'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { logFrontendEvent } from '../lib/frontend-logger'
-import { buildClientDefaultHoleScorecard, formatHoleScoreOutcome, missingHoleScoreNumbers, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
+import { buildClientDefaultHoleScorecard, formatHoleScoreOutcome, missingHoleScoreNumbers, nextUnscoredHoleNumber, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
 import type { HoleScoreDetail, Team } from '../types'
 import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
@@ -113,6 +113,35 @@ function buildInboxThreads(messages: InboxMessage[]): InboxThread[] {
     .sort((a, b) => String(b.displayMessage.createdAt || '').localeCompare(String(a.displayMessage.createdAt || '')))
 }
 
+function getThreadInitialChallengeMessage(thread: InboxThread) {
+  return thread.messages.find((item) => !item.parentMessageId) || sortThreadMessages(thread.messages)[0] || thread.displayMessage
+}
+
+function getChallengeStatusSortRank(message: InboxMessage) {
+  if (message.challengeDeletedAt) return 2
+  return String(message.challengeStatus || '').trim().toLowerCase() === 'completed' ? 1 : 0
+}
+
+function getChallengeSortDate(message: InboxMessage) {
+  const value = String(message.challengeDate || message.createdAt || '').trim()
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function sortChallengeThreadsByStatusAndDate(threads: InboxThread[]) {
+  return [...threads].sort((a, b) => {
+    const aChallenge = getThreadInitialChallengeMessage(a)
+    const bChallenge = getThreadInitialChallengeMessage(b)
+    const statusDifference = getChallengeStatusSortRank(aChallenge) - getChallengeStatusSortRank(bChallenge)
+    if (statusDifference !== 0) return statusDifference
+
+    const dateDifference = getChallengeSortDate(bChallenge) - getChallengeSortDate(aChallenge)
+    if (dateDifference !== 0) return dateDifference
+
+    return String(b.displayMessage.createdAt || '').localeCompare(String(a.displayMessage.createdAt || ''))
+  })
+}
+
 function getMessagePreview(body?: string | null) {
   const normalized = String(body || '').replace(/\s+/g, ' ').trim()
   if (normalized.length <= 140) return normalized
@@ -187,9 +216,13 @@ export default function Challenges() {
   const [activeIndividualChallengeLeaderboard, setActiveIndividualChallengeLeaderboard] = useState<InboxMessage | null>(null)
   const [activeIndividualLeaderboardParticipant, setActiveIndividualLeaderboardParticipant] = useState<IndividualChallengeParticipant | null>(null)
   const [activeTeamChallengeLeaderboard, setActiveTeamChallengeLeaderboard] = useState<InboxMessage | null>(null)
+  const [teamChallengeLeaderboardReturnTarget, setTeamChallengeLeaderboardReturnTarget] = useState<TeamChallengeScorecardTarget | null>(null)
+  const [individualChallengeLeaderboardReturnTarget, setIndividualChallengeLeaderboardReturnTarget] = useState<IndividualChallengeScorecardTarget | null>(null)
+  const [scorecardResumeHoles, setScorecardResumeHoles] = useState<Record<string, number>>({})
   const [refreshingLeaderboard, setRefreshingLeaderboard] = useState(false)
   const autoMarkedReadThreadIds = useRef(new Set<string>())
   const teamChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
+  const individualChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const [completingChallengeThreadId, setCompletingChallengeThreadId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -204,7 +237,7 @@ export default function Challenges() {
   const parsedIndividualParticipantEmails = useMemo(() => parseIndividualChallengeEmails(individualParticipantEmails), [individualParticipantEmails])
   const canSubmitChallenge = Boolean(teamChallengeDate && teamChallengeState && teamChallengeCourse) && (isTeamChallenge ? Boolean(proposerTeamId && /^\d+$/.test(challengedTeamIdentifier.trim())) : Boolean(challengeBody.trim() && parsedIndividualParticipantEmails.length > 0 && parsedIndividualParticipantEmails.length <= 25))
   const teamChallengeMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentChallenges].filter((message) => isChallengeMessage(message) && currentUserCanViewChallenge(message))), [messages, sentChallenges, teams, currentUserEmail, user?.id])
-  const teamChallengeThreads = useMemo(() => sortChallengeThreadsByActiveStatus(buildInboxThreads(teamChallengeMessages).map((thread) => {
+  const teamChallengeThreads = useMemo(() => sortChallengeThreadsByStatusAndDate(buildInboxThreads(teamChallengeMessages).map((thread) => {
     const unreadMessages = thread.unreadMessages.filter((message) => currentUserShouldSeeUnreadNotification(message))
     return { ...thread, unreadMessages, unreadCount: unreadMessages.length }
   })), [teamChallengeMessages, teams, currentUserEmail, user?.id])
@@ -215,7 +248,25 @@ export default function Challenges() {
     if (deleted) return false
     return challengeView === 'completed' ? isChallengeCompleted(challenge) : !isChallengeCompleted(challenge)
   }), [teamChallengeThreads, challengeView])
+  const displayedChallengeThreads = useMemo(() => {
+    if (!expandedThreadId) return visibleChallengeThreads
+    const selectedThreads = visibleChallengeThreads.filter((thread) => thread.threadId === expandedThreadId)
+    return selectedThreads.length > 0 ? selectedThreads : visibleChallengeThreads
+  }, [visibleChallengeThreads, expandedThreadId])
   const allConversationMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentMessages, ...sentChallenges]), [messages, sentMessages, sentChallenges])
+
+  function rememberScorecardResumeHole(key: string, holeNumber: number | null | undefined) {
+    const normalizedHole = Number(holeNumber)
+    if (!Number.isFinite(normalizedHole) || normalizedHole < 1) return
+    const nextHole = Math.trunc(normalizedHole)
+    setScorecardResumeHoles((current) => (current[key] === nextHole ? current : { ...current, [key]: nextHole }))
+  }
+
+  function resolveLeaderboardResumeHole(holes: HoleScoreDetail[], currentHole: number | null | undefined, saved: boolean) {
+    const normalizedCurrentHole = Number.isFinite(Number(currentHole)) ? Math.trunc(Number(currentHole)) : null
+    if (saved) return nextUnscoredHoleNumber(holes, normalizedCurrentHole || 0) || normalizedCurrentHole || nextUnscoredHoleNumber(holes, 0) || 1
+    return normalizedCurrentHole || nextUnscoredHoleNumber(holes, 0) || holes[0]?.hole || 1
+  }
 
   function getConversationFor(message: InboxMessage) {
     const threadId = messageThreadId(message)
@@ -236,19 +287,6 @@ export default function Challenges() {
 
   function isChallengeCompleted(message: InboxMessage) {
     return String(message.challengeStatus || '').trim().toLowerCase() === 'completed'
-  }
-
-  function isChallengeActive(message: InboxMessage) {
-    return isChallengeMessage(message) && !isChallengeCompleted(message)
-  }
-
-  function sortChallengeThreadsByActiveStatus(threads: InboxThread[]) {
-    return [...threads].sort((a, b) => {
-      const aActive = isChallengeActive(getInitialChallengeMessage(a))
-      const bActive = isChallengeActive(getInitialChallengeMessage(b))
-      if (aActive !== bActive) return aActive ? -1 : 1
-      return String(b.displayMessage.createdAt || '').localeCompare(String(a.displayMessage.createdAt || ''))
-    })
   }
 
   function selectChallengeView(nextView: 'active' | 'completed' | 'deleted') {
@@ -293,7 +331,7 @@ export default function Challenges() {
   }
 
   function getInitialChallengeMessage(thread: InboxThread) {
-    return thread.messages.find((item) => !item.parentMessageId) || sortThreadMessages(thread.messages)[0] || thread.displayMessage
+    return getThreadInitialChallengeMessage(thread)
   }
 
   function currentUserCreatedInitialChallenge(thread: InboxThread) {
@@ -524,14 +562,54 @@ export default function Challenges() {
     }
   }
 
-  async function openTeamChallengeLeaderboard(message: InboxMessage) {
+  async function openTeamChallengeLeaderboard(message: InboxMessage, returnTarget: TeamChallengeScorecardTarget | null = null) {
     const currentMessage = await fetchCurrentChallengeForLeaderboard(message, 'challenge_request', 'open')
-    if (!currentMessage) return
+    if (!currentMessage) return null
     const rows = getTeamChallengeLeaderboardRows(currentMessage)
     const pointSummary = getTeamChallengePointSummary(currentMessage)
     const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
+    setTeamChallengeLeaderboardReturnTarget(returnTarget)
     setActiveTeamChallengeLeaderboard(currentMessage)
-    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: currentMessage.threadId || currentMessage.id, proposerTeamId: currentMessage.proposerTeamId, challengedTeamId: currentMessage.challengedTeamId, displayOrder: showPointsColumn ? ['Round', 'Points', 'Thru', 'Total'] : ['Round', 'Thru', 'Total'], totalDisplayMode: showPointsColumn ? 'entered_strokes_and_points' : 'entered_strokes', pointsDisplayMode: showPointsColumn ? 'opponent_adjusted_net_points' : 'not_applicable', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length, showPointsColumn, summaryViewVisible: true, summaryViewMode: 'compact_line_item', opponentReadOnlyScoreTileRemoved: true, pushColumnVisible: true, scoreColorLegend: ['win', 'loss', 'push'], skinsPushDifferentialHoleCount: pointSummary.holeResults.filter((hole) => hole.strokeDifferentialBonus > 0).length, fetchedCurrentData: true } })
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: currentMessage.threadId || currentMessage.id, proposerTeamId: currentMessage.proposerTeamId, challengedTeamId: currentMessage.challengedTeamId, displayOrder: showPointsColumn ? ['Round', 'Points', 'Thru', 'Total'] : ['Round', 'Thru', 'Total'], totalDisplayMode: showPointsColumn ? 'entered_strokes_and_points' : 'entered_strokes', pointsDisplayMode: showPointsColumn ? 'opponent_adjusted_net_points' : 'not_applicable', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length, showPointsColumn, summaryViewVisible: true, summaryViewMode: 'compact_line_item', opponentReadOnlyScoreTileRemoved: true, pushColumnVisible: true, scoreColorLegend: ['win', 'loss', 'push'], skinsPushDifferentialHoleCount: pointSummary.holeResults.filter((hole) => hole.strokeDifferentialBonus > 0).length, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
+    return currentMessage
+  }
+
+  async function openTeamChallengeLeaderboardFromScorecard(message: InboxMessage, side: 'proposer' | 'challenged', editable: boolean) {
+    const key = getTeamChallengeScoreKey(message, side)
+    let resumeHole = scorecardResumeHoles[key] || null
+    try {
+      if (editable && teamChallengePendingHoleSaveRef.current) {
+        const pendingResult = await teamChallengePendingHoleSaveRef.current('team_challenge_leaderboard_open')
+        const latestHoles = pendingResult.holes || getTeamChallengeHoles(message, side)
+        updateTeamChallengeScorecard(message, side, latestHoles)
+        resumeHole = resolveLeaderboardResumeHole(latestHoles, pendingResult.hole || resumeHole, pendingResult.saved)
+        rememberScorecardResumeHole(key, resumeHole)
+      }
+      const opened = await openTeamChallengeLeaderboard(message, { message, side })
+      if (opened) {
+        setActiveTeamChallengeScorecard(null)
+        logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'scorecard_transitioned_to_leaderboard', data: { messageId: message.id, threadId: messageThreadId(message), side, returnToHole: resumeHole } })
+      }
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : 'Could not save the active hole before opening the leaderboard.'
+      setError(messageText)
+      logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', level: 'error', message: 'scorecard_transition_to_leaderboard_failed', data: { messageId: message.id, threadId: messageThreadId(message), side, error: messageText } })
+    }
+  }
+
+  function returnFromTeamChallengeLeaderboard(source: 'back' | 'close' | 'overlay') {
+    const returnTarget = teamChallengeLeaderboardReturnTarget
+    const leaderboardMessage = activeTeamChallengeLeaderboard
+    setActiveTeamChallengeLeaderboard(null)
+    setTeamChallengeLeaderboardReturnTarget(null)
+    if (!returnTarget) return
+
+    const returnMessage = leaderboardMessage && messageThreadId(leaderboardMessage) === messageThreadId(returnTarget.message)
+      ? leaderboardMessage
+      : returnTarget.message
+    setActiveTeamChallengeScorecard({ message: returnMessage, side: returnTarget.side })
+    const key = getTeamChallengeScoreKey(returnMessage, returnTarget.side)
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'returned_to_hole_scorecard', data: { messageId: returnMessage.id, threadId: messageThreadId(returnMessage), side: returnTarget.side, source, returnToHole: scorecardResumeHoles[key] || null } })
   }
 
   async function refreshTeamChallengeLeaderboard() {
@@ -628,13 +706,38 @@ export default function Challenges() {
       .map((row, index) => ({ ...row, position: index + 1 }))
   }
 
-  async function openIndividualChallengeLeaderboard(message: InboxMessage) {
+  async function openIndividualChallengeLeaderboard(message: InboxMessage, returnTarget: IndividualChallengeScorecardTarget | null = null) {
     const currentMessage = await fetchCurrentChallengeForLeaderboard(message, 'individual_challenge', 'open')
-    if (!currentMessage) return
+    if (!currentMessage) return null
     const rows = getIndividualChallengeLeaderboardRows(currentMessage)
+    setIndividualChallengeLeaderboardReturnTarget(returnTarget)
     setActiveIndividualLeaderboardParticipant(null)
     setActiveIndividualChallengeLeaderboard(currentMessage)
-    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: messageThreadId(currentMessage), participantCount: getIndividualChallengeParticipants(currentMessage).length, displayOrder: ['Round', 'Thru', 'Total'], totalDisplayMode: 'entered_strokes', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length, golferRowsClickable: true, roundSummaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'], readOnlyScoreTilesRemoved: true, fetchedCurrentData: true } })
+    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: messageThreadId(currentMessage), participantCount: getIndividualChallengeParticipants(currentMessage).length, displayOrder: ['Round', 'Thru', 'Total'], totalDisplayMode: 'entered_strokes', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length, golferRowsClickable: true, roundSummaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'], readOnlyScoreTilesRemoved: true, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
+    return currentMessage
+  }
+
+  async function openIndividualChallengeLeaderboardFromScorecard(message: InboxMessage, participant: IndividualChallengeParticipant, editable: boolean) {
+    const key = getIndividualChallengeScoreKey(message, participant)
+    let resumeHole = scorecardResumeHoles[key] || null
+    try {
+      if (editable && individualChallengePendingHoleSaveRef.current) {
+        const pendingResult = await individualChallengePendingHoleSaveRef.current('individual_challenge_leaderboard_open')
+        const latestHoles = pendingResult.holes || getIndividualChallengeHoles(message, participant)
+        updateIndividualChallengeScorecard(message, participant, latestHoles)
+        resumeHole = resolveLeaderboardResumeHole(latestHoles, pendingResult.hole || resumeHole, pendingResult.saved)
+        rememberScorecardResumeHole(key, resumeHole)
+      }
+      const opened = await openIndividualChallengeLeaderboard(message, { message, participant })
+      if (opened) {
+        setActiveIndividualChallengeScorecard(null)
+        logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'scorecard_transitioned_to_leaderboard', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), returnToHole: resumeHole } })
+      }
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : 'Could not save the active hole before opening the leaderboard.'
+      setError(messageText)
+      logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', level: 'error', message: 'scorecard_transition_to_leaderboard_failed', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), error: messageText } })
+    }
   }
 
   function openIndividualLeaderboardRoundSummary(message: InboxMessage, participant: IndividualChallengeParticipant) {
@@ -642,9 +745,27 @@ export default function Challenges() {
     logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), course: getTeamChallengeCourseName(message), editable: currentUserCanEditIndividualParticipant(participant), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'] } })
   }
 
-  function closeIndividualChallengeLeaderboard() {
+  function returnFromIndividualChallengeLeaderboard(source: 'back' | 'close' | 'overlay') {
+    const returnTarget = individualChallengeLeaderboardReturnTarget
+    const leaderboardMessage = activeIndividualChallengeLeaderboard
     setActiveIndividualLeaderboardParticipant(null)
     setActiveIndividualChallengeLeaderboard(null)
+    setIndividualChallengeLeaderboardReturnTarget(null)
+    if (!returnTarget) return
+
+    const returnMessage = leaderboardMessage && messageThreadId(leaderboardMessage) === messageThreadId(returnTarget.message)
+      ? leaderboardMessage
+      : returnTarget.message
+    const targetEmail = participantEmail(returnTarget.participant)
+    const returnParticipant = getIndividualChallengeParticipants(returnMessage)
+      .find((participant) => participantEmail(participant) === targetEmail) || returnTarget.participant
+    setActiveIndividualChallengeScorecard({ message: returnMessage, participant: returnParticipant })
+    const key = getIndividualChallengeScoreKey(returnMessage, returnParticipant)
+    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'returned_to_hole_scorecard', data: { messageId: returnMessage.id, threadId: messageThreadId(returnMessage), participantEmail: targetEmail, source, returnToHole: scorecardResumeHoles[key] || null } })
+  }
+
+  function closeIndividualChallengeLeaderboard() {
+    returnFromIndividualChallengeLeaderboard('close')
   }
 
   function getIndividualRoundSummaryRows(message: InboxMessage, participant: IndividualChallengeParticipant) {
@@ -1063,7 +1184,7 @@ export default function Challenges() {
       logFrontendEvent({
         category: source === 'team-challenges' ? 'inbox.teamChallenge' : 'inbox.message',
         message: next === thread.threadId ? 'inbox_thread_expanded' : 'inbox_thread_collapsed',
-        data: { threadId: thread.threadId, displayMessageId: thread.displayMessage.id, messageType: thread.displayMessage.messageType, threadMessageCount: thread.messages.length, unreadCount: thread.unreadCount, source },
+        data: { threadId: thread.threadId, displayMessageId: thread.displayMessage.id, messageType: thread.displayMessage.messageType, threadMessageCount: thread.messages.length, unreadCount: thread.unreadCount, source, otherChallengesHidden: source === 'team-challenges' && next === thread.threadId, hiddenChallengeCount: source === 'team-challenges' && next === thread.threadId ? Math.max(0, visibleChallengeThreads.length - 1) : 0 },
       })
       return next
     })
@@ -1444,6 +1565,8 @@ export default function Challenges() {
                 loadScorecardOnMount={!holes.some((hole) => hole.scoreProvided)}
                 teeColor={getTeamChallengeTeeColor(message)}
                 registerPendingHoleSave={(handler) => { teamChallengePendingHoleSaveRef.current = handler }}
+                initialHoleNumber={scorecardResumeHoles[key] || null}
+                onActiveHoleChange={(holeNumber) => rememberScorecardResumeHole(key, holeNumber)}
               />
               <div className="small holeInputModalHint">Enter each hole score, then save the Team Challenge score.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
@@ -1461,10 +1584,7 @@ export default function Challenges() {
                   className="btn btnSmall inboxLeaderboardButton"
                   disabled={refreshingLeaderboard}
                   aria-busy={refreshingLeaderboard}
-                  onClick={() => {
-                    setActiveTeamChallengeScorecard(null)
-                    openTeamChallengeLeaderboard(message)
-                  }}
+                  onClick={() => { void openTeamChallengeLeaderboardFromScorecard(message, side, editable) }}
                 >
                   {refreshingLeaderboard ? 'Loading leaderboard…' : 'Leaderboard'}
                 </button>
@@ -1493,10 +1613,7 @@ export default function Challenges() {
                   className="btn btnSmall inboxLeaderboardButton"
                   disabled={refreshingLeaderboard}
                   aria-busy={refreshingLeaderboard}
-                  onClick={() => {
-                    setActiveTeamChallengeScorecard(null)
-                    openTeamChallengeLeaderboard(message)
-                  }}
+                  onClick={() => { void openTeamChallengeLeaderboardFromScorecard(message, side, editable) }}
                 >
                   {refreshingLeaderboard ? 'Loading leaderboard…' : 'Leaderboard'}
                 </button>
@@ -1532,6 +1649,9 @@ export default function Challenges() {
                 scoreOwnerLabel={`${golferName} score`}
                 loadScorecardOnMount={!holes.some((hole) => hole.scoreProvided)}
                 teeColor={getTeamChallengeTeeColor(message)}
+                registerPendingHoleSave={(handler) => { individualChallengePendingHoleSaveRef.current = handler }}
+                initialHoleNumber={scorecardResumeHoles[getIndividualChallengeScoreKey(message, participant)] || null}
+                onActiveHoleChange={(holeNumber) => rememberScorecardResumeHole(getIndividualChallengeScoreKey(message, participant), holeNumber)}
               />
               <div className="small holeInputModalHint">Enter each hole score; each completed hole saves automatically.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
@@ -1541,10 +1661,7 @@ export default function Challenges() {
                   className="btn btnSmall inboxLeaderboardButton"
                   disabled={refreshingLeaderboard}
                   aria-busy={refreshingLeaderboard}
-                  onClick={() => {
-                    setActiveIndividualChallengeScorecard(null)
-                    openIndividualChallengeLeaderboard(message)
-                  }}
+                  onClick={() => { void openIndividualChallengeLeaderboardFromScorecard(message, participant, editable) }}
                 >
                   {refreshingLeaderboard ? 'Loading leaderboard…' : 'Leaderboard'}
                 </button>
@@ -1571,10 +1688,7 @@ export default function Challenges() {
                   className="btn btnSmall inboxLeaderboardButton"
                   disabled={refreshingLeaderboard}
                   aria-busy={refreshingLeaderboard}
-                  onClick={() => {
-                    setActiveIndividualChallengeScorecard(null)
-                    openIndividualChallengeLeaderboard(message)
-                  }}
+                  onClick={() => { void openIndividualChallengeLeaderboardFromScorecard(message, participant, editable) }}
                 >
                   {refreshingLeaderboard ? 'Loading leaderboard…' : 'Leaderboard'}
                 </button>
@@ -1596,11 +1710,11 @@ export default function Challenges() {
     const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
 
     return (
-      <div className="modalOverlay inboxLeaderboardModalOverlay" role="presentation" onClick={() => setActiveTeamChallengeLeaderboard(null)}>
+      <div className="modalOverlay inboxLeaderboardModalOverlay" role="presentation" onClick={() => returnFromTeamChallengeLeaderboard('overlay')}>
         <div className="modalCard inboxLeaderboardModal" role="dialog" aria-modal="true" aria-label="Team Challenge Leaderboard" onClick={(event) => event.stopPropagation()}>
           <div className="inboxLeaderboardHero">
             <div className="inboxLeaderboardHeroTopline">
-              <button type="button" className="inboxLeaderboardIconButton" aria-label="Close leaderboard" onClick={() => setActiveTeamChallengeLeaderboard(null)}>‹</button>
+              <button type="button" className="inboxLeaderboardIconButton" aria-label={teamChallengeLeaderboardReturnTarget ? `Back to Hole ${scorecardResumeHoles[getTeamChallengeScoreKey(message, teamChallengeLeaderboardReturnTarget.side)] || 1}` : 'Close leaderboard'} onClick={() => returnFromTeamChallengeLeaderboard('back')}>‹</button>
               <div className="inboxLeaderboardCrest" aria-hidden="true">⛳</div>
               <div className="inboxLeaderboardTopRightActions">
                 <button
@@ -1612,7 +1726,7 @@ export default function Challenges() {
                 >
                   {refreshingLeaderboard ? '…' : '↻'}
                 </button>
-                <button type="button" className="inboxLeaderboardIconButton" aria-label="Close leaderboard" onClick={() => setActiveTeamChallengeLeaderboard(null)}>×</button>
+                <button type="button" className="inboxLeaderboardIconButton" aria-label={teamChallengeLeaderboardReturnTarget ? `Return to Hole ${scorecardResumeHoles[getTeamChallengeScoreKey(message, teamChallengeLeaderboardReturnTarget.side)] || 1}` : 'Close leaderboard'} onClick={() => returnFromTeamChallengeLeaderboard('close')}>×</button>
               </div>
             </div>
             <div className="inboxLeaderboardYear">Golf Homiez</div>
@@ -1677,19 +1791,19 @@ export default function Challenges() {
     const canEditSelected = selectedParticipant ? currentUserCanEditIndividualParticipant(selectedParticipant) && !isChallengeCompleted(message) : false
 
     return (
-      <div className="modalOverlay inboxLeaderboardModalOverlay" role="presentation" onClick={closeIndividualChallengeLeaderboard}>
+      <div className="modalOverlay inboxLeaderboardModalOverlay" role="presentation" onClick={() => returnFromIndividualChallengeLeaderboard('overlay')}>
         <div className="modalCard inboxLeaderboardModal" role="dialog" aria-modal="true" aria-label={selectedParticipant ? `${selectedName} round summary` : 'Individual Challenge Leaderboard'} onClick={(event) => event.stopPropagation()}>
           <div className="inboxLeaderboardHero">
             <div className="inboxLeaderboardHeroTopline">
               <button
                 type="button"
                 className="inboxLeaderboardIconButton"
-                aria-label={selectedParticipant ? 'Back to leaderboard' : 'Close leaderboard'}
+                aria-label={selectedParticipant ? 'Back to leaderboard' : (individualChallengeLeaderboardReturnTarget ? `Back to Hole ${scorecardResumeHoles[getIndividualChallengeScoreKey(message, individualChallengeLeaderboardReturnTarget.participant)] || 1}` : 'Close leaderboard')}
                 onClick={() => {
                   if (selectedParticipant) {
                     setActiveIndividualLeaderboardParticipant(null)
                     logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_round_summary_back_to_leaderboard', data: { messageId: message.id, threadId: messageThreadId(message) } })
-                  } else closeIndividualChallengeLeaderboard()
+                  } else returnFromIndividualChallengeLeaderboard('back')
                 }}
               >‹</button>
               <div className="inboxLeaderboardCrest" aria-hidden="true">⛳</div>
@@ -1699,7 +1813,7 @@ export default function Challenges() {
                     {refreshingLeaderboard ? '…' : '↻'}
                   </button>
                 ) : null}
-                <button type="button" className="inboxLeaderboardIconButton" aria-label="Close leaderboard" onClick={closeIndividualChallengeLeaderboard}>×</button>
+                <button type="button" className="inboxLeaderboardIconButton" aria-label={individualChallengeLeaderboardReturnTarget ? `Return to Hole ${scorecardResumeHoles[getIndividualChallengeScoreKey(message, individualChallengeLeaderboardReturnTarget.participant)] || 1}` : 'Close leaderboard'} onClick={() => returnFromIndividualChallengeLeaderboard('close')}>×</button>
               </div>
             </div>
             <div className="inboxLeaderboardYear">Golf Homiez</div>
@@ -2076,7 +2190,7 @@ export default function Challenges() {
 
         {loading ? null : visibleChallengeThreads.length === 0 ? <div className="small">{challengeView === 'completed' ? 'No completed Challenges.' : (challengeView === 'deleted' ? 'No deleted Challenges.' : 'No active Challenges yet.')}</div> : null}
         <div className="inboxMessageList">
-          {visibleChallengeThreads.map((thread) => renderThreadCard(thread, 'team-challenges'))}
+          {displayedChallengeThreads.map((thread) => renderThreadCard(thread, 'team-challenges'))}
         </div>
       </section>
 

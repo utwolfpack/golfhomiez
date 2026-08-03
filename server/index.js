@@ -18,7 +18,8 @@ import { calculateHoleScoreTotal, calculateProvidedHoleScoreTotal, getHoleScorec
 import { clearScorecardDraftHoles, deleteScorecardDraftHole, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
-import { listScheduledJobs, runScheduledJob, startScheduledJobRunner } from './lib/scheduled-jobs.js'
+import { cancelScheduledJob, configureScheduledJob, listScheduledJobs, runScheduledJob, startScheduledJobRunner } from './lib/scheduled-jobs.js'
+import { searchGolfCourseTournaments } from './lib/tournament-discovery.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
 import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerPasswordReset, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, resetOrganizerPassword, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
@@ -1794,7 +1795,7 @@ async function proxyClientApp(req, res, next) {
   }
 }
 
-app.get(['/register', '/login', '/verify-contact', '/support', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/login', '/organizer/forgot-password', '/organizer/reset-password', '/organizer/portal/profile'], async (req, res, next) => {
+app.get(['/register', '/login', '/verify-contact', '/support', '/find-tournament', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/login', '/organizer/forgot-password', '/organizer/reset-password', '/organizer/portal/profile'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
 
@@ -1970,9 +1971,72 @@ app.post('/api/admin/scheduled-jobs/:id/run', adminMiddleware, async (req, res) 
     if (error instanceof Error && /Scheduled job not found/i.test(error.message)) {
       return res.status(404).json({ message: error.message })
     }
+    if (error?.code === 'SCHEDULED_JOB_ALREADY_RUNNING') {
+      return res.status(409).json({ message: error.message })
+    }
     logRouteError('Admin scheduled job manual run error', req, error)
     logScheduledJob('admin_scheduled_job_manual_run_failed', { ...requestContext(req), adminUserId: req.adminUser?.id || null, jobId: req.params.id || null, error })
     res.status(500).json({ message: 'Could not run scheduled job' })
+  }
+})
+
+app.put('/api/admin/scheduled-jobs/:id/schedule', adminMiddleware, async (req, res) => {
+  try {
+    const jobId = String(req.params.id || '').trim()
+    if (!jobId) return res.status(400).json({ message: 'Scheduled job id is required' })
+    logApi('admin_scheduled_job_schedule_update_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId, schedule: req.body?.schedule || null })
+    logScheduledJob('admin_scheduled_job_schedule_update_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId, schedule: req.body?.schedule || null })
+    const job = await configureScheduledJob(getPool(), jobId, {
+      schedule: req.body?.schedule,
+      jobConfig: req.body?.jobConfig,
+      correlationId: req.correlationId,
+      adminUser: req.adminUser,
+      logApi,
+      logScheduledJob,
+    })
+    if (cancelledTournamentCleanupScheduler?.reschedule) {
+      await cancelledTournamentCleanupScheduler.reschedule(jobId)
+    }
+    const jobs = await listScheduledJobs(getPool())
+    res.json({ job, jobs })
+  } catch (error) {
+    if (error instanceof Error && /Scheduled job not found/i.test(error.message)) {
+      return res.status(404).json({ message: error.message })
+    }
+    if (error instanceof Error && /Schedule|Weekly|Monthly|HH:MM/i.test(error.message)) {
+      logApi('admin_scheduled_job_schedule_validation_failed', { ...requestContext(req), adminUserId: req.adminUser?.id || null, jobId: req.params.id || null, error: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Admin scheduled job schedule update error', req, error)
+    logScheduledJob('admin_scheduled_job_schedule_update_failed', { ...requestContext(req), adminUserId: req.adminUser?.id || null, jobId: req.params.id || null, error })
+    res.status(500).json({ message: 'Could not update scheduled job schedule' })
+  }
+})
+
+app.post('/api/admin/scheduled-jobs/:id/cancel', adminMiddleware, async (req, res) => {
+  try {
+    const jobId = String(req.params.id || '').trim()
+    if (!jobId) return res.status(400).json({ message: 'Scheduled job id is required' })
+    logApi('admin_scheduled_job_cancel_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId })
+    logScheduledJob('admin_scheduled_job_cancel_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId })
+    const result = await cancelScheduledJob(getPool(), jobId, {
+      correlationId: req.correlationId,
+      adminUser: req.adminUser,
+      logApi,
+      logScheduledJob,
+    })
+    const jobs = await listScheduledJobs(getPool())
+    res.status(202).json({ result, jobs })
+  } catch (error) {
+    if (error instanceof Error && /Scheduled job not found/i.test(error.message)) {
+      return res.status(404).json({ message: error.message })
+    }
+    if (error?.code === 'SCHEDULED_JOB_NOT_RUNNING') {
+      return res.status(409).json({ message: error.message })
+    }
+    logRouteError('Admin scheduled job cancel error', req, error)
+    logScheduledJob('admin_scheduled_job_cancel_failed', { ...requestContext(req), adminUserId: req.adminUser?.id || null, jobId: req.params.id || null, error })
+    res.status(500).json({ message: 'Could not cancel scheduled job' })
   }
 })
 
@@ -2755,6 +2819,38 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
     }
     logRouteError('Tournament registration error', req, error)
     res.status(500).json({ message: 'Could not register for tournament' })
+  }
+})
+
+
+app.get('/api/users/tournament-search', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    logApi('user_tournament_search_started', { ...requestContext(req), authUserId: req.user.id })
+    const result = await searchGolfCourseTournaments(getPool(), {
+      state: req.query.state,
+      city: req.query.city,
+      zipCode: req.query.zipCode,
+      golfCourseName: req.query.golfCourseName,
+      fromDate: req.query.fromDate,
+      toDate: req.query.toDate,
+    }, { page: req.query.page })
+    logApi('user_tournament_search_completed', {
+      ...requestContext(req),
+      authUserId: req.user.id,
+      filters: result.filters,
+      page: result.pagination.page,
+      pageSize: result.pagination.pageSize,
+      resultCount: result.tournaments.length,
+      totalResults: result.pagination.totalResults,
+    })
+    res.json(result)
+  } catch (error) {
+    if (error instanceof Error && /date|six months|YYYY-MM-DD/i.test(error.message)) {
+      logApi('user_tournament_search_validation_failed', { ...requestContext(req), authUserId: req.user?.id || null, error: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('User tournament search error', req, error)
+    res.status(500).json({ message: 'Could not search golf tournaments' })
   }
 })
 
