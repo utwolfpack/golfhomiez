@@ -3781,8 +3781,9 @@ button.navDropdownItem{font:inherit;}
 }
 
 .holeInputTrackerChip{
-  min-width:26px;
-  min-height:26px;
+  min-width:32px;
+  min-height:32px;
+  padding:0;
   border:1px solid #cbd5e1;
   border-radius:999px;
   background:#fff;
@@ -3790,6 +3791,8 @@ button.navDropdownItem{font:inherit;}
   font-size:12px;
   font-weight:900;
   cursor:pointer;
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
   transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,transform .15s ease;
 }
 
@@ -3817,6 +3820,14 @@ button.navDropdownItem{font:inherit;}
   border-color:#60a5fa;
   color:#1e3a8a;
   box-shadow:0 0 0 3px rgba(147,197,253,.42);
+}
+
+@media (max-width:720px){
+  .holeInputTrackerChip{
+    min-width:36px;
+    min-height:36px;
+    font-size:13px;
+  }
 }
 
 .holeInputResetButton{

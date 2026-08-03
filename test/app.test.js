@@ -329,11 +329,12 @@ test('unsaved hole scores preserve null values and default the score input to th
   const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const scorecardLib = fs.readFileSync(new URL('../src/lib/hole-scorecard.ts', import.meta.url), 'utf8')
 
-  assert.match(component, /if \(hole\.scoreProvided === false \|\| hole\.score == null\) return getPlayablePar\(hole\.par\)/)
+  assert.match(component, /if \(!hasSavedHoleScoreValue\(hole\)\) return getPlayablePar\(hole\.par\)/)
   assert.match(component, /setActiveScore\(getScoreOrPar\(activeHole\)\)/)
   assert.match(scorecardLib, /const hasScoreValue = rawScore !== undefined && rawScore !== null && rawScore !== ''/)
   assert.match(scorecardLib, /const score = hasScoreValue \? Number\(rawScore\) : Number\.NaN/)
-  assert.match(scorecardLib, /score: hasScoreValue && Number\.isFinite\(score\) && score >= 0 \? Math\.trunc\(score\) : \(scoreProvided \? \(Number\.isFinite\(par\) && par > 0 \? Math\.trunc\(par\) : 0\) : null\)/)
+  assert.match(scorecardLib, /const hasValidScoreValue = hasScoreValue && Number\.isFinite\(score\) && score >= 0/)
+  assert.match(scorecardLib, /score: hasValidScoreValue \? Math\.trunc\(score\) : \(scoreProvided \? \(Number\.isFinite\(par\) && par > 0 \? Math\.trunc\(par\) : 0\) : null\)/)
 })
 
 test('hole-by-hole input uses a GolfHomiez-themed numbered golf ball with a Hole label and no extra controls above it', () => {
@@ -1448,12 +1449,14 @@ test('hole-by-hole close actions save the active dirty score before closing edit
   assert.match(css, /\.teamScorecardModalCard \.holeInputNavigation\{[\s\S]*grid-template-columns:repeat\(2, minmax\(0, 1fr\)\)/)
 })
 
-test('solo hole tracker merge keeps unsaved persisted holes marked missing', () => {
+test('solo hole tracker merge treats null as missing and a numeric persisted score as saved', () => {
   const holeScorecardLib = fs.readFileSync(new URL('../src/lib/hole-scorecard.ts', import.meta.url), 'utf8')
   const component = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
 
   assert.match(holeScorecardLib, /function hasScoreProvidedFlag\(record: Record<string, unknown>\)/)
-  assert.match(holeScorecardLib, /if \(hasScoreProvidedFlag\(record\) && !provided\) return null/)
+  assert.doesNotMatch(holeScorecardLib, /if \(hasScoreProvidedFlag\(record\) && !provided\) return null/)
+  assert.match(holeScorecardLib, /export function hasSavedHoleScoreValue/)
+  assert.match(holeScorecardLib, /if \(!hole \|\| hole\.score == null\) return false/)
   assert.match(component, /const loadedProvidedHoleNumbers = getProvidedHoleNumbers\(nextHoles\)/)
   assert.match(component, /providedCount: loadedProvidedHoleNumbers\.length/)
   assert.match(component, /providedHoleNumbers: loadedProvidedHoleNumbers/)
@@ -3955,7 +3958,7 @@ test('leaderboard refresh and hole-by-hole score resets persist with current dat
   assert.match(scorecardLib, /score: null/)
   assert.match(scorecardLib, /export function resetHoleScore/)
   assert.match(scorecardLib, /scoreProvided: false/)
-  assert.match(scorecard, /defaultHoleIndexForInputFlow/)
+  assert.match(scorecard, /defaultHoleNumberForInputFlow/)
   assert.match(scorecard, /findFirstUnscoredHoleIndex/)
   assert.match(scorecard, /first_unscored_hole_selected/)
   assert.match(scorecard, /Reset Hole Score/)
@@ -4206,9 +4209,9 @@ test('round review popup opens hole-by-hole editing, restores the solo hole revi
   assert.match(modal, /fullViewportScorecard: true/)
   assert.match(modal, /sharedHoleInputFlow: true/)
   assert.match(modal, /else beginHoleByHoleEdit\(\)/)
-  assert.match(scorecard, /function defaultHoleIndexForInputFlow\(holes: HoleScoreDetail\[\], preferredHoleNumber\?: number \| null\)/)
+  assert.match(scorecard, /function defaultHoleNumberForInputFlow\(holes: HoleScoreDetail\[\], preferredHoleNumber\?: number \| null\)/)
   assert.match(scorecard, /const firstUnscoredHoleIndex = findFirstUnscoredHoleIndex\(holes\)/)
-  assert.match(scorecard, /if \(firstUnscoredHoleIndex == null\) return 0/)
+  assert.match(scorecard, /if \(firstUnscoredHoleIndex == null\) return 1/)
   assert.match(scorecard, /completed_scorecard_defaulted_to_hole_one/)
   assert.match(scorecard, /allHolesSaved/)
 
@@ -4295,7 +4298,7 @@ test('registered tournaments support team score entry with a clickable non-conso
 
   assert.match(scorecard, /showTeeData = true/)
   assert.match(scorecard, /showTeeData \? \{ key: 'tees'/)
-  assert.match(scorecard, /if \(hole\.scoreProvided === false \|\| hole\.score == null\) return getPlayablePar\(hole\.par\)/)
+  assert.match(scorecard, /if \(!hasSavedHoleScoreValue\(hole\)\) return getPlayablePar\(hole\.par\)/)
 
   assert.match(accounts, /fetchTournamentTeamScore/)
   assert.match(accounts, /updateTournamentTeamScore/)
@@ -4323,7 +4326,7 @@ test('completed scorecards reopen on hole 1 and challenge selection isolates the
   const scorecard = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
   const challenges = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
 
-  const completedDefaultPosition = scorecard.indexOf('if (firstUnscoredHoleIndex == null) return 0')
+  const completedDefaultPosition = scorecard.indexOf('if (firstUnscoredHoleIndex == null) return 1')
   const preferredHolePosition = scorecard.indexOf('const normalizedPreferredHole = Number(preferredHoleNumber)')
   assert.ok(completedDefaultPosition >= 0)
   assert.ok(preferredHolePosition > completedDefaultPosition)
@@ -4346,7 +4349,7 @@ test('My Tournaments starts on the first null score from holes 1 through 18 and 
   assert.match(tournamentScoreModal, /const defaultHoles = buildClientDefaultHoleScorecard\(stateCode, course, teeColor\)/)
   assert.match(tournamentScoreModal, /return defaultHoles\.map\(\(defaultHole\) =>/)
   assert.match(tournamentScoreModal, /function hasSavedTournamentHoleValue\(hole: HoleScoreDetail \| undefined\)/)
-  assert.match(tournamentScoreModal, /hole\.score == null/)
+  assert.match(tournamentScoreModal, /return hasSavedHoleScoreValue\(hole\)/)
   assert.match(tournamentScoreModal, /const savedHoleNumbers = new Set\(/)
   assert.match(tournamentScoreModal, /for \(let holeNumber = 1; holeNumber <= 18; holeNumber \+= 1\)/)
   assert.match(tournamentScoreModal, /if \(!savedHoleNumbers\.has\(holeNumber\)\) \{[\s\S]{0,180}return \{ hole: holeNumber, allHolesSaved: false/)
@@ -4370,4 +4373,66 @@ test('My Tournaments starts on the first null score from holes 1 through 18 and 
   assert.doesNotMatch(emailBlock, /onChange=/)
   assert.match(css, /\.profileReadOnlyValue\{[\s\S]{0,500}user-select:text/)
   assert.match(profile, /profile_email_displayed_read_only/)
+})
+
+test('hole-by-hole initialization cannot enter a resume-hole feedback loop and uses stored score values as the progression source', () => {
+  const scorecard = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
+  const scorecardLib = fs.readFileSync(new URL('../src/lib/hole-scorecard.ts', import.meta.url), 'utf8')
+  const tournamentScoreModal = fs.readFileSync(new URL('../src/components/TournamentTeamScoreModal.tsx', import.meta.url), 'utf8')
+  const challenges = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
+  const roundDetail = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
+
+  assert.match(scorecard, /useState\(\(\) => defaultHoleNumberForInputFlow\(holes, initialHoleNumber\)\)/)
+  assert.match(scorecard, /const preferredHoleNumber = initialHoleNumberRef\.current/)
+  assert.match(scorecard, /selectionMode: 'initialize_once_per_scorecard_context'/)
+
+  const keyStart = scorecard.indexOf('const defaultHoleSelectionKey = useMemo')
+  const keyEnd = scorecard.indexOf('useLayoutEffect(() => {', keyStart)
+  assert.ok(keyStart >= 0 && keyEnd > keyStart)
+  const keyBlock = scorecard.slice(keyStart, keyEnd)
+  assert.doesNotMatch(keyBlock, /String\(initialHoleNumber/)
+  assert.doesNotMatch(keyBlock, /initialHoleNumber\]/)
+
+  const defaultSelectionEffectStart = scorecard.indexOf('useLayoutEffect(() => {', keyEnd)
+  const defaultSelectionEffectEnd = scorecard.indexOf('\n\n  useEffect(() => {', defaultSelectionEffectStart)
+  const defaultSelectionEffect = scorecard.slice(defaultSelectionEffectStart, defaultSelectionEffectEnd)
+  assert.match(defaultSelectionEffect, /\}, \[enabled, defaultHoleSelectionKey\]\)/)
+  assert.doesNotMatch(defaultSelectionEffect, /\[enabled, defaultHoleSelectionKey, initialHoleNumber\]/)
+
+  const persistedMergeStart = scorecard.indexOf("category: 'scorecard.persisted_holes.merge'")
+  const persistedMergeEffectStart = scorecard.lastIndexOf('useEffect(() => {', persistedMergeStart)
+  const persistedMergeEffectEnd = scorecard.indexOf('\n\n  useEffect(() => {', persistedMergeStart)
+  const persistedMergeEffect = scorecard.slice(persistedMergeEffectStart, persistedMergeEffectEnd)
+  assert.match(persistedMergeEffect, /navigationPreserved: true/)
+  assert.doesNotMatch(persistedMergeEffect, /setActiveHoleNumber/)
+
+  assert.match(scorecardLib, /export function hasSavedHoleScoreValue/)
+  assert.match(scorecardLib, /if \(!hole \|\| hole\.score == null\) return false/)
+  assert.match(scorecardLib, /const scoreProvided = hasValidScoreValue \|\| \(explicitScoreProvided && isProvided/)
+  assert.match(scorecardLib, /\.filter\(\(hole\) => !hasSavedHoleScoreValue\(hole\)\)/)
+  assert.match(scorecardLib, /\.filter\(\(hole\) => hasSavedHoleScoreValue\(hole\)\)/)
+
+  assert.match(tournamentScoreModal, /return holes\.filter\(\(hole\) => hasSavedHoleScoreValue\(hole\)\)/)
+  assert.match(challenges, /loadScorecardOnMount=\{!holes\.some\(\(hole\) => hasSavedHoleScoreValue\(hole\)\)\}/)
+  assert.match(roundDetail, /\.some\(\(hole\) => hasSavedHoleScoreValue\(hole\)\)/)
+})
+
+
+test('hole tracker navigation uses hole numbers, changes immediately, and remains available during score persistence', () => {
+  const scorecard = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(scorecard, /function getSafeHoleByNumber\(/)
+  assert.match(scorecard, /const \[activeHoleNumber, setActiveHoleNumber\] = useState/)
+  assert.match(scorecard, /const activeHole = getSafeHoleByNumber\(holes, activeHoleNumber/)
+  assert.match(scorecard, /async function goToHole\(holeNumber: number/)
+  assert.match(scorecard, /const pendingSave = savePendingActiveHoleScore\(source\)[\s\S]{0,260}setActiveHoleNumber\(targetHoleNumber\)[\s\S]{0,650}await pendingSave/)
+  assert.match(scorecard, /message: 'selected_immediately'/)
+  assert.match(scorecard, /navigationMode: 'hole_number_immediate'/)
+  assert.match(scorecard, /persistenceDoesNotBlockNavigation: true/)
+  assert.match(scorecard, /previous_hole_save_failed_navigation_preserved/)
+  assert.match(scorecard, /void goToHole\(holeNumber, 'tracker_chip'\)/)
+  assert.doesNotMatch(scorecard, /if \(savingHole\) return[\s\S]{0,140}setActiveHole/)
+  assert.match(scorecard, /const hasSavedScore = hasSavedHoleScoreValue\(currentHoleRecord\)/)
+  assert.match(css, /\.holeInputTrackerChip\{[\s\S]{0,350}touch-action:manipulation/)
 })

@@ -4,7 +4,7 @@ import type { FormEvent } from 'react'
 import type { HoleScoreDetail, ScoreEntry } from '../types'
 import { compareRoundToHistory } from '../lib/roundInsights'
 import { formatFriendlyDate, formatFriendlyDateTime } from '../lib/time-format'
-import { formatHoleScoreOutcome, holeScoreTotal as calculateClientHoleScoreTotal, missingHoleScoreNumbers, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
+import { formatHoleScoreOutcome, hasSavedHoleScoreValue, holeScoreTotal as calculateClientHoleScoreTotal, missingHoleScoreNumbers, normalizeHoleScorecard, scoreOutcomeClassName } from '../lib/hole-scorecard'
 import { normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
 import { getIncompleteRoundStatus } from '../lib/round-status'
 import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType } from '../lib/team-challenge-scoring'
@@ -889,7 +889,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
       >
         <HoleByHoleScorecard
           enabled={true}
-          loadScorecardOnMount={!(activeEditScorecardSide === 'solo' ? editSoloHoles : activeEditScorecardSide === 'team' ? editTeamHoles : editOpponentHoles).some((hole) => hole.scoreProvided)}
+          loadScorecardOnMount={!(activeEditScorecardSide === 'solo' ? editSoloHoles : activeEditScorecardSide === 'team' ? editTeamHoles : editOpponentHoles).some((hole) => hasSavedHoleScoreValue(hole))}
           stateCode={editForm.state}
           course={editForm.course}
           courseId={String((round as any).courseId || (round as any).course_id || '') || null}
