@@ -103,3 +103,57 @@ test('tournament team score migration is registered with per-tournament team uni
   assert.match(sql, /correlation_id VARCHAR\(191\) NULL/)
   assert.match(sql, /ON DELETE CASCADE/)
 })
+
+test('GolfHomiez tournament search migration uses collation-safe identifier joins', async () => {
+  const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260806_067')
+  assert.ok(migration)
+  const db = {
+    async execute() {
+      return [[]]
+    },
+  }
+
+  const sql = await migration.getSql(db)
+  assert.match(sql, /BINARY hra\.id = BINARY t\.host_account_id/)
+  assert.match(sql, /BINARY ha\.id = BINARY t\.host_account_id/)
+  assert.match(sql, /BINARY gcpp\.host_account_id = BINARY t\.host_account_id/)
+  assert.match(sql, /BINARY gc\.id = BINARY COALESCE\(ha\.golf_course_id, gcpp\.golf_course_id\)/)
+})
+
+test('team start assignment migration inherits tournaments.id charset and collation', async () => {
+  const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260806_069')
+  assert.ok(migration)
+  const db = {
+    async execute(sql) {
+      if (/table_name = 'tournaments'/i.test(sql) && /column_name = 'id'/i.test(sql)) {
+        return [[{
+          column_type: 'varchar(191)',
+          character_set_name: 'utf8mb4',
+          collation_name: 'utf8mb4_bin',
+        }]]
+      }
+      if (/information_schema\.tables/i.test(sql)) return [[]]
+      throw new Error(`Unexpected execute call: ${sql}`)
+    },
+  }
+
+  const sql = await migration.getSql(db)
+  assert.match(sql, /tournament_id VARCHAR\(191\) CHARACTER SET `utf8mb4` COLLATE `utf8mb4_bin` NOT NULL/)
+  assert.match(sql, /FOREIGN KEY \(tournament_id\) REFERENCES tournaments\(id\)/)
+})
+
+test('cross-table collation repair migration and migration failure diagnostics are registered', async () => {
+  const repairMigration = APP_MIGRATIONS.find((entry) => entry.version === '20260810_071')
+  assert.ok(repairMigration)
+  assert.equal(repairMigration.name, 'cross_table_identifier_collation_repair')
+
+  const migrationSql = await readFile(new URL('../migration_scripts/20260810_071_cross_table_identifier_collation_repair.sql', import.meta.url), 'utf8')
+  const runnerSource = await readFile(new URL('../server/migrations/runner.js', import.meta.url), 'utf8')
+  assert.match(migrationSql, /golf_course_tournaments MODIFY COLUMN golfhomiez_tournament_id/i)
+  assert.match(migrationSql, /tournament_team_start_assignments MODIFY COLUMN tournament_id/i)
+  assert.match(migrationSql, /BINARY gc\.id = BINARY COALESCE/i)
+  assert.match(migrationSql, /migration-20260810-071/)
+  assert.match(runnerSource, /\$\{migration\.version\} starting/)
+  assert.match(runnerSource, /migrationFilename: migration\.filename/)
+  assert.match(runnerSource, /logger\.error\?\./)
+})

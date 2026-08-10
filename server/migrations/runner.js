@@ -95,9 +95,20 @@ export async function runAppMigrations(db, logger = console) {
   const results = []
   for (const migration of migrations) {
     if (appliedVersionSet.has(migration.version)) continue
-    const result = await applyMigration(db, migration)
-    results.push(result)
-    logger.info?.(`[db:migrate] ${migration.version} ${result.status}`)
+    logger.info?.(`[db:migrate] ${migration.version} starting`)
+    try {
+      const result = await applyMigration(db, migration)
+      results.push(result)
+      logger.info?.(`[db:migrate] ${migration.version} ${result.status}`)
+    } catch (error) {
+      logger.error?.(`[db:migrate] ${migration.version} failed`, {
+        migrationVersion: migration.version,
+        migrationName: migration.name,
+        migrationFilename: migration.filename,
+        error,
+      })
+      throw error
+    }
   }
 
   if (results.length === 0) {
