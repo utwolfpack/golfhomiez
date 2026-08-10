@@ -4,10 +4,13 @@ export type HostAccount = {
   id: string
   email: string
   golfCourseName: string
+  golfCourseId?: string | null
   contactName?: string | null
   phone?: string | null
   websiteUrl?: string | null
   notes?: string | null
+  golfCourseAddress?: string | null
+  defaultTournamentLocation?: string | null
   isValidated: boolean
   validatedAt: string | null
 }
@@ -18,6 +21,7 @@ export type HostAccountRequestPayload = {
   email: string
   stateCode: string
   stateName: string
+  golfCourseId: string
   golfCourseName: string
   representativeDetails: string
   password: string

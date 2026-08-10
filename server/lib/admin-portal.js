@@ -3,6 +3,7 @@ import { getPool } from '../db.js'
 import { sendMail } from '../mailer.js'
 import { normalizeEmail, isEmail } from './team-utils.js'
 import { ensureHostAuthSchema } from './host-auth.js'
+import { createGolfCoursePublicPageForApprovedHost } from './golf-course-public-pages.js'
 
 const ADMIN_COOKIE = 'golf_admin_session'
 export const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24
@@ -106,6 +107,7 @@ async function ensureHostAccountRequestTableCompatibility() {
   await addColumnIfMissing('host_account_requests', 'state_code', "VARCHAR(32) NOT NULL DEFAULT ''", { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'state_name', "VARCHAR(191) NOT NULL DEFAULT ''", { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'location_label', "VARCHAR(191) NOT NULL DEFAULT ''", { ignoreDuplicate: true })
+  await addColumnIfMissing('host_account_requests', 'golf_course_id', 'VARCHAR(64) NULL', { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'requested_password_hash', 'VARCHAR(255) NULL', { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'reviewed_by_admin_id', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'reviewed_by_email', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
@@ -205,11 +207,12 @@ async function sendHostAccountApprovalEmail({ email, firstName, golfCourseName }
   })
 }
 
-async function createOrUpdateApprovedHostAccount({ email, golfCourseName, passwordHash = null }) {
+async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCourseId = null, passwordHash = null }) {
   await ensureHostAuthSchema(pool())
   const db = pool()
   const normalizedEmail = normalizeEmail(email)
   const normalizedGolfCourseName = String(golfCourseName || '').trim()
+  const normalizedGolfCourseId = String(golfCourseId || '').trim() || null
   const [existingRows] = await db.execute('SELECT id FROM host_accounts WHERE email = ? LIMIT 1', [normalizedEmail])
   const existing = existingRows[0]
   const columns = await getTableColumns('host_accounts')
@@ -221,6 +224,10 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, passwo
     if (columns.has('auth_user_id')) {
       assignments.push('auth_user_id = ?')
       params.push(`host:${normalizedEmail}`)
+    }
+    if (columns.has('golf_course_id')) {
+      assignments.push('golf_course_id = ?')
+      params.push(normalizedGolfCourseId)
     }
     if (columns.has('reset_email')) {
       assignments.push('reset_email = ?')
@@ -259,6 +266,11 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, passwo
     insertColumns.push('auth_user_id')
     insertValues.push('?')
     insertParams.push(`host:${normalizedEmail}`)
+  }
+  if (columns.has('golf_course_id')) {
+    insertColumns.push('golf_course_id')
+    insertValues.push('?')
+    insertParams.push(normalizedGolfCourseId)
   }
   if (columns.has('password_hash')) {
     insertColumns.push('password_hash')
@@ -334,6 +346,7 @@ await db.query(`
     state_code VARCHAR(32) NOT NULL,
     state_name VARCHAR(191) NOT NULL,
     golf_course_name VARCHAR(191) NOT NULL,
+    golf_course_id VARCHAR(64) NULL,
     representative_details TEXT NOT NULL,
     status VARCHAR(64) NOT NULL DEFAULT 'pending',
     reviewed_by_admin_id VARCHAR(191) NULL,
@@ -352,6 +365,7 @@ await db.query(`
     CREATE TABLE IF NOT EXISTS host_accounts (
       id VARCHAR(191) PRIMARY KEY,
       auth_user_id VARCHAR(191) NOT NULL UNIQUE,
+      golf_course_id VARCHAR(64) NULL,
       email VARCHAR(191) NOT NULL UNIQUE,
       account_name VARCHAR(191) NOT NULL,
       invite_id VARCHAR(191) NOT NULL,
@@ -613,7 +627,7 @@ export async function consumeAdminResetToken(rawToken, nextPassword) {
   return getAdminUserById(row.admin_user_id)
 }
 
-export async function createHostAccountRequest({ firstName, lastName, email, stateCode, stateName, golfCourseName, representativeDetails, password }) {
+export async function createHostAccountRequest({ firstName, lastName, email, stateCode, stateName, golfCourseId = '', golfCourseName, representativeDetails, password }) {
   await ensureAdminPortalSchema()
   const normalizedEmail = normalizeEmail(email)
   if (!isEmail(normalizedEmail)) throw new Error('A valid email address is required.')
@@ -622,6 +636,7 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
   const normalizedStateCode = String(stateCode || '').trim().toUpperCase()
   const normalizedStateName = String(stateName || '').trim()
   const normalizedGolfCourseName = String(golfCourseName || '').trim()
+  const normalizedGolfCourseId = String(golfCourseId || '').trim() || null
   const normalizedRepresentativeDetails = String(representativeDetails || '').trim()
   const normalizedPassword = String(password || '')
 
@@ -644,6 +659,7 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
   if (requestColumns.has('state_name')) insertMap.set('state_name', normalizedStateName)
   if (requestColumns.has('location_label')) insertMap.set('location_label', normalizedStateName)
   if (requestColumns.has('golf_course_name')) insertMap.set('golf_course_name', normalizedGolfCourseName)
+  if (requestColumns.has('golf_course_id')) insertMap.set('golf_course_id', normalizedGolfCourseId)
   if (requestColumns.has('representative_details')) insertMap.set('representative_details', normalizedRepresentativeDetails)
   if (requestColumns.has('requested_password_hash')) insertMap.set('requested_password_hash', hashHostAccountPassword(normalizedPassword))
   if (requestColumns.has('status')) insertMap.set('status', 'pending')
@@ -661,6 +677,7 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
     email: normalizedEmail,
     stateName: normalizedStateName,
     golfCourseName: normalizedGolfCourseName,
+    golfCourseId: normalizedGolfCourseId,
     representativeDetails: normalizedRepresentativeDetails,
   })
 
@@ -673,6 +690,7 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
     stateCode: normalizedStateCode,
     stateName: normalizedStateName,
     golfCourseName: normalizedGolfCourseName,
+    golfCourseId: normalizedGolfCourseId,
     representativeDetails: normalizedRepresentativeDetails,
   }
 }
@@ -695,7 +713,16 @@ export async function approveHostAccountRequest({ requestId, adminUserId, adminE
   const hostAccountId = await createOrUpdateApprovedHostAccount({
     email: request.email,
     golfCourseName: request.golf_course_name,
+    golfCourseId: request.golf_course_id || null,
     passwordHash: request.requested_password_hash || null,
+  })
+
+  const publicPage = await createGolfCoursePublicPageForApprovedHost(pool(), {
+    hostAccountId,
+    golfCourseId: request.golf_course_id || null,
+    golfCourseName: request.golf_course_name,
+    stateCode: request.state_code,
+    baseUrl: getAppBaseUrl(),
   })
 
   await pool().execute(
@@ -727,6 +754,7 @@ export async function approveHostAccountRequest({ requestId, adminUserId, adminE
   return {
     request: updatedRows[0] || null,
     hostAccountId,
+    publicPage,
     approved: true,
   }
 }

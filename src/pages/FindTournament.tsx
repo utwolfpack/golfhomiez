@@ -241,31 +241,47 @@ export default function FindTournament() {
           {searchResults.length > 0 ? (
             <>
               <div className="compactLineItemList tournamentSearchResults" aria-live="polite">
-                {searchResults.map((tournament) => (
-                  <div className="compactLineItem tournamentSearchResult" key={tournament.id}>
-                    <span className="compactLineItemMain tournamentSearchResultMain">
-                      <strong className="tournamentSearchCourseName">{tournament.golfCourseName}</strong>
-                      <span className="tournamentSearchMidline">
-                        <span><strong>Date:</strong> {formatDate(tournament.tournamentDate)}</span>
-                        <span><strong>Location:</strong> {formatSearchResultLocation(tournament)}</span>
+                {searchResults.map((tournament) => {
+                  const isGolfHomiezTournament = Boolean(tournament.isGolfHomiezTournament)
+                  const tournamentPath = tournament.tournamentPath || tournament.tournamentWebsite || ''
+                  const actionLabel = tournament.isRegistered ? 'Registered' : 'Golf Homiez Tournament'
+                  return (
+                    <div className={`compactLineItem tournamentSearchResult ${isGolfHomiezTournament ? 'tournamentSearchResultGolfHomiez' : ''}`} key={tournament.id}>
+                      <span className="compactLineItemMain tournamentSearchResultMain">
+                        <span className="tournamentSearchCourseHeading">
+                          <strong className="tournamentSearchCourseName">{tournament.golfCourseName}</strong>
+                          {isGolfHomiezTournament ? <span className="tournamentSearchGolfHomiezBadge">GolfHomiez hosted</span> : null}
+                        </span>
+                        <span className="tournamentSearchMidline">
+                          <span><strong>Date:</strong> {formatDate(tournament.tournamentDate)}</span>
+                          <span><strong>Location:</strong> {formatSearchResultLocation(tournament)}</span>
+                        </span>
+                        <span className="tournamentSearchTournamentName">{tournament.tournamentName || 'Golf tournament'}</span>
                       </span>
-                      <span className="tournamentSearchTournamentName">{tournament.tournamentName || 'Golf tournament'}</span>
-                    </span>
-                    <span className="compactLineItemSummary tournamentSearchResultAction">
-                      {tournament.tournamentWebsite ? (
-                        <a
-                          className="btn btnSmall"
-                          href={tournament.tournamentWebsite}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          onClick={() => logFrontendEvent({ category: 'user.tournaments.search', message: 'tournament_website_opened', data: { route: '/find-tournament', tournamentId: tournament.id, golfCourseName: tournament.golfCourseName } })}
-                        >
-                          Tournament website
-                        </a>
-                      ) : <span className="small">Website not listed</span>}
-                    </span>
-                  </div>
-                ))}
+                      <span className="compactLineItemSummary tournamentSearchResultAction">
+                        {isGolfHomiezTournament && tournamentPath ? (
+                          <Link
+                            className={`btn btnSmall tournamentSearchGolfHomiezAction ${tournament.isRegistered ? 'tournamentSearchRegisteredAction' : ''}`}
+                            to={tournamentPath}
+                            onClick={() => logFrontendEvent({ category: 'user.tournaments.search', message: tournament.isRegistered ? 'registered_golfhomiez_tournament_opened' : 'golfhomiez_tournament_opened', data: { route: '/find-tournament', tournamentId: tournament.golfHomiezTournamentId || tournament.id, golfCourseName: tournament.golfCourseName, registered: Boolean(tournament.isRegistered) } })}
+                          >
+                            {actionLabel}
+                          </Link>
+                        ) : tournament.tournamentWebsite ? (
+                          <a
+                            className="btn btnSmall"
+                            href={tournament.tournamentWebsite}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            onClick={() => logFrontendEvent({ category: 'user.tournaments.search', message: 'tournament_website_opened', data: { route: '/find-tournament', tournamentId: tournament.id, golfCourseName: tournament.golfCourseName } })}
+                          >
+                            Tournament website
+                          </a>
+                        ) : <span className="small">Website not listed</span>}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
 
               {pagination.totalPages > 1 ? (

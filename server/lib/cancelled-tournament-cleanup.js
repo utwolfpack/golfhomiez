@@ -99,6 +99,7 @@ export async function deleteCancelledTournaments(pool, { correlationId = `cancel
     `SELECT id, tournament_identifier, name, status
        FROM tournaments
       WHERE LOWER(status) = 'cancelled'
+        AND archived_at IS NULL
       ORDER BY updated_at ASC, created_at ASC`,
   )
 

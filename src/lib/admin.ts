@@ -41,7 +41,7 @@ export async function fetchAdminPortal() {
 }
 
 export async function approveHostAccountRequest(requestId: string) {
-  return api<{ request: Record<string, unknown>; hostAccountId?: string | null; approved: true }>(`/api/admin/host-account-requests/${encodeURIComponent(requestId)}/approve`, {
+  return api<{ request: Record<string, unknown>; hostAccountId?: string | null; publicPage?: { slug: string; path: string; url: string } | null; approved: true }>(`/api/admin/host-account-requests/${encodeURIComponent(requestId)}/approve`, {
     method: 'POST',
   })
 }

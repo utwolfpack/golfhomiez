@@ -1,9 +1,11 @@
-import { DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, emptyTournamentTemplateData, type TournamentTemplateData } from '../lib/tournament-templates'
+import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, TOURNAMENT_TEMPLATES, emptyTournamentTemplateData, type TournamentTemplateData } from '../lib/tournament-templates'
 import ImageUploadField from './ImageUploadField'
 import { compressImageFile } from '../lib/image-upload'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 
 export type TournamentTemplateFormValue = {
+  startDate?: string | null
   templateKey?: string | null
   templateBackgroundImageUrl?: string | null
   templateData?: TournamentTemplateData | null
@@ -101,9 +103,31 @@ export function TournamentRegistrationDeadlineField({ value, onChange }: Props) 
         className="input"
         type="date"
         value={String(templateData.registrationDeadline || '')}
+        max={value.startDate || undefined}
         onChange={(e) => updateTemplateData({ registrationDeadline: e.target.value })}
       />
-      <div className="small" style={{ marginTop: 4 }}>Last day golfers can register for this tournament.</div>
+      <div className="small" style={{ marginTop: 4 }}>Last day golfers can register. The deadline cannot be after the tournament date.</div>
+    </div>
+  )
+}
+
+export function TournamentSummaryField({ value, onChange }: Props) {
+  const templateData = { ...emptyTournamentTemplateData(), ...(value.templateData || {}) }
+  const summary = String(templateData.tournamentSummary || '')
+
+  return (
+    <div className="card tournament-summary-editor" style={{ padding: 14, background: '#f8fafc' }}>
+      <label className="label" htmlFor="tournament-summary">Tournament summary</label>
+      <textarea
+        id="tournament-summary"
+        className="input"
+        rows={5}
+        maxLength={5000}
+        value={summary}
+        onChange={(event) => onChange({ ...value, templateData: { ...templateData, tournamentSummary: event.target.value } })}
+        placeholder="Add final results, winners, memorable moments, charity totals, or other completed-tournament notes."
+      />
+      <div className="small" style={{ marginTop: 4 }}>When this tournament is completed, this summary appears below the final leaderboard on the public tournament page.</div>
     </div>
   )
 }
@@ -133,11 +157,9 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
   }
 
   const textFields: Array<[keyof TournamentTemplateData, string, string?]> = [
-    ['hostOrganization', 'Host organization'],
     ['beneficiaryCharity', 'Beneficiary / Charity'],
     ['checkInTime', 'Check-in time', 'time'],
     ['teeTime', 'Tee time', 'time'],
-    ['tournamentFormat', 'Tournament format'],
     ['contactPerson', 'Contact person'],
     ['contactPhone', 'Contact phone'],
     ['contactEmail', 'Contact email', 'email'],
@@ -165,6 +187,51 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
         onChange={(dataUrl) => updateTemplateData({ supportingPhotoUrl: dataUrl })}
         onRemove={() => updateTemplateData({ supportingPhotoUrl: '' })}
       />
+
+      <div className="tournament-template-selector" style={{ marginTop: 16 }}>
+        <div className="tournament-template-selector-heading">
+          <div>
+            <label className="label">Flyer template</label>
+            <div className="small">Choose the public flyer layout. Switching templates keeps the tournament data you already entered.</div>
+          </div>
+          <span className="tournament-template-selector-count">{TOURNAMENT_TEMPLATES.length} layouts</span>
+        </div>
+        <div className="tournament-template-selector-grid" role="radiogroup" aria-label="Tournament flyer template">
+          {TOURNAMENT_TEMPLATES.map((template) => {
+            const selected = (value.templateKey || 'classic-flyer') === template.key
+            return (
+              <button
+                key={template.key}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`tournament-template-option${selected ? ' tournament-template-option--selected' : ''}`}
+                onClick={() => {
+                  const correlationId = getCorrelationId()
+                  onChange({ ...value, templateKey: template.key })
+                  logFrontendEvent({
+                    category: 'tournament.template',
+                    message: 'tournament_flyer_template_selected',
+                    data: { templateKey: template.key, templateName: template.name, correlationId },
+                  })
+                }}
+              >
+                <span className={`tournament-template-preview ${template.previewClassName}`} aria-hidden="true">
+                  <span className="tournament-template-preview-title">GOLF</span>
+                  <span className="tournament-template-preview-rule" />
+                  <span className="tournament-template-preview-detail" />
+                  <span className="tournament-template-preview-detail tournament-template-preview-detail--short" />
+                </span>
+                <span className="tournament-template-option-copy">
+                  <strong>{template.name}</strong>
+                  <span>{template.description}</span>
+                </span>
+                <span className="tournament-template-option-check" aria-hidden="true">{selected ? '✓' : ''}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       <div style={{ marginTop: 14 }}>
         <label className="label">Beneficiary / Charity message</label>
@@ -209,6 +276,16 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
         ))}
         {!hideRegistrationDeadline ? <TournamentRegistrationDeadlineField value={value} onChange={onChange} /> : null}
         <div>
+          <label className="label">Tournament format</label>
+          <input
+            className="input"
+            type="text"
+            value={String(templateData.tournamentFormat || '')}
+            onChange={(e) => updateTemplateData({ tournamentFormat: e.target.value })}
+            placeholder="4-Person Scramble"
+          />
+        </div>
+        <div>
           <label className="label tournament-template-label-with-tooltip">
             <span>Entry fee</span>
             <Tooltip>Currency only. Enter dollars and cents, for example $125.00.</Tooltip>
@@ -227,12 +304,29 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
         </div>
       </div>
 
-      <div style={{ marginTop: 14 }}>
-        <label className="label">Shotgun Start or tee times</label>
-        <select className="input" value={templateData.startType || 'shotgun'} onChange={(e) => updateTemplateData({ startType: e.target.value })}>
-          <option value="shotgun">Shotgun Start</option>
-          <option value="tee-times">Tee times</option>
-        </select>
+      <div className="formRow formRow--split" style={{ marginTop: 14 }}>
+        <div>
+          <label className="label">Team start method</label>
+          <select className="input" value={templateData.startType || 'shotgun'} onChange={(e) => updateTemplateData({ startType: e.target.value })}>
+            <option value="shotgun">Shotgun Start</option>
+            <option value="tee-times">Tee times</option>
+          </select>
+          <div className="small" style={{ marginTop: 4 }}>After teams register, the host or organizer can auto-create and edit each team’s start time and starting hole.</div>
+        </div>
+        {templateData.startType === 'tee-times' ? (
+          <div>
+            <label className="label">Tee-time interval (minutes)</label>
+            <input
+              className="input"
+              type="number"
+              min={5}
+              max={60}
+              step={1}
+              value={Number(templateData.teeTimeIntervalMinutes || DEFAULT_TEE_TIME_INTERVAL_MINUTES)}
+              onChange={(e) => updateTemplateData({ teeTimeIntervalMinutes: Math.min(60, Math.max(5, Number(e.target.value) || DEFAULT_TEE_TIME_INTERVAL_MINUTES)) })}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="formRow formRow--split" style={{ marginTop: 14 }}>

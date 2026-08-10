@@ -38,6 +38,7 @@ import Inbox from './pages/Inbox'
 import Challenges from './pages/Challenges'
 import InviteHomie from './pages/InviteHomie'
 import TournamentPortal from './pages/TournamentPortal'
+import GolfCoursePage from './pages/GolfCoursePage'
 import ProtectedRoute from './components/ProtectedRoute'
 import HostProtectedRoute from './components/HostProtectedRoute'
 import { emitFrontendStage } from './lib/frontend-logger'
@@ -165,6 +166,7 @@ export default function App() {
               <Route path="/golfadmin/forgot-password" element={<AdminResetPassword />} />
               <Route path="/golfadmin/reset-password" element={<AdminResetPassword />} />
               <Route path="/golfadmin/scheduled-jobs" element={<AdminEntryRoute><AdminScheduledJobs /></AdminEntryRoute>} />
+              <Route path="/:golfCourseSlug" element={<GolfCoursePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </HostAuthProvider>

@@ -2222,6 +2222,305 @@ LEFT JOIN \`user\` u ON LOWER(u.email) = LOWER(tm.email)
       return statements.join(';\n')
     },
   },
+  {
+    version: '20260804_066',
+    name: 'golf_course_public_pages',
+    filename: '20260804_066_golf_course_public_pages.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'host_accounts', 'golf_course_id') &&
+        await columnExists(db, 'host_account_requests', 'golf_course_id') &&
+        await tableExists(db, 'golf_course_public_pages') &&
+        await columnExists(db, 'golf_course_public_pages', 'slug') &&
+        await columnExists(db, 'golf_course_public_pages', 'summary') &&
+        await columnExists(db, 'golf_course_public_pages', 'banner_image_url') &&
+        await columnExists(db, 'golf_course_public_pages', 'source_website_url') &&
+        await indexExists(db, 'golf_course_public_pages', 'uq_golf_course_public_pages_host') &&
+        await indexExists(db, 'golf_course_public_pages', 'uq_golf_course_public_pages_slug') &&
+        await indexExists(db, 'host_accounts', 'idx_host_accounts_golf_course_id') &&
+        await indexExists(db, 'host_account_requests', 'idx_host_account_requests_golf_course_id')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'host_accounts', 'golf_course_id'))) {
+        statements.push('ALTER TABLE host_accounts ADD COLUMN golf_course_id VARCHAR(64) NULL AFTER auth_user_id')
+      }
+      if (!(await columnExists(db, 'host_account_requests', 'golf_course_id'))) {
+        statements.push('ALTER TABLE host_account_requests ADD COLUMN golf_course_id VARCHAR(64) NULL AFTER golf_course_name')
+      }
+      if (!(await tableExists(db, 'golf_course_public_pages'))) {
+        statements.push(`CREATE TABLE golf_course_public_pages (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  host_account_id VARCHAR(191) NOT NULL,
+  golf_course_id VARCHAR(64) NULL,
+  slug VARCHAR(191) NOT NULL,
+  golf_course_name VARCHAR(191) NOT NULL,
+  summary TEXT NULL,
+  banner_image_url VARCHAR(1024) NULL,
+  website_url VARCHAR(1024) NULL,
+  contact_phone VARCHAR(64) NULL,
+  address_line1 VARCHAR(255) NULL,
+  city VARCHAR(128) NULL,
+  state_code VARCHAR(8) NOT NULL,
+  postal_code VARCHAR(32) NULL,
+  source_website_url VARCHAR(1024) NULL,
+  source_last_synced_at DATETIME NULL,
+  is_published TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_golf_course_public_pages_host (host_account_id),
+  UNIQUE KEY uq_golf_course_public_pages_slug (slug),
+  KEY idx_golf_course_public_pages_course (golf_course_id),
+  KEY idx_golf_course_public_pages_state (state_code, golf_course_name),
+  KEY idx_golf_course_public_pages_published (is_published, slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+      } else {
+        const columns = [
+          ['host_account_id', 'VARCHAR(191) NOT NULL'],
+          ['golf_course_id', 'VARCHAR(64) NULL'],
+          ['slug', 'VARCHAR(191) NOT NULL'],
+          ['golf_course_name', "VARCHAR(191) NOT NULL DEFAULT 'Golf course'"],
+          ['summary', 'TEXT NULL'],
+          ['banner_image_url', 'VARCHAR(1024) NULL'],
+          ['website_url', 'VARCHAR(1024) NULL'],
+          ['contact_phone', 'VARCHAR(64) NULL'],
+          ['address_line1', 'VARCHAR(255) NULL'],
+          ['city', 'VARCHAR(128) NULL'],
+          ['state_code', "VARCHAR(8) NOT NULL DEFAULT ''"],
+          ['postal_code', 'VARCHAR(32) NULL'],
+          ['source_website_url', 'VARCHAR(1024) NULL'],
+          ['source_last_synced_at', 'DATETIME NULL'],
+          ['is_published', 'TINYINT(1) NOT NULL DEFAULT 1'],
+          ['created_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+          ['updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+        ]
+        for (const [columnName, definition] of columns) {
+          if (!(await columnExists(db, 'golf_course_public_pages', columnName))) {
+            statements.push(`ALTER TABLE golf_course_public_pages ADD COLUMN ${columnName} ${definition}`)
+          }
+        }
+        if (!(await indexExists(db, 'golf_course_public_pages', 'uq_golf_course_public_pages_host'))) statements.push('CREATE UNIQUE INDEX uq_golf_course_public_pages_host ON golf_course_public_pages (host_account_id)')
+        if (!(await indexExists(db, 'golf_course_public_pages', 'uq_golf_course_public_pages_slug'))) statements.push('CREATE UNIQUE INDEX uq_golf_course_public_pages_slug ON golf_course_public_pages (slug)')
+        if (!(await indexExists(db, 'golf_course_public_pages', 'idx_golf_course_public_pages_course'))) statements.push('CREATE INDEX idx_golf_course_public_pages_course ON golf_course_public_pages (golf_course_id)')
+        if (!(await indexExists(db, 'golf_course_public_pages', 'idx_golf_course_public_pages_state'))) statements.push('CREATE INDEX idx_golf_course_public_pages_state ON golf_course_public_pages (state_code, golf_course_name)')
+        if (!(await indexExists(db, 'golf_course_public_pages', 'idx_golf_course_public_pages_published'))) statements.push('CREATE INDEX idx_golf_course_public_pages_published ON golf_course_public_pages (is_published, slug)')
+      }
+      if (!(await indexExists(db, 'host_accounts', 'idx_host_accounts_golf_course_id'))) {
+        statements.push('CREATE INDEX idx_host_accounts_golf_course_id ON host_accounts (golf_course_id)')
+      }
+      if (!(await indexExists(db, 'host_account_requests', 'idx_host_account_requests_golf_course_id'))) {
+        statements.push('CREATE INDEX idx_host_account_requests_golf_course_id ON host_account_requests (golf_course_id)')
+      }
+      return statements.join(';\n')
+    },
+  },
+  {
+    version: '20260806_067',
+    name: 'golfhomiez_tournament_search_records',
+    filename: '20260806_067_golfhomiez_tournament_search_records.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'golf_course_tournaments', 'source_type') &&
+        await columnExists(db, 'golf_course_tournaments', 'golfhomiez_tournament_id') &&
+        await indexExists(db, 'golf_course_tournaments', 'uq_golf_course_tournaments_golfhomiez_id') &&
+        await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_source_active_date')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'golf_course_tournaments', 'source_type'))) {
+        statements.push("ALTER TABLE golf_course_tournaments ADD COLUMN source_type VARCHAR(32) NOT NULL DEFAULT 'external' AFTER correlation_id")
+      }
+      if (!(await columnExists(db, 'golf_course_tournaments', 'golfhomiez_tournament_id'))) {
+        statements.push('ALTER TABLE golf_course_tournaments ADD COLUMN golfhomiez_tournament_id VARCHAR(191) NULL AFTER source_type')
+      }
+      statements.push("UPDATE golf_course_tournaments SET source_type = 'external' WHERE source_type IS NULL OR TRIM(source_type) = ''")
+      if (!(await indexExists(db, 'golf_course_tournaments', 'uq_golf_course_tournaments_golfhomiez_id'))) {
+        statements.push('CREATE UNIQUE INDEX uq_golf_course_tournaments_golfhomiez_id ON golf_course_tournaments (golfhomiez_tournament_id)')
+      }
+      if (!(await indexExists(db, 'golf_course_tournaments', 'idx_golf_course_tournaments_source_active_date'))) {
+        statements.push('CREATE INDEX idx_golf_course_tournaments_source_active_date ON golf_course_tournaments (source_type, active, tournament_date)')
+      }
+      statements.push(`INSERT INTO golf_course_tournaments
+  (id, discovery_key, golf_course_id, golf_course_name, tournament_name, state_code, city, zip_code,
+   tournament_date, tournament_website, source_url, discovered_text, active, first_seen_at, last_seen_at,
+   correlation_id, source_type, golfhomiez_tournament_id)
+SELECT
+  LOWER(REPLACE(UUID(), '-', '')),
+  SHA2(CONCAT('golfhomiez:', t.id), 256),
+  COALESCE(gc.id, gcpp.golf_course_id, ha.golf_course_id),
+  COALESCE(NULLIF(TRIM(gc.name), ''), NULLIF(TRIM(gcpp.golf_course_name), ''), NULLIF(TRIM(ha.golf_course_name), ''), NULLIF(TRIM(hra.golf_course_name), ''), 'Golf course'),
+  t.name,
+  COALESCE(NULLIF(TRIM(gc.state_code), ''), NULLIF(TRIM(gcpp.state_code), ''), ''),
+  COALESCE(NULLIF(TRIM(gc.city), ''), NULLIF(TRIM(gcpp.city), '')),
+  COALESCE(NULLIF(TRIM(gc.postal_code), ''), NULLIF(TRIM(gcpp.postal_code), '')),
+  t.start_date,
+  CONCAT('/tournaments/', COALESCE(NULLIF(TRIM(t.tournament_identifier), ''), t.id)),
+  CONCAT('/tournaments/', COALESCE(NULLIF(TRIM(t.tournament_identifier), ''), t.id)),
+  CONCAT_WS(' ', t.name, t.description),
+  1,
+  COALESCE(t.created_at, UTC_TIMESTAMP()),
+  UTC_TIMESTAMP(),
+  'migration-20260806-067',
+  'golfhomiez',
+  t.id
+FROM tournaments t
+LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
+LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
+LEFT JOIN golf_course_public_pages gcpp ON gcpp.host_account_id = t.host_account_id
+LEFT JOIN golf_courses gc ON gc.id = COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+WHERE LOWER(TRIM(COALESCE(t.status, ''))) = 'published'
+  AND t.start_date IS NOT NULL
+ON DUPLICATE KEY UPDATE
+  golf_course_id = VALUES(golf_course_id),
+  golf_course_name = VALUES(golf_course_name),
+  tournament_name = VALUES(tournament_name),
+  state_code = VALUES(state_code),
+  city = VALUES(city),
+  zip_code = VALUES(zip_code),
+  tournament_date = VALUES(tournament_date),
+  tournament_website = VALUES(tournament_website),
+  source_url = VALUES(source_url),
+  discovered_text = VALUES(discovered_text),
+  active = 1,
+  last_seen_at = UTC_TIMESTAMP(),
+  correlation_id = VALUES(correlation_id),
+  source_type = 'golfhomiez',
+  golfhomiez_tournament_id = VALUES(golfhomiez_tournament_id)`)
+      return statements.join(';\n')
+    },
+  },
+  {
+    version: '20260806_068',
+    name: 'host_course_profile_banner',
+    filename: '20260806_068_host_course_profile_banner.sql',
+    async isSatisfied(db) {
+      return await columnExists(db, 'golf_course_public_pages', 'banner_image_data')
+    },
+    async getSql(db) {
+      if (await columnExists(db, 'golf_course_public_pages', 'banner_image_data')) return ''
+      return 'ALTER TABLE golf_course_public_pages ADD COLUMN banner_image_data MEDIUMTEXT NULL AFTER banner_image_url'
+    },
+  },
+  {
+    version: '20260806_069',
+    name: 'tournament_team_start_assignments',
+    filename: '20260806_069_tournament_team_start_assignments.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'tournament_team_start_assignments'))) return false
+      const requiredColumns = [
+        'tournament_id',
+        'team_key',
+        'registration_id',
+        'team_id',
+        'team_name',
+        'start_type',
+        'start_time',
+        'starting_hole',
+        'sort_order',
+        'notes',
+        'updated_by_auth_user_id',
+        'correlation_id',
+        'created_at',
+        'updated_at',
+      ]
+      for (const columnName of requiredColumns) {
+        if (!(await columnExists(db, 'tournament_team_start_assignments', columnName))) return false
+      }
+      return (
+        await indexExists(db, 'tournament_team_start_assignments', 'uq_tournament_team_start_assignment') &&
+        await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_schedule') &&
+        await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_registration') &&
+        await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_correlation') &&
+        await foreignKeyExists(db, 'tournament_team_start_assignments', 'fk_tournament_team_start_tournament')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await tableExists(db, 'tournament_team_start_assignments'))) {
+        statements.push(`CREATE TABLE tournament_team_start_assignments (
+  id VARCHAR(191) NOT NULL PRIMARY KEY,
+  tournament_id VARCHAR(191) NOT NULL,
+  team_key VARCHAR(255) NOT NULL,
+  registration_id VARCHAR(191) NULL,
+  team_id VARCHAR(191) NULL,
+  team_name VARCHAR(191) NOT NULL,
+  start_type VARCHAR(32) NOT NULL DEFAULT 'shotgun',
+  start_time TIME NOT NULL,
+  starting_hole VARCHAR(12) NULL,
+  sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+  notes VARCHAR(500) NULL,
+  updated_by_auth_user_id VARCHAR(191) NULL,
+  correlation_id VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_tournament_team_start_assignment (tournament_id, team_key),
+  KEY idx_tournament_team_start_schedule (tournament_id, sort_order, start_time),
+  KEY idx_tournament_team_start_registration (registration_id),
+  KEY idx_tournament_team_start_correlation (correlation_id),
+  CONSTRAINT fk_tournament_team_start_tournament
+    FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+      } else {
+        const columns = [
+          ['tournament_id', 'VARCHAR(191) NOT NULL'],
+          ['team_key', "VARCHAR(255) NOT NULL DEFAULT ''"],
+          ['registration_id', 'VARCHAR(191) NULL'],
+          ['team_id', 'VARCHAR(191) NULL'],
+          ['team_name', "VARCHAR(191) NOT NULL DEFAULT 'Tournament team'"],
+          ['start_type', "VARCHAR(32) NOT NULL DEFAULT 'shotgun'"],
+          ['start_time', "TIME NOT NULL DEFAULT '08:30:00'"],
+          ['starting_hole', 'VARCHAR(12) NULL'],
+          ['sort_order', 'INT UNSIGNED NOT NULL DEFAULT 0'],
+          ['notes', 'VARCHAR(500) NULL'],
+          ['updated_by_auth_user_id', 'VARCHAR(191) NULL'],
+          ['correlation_id', 'VARCHAR(191) NULL'],
+          ['created_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+          ['updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+        ]
+        for (const [columnName, definition] of columns) {
+          if (!(await columnExists(db, 'tournament_team_start_assignments', columnName))) {
+            statements.push(`ALTER TABLE tournament_team_start_assignments ADD COLUMN ${columnName} ${definition}`)
+          }
+        }
+        if (!(await indexExists(db, 'tournament_team_start_assignments', 'uq_tournament_team_start_assignment'))) statements.push('CREATE UNIQUE INDEX uq_tournament_team_start_assignment ON tournament_team_start_assignments (tournament_id, team_key)')
+        if (!(await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_schedule'))) statements.push('CREATE INDEX idx_tournament_team_start_schedule ON tournament_team_start_assignments (tournament_id, sort_order, start_time)')
+        if (!(await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_registration'))) statements.push('CREATE INDEX idx_tournament_team_start_registration ON tournament_team_start_assignments (registration_id)')
+        if (!(await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_correlation'))) statements.push('CREATE INDEX idx_tournament_team_start_correlation ON tournament_team_start_assignments (correlation_id)')
+        if (!(await foreignKeyExists(db, 'tournament_team_start_assignments', 'fk_tournament_team_start_tournament'))) {
+          statements.push('ALTER TABLE tournament_team_start_assignments ADD CONSTRAINT fk_tournament_team_start_tournament FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE')
+        }
+      }
+      return statements.join(';\n')
+    },
+  },
+
+  {
+    version: '20260810_070',
+    name: 'tournament_archiving',
+    filename: '20260810_070_tournament_archiving.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'tournaments') &&
+        await columnExists(db, 'tournaments', 'archived_at') &&
+        await indexExists(db, 'tournaments', 'idx_tournaments_archived_at')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await tableExists(db, 'tournaments'))) return ''
+      if (!(await columnExists(db, 'tournaments', 'archived_at'))) {
+        statements.push('ALTER TABLE tournaments ADD COLUMN archived_at DATETIME NULL AFTER status')
+      }
+      if (!(await indexExists(db, 'tournaments', 'idx_tournaments_archived_at'))) {
+        statements.push('CREATE INDEX idx_tournaments_archived_at ON tournaments (archived_at)')
+      }
+      return statements.join(';\n')
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {
