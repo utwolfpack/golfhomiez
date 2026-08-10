@@ -2366,10 +2366,10 @@ SELECT
   'golfhomiez',
   t.id
 FROM tournaments t
-LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
-LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
-LEFT JOIN golf_course_public_pages gcpp ON gcpp.host_account_id = t.host_account_id
-LEFT JOIN golf_courses gc ON gc.id = COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+LEFT JOIN host_role_accounts hra ON BINARY hra.id = BINARY t.host_account_id
+LEFT JOIN host_accounts ha ON BINARY ha.id = BINARY t.host_account_id
+LEFT JOIN golf_course_public_pages gcpp ON BINARY gcpp.host_account_id = BINARY t.host_account_id
+LEFT JOIN golf_courses gc ON BINARY gc.id = BINARY COALESCE(ha.golf_course_id, gcpp.golf_course_id)
 WHERE LOWER(TRIM(COALESCE(t.status, ''))) = 'published'
   AND t.start_date IS NOT NULL
 ON DUPLICATE KEY UPDATE
@@ -2428,7 +2428,35 @@ ON DUPLICATE KEY UPDATE
       for (const columnName of requiredColumns) {
         if (!(await columnExists(db, 'tournament_team_start_assignments', columnName))) return false
       }
+
+      const [assignmentTournamentIdRows] = await db.execute(
+        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+           FROM information_schema.COLUMNS
+          WHERE table_schema = DATABASE()
+            AND table_name = 'tournament_team_start_assignments'
+            AND column_name = 'tournament_id'
+          LIMIT 1`,
+      )
+      const [tournamentIdRows] = await db.execute(
+        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+           FROM information_schema.COLUMNS
+          WHERE table_schema = DATABASE()
+            AND table_name = 'tournaments'
+            AND column_name = 'id'
+          LIMIT 1`,
+      )
+      const assignmentTournamentId = assignmentTournamentIdRows[0]
+      const tournamentId = tournamentIdRows[0]
+      const tournamentIdCompatible = Boolean(
+        assignmentTournamentId &&
+          tournamentId &&
+          String(assignmentTournamentId.column_type).toLowerCase() === String(tournamentId.column_type).toLowerCase() &&
+          String(assignmentTournamentId.character_set_name || '').toLowerCase() === String(tournamentId.character_set_name || '').toLowerCase() &&
+          String(assignmentTournamentId.collation_name || '').toLowerCase() === String(tournamentId.collation_name || '').toLowerCase()
+      )
+
       return (
+        tournamentIdCompatible &&
         await indexExists(db, 'tournament_team_start_assignments', 'uq_tournament_team_start_assignment') &&
         await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_schedule') &&
         await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_registration') &&
@@ -2437,11 +2465,32 @@ ON DUPLICATE KEY UPDATE
       )
     },
     async getSql(db) {
+      const quoteIdentifier = (value) => `\`${String(value).replaceAll('`', '``')}\``
+      const [tournamentIdRows] = await db.execute(
+        `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+           FROM information_schema.COLUMNS
+          WHERE table_schema = DATABASE()
+            AND table_name = 'tournaments'
+            AND column_name = 'id'
+          LIMIT 1`,
+      )
+      const tournamentId = tournamentIdRows[0]
+      const tournamentColumnType = String(tournamentId?.column_type || '').trim()
+      if (!tournamentColumnType) {
+        throw new Error('Cannot build tournament_team_start_assignments migration: tournaments.id column type could not be detected')
+      }
+      const tournamentIdDefinition = [
+        tournamentColumnType.toUpperCase(),
+        tournamentId.character_set_name ? `CHARACTER SET ${quoteIdentifier(tournamentId.character_set_name)}` : '',
+        tournamentId.collation_name ? `COLLATE ${quoteIdentifier(tournamentId.collation_name)}` : '',
+        'NOT NULL',
+      ].filter(Boolean).join(' ')
+
       const statements = []
       if (!(await tableExists(db, 'tournament_team_start_assignments'))) {
         statements.push(`CREATE TABLE tournament_team_start_assignments (
   id VARCHAR(191) NOT NULL PRIMARY KEY,
-  tournament_id VARCHAR(191) NOT NULL,
+  tournament_id ${tournamentIdDefinition},
   team_key VARCHAR(255) NOT NULL,
   registration_id VARCHAR(191) NULL,
   team_id VARCHAR(191) NULL,
@@ -2465,7 +2514,6 @@ ON DUPLICATE KEY UPDATE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
       } else {
         const columns = [
-          ['tournament_id', 'VARCHAR(191) NOT NULL'],
           ['team_key', "VARCHAR(255) NOT NULL DEFAULT ''"],
           ['registration_id', 'VARCHAR(191) NULL'],
           ['team_id', 'VARCHAR(191) NULL'],
@@ -2485,17 +2533,21 @@ ON DUPLICATE KEY UPDATE
             statements.push(`ALTER TABLE tournament_team_start_assignments ADD COLUMN ${columnName} ${definition}`)
           }
         }
+
+        if (await foreignKeyExists(db, 'tournament_team_start_assignments', 'fk_tournament_team_start_tournament')) {
+          statements.push('ALTER TABLE tournament_team_start_assignments DROP FOREIGN KEY fk_tournament_team_start_tournament')
+        }
+        statements.push(`ALTER TABLE tournament_team_start_assignments MODIFY COLUMN tournament_id ${tournamentIdDefinition}`)
         if (!(await indexExists(db, 'tournament_team_start_assignments', 'uq_tournament_team_start_assignment'))) statements.push('CREATE UNIQUE INDEX uq_tournament_team_start_assignment ON tournament_team_start_assignments (tournament_id, team_key)')
         if (!(await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_schedule'))) statements.push('CREATE INDEX idx_tournament_team_start_schedule ON tournament_team_start_assignments (tournament_id, sort_order, start_time)')
         if (!(await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_registration'))) statements.push('CREATE INDEX idx_tournament_team_start_registration ON tournament_team_start_assignments (registration_id)')
         if (!(await indexExists(db, 'tournament_team_start_assignments', 'idx_tournament_team_start_correlation'))) statements.push('CREATE INDEX idx_tournament_team_start_correlation ON tournament_team_start_assignments (correlation_id)')
-        if (!(await foreignKeyExists(db, 'tournament_team_start_assignments', 'fk_tournament_team_start_tournament'))) {
-          statements.push('ALTER TABLE tournament_team_start_assignments ADD CONSTRAINT fk_tournament_team_start_tournament FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE')
-        }
+        statements.push('ALTER TABLE tournament_team_start_assignments ADD CONSTRAINT fk_tournament_team_start_tournament FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE')
       }
       return statements.join(';\n')
     },
   },
+
 
   {
     version: '20260810_070',
@@ -2520,6 +2572,189 @@ ON DUPLICATE KEY UPDATE
       return statements.join(';\n')
     },
   },
+
+  {
+    version: '20260810_071',
+    name: 'cross_table_identifier_collation_repair',
+    filename: '20260810_071_cross_table_identifier_collation_repair.sql',
+    async isSatisfied(db) {
+      const metadata = async (tableName, columnName) => {
+        const [rows] = await db.execute(
+          `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+             FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+            LIMIT 1`,
+          [tableName, columnName],
+        )
+        return rows[0] || null
+      }
+      const compatible = (left, right) => Boolean(
+        left &&
+          right &&
+          String(left.column_type || '').toLowerCase() === String(right.column_type || '').toLowerCase() &&
+          String(left.character_set_name || '').toLowerCase() === String(right.character_set_name || '').toLowerCase() &&
+          String(left.collation_name || '').toLowerCase() === String(right.collation_name || '').toLowerCase()
+      )
+
+      const golfCourseId = await metadata('golf_courses', 'id')
+      const hostAccountId = await metadata('host_accounts', 'id')
+      const tournamentId = await metadata('tournaments', 'id')
+      const pairs = [
+        [await metadata('host_accounts', 'golf_course_id'), golfCourseId],
+        [await metadata('host_account_requests', 'golf_course_id'), golfCourseId],
+        [await metadata('golf_course_public_pages', 'golf_course_id'), golfCourseId],
+        [await metadata('golf_course_public_pages', 'host_account_id'), hostAccountId],
+        [await metadata('golf_course_tournaments', 'golfhomiez_tournament_id'), tournamentId],
+        [await metadata('tournament_team_start_assignments', 'tournament_id'), tournamentId],
+      ]
+      if (pairs.some(([left, right]) => !compatible(left, right))) return false
+      if (!(await foreignKeyExists(db, 'tournament_team_start_assignments', 'fk_tournament_team_start_tournament'))) return false
+
+      const [[pending = {}] = []] = await db.query(`
+        SELECT COUNT(*) AS pending_count
+          FROM tournaments t
+          LEFT JOIN golf_course_tournaments gct
+            ON BINARY gct.golfhomiez_tournament_id = BINARY t.id
+           AND gct.source_type = 'golfhomiez'
+           AND gct.active = 1
+         WHERE LOWER(TRIM(COALESCE(t.status, ''))) = 'published'
+           AND t.start_date IS NOT NULL
+           AND t.archived_at IS NULL
+           AND gct.id IS NULL
+      `)
+      return Number(pending.pending_count || 0) === 0
+    },
+    async getSql(db) {
+      const quoteIdentifier = (value) => `\`${String(value).replaceAll('`', '``')}\``
+      const metadata = async (tableName, columnName) => {
+        const [rows] = await db.execute(
+          `SELECT COLUMN_TYPE AS column_type, CHARACTER_SET_NAME AS character_set_name, COLLATION_NAME AS collation_name
+             FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+            LIMIT 1`,
+          [tableName, columnName],
+        )
+        return rows[0] || null
+      }
+      const compatible = (left, right) => Boolean(
+        left &&
+          right &&
+          String(left.column_type || '').toLowerCase() === String(right.column_type || '').toLowerCase() &&
+          String(left.character_set_name || '').toLowerCase() === String(right.character_set_name || '').toLowerCase() &&
+          String(left.collation_name || '').toLowerCase() === String(right.collation_name || '').toLowerCase()
+      )
+      const definitionFrom = (column, nullable) => {
+        const columnType = String(column?.column_type || '').trim()
+        if (!columnType) throw new Error('Cannot repair cross-table identifier collations because a reference column type could not be detected')
+        return [
+          columnType.toUpperCase(),
+          column.character_set_name ? `CHARACTER SET ${quoteIdentifier(column.character_set_name)}` : '',
+          column.collation_name ? `COLLATE ${quoteIdentifier(column.collation_name)}` : '',
+          nullable ? 'NULL' : 'NOT NULL',
+        ].filter(Boolean).join(' ')
+      }
+
+      const golfCourseId = await metadata('golf_courses', 'id')
+      const hostAccountId = await metadata('host_accounts', 'id')
+      const tournamentId = await metadata('tournaments', 'id')
+      if (!golfCourseId || !hostAccountId || !tournamentId) {
+        throw new Error('Cannot repair cross-table identifier collations because golf_courses.id, host_accounts.id, or tournaments.id is missing')
+      }
+
+      const statements = []
+      const maybeModify = async (tableName, columnName, reference, nullable) => {
+        const current = await metadata(tableName, columnName)
+        if (!current) throw new Error(`Cannot repair ${tableName}.${columnName}: column is missing`)
+        if (!compatible(current, reference)) {
+          statements.push(`ALTER TABLE ${tableName} MODIFY COLUMN ${columnName} ${definitionFrom(reference, nullable)}`)
+          return true
+        }
+        return false
+      }
+
+      await maybeModify('host_accounts', 'golf_course_id', golfCourseId, true)
+      await maybeModify('host_account_requests', 'golf_course_id', golfCourseId, true)
+      await maybeModify('golf_course_public_pages', 'golf_course_id', golfCourseId, true)
+      await maybeModify('golf_course_public_pages', 'host_account_id', hostAccountId, false)
+      await maybeModify('golf_course_tournaments', 'golfhomiez_tournament_id', tournamentId, true)
+
+      const assignmentNeedsModify = !compatible(
+        await metadata('tournament_team_start_assignments', 'tournament_id'),
+        tournamentId,
+      )
+      const assignmentHasFk = await foreignKeyExists(db, 'tournament_team_start_assignments', 'fk_tournament_team_start_tournament')
+      if (assignmentNeedsModify && assignmentHasFk) {
+        statements.push('ALTER TABLE tournament_team_start_assignments DROP FOREIGN KEY fk_tournament_team_start_tournament')
+      }
+      if (assignmentNeedsModify) {
+        statements.push(`ALTER TABLE tournament_team_start_assignments MODIFY COLUMN tournament_id ${definitionFrom(tournamentId, false)}`)
+      }
+      if (assignmentNeedsModify || !assignmentHasFk) {
+        statements.push('ALTER TABLE tournament_team_start_assignments ADD CONSTRAINT fk_tournament_team_start_tournament FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE')
+      }
+
+      statements.push(`INSERT INTO golf_course_tournaments
+  (id, discovery_key, golf_course_id, golf_course_name, tournament_name, state_code, city, zip_code,
+   tournament_date, tournament_website, source_url, discovered_text, active, first_seen_at, last_seen_at,
+   correlation_id, source_type, golfhomiez_tournament_id)
+SELECT
+  LOWER(REPLACE(UUID(), '-', '')),
+  SHA2(CONCAT('golfhomiez:', t.id), 256),
+  COALESCE(gc.id, gcpp.golf_course_id, ha.golf_course_id),
+  COALESCE(NULLIF(TRIM(gc.name), ''), NULLIF(TRIM(gcpp.golf_course_name), ''), NULLIF(TRIM(ha.golf_course_name), ''), NULLIF(TRIM(hra.golf_course_name), ''), 'Golf course'),
+  t.name,
+  COALESCE(NULLIF(TRIM(gc.state_code), ''), NULLIF(TRIM(gcpp.state_code), ''), ''),
+  COALESCE(NULLIF(TRIM(gc.city), ''), NULLIF(TRIM(gcpp.city), '')),
+  COALESCE(NULLIF(TRIM(gc.postal_code), ''), NULLIF(TRIM(gcpp.postal_code), '')),
+  t.start_date,
+  CONCAT('/tournaments/', COALESCE(NULLIF(TRIM(t.tournament_identifier), ''), t.id)),
+  CONCAT('/tournaments/', COALESCE(NULLIF(TRIM(t.tournament_identifier), ''), t.id)),
+  CONCAT_WS(' ', t.name, t.description),
+  1,
+  COALESCE(t.created_at, UTC_TIMESTAMP()),
+  UTC_TIMESTAMP(),
+  'migration-20260810-071',
+  'golfhomiez',
+  t.id
+FROM tournaments t
+LEFT JOIN host_role_accounts hra ON BINARY hra.id = BINARY t.host_account_id
+LEFT JOIN host_accounts ha ON BINARY ha.id = BINARY t.host_account_id
+LEFT JOIN golf_course_public_pages gcpp ON BINARY gcpp.host_account_id = BINARY t.host_account_id
+LEFT JOIN golf_courses gc ON BINARY gc.id = BINARY COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+WHERE LOWER(TRIM(COALESCE(t.status, ''))) = 'published'
+  AND t.start_date IS NOT NULL
+  AND t.archived_at IS NULL
+ON DUPLICATE KEY UPDATE
+  golf_course_id = VALUES(golf_course_id),
+  golf_course_name = VALUES(golf_course_name),
+  tournament_name = VALUES(tournament_name),
+  state_code = VALUES(state_code),
+  city = VALUES(city),
+  zip_code = VALUES(zip_code),
+  tournament_date = VALUES(tournament_date),
+  tournament_website = VALUES(tournament_website),
+  source_url = VALUES(source_url),
+  discovered_text = VALUES(discovered_text),
+  active = 1,
+  last_seen_at = UTC_TIMESTAMP(),
+  correlation_id = VALUES(correlation_id),
+  source_type = 'golfhomiez',
+  golfhomiez_tournament_id = VALUES(golfhomiez_tournament_id)`)
+      statements.push(`UPDATE golf_course_tournaments gct
+JOIN tournaments t ON BINARY t.id = BINARY gct.golfhomiez_tournament_id
+   SET gct.active = 0,
+       gct.last_seen_at = UTC_TIMESTAMP(),
+       gct.correlation_id = 'migration-20260810-071'
+ WHERE gct.source_type = 'golfhomiez'
+   AND t.archived_at IS NOT NULL`)
+      return statements.join(';\n')
+    },
+  },
+
 
 ]
 

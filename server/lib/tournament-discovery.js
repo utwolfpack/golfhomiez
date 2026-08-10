@@ -604,10 +604,10 @@ export async function syncGolfHomiezTournamentSearchRecord(db, tournamentId, {
             COALESCE(NULLIF(TRIM(gc.city), ''), NULLIF(TRIM(gcpp.city), '')) AS city,
             COALESCE(NULLIF(TRIM(gc.postal_code), ''), NULLIF(TRIM(gcpp.postal_code), '')) AS postal_code
        FROM tournaments t
-       LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
-       LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
-       LEFT JOIN golf_course_public_pages gcpp ON gcpp.host_account_id = t.host_account_id
-       LEFT JOIN golf_courses gc ON gc.id = COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+       LEFT JOIN host_role_accounts hra ON BINARY hra.id = BINARY t.host_account_id
+       LEFT JOIN host_accounts ha ON BINARY ha.id = BINARY t.host_account_id
+       LEFT JOIN golf_course_public_pages gcpp ON BINARY gcpp.host_account_id = BINARY t.host_account_id
+       LEFT JOIN golf_courses gc ON BINARY gc.id = BINARY COALESCE(ha.golf_course_id, gcpp.golf_course_id)
       WHERE t.id = ?
       LIMIT 1`,
     [resolvedTournamentId],
@@ -1331,14 +1331,14 @@ export async function searchGolfCourseTournaments(db, filters = {}, {
                AND EXISTS (
                  SELECT 1
                    FROM tournament_registrations tr
-                  WHERE tr.tournament_id = gct.golfhomiez_tournament_id
+                  WHERE BINARY tr.tournament_id = BINARY gct.golfhomiez_tournament_id
                     AND tr.status = 'registered'
                     AND ((? <> '' AND tr.auth_user_id = ?) OR (? <> '' AND LOWER(tr.email) = ?))
                )
               THEN 1 ELSE 0
             END AS is_registered
        FROM golf_course_tournaments gct
-       LEFT JOIN tournaments t ON t.id = gct.golfhomiez_tournament_id
+       LEFT JOIN tournaments t ON BINARY t.id = BINARY gct.golfhomiez_tournament_id
       WHERE ${where.join('\n        AND ')}
       ORDER BY CASE WHEN gct.source_type = '${GOLF_HOMIEZ_TOURNAMENT_SOURCE}' THEN 0 ELSE 1 END ASC,
                gct.tournament_date ASC, gct.state_code ASC, gct.golf_course_name ASC`,

@@ -81,10 +81,10 @@ SELECT
   'golfhomiez',
   t.id
 FROM tournaments t
-LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
-LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
-LEFT JOIN golf_course_public_pages gcpp ON gcpp.host_account_id = t.host_account_id
-LEFT JOIN golf_courses gc ON gc.id = COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+LEFT JOIN host_role_accounts hra ON BINARY hra.id = BINARY t.host_account_id
+LEFT JOIN host_accounts ha ON BINARY ha.id = BINARY t.host_account_id
+LEFT JOIN golf_course_public_pages gcpp ON BINARY gcpp.host_account_id = BINARY t.host_account_id
+LEFT JOIN golf_courses gc ON BINARY gc.id = BINARY COALESCE(ha.golf_course_id, gcpp.golf_course_id)
 WHERE LOWER(TRIM(COALESCE(t.status, ''))) = 'published'
   AND t.start_date IS NOT NULL
 ON DUPLICATE KEY UPDATE

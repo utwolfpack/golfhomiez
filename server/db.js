@@ -128,6 +128,9 @@ export async function initDb() {
       warn(message) {
         logInfo(message, { levelOverride: 'warn' })
       },
+      error(message, details = {}) {
+        logError(message, details)
+      },
     })
     logInfo('Database initialization complete')
   } catch (error) {
