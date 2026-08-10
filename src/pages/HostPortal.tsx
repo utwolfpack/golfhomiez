@@ -1,19 +1,26 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router'
 import PageHero from '../components/PageHero'
 import { useHostAuth } from '../context/HostAuthContext'
-import { createHostTournament, sendHostTournamentInvite, updateHostTournamentRecord, type Tournament, type TournamentInput } from '../lib/accounts'
+import { archiveHostTournamentRecord, createHostTournament, restoreHostTournamentRecord, sendHostTournamentInvite, updateHostTournamentRecord, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDateTime } from '../lib/time-format'
-import TournamentTemplateFields, { TournamentRegistrationDeadlineField } from '../components/TournamentTemplateFields'
+import TournamentTemplateFields, { TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
+import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
+import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
 import { fetchHostPortal } from '../lib/host-auth'
+import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_CHECK_IN_TIME, DEFAULT_TOURNAMENT_TEE_TIME, emptyTournamentTemplateData } from '../lib/tournament-templates'
+import { getFriendlyTournamentError, validateTournamentForSave } from '../lib/tournament-errors'
 
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
+const TOURNAMENTS_PER_PAGE = 10
 
 type HostPortalState = {
   account?: {
+    id?: string | null
     golfCourseName: string
+    golfCourseAddress?: string | null
+    defaultTournamentLocation?: string | null
     email: string
     isValidated: boolean
   }
@@ -46,6 +53,7 @@ function sortTournamentsByCreatedDescending(tournaments: Tournament[] = []) {
   return [...tournaments].sort((left, right) => tournamentCreatedTimestamp(right) - tournamentCreatedTimestamp(left))
 }
 
+
 function TournamentCapacitySummary({ tournament }: { tournament: Tournament }) {
   const stats = tournamentStats(tournament)
   return (
@@ -57,15 +65,38 @@ function TournamentCapacitySummary({ tournament }: { tournament: Tournament }) {
   )
 }
 
-const EMPTY_FORM: TournamentInput = {
-  name: '',
-  description: '',
-  status: 'draft',
-  isPublic: false,
-  organizerEmail: '',
-  templateKey: 'classic-flyer',
-  templateBackgroundImageUrl: null,
-  teamSlotLimit: DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT,
+function applyGolfCourseTournamentDefaults(templateData: Record<string, unknown> | null | undefined, defaultLocation = '', golfCourseName = '') {
+  const current = { ...emptyTournamentTemplateData(), ...(templateData || {}) }
+  return {
+    ...current,
+    locationAddress: String(current.locationAddress || '').trim() || defaultLocation,
+    hostOrganization: String(current.hostOrganization || '').trim() || golfCourseName,
+    checkInTime: String(current.checkInTime || '').trim() || DEFAULT_TOURNAMENT_CHECK_IN_TIME,
+    teeTime: String(current.teeTime || '').trim() || DEFAULT_TOURNAMENT_TEE_TIME,
+    teeTimeIntervalMinutes: Number(current.teeTimeIntervalMinutes) >= 5 && Number(current.teeTimeIntervalMinutes) <= 60
+      ? Math.trunc(Number(current.teeTimeIntervalMinutes))
+      : DEFAULT_TEE_TIME_INTERVAL_MINUTES,
+  }
+}
+
+function isValidOptionalEmail(value: string) {
+  return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function createEmptyTournamentForm(defaultLocation = '', golfCourseName = ''): TournamentInput {
+  return {
+    name: '',
+    description: '',
+    startDate: null,
+    endDate: null,
+    status: 'draft',
+    isPublic: false,
+    organizerEmail: '',
+    templateKey: 'classic-flyer',
+    templateBackgroundImageUrl: null,
+    templateData: applyGolfCourseTournamentDefaults({}, defaultLocation, golfCourseName),
+    teamSlotLimit: DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT,
+  }
 }
 
 function formatRegisteredAt(value?: string | null) {
@@ -127,12 +158,11 @@ function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
 }
 
 function toEditableTemplateData(tournament: Tournament): Record<string, unknown> {
-  const templateData = { ...(tournament.templateData || {}) }
-  const locationAddress = String((templateData as any).locationAddress || '').trim()
-  if (!locationAddress) {
-    templateData.locationAddress = tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || ''
-  }
-  return templateData
+  return applyGolfCourseTournamentDefaults(
+    tournament.templateData,
+    tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || '',
+    tournament.hostGolfCourseName || '',
+  )
 }
 
 function toEditForm(tournament: Tournament): TournamentInput {
@@ -151,10 +181,9 @@ function toEditForm(tournament: Tournament): TournamentInput {
 }
 
 export default function HostPortal() {
-  const { hostAccount, logoutHost } = useHostAuth()
-  const navigate = useNavigate()
+  const { hostAccount } = useHostAuth()
   const [portalData, setPortalData] = useState<HostPortalState | null>(null)
-  const [form, setForm] = useState<TournamentInput>(EMPTY_FORM)
+  const [form, setForm] = useState<TournamentInput>(() => createEmptyTournamentForm())
   const [editForm, setEditForm] = useState<TournamentInput | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -162,12 +191,23 @@ export default function HostPortal() {
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
   const [sendingInviteId, setSendingInviteId] = useState<string | null>(null)
+  const [inviteEmailByTournament, setInviteEmailByTournament] = useState<Record<string, string>>({})
   const [createTournamentOpen, setCreateTournamentOpen] = useState(false)
+  const [createAdditionalFieldsOpen, setCreateAdditionalFieldsOpen] = useState(false)
+  const [showArchivedTournaments, setShowArchivedTournaments] = useState(false)
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null)
+  const [tournamentPage, setTournamentPage] = useState(1)
 
   async function loadPortal() {
     const result = await fetchHostPortal()
     if (!result.response.ok) throw new Error((result.data as any)?.message || 'Could not load host portal')
-    setPortalData(result.data as HostPortalState)
+    const nextPortalData = result.data as unknown as HostPortalState
+    setPortalData(nextPortalData)
+    const defaultLocation = nextPortalData.account?.defaultTournamentLocation || nextPortalData.account?.golfCourseAddress || nextPortalData.account?.golfCourseName || ''
+    const golfCourseName = nextPortalData.account?.golfCourseName || ''
+    setForm((current) => {
+      return { ...current, templateData: applyGolfCourseTournamentDefaults(current.templateData, defaultLocation, golfCourseName) }
+    })
   }
 
   useEffect(() => {
@@ -186,7 +226,7 @@ export default function HostPortal() {
 
 
   useEffect(() => {
-    const cancelledTournaments = (portalData?.tournaments || []).filter((tournament) => tournament.status === 'cancelled')
+    const cancelledTournaments = (portalData?.tournaments || []).filter((tournament) => tournament.status === 'cancelled' && !tournament.archivedAt)
     if (!cancelledTournaments.length) return
     logFrontendEvent({
       category: 'host.portal',
@@ -196,34 +236,83 @@ export default function HostPortal() {
   }, [portalData?.tournaments])
 
   function startEditing(tournament: Tournament) {
+    setCreateTournamentOpen(false)
+    setCreateAdditionalFieldsOpen(false)
     setEditingId(tournament.id)
     setEditForm(toEditForm(tournament))
     setError(null)
     setSuccess(null)
-    logFrontendEvent({ category: 'host.portal', message: 'host_tournament_edit_started', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null } })
+    logFrontendEvent({
+      category: 'host.portal',
+      message: 'host_tournament_edit_started',
+      data: {
+        tournamentId: tournament.id,
+        tournamentIdentifier: tournament.tournamentIdentifier || null,
+        otherTournamentCountHidden: Math.max((portalData?.tournaments || []).length - 1, 0),
+      },
+    })
   }
 
   async function onCreateTournament(event: FormEvent) {
     event.preventDefault()
+    const tournamentName = String(form.name || '').trim()
+    const tournamentEmail = String(form.organizerEmail || '').trim().toLowerCase()
+    const validationMessage = validateTournamentForSave({ ...form, name: tournamentName })
+    if (validationMessage || !isValidOptionalEmail(tournamentEmail)) {
+      const message = validationMessage || 'Organizer Email is invalid. Enter a complete email address or leave it blank.'
+      setError(message)
+      logFrontendEvent({ category: 'host.portal', level: 'warn', message: 'host_tournament_create_validation_failed', data: { tournamentNameProvided: Boolean(tournamentName), tournamentEmailProvided: Boolean(tournamentEmail), validationMessage: message } })
+      return
+    }
+
     setSaving(true)
     setError(null)
     setSuccess(null)
     try {
-      const created = await createHostTournament(form)
-      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_created', data: { tournamentId: created.tournament.id, tournamentIdentifier: created.tournament.tournamentIdentifier, teamSlotLimit: created.tournament.teamSlotLimit } })
-      if (form.organizerEmail) {
-        const invited = await sendHostTournamentInvite(created.tournament.id, { organizerEmail: form.organizerEmail })
-        setSuccess(`Tournament created. Organizer invite sent to ${form.organizerEmail}. Link: ${invited.organizerUrl}`)
+      const created = await createHostTournament({ ...form, name: tournamentName, organizerEmail: tournamentEmail || null })
+      logFrontendEvent({
+        category: 'host.portal',
+        message: 'host_tournament_created',
+        data: {
+          tournamentId: created.tournament.id,
+          tournamentIdentifier: created.tournament.tournamentIdentifier,
+          teamSlotLimit: created.tournament.teamSlotLimit,
+          optionalFieldsExpanded: createAdditionalFieldsOpen,
+          defaultLocationPresent: Boolean(String((form.templateData as any)?.locationAddress || '').trim()),
+          organizerInviteRequested: Boolean(tournamentEmail),
+          checkInTime: String((form.templateData as any)?.checkInTime || ''),
+          teeTime: String((form.templateData as any)?.teeTime || ''),
+          templateKey: String(form.templateKey || 'classic-flyer'),
+        },
+      })
+      if (tournamentEmail) {
+        try {
+          const invited = await sendHostTournamentInvite(created.tournament.id, { organizerEmail: tournamentEmail })
+          setSuccess(`Tournament created. Organizer invite sent to ${tournamentEmail}. Link: ${invited.organizerUrl}`)
+        } catch (inviteError) {
+          const inviteMessage = inviteError instanceof Error ? inviteError.message : 'Could not send the organizer invite.'
+          setSuccess('Tournament created.')
+          setError(`The tournament was created, but the organizer invite was not sent. Use Invite organizer from the tournament record. ${inviteMessage}`)
+          logFrontendEvent({
+            category: 'host.portal',
+            level: 'error',
+            message: 'host_tournament_invite_after_create_failed',
+            data: { tournamentId: created.tournament.id, tournamentEmail, error: inviteMessage },
+          })
+        }
       } else {
-        setSuccess(`Tournament created with identifier ${created.tournament.tournamentIdentifier}.`)
+        setSuccess('Tournament created. An organizer can be invited later from the tournament record.')
       }
-      setForm(EMPTY_FORM)
+      const defaultLocation = portalData?.account?.defaultTournamentLocation || portalData?.account?.golfCourseAddress || portalData?.account?.golfCourseName || ''
+      const golfCourseName = portalData?.account?.golfCourseName || ''
+      setForm(createEmptyTournamentForm(defaultLocation, golfCourseName))
+      setCreateAdditionalFieldsOpen(false)
       setCreateTournamentOpen(false)
       await loadPortal()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not create tournament.'
+      const message = getFriendlyTournamentError(err, 'create')
       setError(message)
-      logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_tournament_create_failed', data: { error: message } })
+      logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_tournament_create_failed', data: { error: message, tournamentEmailProvided: Boolean(tournamentEmail), organizerInviteRequested: Boolean(tournamentEmail) } })
     } finally {
       setSaving(false)
     }
@@ -232,18 +321,24 @@ export default function HostPortal() {
   async function onSaveTournament(event: FormEvent) {
     event.preventDefault()
     if (!editingId || !editForm) return
+    const validationMessage = validateTournamentForSave(editForm)
+    if (validationMessage) {
+      setError(validationMessage)
+      logFrontendEvent({ category: 'host.portal', level: 'warn', message: 'host_tournament_update_validation_failed', data: { tournamentId: editingId, validationMessage } })
+      return
+    }
     setSaving(true)
     setError(null)
     setSuccess(null)
     try {
       const saved = await updateHostTournamentRecord(editingId, { ...editForm, endDate: null })
       setPortalData((prev) => prev ? { ...prev, tournaments: (prev.tournaments || []).map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : prev)
-      setSuccess(saved.status === 'published' && (saved.registrationUrl || saved.portalUrl) ? `Tournament updated. Registration URL: ${saved.registrationUrl || saved.portalUrl}` : 'Tournament updated.')
+      setSuccess(['published', 'completed'].includes(String(saved.status || '').toLowerCase()) && (saved.registrationUrl || saved.portalUrl) ? `Tournament updated. ${saved.status === 'completed' ? 'Tournament page URL' : 'Registration URL'}: ${saved.registrationUrl || saved.portalUrl}` : 'Tournament updated.')
       setEditingId(null)
       setEditForm(null)
-      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_updated', data: { tournamentId: saved.id, status: saved.status, teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount } })
+      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || editForm.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((editForm.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((editForm.templateData as any)?.tournamentSummary || '').length } })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not update tournament.'
+      const message = getFriendlyTournamentError(err, 'save')
       setError(message)
       logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_tournament_update_failed', data: { tournamentId: editingId, error: message } })
     } finally {
@@ -253,48 +348,94 @@ export default function HostPortal() {
 
 
   async function onSendInvite(tournamentId: string, organizerEmail: string) {
-    if (!organizerEmail) {
-      setError('Add an organizer email before sending an invite.')
+    const normalizedEmail = String(organizerEmail || '').trim().toLowerCase()
+    if (!normalizedEmail || !isValidOptionalEmail(normalizedEmail)) {
+      setError('Enter a valid organizer email before sending an invite.')
+      logFrontendEvent({ category: 'host.portal', level: 'warn', message: 'host_tournament_invite_validation_failed', data: { tournamentId, organizerEmailProvided: Boolean(normalizedEmail) } })
       return
     }
     setSendingInviteId(tournamentId)
     setError(null)
     setSuccess(null)
     try {
-      const result = await sendHostTournamentInvite(tournamentId, { organizerEmail })
+      const result = await sendHostTournamentInvite(tournamentId, { organizerEmail: normalizedEmail })
       setSuccess(`Organizer invite sent. Registration or login link: ${result.organizerUrl}`)
+      setInviteEmailByTournament((current) => ({ ...current, [tournamentId]: '' }))
+      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_organizer_invited', data: { tournamentId, organizerEmail: normalizedEmail } })
       await loadPortal()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send organizer invite.')
+      const message = err instanceof Error ? err.message : 'Could not send organizer invite.'
+      setError(message)
+      logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_tournament_organizer_invite_failed', data: { tournamentId, organizerEmail: normalizedEmail, error: message } })
     } finally {
       setSendingInviteId(null)
     }
   }
 
+  async function onArchiveTournament(tournament: Tournament) {
+    setArchiveBusyId(tournament.id)
+    setError(null)
+    setSuccess(null)
+    try {
+      const archived = await archiveHostTournamentRecord(tournament.id)
+      setPortalData((previous) => previous ? { ...previous, tournaments: (previous.tournaments || []).map((item) => item.id === archived.id ? { ...item, ...archived } : item) } : previous)
+      setSuccess(`${tournament.name} was archived.`)
+      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_archived', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The tournament could not be archived. Try again.'
+      setError(message)
+      logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_tournament_archive_failed', data: { tournamentId: tournament.id, error: message } })
+    } finally {
+      setArchiveBusyId(null)
+    }
+  }
+
+  async function onRestoreTournament(tournament: Tournament) {
+    setArchiveBusyId(tournament.id)
+    setError(null)
+    setSuccess(null)
+    try {
+      const restored = await restoreHostTournamentRecord(tournament.id)
+      setPortalData((previous) => previous ? { ...previous, tournaments: (previous.tournaments || []).map((item) => item.id === restored.id ? { ...item, ...restored } : item) } : previous)
+      setSuccess(`${tournament.name} was restored to active tournaments.`)
+      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_restored', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null, status: restored.status } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The tournament could not be restored. Try again.'
+      setError(message)
+      logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_tournament_restore_failed', data: { tournamentId: tournament.id, error: message } })
+    } finally {
+      setArchiveBusyId(null)
+    }
+  }
+
   const hostedTournaments = sortTournamentsByCreatedDescending(portalData?.tournaments || [])
+  const activeHostedTournaments = hostedTournaments.filter((tournament) => !tournament.archivedAt)
+  const archivedHostedTournaments = hostedTournaments.filter((tournament) => Boolean(tournament.archivedAt))
+  const selectedHostedTournaments = showArchivedTournaments ? archivedHostedTournaments : activeHostedTournaments
+  const totalTournamentPages = Math.max(1, Math.ceil(selectedHostedTournaments.length / TOURNAMENTS_PER_PAGE))
+  const safeTournamentPage = Math.min(tournamentPage, totalTournamentPages)
+  const pagedHostedTournaments = selectedHostedTournaments.slice((safeTournamentPage - 1) * TOURNAMENTS_PER_PAGE, safeTournamentPage * TOURNAMENTS_PER_PAGE)
+  const visibleHostedTournaments = editingId ? selectedHostedTournaments.filter((tournament) => tournament.id === editingId) : pagedHostedTournaments
+
+  useEffect(() => {
+    if (tournamentPage > totalTournamentPages) setTournamentPage(totalTournamentPages)
+  }, [tournamentPage, totalTournamentPages])
 
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero eyebrow="Golf-course portal" title={hostAccount ? hostAccount.golfCourseName : 'Host portal'} subtitle="Create tournaments, click a tournament tile to modify it, copy registration URLs after publishing, and invite organizers into their portal." />
+        <PageHero eyebrow="Golf-course portal" title={hostAccount ? hostAccount.golfCourseName : 'Host portal'} subtitle="Create tournaments, select a tournament line item to modify it, copy registration URLs after publishing, and invite organizers into their portal." />
         {busy ? <div className="small">Loading host portal…</div> : null}
         {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
         {success ? <div className="small" style={{ color: '#166534' }}>{success}</div> : null}
 
         {portalData?.account ? (
-          <div className="formStack" style={{ maxWidth: 760 }}>
-            <div className="card" style={{ padding: 16 }}>
-              <div><strong>Golf-course:</strong> {portalData.account.golfCourseName}</div>
-              <div><strong>Email:</strong> {portalData.account.email}</div>
-              <div><strong>Validated:</strong> {portalData.account.isValidated ? 'Yes' : 'No'}</div>
-              <div style={{ marginTop: 10 }}><Link className="btn" to="/host/portal/profile">Update host profile</Link></div>
-            </div>
-
-            <section className="card" style={{ padding: 16 }}>
+          <div className="formStack" style={{ maxWidth: 1100 }}>
+            {!editingId ? <section className="card" style={{ padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div>
                   <strong>Create tournament</strong>
-                  <div className="small">The create tournament panel starts minimized when you enter the host portal.</div>
+                  <div className="small">Only the tournament name is required. Add an organizer email now to send an invitation, or invite an organizer later.</div>
                 </div>
                 <button
                   className="btn btnPrimary"
@@ -303,8 +444,34 @@ export default function HostPortal() {
                   aria-controls="host-create-tournament-panel"
                   onClick={() => {
                     const nextOpen = !createTournamentOpen
+                    const defaultLocation = portalData.account?.defaultTournamentLocation || portalData.account?.golfCourseAddress || portalData.account?.golfCourseName || ''
+                    const golfCourseName = portalData.account?.golfCourseName || ''
+                    if (nextOpen) {
+                      setShowArchivedTournaments(false)
+                      setEditingId(null)
+                      setEditForm(null)
+                      setForm((current) => ({ ...current, templateData: applyGolfCourseTournamentDefaults(current.templateData, defaultLocation, golfCourseName) }))
+                    } else {
+                      setCreateAdditionalFieldsOpen(false)
+                    }
                     setCreateTournamentOpen(nextOpen)
-                    logFrontendEvent({ category: 'host.portal', message: nextOpen ? 'host_tournament_create_panel_opened' : 'host_tournament_create_panel_minimized' })
+                    const flowLogData = {
+                      tournamentCountHidden: nextOpen ? activeHostedTournaments.length : 0,
+                      defaultLocationAvailable: Boolean(defaultLocation),
+                      defaultHostOrganizationAvailable: Boolean(golfCourseName),
+                      defaultCheckInTime: DEFAULT_TOURNAMENT_CHECK_IN_TIME,
+                      defaultTeeTime: DEFAULT_TOURNAMENT_TEE_TIME,
+                    }
+                    logFrontendEvent({
+                      category: 'host.portal',
+                      message: nextOpen ? 'host_tournament_create_panel_opened' : 'host_tournament_create_panel_minimized',
+                      data: flowLogData,
+                    })
+                    logFrontendEvent({
+                      category: 'host.portal',
+                      message: nextOpen ? 'host_tournament_create_flow_started' : 'host_tournament_create_flow_minimized',
+                      data: flowLogData,
+                    })
                   }}
                 >
                   {createTournamentOpen ? 'Minimize create tournament' : 'Create tournament'}
@@ -312,32 +479,107 @@ export default function HostPortal() {
               </div>
               {createTournamentOpen ? (
                 <form id="host-create-tournament-panel" onSubmit={onCreateTournament} className="formStack" style={{ marginTop: 16 }}>
-                  <div>
-                    <label className="label">Tournament name</label>
-                    <input className="input" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Spring Member Classic" />
+                  <div className="card" style={{ padding: 14, background: '#f8fafc' }}>
+                    <div style={{ fontWeight: 700, marginBottom: 10 }}>Tournament setup</div>
+                    <div className="formStack">
+                      <div>
+                        <label className="label">Tournament name</label>
+                        <input className="input" required value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Spring Member Classic" />
+                      </div>
+                      <div>
+                        <label className="label">Organizer email (optional)</label>
+                        <input className="input" type="email" value={form.organizerEmail || ''} onChange={(e) => setForm((prev) => ({ ...prev, organizerEmail: e.target.value }))} placeholder="organizer@example.com" />
+                        <div className="small" style={{ marginTop: 4 }}>When provided, Golf Homiez sends this address an organizer invitation after the tournament is created.</div>
+                      </div>
+                    </div>
                   </div>
+
                   <div>
-                    <label className="label">Tournament organizer email</label>
-                    <input className="input" type="email" value={form.organizerEmail || ''} onChange={(e) => setForm((prev) => ({ ...prev, organizerEmail: e.target.value }))} placeholder="organizer@example.com" />
+                    <button
+                      type="button"
+                      className="btn"
+                      aria-expanded={createAdditionalFieldsOpen}
+                      aria-controls="host-create-tournament-optional-fields"
+                      onClick={() => {
+                        const nextOpen = !createAdditionalFieldsOpen
+                        setCreateAdditionalFieldsOpen(nextOpen)
+                        logFrontendEvent({ category: 'host.portal', message: 'host_tournament_optional_fields_toggled', data: { expanded: nextOpen } })
+                      }}
+                    >
+                      {createAdditionalFieldsOpen ? 'Hide optional tournament fields' : 'Show optional tournament fields'}
+                    </button>
+                    <div className="small" style={{ marginTop: 6 }}>Optional fields can be completed now or by the invited organizer later.</div>
                   </div>
-                  <div>
-                    <label className="label">Number of teams to play in the tournament</label>
-                    <input className="input" type="number" min={1} step={1} value={form.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setForm((prev) => ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }))} />
-                  </div>
-                  <TournamentTemplateFields value={form} onChange={(next) => setForm((prev) => ({ ...prev, ...next }))} />
-                  <div>
-                    <button className="btn btnPrimary" disabled={saving}>{saving ? 'Creating…' : 'Create tournament'}</button>
+
+                  {createAdditionalFieldsOpen ? (
+                    <div id="host-create-tournament-optional-fields" className="formStack">
+                      <div>
+                        <label className="label">Description</label>
+                        <textarea className="input" rows={4} value={form.description || ''} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+                      </div>
+                      <div className="formRow formRow--split">
+                        <div>
+                          <label className="label">Tournament date</label>
+                          <input className="input" type="date" value={form.startDate || ''} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value, endDate: null }))} />
+                        </div>
+                      </div>
+                      <TournamentRegistrationDeadlineField value={form} onChange={(next) => setForm((prev) => ({ ...prev, ...next }))} />
+                      <div>
+                        <label className="label">Number of teams to play in the tournament</label>
+                        <input className="input" type="number" min={1} step={1} value={form.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setForm((prev) => ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }))} />
+                      </div>
+                      <TournamentTemplateFields value={form} hideRegistrationDeadline onChange={(next) => setForm((prev) => ({ ...prev, ...next }))} />
+                    </div>
+                  ) : null}
+
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button className="btn btnPrimary" disabled={saving}>{saving ? 'Creating…' : (String(form.organizerEmail || '').trim() ? 'Create tournament and invite organizer' : 'Create tournament')}</button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        const defaultLocation = portalData.account?.defaultTournamentLocation || portalData.account?.golfCourseAddress || portalData.account?.golfCourseName || ''
+                        setForm(createEmptyTournamentForm(defaultLocation, portalData.account?.golfCourseName || ''))
+                        setCreateAdditionalFieldsOpen(false)
+                        setCreateTournamentOpen(false)
+                        setError(null)
+                        logFrontendEvent({ category: 'host.portal', message: 'host_tournament_create_flow_cancelled' })
+                      }}
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </form>
               ) : null}
-            </section>
+            </section> : null}
 
-            <div>
-              <strong>Tournaments hosted here</strong>
-              <div className="small">Click a tile to modify the tournament. Published tournaments show a golfer registration URL.</div>
-              <div className="formStack" style={{ marginTop: 12 }}>
-                {hostedTournaments.length === 0 ? <div className="small">No tournaments created yet.</div> : hostedTournaments.map((tournament) => (
-                  <div key={tournament.id} className="card" role="button" tabIndex={0} onClick={() => editingId === tournament.id ? undefined : startEditing(tournament)} onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && editingId !== tournament.id) startEditing(tournament) }} style={{ padding: 16, cursor: editingId === tournament.id ? 'default' : 'pointer' }}>
+            {!createTournamentOpen ? (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div>
+                    <strong>{showArchivedTournaments ? 'Archived tournaments' : 'Tournaments hosted here'}</strong>
+                    {showArchivedTournaments ? <div className="small">Archived tournaments remain stored and can be restored to the active list.</div> : null}
+                  </div>
+                  {!editingId ? (
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => {
+                        const next = !showArchivedTournaments
+                        setShowArchivedTournaments(next)
+                        setTournamentPage(1)
+                        setError(null)
+                        setSuccess(null)
+                        logFrontendEvent({ category: 'host.portal', message: next ? 'host_archived_tournaments_view_opened' : 'host_active_tournaments_view_opened', data: { archivedCount: archivedHostedTournaments.length, activeCount: activeHostedTournaments.length } })
+                      }}
+                    >
+                      {showArchivedTournaments ? `View active tournaments (${activeHostedTournaments.length})` : `View archived tournaments (${archivedHostedTournaments.length})`}
+                    </button>
+                  ) : null}
+                </div>
+                <div className="formStack" style={{ marginTop: 12 }}>
+                  {visibleHostedTournaments.length === 0 ? <div className="small">{showArchivedTournaments ? 'No archived tournaments.' : 'No active tournaments created yet.'}</div> : visibleHostedTournaments.map((tournament) => (
+                  <div key={tournament.id} className={editingId === tournament.id ? 'card' : undefined} style={editingId === tournament.id ? { padding: 16 } : undefined}>
                     {editingId === tournament.id && editForm ? (
                       <form onSubmit={onSaveTournament} className="formStack" onClick={(e) => e.stopPropagation()}>
                         <RegisteredGolfers tournament={tournament} />
@@ -371,37 +613,88 @@ export default function HostPortal() {
                           <input className="input" type="number" min={1} step={1} value={editForm.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }) : prev)} />
                         </div>
                         <TournamentTemplateFields value={editForm} hideRegistrationDeadline onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                        <TournamentStartScheduleManager
+                          tournamentId={tournament.id}
+                          actor="host"
+                          registrations={tournament.registrations || []}
+                          assignments={tournament.startAssignments || []}
+                          startType={String((editForm.templateData as any)?.startType || 'shotgun')}
+                          firstStartTime={String((editForm.templateData as any)?.teeTime || DEFAULT_TOURNAMENT_TEE_TIME)}
+                          intervalMinutes={Number((editForm.templateData as any)?.teeTimeIntervalMinutes || DEFAULT_TEE_TIME_INTERVAL_MINUTES)}
+                          onAssignmentsChange={(startAssignments) => setPortalData((previous) => previous ? {
+                            ...previous,
+                            tournaments: (previous.tournaments || []).map((item) => item.id === tournament.id ? { ...item, startAssignments } : item),
+                          } : previous)}
+                        />
+                        <TournamentSummaryField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                        <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
+                          <div style={{ fontWeight: 700 }}>Organizer</div>
+                          {tournament.organizerEmail ? (
+                            <>
+                              <div className="small" style={{ marginTop: 4 }}>{tournament.organizerName || tournament.organizerEmail}</div>
+                              {tournament.inviteUrl ? <div className="small">Organizer link: <a href={tournament.inviteUrl}>{tournament.inviteUrl}</a></div> : null}
+                              <button className="btn" style={{ marginTop: 8 }} type="button" onClick={() => { void onSendInvite(tournament.id, tournament.organizerEmail || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Resend organizer invite'}</button>
+                            </>
+                          ) : (
+                            <>
+                              <label className="label" htmlFor={`organizer-email-${tournament.id}`}>Organizer email (optional)</label>
+                              <div style={{ display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
+                                <input
+                                  id={`organizer-email-${tournament.id}`}
+                                  className="input"
+                                  type="email"
+                                  style={{ flex: '1 1 260px' }}
+                                  value={inviteEmailByTournament[tournament.id] || ''}
+                                  onChange={(e) => setInviteEmailByTournament((current) => ({ ...current, [tournament.id]: e.target.value }))}
+                                  placeholder="organizer@example.com"
+                                />
+                                <button className="btn" type="button" onClick={() => { void onSendInvite(tournament.id, inviteEmailByTournament[tournament.id] || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Invite organizer'}</button>
+                              </div>
+                              <div className="small" style={{ marginTop: 4 }}>The tournament can remain host-managed without an organizer.</div>
+                            </>
+                          )}
+                        </div>
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <button className="btn btnPrimary" disabled={saving}>{saving ? 'Saving…' : 'Save tournament changes'}</button>
-                          <button type="button" className="btn" onClick={() => { setEditingId(null); setEditForm(null); setError(null) }}>Cancel</button>
+                          <button type="button" className="btn" onClick={() => {
+                            logFrontendEvent({ category: 'host.portal', message: 'host_tournament_edit_cancelled', data: { tournamentId: editingId } })
+                            setEditingId(null)
+                            setEditForm(null)
+                            setError(null)
+                          }}>Cancel</button>
                         </div>
                       </form>
                     ) : (
-                      <>
-                        <div style={{ fontWeight: 700 }}>{tournament.name}</div>
-                        <div className="small">Tournament identifier: {tournament.tournamentIdentifier}</div>
-                        <div className="small">Organizer email: {tournament.organizerEmail || 'Not invited yet'}</div>
-                        <div className="small">Invite status: {tournament.inviteStatus || 'not_sent'} · Status: {tournament.status || 'draft'}</div>
-                        {tournament.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
-                        <TournamentCapacitySummary tournament={tournament} />
-                        {tournament.status === 'published' && (tournament.registrationUrl || tournament.portalUrl) ? <div className="small">Golfer registration URL: <a href={tournament.registrationUrl || tournament.portalUrl || undefined} onClick={(e) => e.stopPropagation()}>{tournament.registrationUrl || tournament.portalUrl}</a></div> : null}
-                        {tournament.inviteUrl ? <div className="small">Organizer link: <a href={tournament.inviteUrl} onClick={(e) => e.stopPropagation()}>{tournament.inviteUrl}</a></div> : null}
-                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-                          {tournament.organizerEmail ? <button className="btn" type="button" onClick={(e) => { e.stopPropagation(); void onSendInvite(tournament.id, tournament.organizerEmail || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Resend organizer invite'}</button> : null}
-                        </div>
-                      </>
+                      <TournamentManagementLineItem
+                        tournament={tournament}
+                        archived={showArchivedTournaments}
+                        busy={archiveBusyId === tournament.id}
+                        onSelect={showArchivedTournaments ? undefined : startEditing}
+                        onArchive={onArchiveTournament}
+                        onRestore={onRestoreTournament}
+                      />
                     )}
                   </div>
-                ))}
+                  ))}
+                </div>
+                {!editingId ? (
+                  <TournamentManagementPagination
+                    currentPage={safeTournamentPage}
+                    totalPages={totalTournamentPages}
+                    totalItems={selectedHostedTournaments.length}
+                    onPageChange={(page) => {
+                      setTournamentPage(page)
+                      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_page_selected', data: { archived: showArchivedTournaments, page, totalPages: totalTournamentPages } })
+                    }}
+                  />
+                ) : null}
               </div>
-            </div>
+            ) : (
+              <div className="small" role="status">Existing tournaments are hidden while the create tournament flow is open.</div>
+            )}
           </div>
         ) : null}
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn btnPrimary" onClick={() => { void logoutHost().finally(() => navigate('/host/login', { replace: true })) }}>Sign out of host portal</button>
-          <Link className="btn" to="/host/request-password-reset">Reset host password</Link>
-        </div>
       </div>
     </div>
   )

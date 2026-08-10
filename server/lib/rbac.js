@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { normalizeEmail } from './team-utils.js'
+import { isEmail, normalizeEmail } from './team-utils.js'
 import { getOrganizerAuthAccountByEmail } from './organizer-auth.js'
 
 export const ROLE_USER = 'user'
@@ -8,6 +8,7 @@ export const ROLE_ORGANIZER = 'organizer'
 export const ROLE_ADMIN = 'admin'
 export const SUPPORTED_ROLES = [ROLE_USER, ROLE_HOST, ROLE_ORGANIZER, ROLE_ADMIN]
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
+const DEFAULT_TEE_TIME_INTERVAL_MINUTES = 10
 
 function createId() {
   return randomUUID().replace(/-/g, '')
@@ -410,15 +411,19 @@ export function sanitizeTournamentPayload(body = {}, options = {}) {
   const isPublic = status === 'published'
   const requireDates = options.requireDates !== false
   const allowedStatuses = new Set(['draft', 'published', 'completed', 'cancelled'])
-  const allowedTemplateKeys = new Set(['classic-flyer'])
+  const allowedTemplateKeys = new Set(['classic-flyer', 'fairway-poster', 'modern-open', 'charity-tribute', 'sunset-drive', 'green-invite'])
   const templateKey = String(body.templateKey || 'classic-flyer').trim()
   const templateBackgroundImageUrl = String(body.templateBackgroundImageUrl || '').trim()
+  const templateData = sanitizeTournamentTemplateData(body.templateData)
+  const registrationDeadline = String(templateData.registrationDeadline || '').trim().slice(0, 10)
 
-  if (!name) throw new Error('Tournament name is required.')
-  if (requireDates && !startDate) throw new Error('Tournament start date is required.')
-  if (startDate && Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) throw new Error('Tournament start date is invalid.')
-  if (!allowedStatuses.has(status)) throw new Error('Tournament status is invalid.')
-  if (!allowedTemplateKeys.has(templateKey)) throw new Error('Tournament template is invalid.')
+  if (!name) throw new Error('Tournament Name is a required field. Enter a tournament name and try again.')
+  if ((requireDates || status === 'published') && !startDate) throw new Error('Tournament Start Date is a required field before publishing. Add a tournament date and try again.')
+  if (startDate && Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) throw new Error('Tournament Start Date is invalid. Select a valid calendar date and try again.')
+  if (registrationDeadline && Number.isNaN(Date.parse(`${registrationDeadline}T00:00:00Z`))) throw new Error('Registration Deadline is invalid. Select a valid calendar date and try again.')
+  if (startDate && registrationDeadline && registrationDeadline > startDate.slice(0, 10)) throw new Error('Registration Deadline cannot be after the Tournament Start Date. Select a deadline on or before the tournament date and try again.')
+  if (!allowedStatuses.has(status)) throw new Error('Tournament Status is invalid. Select Draft, Published, Completed, or Cancelled.')
+  if (!allowedTemplateKeys.has(templateKey)) throw new Error('Tournament Template is invalid. Select an available tournament template.')
 
   return {
     name,
@@ -430,7 +435,7 @@ export function sanitizeTournamentPayload(body = {}, options = {}) {
     isPublic,
     templateKey,
     templateBackgroundImageUrl: templateBackgroundImageUrl || null,
-    templateData: sanitizeTournamentTemplateData(body.templateData),
+    templateData,
     teamSlotLimit: normalizeTournamentTeamSlotLimit(body.teamSlotLimit ?? body.team_slot_limit),
   }
 }
@@ -507,7 +512,7 @@ function sanitizeCurrencyField(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(numeric)
 }
 
-function sanitizeTournamentTemplateData(value = {}) {
+export function sanitizeTournamentTemplateData(value = {}) {
   const source = value && typeof value === 'object' ? value : {}
   const cleanString = (key) => source[key] == null ? null : String(source[key]).trim() || null
   const startType = String(source.startType || 'shotgun').trim()
@@ -520,6 +525,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     eventDate: cleanString('eventDate'),
     checkInTime: cleanString('checkInTime'),
     teeTime: cleanString('teeTime'),
+    teeTimeIntervalMinutes: Math.min(60, Math.max(5, Number.parseInt(String(source.teeTimeIntervalMinutes || ''), 10) || DEFAULT_TEE_TIME_INTERVAL_MINUTES)),
     startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
     tournamentFormat: cleanString('tournamentFormat'),
     registrationDeadline: cleanString('registrationDeadline'),
@@ -533,6 +539,7 @@ function sanitizeTournamentTemplateData(value = {}) {
     logoFiles,
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
     miscNotes: cleanString('miscNotes'),
+    tournamentSummary: source.tournamentSummary == null ? null : (String(source.tournamentSummary).trim().slice(0, 5000) || null),
     sponsorsAvailable: Boolean(source.sponsorsAvailable),
   }
 }
@@ -549,6 +556,7 @@ function mapTournamentRow(row) {
     startDate: row.start_date,
     endDate: row.end_date,
     status: row.status,
+    archivedAt: row.archived_at || null,
     isPublic: Boolean(row.is_public),
     templateKey: row.template_key || 'classic-flyer',
     templateBackgroundImageUrl: row.template_background_image_url || null,
@@ -1275,11 +1283,18 @@ export async function createTournament(pool, user, input) {
   return mapTournamentRow(rows[0] || null)
 }
 
+export function sanitizeHostManagedTournamentPayload(input = {}, hostAccountId = null) {
+  const organizerEmail = normalizeEmail(input.organizerEmail || input.email)
+  if (organizerEmail && !isEmail(organizerEmail)) throw new Error('Organizer email is invalid.')
+
+  const payload = sanitizeTournamentPayload({ ...input, hostAccountId }, { requireDates: false })
+  return { ...payload, organizerEmail: organizerEmail || null }
+}
+
 export async function createHostManagedTournament(pool, hostAccountId, input) {
   await ensureTournamentInviteSchema(pool)
   const resolvedHostAccountId = await resolveHostTournamentAccountId(pool, hostAccountId)
-  const payload = sanitizeTournamentPayload({ ...input, hostAccountId: resolvedHostAccountId }, { requireDates: false })
-  const organizerEmail = normalizeEmail(input.organizerEmail || input.email)
+  const payload = sanitizeHostManagedTournamentPayload(input, resolvedHostAccountId)
   const id = createId()
   const tournamentIdentifier = buildTournamentIdentifier(payload.name)
 
@@ -1288,7 +1303,7 @@ export async function createHostManagedTournament(pool, hostAccountId, input) {
     organizerAccountId: null,
     hostAccountId: resolvedHostAccountId,
     tournamentIdentifier,
-    organizerEmail: organizerEmail || null,
+    organizerEmail: payload.organizerEmail,
     name: payload.name,
     description: payload.description,
     startDate: payload.startDate,

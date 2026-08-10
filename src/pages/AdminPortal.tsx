@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import PageHero from '../components/PageHero'
 import {
@@ -657,11 +658,21 @@ export default function AdminPortal() {
     setMessage(null)
     setError(null)
     try {
-      await approveHostAccountRequest(requestId)
-      setMessage('Golf-course account request approved. The requester has been emailed with next steps and host access details.')
+      logFrontendEvent({ category: 'admin.portal.host_approval', message: 'host_account_approval_started', data: { requestId } })
+      const result = await approveHostAccountRequest(requestId)
+      logFrontendEvent({
+        category: 'admin.portal.host_approval',
+        message: 'host_account_approval_completed',
+        data: { requestId, hostAccountId: result.hostAccountId || null, publicPageSlug: result.publicPage?.slug || null },
+      })
+      setMessage(result.publicPage?.url
+        ? `Golf-course account request approved. The public course page was created at ${result.publicPage.url}.`
+        : 'Golf-course account request approved. The requester has been emailed with next steps and host access details.')
       await loadPortal()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not approve the golf-course account request.')
+      const message = err instanceof Error ? err.message : 'Could not approve the golf-course account request.'
+      logFrontendEvent({ category: 'admin.portal.host_approval', level: 'error', message: 'host_account_approval_failed', data: { requestId, error: message } })
+      setError(message)
     } finally {
       setApprovingRequestId(null)
     }

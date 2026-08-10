@@ -2,6 +2,44 @@ import { api } from './api'
 import type { HoleScoreDetail, Team } from '../types'
 import type { GolfCourseOption } from './golf-courses'
 
+export type GolfCoursePublicPageTournament = {
+  id: string
+  tournamentIdentifier?: string | null
+  name: string
+  startDate?: string | null
+  status?: string | null
+  portalPath: string
+}
+
+export type GolfCoursePublicPageInput = {
+  summary: string
+  bannerImageUrl?: string | null
+  bannerImageData?: string | null
+  websiteUrl?: string | null
+  contactPhone?: string | null
+  addressLine1?: string | null
+  city?: string | null
+  stateCode: string
+  postalCode?: string | null
+  isPublished: boolean
+}
+
+export type GolfCoursePublicPage = GolfCoursePublicPageInput & {
+  id: string
+  hostAccountId: string
+  golfCourseId?: string | null
+  slug: string
+  path: string
+  url: string
+  golfCourseName: string
+  sourceWebsiteUrl?: string | null
+  sourceLastSyncedAt?: string | null
+  tournamentCount: number
+  tournaments: GolfCoursePublicPageTournament[]
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
 export type HostAccountInput = {
   golfCourseName: string
   contactName: string
@@ -11,6 +49,7 @@ export type HostAccountInput = {
   state?: string | null
   postalCode?: string | null
   notes?: string | null
+  publicPage?: GolfCoursePublicPageInput | null
 }
 
 export type OrganizerAccountInput = {
@@ -42,10 +81,22 @@ export type TournamentInput = {
 
 export type HostAccount = HostAccountInput & {
   id: string
+  catalogCourse?: {
+    id: string
+    name?: string | null
+    phone?: string | null
+    websiteUrl?: string | null
+    addressLine1?: string | null
+    city?: string | null
+    stateCode?: string | null
+    postalCode?: string | null
+  } | null
   roleAssignmentId: string
   authUserId: string
   email: string
   role: string
+  golfCourseId?: string | null
+  publicPage?: GolfCoursePublicPage | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -56,6 +107,23 @@ export type OrganizerAccount = OrganizerAccountInput & {
   authUserId: string
   email: string
   role: string
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+
+export type TournamentStartAssignment = {
+  id?: string | null
+  tournamentId?: string | null
+  teamKey: string
+  registrationId?: string | null
+  teamId?: string | null
+  teamName: string
+  startType: 'shotgun' | 'tee-times' | string
+  startTime: string
+  startingHole?: string | null
+  sortOrder?: number
+  notes?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -85,6 +153,7 @@ export type Tournament = {
   startDate?: string | null
   endDate?: string | null
   status: string
+  archivedAt?: string | null
   isPublic: boolean
   organizerName?: string | null
   hostGolfCourseName?: string | null
@@ -109,6 +178,7 @@ export type Tournament = {
   registeredTeamCount?: number
   verifiedUserCount?: number
   openTeamSlotCount?: number
+  startAssignments?: TournamentStartAssignment[]
 }
 
 export type AdminUser = {
@@ -162,6 +232,19 @@ export type OrganizerPortalSummary = {
   tournaments: Tournament[]
 }
 
+export type TournamentFinalLeaderboardRow = {
+  position: number
+  teamKey: string
+  teamId?: string | null
+  teamName: string
+  totalScore?: number | null
+  relativeToPar?: number | null
+  roundLabel: string
+  holesCompleted: number
+  thru?: number | null
+  updatedAt?: string | null
+}
+
 export type TournamentPortal = {
   tournament: Tournament
   registrationCount?: number
@@ -172,6 +255,8 @@ export type TournamentPortal = {
   registrations?: TournamentRegistration[]
   isViewerRegistered?: boolean
   viewerRegistration?: TournamentRegistration | null
+  startAssignments?: TournamentStartAssignment[]
+  finalLeaderboard?: TournamentFinalLeaderboardRow[]
 }
 
 export type UserRegisteredTournament = Tournament & {
@@ -194,6 +279,11 @@ export type GolfCourseTournamentSearchResult = {
   tournamentDate: string
   tournamentWebsite?: string | null
   sourceUrl?: string | null
+  sourceType?: 'external' | 'golfhomiez' | string
+  isGolfHomiezTournament?: boolean
+  golfHomiezTournamentId?: string | null
+  tournamentPath?: string | null
+  isRegistered?: boolean
   firstSeenAt?: string | null
   lastSeenAt?: string | null
 }
@@ -296,6 +386,10 @@ export function updateHostProfile(input: Partial<HostAccountInput>) {
   return api<HostAccount>('/api/host/profile', { method: 'PUT', body: JSON.stringify(input) })
 }
 
+export function fetchGolfCoursePublicPage(slug: string) {
+  return api<GolfCoursePublicPage>(`/api/golf-course-pages/${encodeURIComponent(slug)}`)
+}
+
 export function fetchOrganizerProfile() {
   return api<OrganizerAccount>('/api/organizer/profile')
 }
@@ -318,12 +412,57 @@ export function createTournamentRecord(input: TournamentInput) {
   return api<Tournament>('/api/tournaments', { method: 'POST', body: JSON.stringify(input) })
 }
 
+
+export function autoCreateHostTournamentStartSchedule(tournamentId: string, input: { startType?: string; firstStartTime?: string; intervalMinutes?: number }) {
+  return api<{ assignments: TournamentStartAssignment[] }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/start-schedule/auto`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateHostTournamentStartSchedule(tournamentId: string, assignments: TournamentStartAssignment[]) {
+  return api<{ assignments: TournamentStartAssignment[] }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/start-schedule`, {
+    method: 'PUT',
+    body: JSON.stringify({ assignments }),
+  })
+}
+
+export function autoCreateOrganizerTournamentStartSchedule(tournamentId: string, input: { startType?: string; firstStartTime?: string; intervalMinutes?: number }) {
+  return api<{ assignments: TournamentStartAssignment[] }>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/start-schedule/auto`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateOrganizerTournamentStartSchedule(tournamentId: string, assignments: TournamentStartAssignment[]) {
+  return api<{ assignments: TournamentStartAssignment[] }>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/start-schedule`, {
+    method: 'PUT',
+    body: JSON.stringify({ assignments }),
+  })
+}
+
 export function updateOrganizerTournamentRecord(tournamentId: string, input: TournamentInput) {
   return api<Tournament>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}`, { method: 'PUT', body: JSON.stringify(input) })
 }
 
 export function updateHostTournamentRecord(tournamentId: string, input: TournamentInput) {
   return api<Tournament>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}`, { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function archiveHostTournamentRecord(tournamentId: string) {
+  return api<Tournament>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/archive`, { method: 'POST' })
+}
+
+export function restoreHostTournamentRecord(tournamentId: string) {
+  return api<Tournament>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/restore`, { method: 'POST' })
+}
+
+export function archiveOrganizerTournamentRecord(tournamentId: string) {
+  return api<Tournament>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/archive`, { method: 'POST' })
+}
+
+export function restoreOrganizerTournamentRecord(tournamentId: string) {
+  return api<Tournament>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/restore`, { method: 'POST' })
 }
 
 

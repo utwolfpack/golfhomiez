@@ -140,6 +140,7 @@ export async function ensureHostAuthSchema(source) {
     id VARCHAR(64) NOT NULL PRIMARY KEY,
     email VARCHAR(191) NOT NULL,
     auth_user_id VARCHAR(191) NULL,
+    golf_course_id VARCHAR(64) NULL,
     golf_course_name VARCHAR(191) NULL,
     account_name VARCHAR(191) NULL,
     course_name VARCHAR(191) NULL,
@@ -175,6 +176,7 @@ export async function ensureHostAuthSchema(source) {
 
   if (await tableExists(db, 'host_accounts')) {
     await ensureColumn(db, 'host_accounts', 'auth_user_id VARCHAR(191) NULL')
+    await ensureColumn(db, 'host_accounts', 'golf_course_id VARCHAR(64) NULL')
     await ensureColumn(db, 'host_accounts', 'password_hash VARCHAR(255) NULL')
     await ensureColumn(db, 'host_accounts', 'invite_id VARCHAR(64) NULL')
     await ensureColumn(db, 'host_accounts', 'reset_email VARCHAR(191) NULL')
@@ -187,6 +189,7 @@ export async function ensureHostAuthSchema(source) {
   }
 
   await ensureIndex(db, 'host_accounts', 'idx_host_accounts_email', 'CREATE INDEX idx_host_accounts_email ON host_accounts (email)')
+  await ensureIndex(db, 'host_accounts', 'idx_host_accounts_golf_course_id', 'CREATE INDEX idx_host_accounts_golf_course_id ON host_accounts (golf_course_id)')
   return true
 }
 
@@ -223,7 +226,7 @@ export async function getHostAccountByEmail(source, email) {
   const nameCol = await resolvePrimaryNameColumn(db)
   const selectName = nameCol ? `${nameCol} AS golf_course_name,` : ''
   const [rows] = await db.execute(
-    `SELECT id, email, auth_user_id, password_hash, invite_id, reset_email, contact_name, phone, website_url, notes, is_validated, validated_at, ${selectName} created_at, updated_at FROM host_accounts WHERE email = ? LIMIT 1`,
+    `SELECT id, email, auth_user_id, golf_course_id, password_hash, invite_id, reset_email, contact_name, phone, website_url, notes, is_validated, validated_at, ${selectName} created_at, updated_at FROM host_accounts WHERE email = ? LIMIT 1`,
     [email],
   )
   return rows[0] || null

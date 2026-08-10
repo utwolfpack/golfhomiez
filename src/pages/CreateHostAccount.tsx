@@ -1,17 +1,18 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { requestHostAccount } from '../lib/host-auth'
-import { golfCourseNames, searchGolfCourses } from '../lib/golf-courses'
+import { searchGolfCourses, type GolfCourseOption } from '../lib/golf-courses'
 
 export default function CreateHostAccount() {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [state, setState] = useState('UT')
-  const [course, setCourse] = useState('')
-  const [courses, setCourses] = useState<string[]>([])
+  const [courseId, setCourseId] = useState('')
+  const [courses, setCourses] = useState<GolfCourseOption[]>([])
   const [representativeDetails, setRepresentativeDetails] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -28,7 +29,7 @@ export default function CreateHostAccount() {
   useEffect(() => {
     if (stateOptions.length && !stateOptions.some(option => option.abbr === state)) {
       setState(stateOptions[0].abbr)
-      setCourse('')
+      setCourseId('')
     }
   }, [stateOptions, state])
 
@@ -38,14 +39,13 @@ export default function CreateHostAccount() {
     async function loadCourses() {
       try {
         const options = await searchGolfCourses({ state, limit: 100 })
-        const names = golfCourseNames(options)
         if (cancelled) return
-        setCourses(names)
-        setCourse((prev) => (prev && names.includes(prev) ? prev : (names[0] || '')))
+        setCourses(options)
+        setCourseId((prev) => (prev && options.some((option) => option.id === prev) ? prev : (options[0]?.id || '')))
       } catch {
         if (cancelled) return
         setCourses([])
-        setCourse('')
+        setCourseId('')
       }
     }
 
@@ -65,7 +65,8 @@ export default function CreateHostAccount() {
       if (!lastName.trim()) throw new Error('Last name is required.')
       if (!email.trim()) throw new Error('Email is required.')
       if (!state.trim()) throw new Error('State is required.')
-      if (!course.trim()) throw new Error('Golf Course is required.')
+      const selectedCourse = courses.find((entry) => entry.id === courseId)
+      if (!selectedCourse) throw new Error('Golf Course is required.')
       if (!representativeDetails.trim()) throw new Error('Representative details are required.')
       if (password.length < 8) throw new Error('Password must be at least 8 characters.')
       if (password !== confirmPassword) throw new Error('Passwords do not match.')
@@ -76,7 +77,8 @@ export default function CreateHostAccount() {
         email: email.trim(),
         stateCode: state,
         stateName: selectedStateName,
-        golfCourseName: course.trim(),
+        golfCourseId: selectedCourse.id,
+        golfCourseName: selectedCourse.name,
         representativeDetails: representativeDetails.trim(),
         password,
       })
@@ -142,7 +144,7 @@ export default function CreateHostAccount() {
           <div className="grid grid2" style={{ gap: 12 }}>
             <div>
               <label className="label">State</label>
-              <select className="input" value={state} onChange={(e) => { setState(e.target.value); setCourse('') }} disabled={statesLoading && !stateOptions.length}>
+              <select className="input" value={state} onChange={(e) => { setState(e.target.value); setCourseId('') }} disabled={statesLoading && !stateOptions.length}>
                 {!stateOptions.length ? <option value={state}>{statesLoading ? 'Loading golf course states…' : (state || 'No golf course states available')}</option> : null}
                 {stateOptions.map((entry) => (
                   <option key={entry.abbr} value={entry.abbr}>{entry.name}</option>
@@ -153,10 +155,10 @@ export default function CreateHostAccount() {
 
             <div>
               <label className="label">Golf Course</label>
-              <select className="input" value={course} onChange={(e) => setCourse(e.target.value)} disabled={!courses.length}>
+              <select className="input" value={courseId} onChange={(e) => setCourseId(e.target.value)} disabled={!courses.length}>
                 {!courses.length ? <option value="">No courses available</option> : null}
                 {courses.map((entry) => (
-                  <option key={entry} value={entry}>{entry}</option>
+                  <option key={entry.id} value={entry.id}>{entry.name}</option>
                 ))}
               </select>
             </div>

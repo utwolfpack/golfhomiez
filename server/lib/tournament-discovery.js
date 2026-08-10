@@ -41,6 +41,8 @@ const DEFAULT_MAX_PAGES_PER_COURSE = 4
 const DEFAULT_TIMEOUT_MS = 10_000
 const MAX_RESPONSE_BYTES = 2_000_000
 const TOURNAMENT_SEARCH_PAGE_SIZE = 20
+export const GOLF_HOMIEZ_TOURNAMENT_SOURCE = 'golfhomiez'
+export const EXTERNAL_TOURNAMENT_SOURCE = 'external'
 export const TOURNAMENT_DISCOVERY_MONTHS_AHEAD = 6
 
 function intEnv(name, fallback, min, max) {
@@ -352,6 +354,31 @@ function normalizeWebsiteUrl(value) {
   }
 }
 
+function websiteComparisonKey(value) {
+  const normalized = normalizeWebsiteUrl(value)
+  if (normalized) {
+    const url = new URL(normalized)
+    url.hostname = url.hostname.toLowerCase()
+    if ((url.protocol === 'https:' && url.port === '443') || (url.protocol === 'http:' && url.port === '80')) {
+      url.port = ''
+    }
+    if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '') || '/'
+    return url.toString()
+  }
+
+  // Invalid values still need stable comparison so a repeatedly failing unchanged
+  // website value can be routed to retryFailedTournamentWebsites instead of being
+  // attempted by every getTournaments run.
+  return cleanText(value, 2048).replace(/\/+$/, '').toLowerCase()
+}
+
+function hasFailedCrawlForCurrentWebsite(course) {
+  if (cleanText(course?.crawl_state_last_status, 32).toLowerCase() !== 'failed') return false
+  const currentWebsite = websiteComparisonKey(course?.golf_course_website)
+  const failedWebsite = websiteComparisonKey(course?.crawl_state_website)
+  return Boolean(currentWebsite && failedWebsite && currentWebsite === failedWebsite)
+}
+
 function isPrivateIpv4(address) {
   const parts = address.split('.').map(Number)
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return true
@@ -553,14 +580,134 @@ function discoveryKey(candidate) {
   return crypto.createHash('sha256').update(material).digest('hex')
 }
 
+function golfHomiezDiscoveryKey(tournamentId) {
+  return crypto.createHash('sha256').update(`golfhomiez:${String(tournamentId || '').trim()}`).digest('hex')
+}
+
+function golfHomiezTournamentPath(identifier, tournamentId) {
+  return `/tournaments/${encodeURIComponent(cleanText(identifier || tournamentId, 191))}`
+}
+
+export async function syncGolfHomiezTournamentSearchRecord(db, tournamentId, {
+  correlationId = `golfhomiez-tournament-sync-${crypto.randomUUID()}`,
+  tournamentUrl = null,
+} = {}) {
+  const resolvedTournamentId = cleanText(tournamentId, 191)
+  if (!resolvedTournamentId) throw new Error('Tournament id is required to synchronize the GolfHomiez tournament search record')
+
+  const [rows] = await db.execute(
+    `SELECT t.id, t.name, t.description, t.start_date, t.status, t.archived_at, t.tournament_identifier, t.host_account_id,
+            COALESCE(gc.id, gcpp.golf_course_id, ha.golf_course_id) AS golf_course_id,
+            COALESCE(NULLIF(TRIM(gc.name), ''), NULLIF(TRIM(gcpp.golf_course_name), ''),
+                     NULLIF(TRIM(ha.golf_course_name), ''), NULLIF(TRIM(hra.golf_course_name), ''), 'Golf course') AS golf_course_name,
+            COALESCE(NULLIF(TRIM(gc.state_code), ''), NULLIF(TRIM(gcpp.state_code), ''), '') AS state_code,
+            COALESCE(NULLIF(TRIM(gc.city), ''), NULLIF(TRIM(gcpp.city), '')) AS city,
+            COALESCE(NULLIF(TRIM(gc.postal_code), ''), NULLIF(TRIM(gcpp.postal_code), '')) AS postal_code
+       FROM tournaments t
+       LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
+       LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
+       LEFT JOIN golf_course_public_pages gcpp ON gcpp.host_account_id = t.host_account_id
+       LEFT JOIN golf_courses gc ON gc.id = COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+      WHERE t.id = ?
+      LIMIT 1`,
+    [resolvedTournamentId],
+  )
+  const tournament = rows[0] || null
+  if (!tournament) return { action: 'not_found', tournamentId: resolvedTournamentId, active: false }
+
+  const published = String(tournament.status || '').trim().toLowerCase() === 'published' && !tournament.archived_at
+  if (!published) {
+    const [result] = await db.execute(
+      `UPDATE golf_course_tournaments
+          SET active = 0,
+              last_seen_at = UTC_TIMESTAMP(),
+              correlation_id = ?
+        WHERE source_type = ?
+          AND golfhomiez_tournament_id = ?`,
+      [correlationId, GOLF_HOMIEZ_TOURNAMENT_SOURCE, resolvedTournamentId],
+    )
+    return {
+      action: 'deactivated',
+      tournamentId: resolvedTournamentId,
+      active: false,
+      affectedRows: Number(result?.affectedRows || 0),
+    }
+  }
+
+  const tournamentDate = typeof tournament.start_date === 'string'
+    ? tournament.start_date.slice(0, 10)
+    : tournament.start_date instanceof Date
+      ? isoDate(tournament.start_date)
+      : ''
+  if (!tournamentDate) throw new Error('Published GolfHomiez tournaments require a start date before they can appear in tournament search')
+
+  const path = golfHomiezTournamentPath(tournament.tournament_identifier, tournament.id)
+  const resolvedTournamentUrl = cleanText(tournamentUrl, 1024) || path
+  const id = crypto.randomUUID()
+  const key = golfHomiezDiscoveryKey(tournament.id)
+  const discoveredText = cleanText([tournament.name, tournament.description].filter(Boolean).join(' '), 5000)
+
+  await db.execute(
+    `INSERT INTO golf_course_tournaments
+      (id, discovery_key, golf_course_id, golf_course_name, tournament_name, state_code, city, zip_code,
+       tournament_date, tournament_website, source_url, discovered_text, active, first_seen_at, last_seen_at,
+       correlation_id, source_type, golfhomiez_tournament_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       golf_course_id = VALUES(golf_course_id),
+       golf_course_name = VALUES(golf_course_name),
+       tournament_name = VALUES(tournament_name),
+       state_code = VALUES(state_code),
+       city = VALUES(city),
+       zip_code = VALUES(zip_code),
+       tournament_date = VALUES(tournament_date),
+       tournament_website = VALUES(tournament_website),
+       source_url = VALUES(source_url),
+       discovered_text = VALUES(discovered_text),
+       active = 1,
+       last_seen_at = UTC_TIMESTAMP(),
+       correlation_id = VALUES(correlation_id),
+       source_type = VALUES(source_type),
+       golfhomiez_tournament_id = VALUES(golfhomiez_tournament_id)`,
+    [
+      id,
+      key,
+      tournament.golf_course_id || null,
+      cleanText(tournament.golf_course_name, 191) || 'Golf course',
+      cleanText(tournament.name, 255) || 'GolfHomiez Tournament',
+      cleanText(tournament.state_code, 8),
+      cleanText(tournament.city, 128) || null,
+      cleanText(tournament.postal_code, 32) || null,
+      tournamentDate,
+      resolvedTournamentUrl,
+      resolvedTournamentUrl,
+      discoveredText || null,
+      correlationId,
+      GOLF_HOMIEZ_TOURNAMENT_SOURCE,
+      tournament.id,
+    ],
+  )
+
+  return {
+    action: 'upserted',
+    tournamentId: tournament.id,
+    active: true,
+    tournamentPath: path,
+    tournamentUrl: resolvedTournamentUrl,
+    golfCourseId: tournament.golf_course_id || null,
+    golfCourseName: cleanText(tournament.golf_course_name, 191) || 'Golf course',
+  }
+}
+
 async function upsertTournament(db, candidate, correlationId) {
   const id = crypto.randomUUID()
   const key = discoveryKey(candidate)
   await db.execute(
     `INSERT INTO golf_course_tournaments
       (id, discovery_key, golf_course_id, golf_course_name, tournament_name, state_code, city, zip_code,
-       tournament_date, tournament_website, source_url, discovered_text, active, first_seen_at, last_seen_at, correlation_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)
+       tournament_date, tournament_website, source_url, discovered_text, active, first_seen_at, last_seen_at, correlation_id,
+       source_type, golfhomiez_tournament_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?, NULL)
      ON DUPLICATE KEY UPDATE
        golf_course_name = VALUES(golf_course_name),
        tournament_name = COALESCE(NULLIF(VALUES(tournament_name), ''), tournament_name),
@@ -572,20 +719,22 @@ async function upsertTournament(db, candidate, correlationId) {
        discovered_text = VALUES(discovered_text),
        active = 1,
        last_seen_at = UTC_TIMESTAMP(),
-       correlation_id = VALUES(correlation_id)`,
+       correlation_id = VALUES(correlation_id),
+       source_type = VALUES(source_type),
+       golfhomiez_tournament_id = NULL`,
     [
       id, key, candidate.golfCourseId, candidate.golfCourseName, candidate.tournamentName, candidate.state,
       candidate.city, candidate.zipCode, candidate.tournamentDate, candidate.tournamentWebsite, candidate.sourceUrl,
-      candidate.discoveredText, correlationId,
+      candidate.discoveredText, correlationId, EXTERNAL_TOURNAMENT_SOURCE,
     ],
   )
   return key
 }
 
 async function recordCrawlState(db, course, { status, pagesCrawled = 0, tournamentsFound = 0, error = null, correlationId }) {
-  // getTournaments now exhausts every populated golf_courses.website value on each run.
-  // Keep next_crawl_after NULL so crawl-state rows are diagnostic history rather than
-  // a filter that can prevent a website record from being visited.
+  // Keep next_crawl_after NULL. getTournaments uses the matching website and last_status
+  // fields to defer current failed URLs to retryFailedTournamentWebsites, while changed
+  // website values remain eligible for the normal discovery job.
   const nextCrawlAt = null
   await db.execute(
     `INSERT INTO golf_course_tournament_crawl_state
@@ -698,21 +847,30 @@ export async function runGetTournaments(db, {
   throwIfCancelled(signal)
   const discoveryStartDate = todayUtc(now)
   const discoveryEndDate = addUtcMonths(discoveryStartDate, TOURNAMENT_DISCOVERY_MONTHS_AHEAD)
-  // Rebuild the discovered tournament catalog from scratch on every run. This is the
-  // first database operation performed by getTournaments so stale or previously
-  // discovered rows cannot survive a complete refresh.
-  await db.execute(`TRUNCATE TABLE golf_course_tournaments`)
+  // Rebuild only the externally discovered catalog. GolfHomiez-hosted tournament
+  // records are persistent application records and must survive every crawler refresh.
+  await db.execute(
+    `DELETE FROM golf_course_tournaments
+      WHERE COALESCE(NULLIF(TRIM(source_type), ''), ?) <> ?`,
+    [EXTERNAL_TOURNAMENT_SOURCE, GOLF_HOMIEZ_TOURNAMENT_SOURCE],
+  )
   throwIfCancelled(signal)
 
   // Intentionally do not LIMIT this query. A single getTournaments run evaluates every
-  // golf-course record that has a website value. Crawl-state status is intentionally
-  // not joined or considered: every populated website is attempted on every run.
+  // golf-course record that has a website value. Crawl state is included so an unchanged
+  // website whose most recent attempt failed can be skipped and handled by the dedicated
+  // retryFailedTournamentWebsites job. A changed website remains eligible immediately.
   // Prefer the source golf_courses.website column requested by the job specification,
   // while retaining golf_course_website as a compatibility fallback for existing data.
   const [courses] = await db.execute(
     `SELECT gc.id, gc.name, gc.state_code, gc.city, gc.postal_code,
-            COALESCE(NULLIF(TRIM(gc.website), ''), NULLIF(TRIM(gc.golf_course_website), '')) AS golf_course_website
+            COALESCE(NULLIF(TRIM(gc.website), ''), NULLIF(TRIM(gc.golf_course_website), '')) AS golf_course_website,
+            crawl.website AS crawl_state_website,
+            crawl.last_status AS crawl_state_last_status,
+            crawl.last_error AS crawl_state_last_error
        FROM golf_courses gc
+       LEFT JOIN golf_course_tournament_crawl_state crawl
+         ON crawl.golf_course_id = gc.id
       WHERE COALESCE(NULLIF(TRIM(gc.website), ''), NULLIF(TRIM(gc.golf_course_website), '')) IS NOT NULL
       ORDER BY gc.state_code ASC,
                gc.name ASC,
@@ -726,6 +884,7 @@ export async function runGetTournaments(db, {
     coursesSucceeded: 0,
     coursesSkipped: 0,
     coursesSkippedRobots: 0,
+    coursesSkippedPreviousFailure: 0,
     coursesFailed: 0,
     crawlStateWriteFailures: 0,
     pagesCrawled: 0,
@@ -783,7 +942,8 @@ export async function runGetTournaments(db, {
     correlationId,
     triggeredBy,
     candidateCourseCount: courses.length,
-    exhaustiveWebsiteScan: true,
+    allWebsiteRecordsEvaluated: true,
+    matchingFailedWebsitesSkipped: true,
     dateRangeStart: summary.dateRangeStart,
     dateRangeEnd: summary.dateRangeEnd,
   })
@@ -791,7 +951,8 @@ export async function runGetTournaments(db, {
     correlationId,
     triggeredBy,
     candidateCourseCount: courses.length,
-    exhaustiveWebsiteScan: true,
+    allWebsiteRecordsEvaluated: true,
+    matchingFailedWebsitesSkipped: true,
     dateRangeStart: summary.dateRangeStart,
     dateRangeEnd: summary.dateRangeEnd,
   })
@@ -799,6 +960,31 @@ export async function runGetTournaments(db, {
   for (const course of courses) {
     throwIfCancelled(signal, summary)
     summary.coursesProcessed += 1
+
+    if (hasFailedCrawlForCurrentWebsite(course)) {
+      summary.coursesSkipped += 1
+      summary.coursesSkippedPreviousFailure += 1
+      const skipDetails = {
+        correlationId,
+        golfCourseId: course.id,
+        golfCourseName: course.name,
+        state: course.state_code,
+        website: course.golf_course_website,
+        crawlStateWebsite: course.crawl_state_website,
+        crawlStateLastStatus: course.crawl_state_last_status,
+        previousError: cleanText(course.crawl_state_last_error, 2000) || null,
+        reason: 'previous_failed_crawl_for_current_website',
+        courseSequence: summary.coursesProcessed,
+        candidateCourseCount: courses.length,
+        continuing: true,
+      }
+      logApi('tournament_crawl_course_skipped_previous_failure', skipDetails)
+      logScheduledJob('tournament_crawl_course_skipped_previous_failure', {
+        ...skipDetails,
+        level: 'warn',
+      })
+      continue
+    }
 
     logApi('tournament_crawl_course_started', {
       correlationId,
@@ -1107,12 +1293,26 @@ export function normalizeTournamentSearchFilters(filters = {}, now = new Date())
   }
 }
 
-export async function searchGolfCourseTournaments(db, filters = {}, { now = new Date(), page = 1 } = {}) {
+export async function searchGolfCourseTournaments(db, filters = {}, {
+  now = new Date(),
+  page = 1,
+  viewerUserId = '',
+  viewerEmail = '',
+} = {}) {
   const normalized = normalizeTournamentSearchFilters(filters, now)
-  const where = ['active = 1', 'tournament_date BETWEEN ? AND ?']
-  const params = [normalized.fromDate, normalized.toDate]
+  const where = ['gct.active = 1', 'gct.tournament_date BETWEEN ? AND ?']
+  const resolvedViewerUserId = cleanText(viewerUserId, 191)
+  const resolvedViewerEmail = cleanText(viewerEmail, 191).toLowerCase()
+  const params = [
+    resolvedViewerUserId,
+    resolvedViewerUserId,
+    resolvedViewerEmail,
+    resolvedViewerEmail,
+    normalized.fromDate,
+    normalized.toDate,
+  ]
   if (normalized.state) {
-    where.push('state_code = ?')
+    where.push('gct.state_code = ?')
     params.push(normalized.state)
   }
 
@@ -1121,11 +1321,27 @@ export async function searchGolfCourseTournaments(db, filters = {}, { now = new 
   // and allows typo-tolerant token matching instead of exact LIKE-only behavior. ZIP is
   // filtered here as well so %, _, and backslash input can never alter SQL wildcard rules.
   const [rows] = await db.execute(
-    `SELECT id, golf_course_id, golf_course_name, tournament_name, state_code, city, zip_code,
-            tournament_date, tournament_website, source_url, first_seen_at, last_seen_at
-       FROM golf_course_tournaments
+    `SELECT gct.id, gct.golf_course_id, gct.golf_course_name, gct.tournament_name, gct.state_code, gct.city, gct.zip_code,
+            gct.tournament_date, gct.tournament_website, gct.source_url, gct.first_seen_at, gct.last_seen_at,
+            COALESCE(NULLIF(TRIM(gct.source_type), ''), '${EXTERNAL_TOURNAMENT_SOURCE}') AS source_type,
+            gct.golfhomiez_tournament_id,
+            COALESCE(NULLIF(TRIM(t.tournament_identifier), ''), gct.golfhomiez_tournament_id) AS golfhomiez_tournament_identifier,
+            CASE
+              WHEN gct.source_type = '${GOLF_HOMIEZ_TOURNAMENT_SOURCE}'
+               AND EXISTS (
+                 SELECT 1
+                   FROM tournament_registrations tr
+                  WHERE tr.tournament_id = gct.golfhomiez_tournament_id
+                    AND tr.status = 'registered'
+                    AND ((? <> '' AND tr.auth_user_id = ?) OR (? <> '' AND LOWER(tr.email) = ?))
+               )
+              THEN 1 ELSE 0
+            END AS is_registered
+       FROM golf_course_tournaments gct
+       LEFT JOIN tournaments t ON t.id = gct.golfhomiez_tournament_id
       WHERE ${where.join('\n        AND ')}
-      ORDER BY tournament_date ASC, state_code ASC, golf_course_name ASC`,
+      ORDER BY CASE WHEN gct.source_type = '${GOLF_HOMIEZ_TOURNAMENT_SOURCE}' THEN 0 ELSE 1 END ASC,
+               gct.tournament_date ASC, gct.state_code ASC, gct.golf_course_name ASC`,
     params,
   )
 
@@ -1161,6 +1377,13 @@ export async function searchGolfCourseTournaments(db, filters = {}, { now = new 
       tournamentDate: typeof row.tournament_date === 'string' ? row.tournament_date.slice(0, 10) : isoDate(new Date(row.tournament_date)),
       tournamentWebsite: row.tournament_website || row.source_url || null,
       sourceUrl: row.source_url || null,
+      sourceType: row.source_type || EXTERNAL_TOURNAMENT_SOURCE,
+      isGolfHomiezTournament: row.source_type === GOLF_HOMIEZ_TOURNAMENT_SOURCE,
+      golfHomiezTournamentId: row.golfhomiez_tournament_id || null,
+      tournamentPath: row.source_type === GOLF_HOMIEZ_TOURNAMENT_SOURCE
+        ? golfHomiezTournamentPath(row.golfhomiez_tournament_identifier, row.golfhomiez_tournament_id)
+        : null,
+      isRegistered: Boolean(Number(row.is_registered)),
       firstSeenAt: row.first_seen_at || null,
       lastSeenAt: row.last_seen_at || null,
     })),

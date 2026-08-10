@@ -70,7 +70,7 @@ export const SCHEDULED_JOB_DEFINITIONS = [
   {
     id: 'getTournaments',
     name: 'getTournaments',
-    description: 'Truncates and rebuilds the discovered tournament catalog by crawling every populated golf_courses.website value and storing tournaments from today through six months from today.',
+    description: 'Truncates and rebuilds the discovered tournament catalog from current golf-course websites, skipping unchanged URLs whose last crawl failed and storing tournaments from today through six months from today.',
     scheduleLabel: 'Daily 02:00 MT',
     defaultScheduleLabel: 'Daily 02:00 MT',
     scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,

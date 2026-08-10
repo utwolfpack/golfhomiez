@@ -47,25 +47,29 @@ TRUNCATE TABLE golf_course_tournaments;
 
 This removes the complete previously discovered tournament catalog so the job rebuilds it from the current website crawl results. The application database user must therefore have permission to truncate this table.
 
-After truncation, the job evaluates every nonblank `golf_courses.website` value, with `golf_course_website` retained only as a compatibility fallback when the source `website` value is blank. The course-selection query does not join, filter by, or otherwise consider `golf_course_tournament_crawl_state.last_status`. Every populated website is attempted during every run, including websites whose previous crawl status was `failed`. Successful crawls extract upcoming tournament dates and insert/upsert the rebuilt results into `golf_course_tournaments`. The accepted tournament-date window is inclusive: the run date through the date six calendar months later. Past dates and dates after that six-month boundary are ignored and never inserted.
+After truncation, the job evaluates every nonblank `golf_courses.website` value, with `golf_course_website` retained only as a compatibility fallback when the source `website` value is blank. The course-selection query left-joins `golf_course_tournament_crawl_state` by golf-course ID so the current website can be compared with the website recorded by the last crawl attempt.
+
+When the normalized current website matches `golf_course_tournament_crawl_state.website` and `last_status` is `failed`, `getTournaments` does not request that website. It logs `tournament_crawl_course_skipped_previous_failure` with the correlation ID, course, current/recorded website, previous error, record sequence, and `continuing: true`, increments `coursesSkippedPreviousFailure`, and proceeds to the next golf-course record. The failed crawl-state row is left unchanged so `retryFailedTournamentWebsites` can retry it. When the course website has changed since the failure, the new website is crawled normally.
+
+Successful crawls extract upcoming tournament dates and insert/upsert the rebuilt results into `golf_course_tournaments`. The accepted tournament-date window is inclusive: the run date through the date six calendar months later. Past dates and dates after that six-month boundary are ignored and never inserted.
 
 The crawler:
 
 - only follows HTTP/HTTPS URLs;
 - rejects localhost/private-network destinations;
-- limits redirects, response size, request duration, and pages per course while continuing through every course website record in the run;
+- limits redirects, response size, request duration, and pages per course while continuing through every eligible course website record in the run;
 - checks `robots.txt` before crawling pages and honors matching `Allow`/`Disallow` rules using longest-match precedence;
 - treats a site that disallows the course root in `robots.txt` as an expected `skipped_robots` result instead of a crawl failure;
 - never bypasses a site's `robots.txt` restriction just to obtain tournament data;
 - treats each course as an independent unit of work: a fetch, parse, robots, tournament-write, or crawl-state error is logged with the correlation ID and processing continues with the next website record;
-- rebuilds the complete discovered tournament catalog from an empty table on each run.
+- rebuilds the discovered tournament catalog from an empty table on each run, excluding unchanged websites currently deferred because their matching crawl-state status is `failed`.
 
 The following optional environment variables tune per-site crawler safety limits without limiting the number of golf-course website records processed:
 
 - `TOURNAMENT_CRAWL_MAX_PAGES_PER_COURSE` (default `4`)
 - `TOURNAMENT_CRAWL_TIMEOUT_MS` (default `10000`)
 
-There is intentionally no per-run course limit, time-based crawl backoff filter, or crawl-state-status filter. Both scheduled and **Run now** executions continue through every populated website record unless an administrator cancels the running job.
+There is intentionally no per-run course limit or time-based crawl backoff filter. Both scheduled and **Run now** executions inspect every populated website record unless an administrator cancels the running job; only an unchanged website whose matching crawl-state `last_status` is `failed` is skipped by `getTournaments` and left for the retry job.
 
 ## `retryFailedTournamentWebsites`
 
@@ -129,4 +133,4 @@ The crawler, browser, and API enforce a date window from the current date throug
 
 HTTP requests continue to receive a shared `X-Correlation-Id`. Tournament search frontend events are written to `logging/frontend.log`, API/search and crawler events to `logging/api.log`, request lifecycle entries to `logging/access.log`, and crawler/scheduled-job details to `logging/scheduled-jobs.log`. Errors are written to `logging/error.log`.
 
-Schedule changes, scrub activity, failed-website skips/retries, manual runs, cancellations, and tournament-search actions all emit correlated log events. Cancellation logs include both the running job correlation ID and the cancellation request correlation ID so the original job lifecycle and the admin cancellation request can both be traced. A `robots.txt` root restriction is logged as a skip/information event rather than an application error.
+Schedule changes, scrub activity, failed-website skips/retries, manual runs, cancellations, and tournament-search actions all emit correlated log events. A `getTournaments` skip caused by a matching failed crawl state is written as `tournament_crawl_course_skipped_previous_failure` to the API and scheduled-job logs at warning level, without generating another crawl failure. Cancellation logs include both the running job correlation ID and the cancellation request correlation ID so the original job lifecycle and the admin cancellation request can both be traced. A `robots.txt` root restriction is logged as a skip/information event rather than an application error.

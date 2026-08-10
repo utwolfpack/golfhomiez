@@ -13,6 +13,7 @@ import {
   runGetTournaments,
   runRetryFailedTournamentWebsites,
   searchGolfCourseTournaments,
+  syncGolfHomiezTournamentSearchRecord,
 } from '../server/lib/tournament-discovery.js'
 import { cancelScheduledJob, runScheduledJob, SCHEDULED_JOB_DEFINITIONS } from '../server/lib/scheduled-jobs.js'
 import { nextRunForSchedule } from '../server/lib/scheduled-job-schedule.js'
@@ -156,13 +157,15 @@ test('tournament search enforces today through six months, fixes SQL filtering, 
       return [matchingRows]
     },
   }
-  const result = await searchGolfCourseTournaments(db, filters, { now, page: 2 })
+  const result = await searchGolfCourseTournaments(db, filters, { now, page: 2, viewerUserId: 'user-1', viewerEmail: 'golfer@example.com' })
   assert.equal(capturedQueries.length, 1)
   assert.match(capturedQueries[0].sql, /state_code = \?/)
   assert.doesNotMatch(capturedQueries[0].sql, /ESCAPE/i)
   assert.doesNotMatch(capturedQueries[0].sql, /city\s+LIKE/i)
   assert.doesNotMatch(capturedQueries[0].sql, /golf_course_name\s+LIKE/i)
-  assert.deepEqual(capturedQueries[0].params, ['2026-08-01', '2027-01-29', 'UT'])
+  assert.deepEqual(capturedQueries[0].params, ['user-1', 'user-1', 'golfer@example.com', 'golfer@example.com', '2026-08-01', '2027-01-29', 'UT'])
+  assert.match(capturedQueries[0].sql, /ORDER BY CASE WHEN gct\.source_type = 'golfhomiez' THEN 0 ELSE 1 END/i)
+  assert.match(capturedQueries[0].sql, /FROM tournament_registrations tr/i)
   assert.deepEqual(result.pagination, { page: 2, pageSize: 20, totalResults: 25, totalPages: 2 })
   assert.equal(result.tournaments.length, 5)
   assert.equal(result.tournaments[0].tournamentDate, '2026-08-22')
@@ -188,6 +191,8 @@ test('tournament discovery migration and dedicated Find Tournament UI/API wiring
   const findTournament = await readFile(new URL('../src/pages/FindTournament.tsx', import.meta.url), 'utf8')
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  const golfHomiezSql = await readFile(new URL('../migration_scripts/20260806_067_golfhomiez_tournament_search_records.sql', import.meta.url), 'utf8')
+  const golfHomiezMigration = APP_MIGRATIONS.find((entry) => entry.version === '20260806_067')
 
   assert.match(sql, /golf_course_website/)
   assert.match(sql, /CREATE TABLE IF NOT EXISTS golf_course_tournaments/)
@@ -210,6 +215,14 @@ test('tournament discovery migration and dedicated Find Tournament UI/API wiring
   assert.match(findTournament, /pagination\.totalResults/)
   assert.match(findTournament, /Page \{pagination\.page\} of \{pagination\.totalPages\}/)
   assert.doesNotMatch(findTournament, /<strong>Course:<\/strong>/)
+  assert.ok(golfHomiezMigration)
+  assert.equal(golfHomiezMigration.name, 'golfhomiez_tournament_search_records')
+  assert.match(golfHomiezSql, /source_type/)
+  assert.match(golfHomiezSql, /golfhomiez_tournament_id/)
+  assert.match(golfHomiezSql, /WHERE LOWER\(TRIM\(COALESCE\(t\.status, ''\)\)\) = 'published'/)
+  assert.match(findTournament, /Golf Homiez Tournament/)
+  assert.match(findTournament, /Registered/)
+  assert.match(findTournament, /GolfHomiez hosted/)
   assert.match(packageJson.scripts.postinstall, /db:migrate/)
 })
 
@@ -415,34 +428,38 @@ test('getTournaments exhausts every populated website record and continues after
   assert.ok(result.failures.some((entry) => entry.golfCourseId === 'course-broken' && entry.phase === 'crawl_state'))
   assert.ok(loggedErrors.some((entry) => /continuing to next website/i.test(entry.message)))
 
-  assert.match(executedSql[0], /^TRUNCATE TABLE golf_course_tournaments$/i)
+  assert.match(executedSql[0], /^DELETE FROM golf_course_tournaments/i)
+  assert.match(executedSql[0], /source_type/i)
+  assert.match(executedSql[0], /<> \?/i)
+  assert.doesNotMatch(executedSql[0], /TRUNCATE/i)
   assert.match(selectedCourseSql, /NULLIF\(TRIM\(gc\.website\), ''\)/i)
-  assert.doesNotMatch(selectedCourseSql, /golf_course_tournament_crawl_state/i)
-  assert.doesNotMatch(selectedCourseSql, /crawl_state_last_status/i)
+  assert.match(selectedCourseSql, /LEFT JOIN golf_course_tournament_crawl_state crawl/i)
+  assert.match(selectedCourseSql, /crawl\.last_status AS crawl_state_last_status/i)
   assert.doesNotMatch(selectedCourseSql, /\bLIMIT\b/i)
   assert.doesNotMatch(selectedCourseSql, /next_crawl_after/i)
   assert.doesNotMatch(selectedCourseSql, /gc\.active\s*=\s*1/i)
 })
 
-test('getTournaments ignores prior failed crawl state and retries every populated course website', async () => {
+test('getTournaments skips an unchanged website when its matching crawl-state last status is failed', async () => {
   let fetchCalls = 0
   const crawlStatuses = []
   const apiEvents = []
+  const scheduledEvents = []
   const db = {
     async execute(sql, params = []) {
       if (/TRUNCATE TABLE golf_course_tournaments/i.test(sql)) return [{ affectedRows: 0 }]
       if (/SELECT gc\.id, gc\.name/i.test(sql)) {
-        assert.doesNotMatch(sql, /golf_course_tournament_crawl_state/i)
-        assert.doesNotMatch(sql, /last_status/i)
+        assert.match(sql, /LEFT JOIN golf_course_tournament_crawl_state crawl/i)
+        assert.match(sql, /crawl\.last_status AS crawl_state_last_status/i)
         return [[{
           id: 'course-failed',
           name: 'Previously Failed Golf Club',
           state_code: 'UT',
           city: 'Provo',
           postal_code: '84601',
-          golf_course_website: 'https://93.184.216.34/',
+          golf_course_website: 'https://93.184.216.34',
           crawl_state_website: 'https://93.184.216.34/',
-          crawl_state_last_status: 'failed',
+          crawl_state_last_status: ' FAILED ',
           crawl_state_last_error: 'Website returned HTTP 500',
         }]]
       }
@@ -452,29 +469,30 @@ test('getTournaments ignores prior failed crawl state and retries every populate
   }
 
   const result = await runGetTournaments(db, {
-    correlationId: 'retry-prior-failure-test',
-    fetchImpl: async (url) => {
+    correlationId: 'skip-prior-failure-test',
+    fetchImpl: async () => {
       fetchCalls += 1
-      if (String(url).endsWith('/robots.txt')) {
-        return new Response('User-agent: *\nDisallow:\n', { status: 200, headers: { 'content-type': 'text/plain' } })
-      }
-      return new Response('<html><body><p>Golf course home page.</p></body></html>', {
-        status: 200,
-        headers: { 'content-type': 'text/html' },
-      })
+      throw new Error('The failed current website must not be requested by getTournaments')
     },
     logApi: (event, details) => apiEvents.push({ event, details }),
+    logScheduledJob: (event, details) => scheduledEvents.push({ event, details }),
   })
 
   assert.equal(result.candidateCourseCount, 1)
   assert.equal(result.coursesProcessed, 1)
-  assert.equal(result.coursesSkipped, 0)
-  assert.equal(result.coursesSucceeded, 1)
+  assert.equal(result.coursesSkipped, 1)
+  assert.equal(result.coursesSkippedPreviousFailure, 1)
+  assert.equal(result.coursesSucceeded, 0)
   assert.equal(result.coursesFailed, 0)
-  assert.ok(fetchCalls >= 2)
-  assert.deepEqual(crawlStatuses, ['success'])
-  assert.ok(apiEvents.some((entry) => entry.event === 'tournament_crawl_course_started'))
-  assert.ok(!apiEvents.some((entry) => entry.event === 'tournament_crawl_course_skipped_previous_failure'))
+  assert.equal(fetchCalls, 0)
+  assert.deepEqual(crawlStatuses, [])
+  const apiSkip = apiEvents.find((entry) => entry.event === 'tournament_crawl_course_skipped_previous_failure')
+  assert.equal(apiSkip?.details?.reason, 'previous_failed_crawl_for_current_website')
+  assert.equal(apiSkip?.details?.previousError, 'Website returned HTTP 500')
+  assert.equal(apiSkip?.details?.continuing, true)
+  const scheduledSkip = scheduledEvents.find((entry) => entry.event === 'tournament_crawl_course_skipped_previous_failure')
+  assert.equal(scheduledSkip?.details?.level, 'warn')
+  assert.ok(!apiEvents.some((entry) => entry.event === 'tournament_crawl_course_started'))
 })
 
 test('getTournaments retries normally when the golf-course website changed after the recorded failure', async () => {
@@ -559,6 +577,162 @@ test('retryFailedTournamentWebsites retries failed current websites and updates 
   assert.deepEqual(crawlStatuses, ['success'])
 })
 
+
+
+test('published GolfHomiez tournament synchronization creates a persistent internal search record', async () => {
+  const statements = []
+  const db = {
+    async execute(sql, params = []) {
+      statements.push({ sql, params })
+      if (/FROM tournaments t/i.test(sql)) {
+        return [[{
+          id: 'gh-tournament-1',
+          name: 'GolfHomiez Summer Scramble',
+          description: 'A friendly hosted tournament.',
+          start_date: '2026-08-30',
+          status: 'published',
+          tournament_identifier: 'summer-scramble-abc123',
+          host_account_id: 'host-1',
+          golf_course_id: 'course-1',
+          golf_course_name: 'Mountain View Golf Club',
+          state_code: 'UT',
+          city: 'West Jordan',
+          postal_code: '84088',
+        }]]
+      }
+      return [{ affectedRows: 1 }]
+    },
+  }
+
+  const result = await syncGolfHomiezTournamentSearchRecord(db, 'gh-tournament-1', {
+    correlationId: 'sync-correlation-1',
+    tournamentUrl: 'https://golfhomiez.com/tournaments/summer-scramble-abc123',
+  })
+
+  assert.equal(result.action, 'upserted')
+  assert.equal(result.active, true)
+  assert.equal(result.tournamentPath, '/tournaments/summer-scramble-abc123')
+  const write = statements.find((statement) => /INSERT INTO golf_course_tournaments/i.test(statement.sql))
+  assert.ok(write)
+  assert.match(write.sql, /source_type, golfhomiez_tournament_id/i)
+  assert.match(write.sql, /ON DUPLICATE KEY UPDATE/i)
+  assert.equal(write.params.at(-2), 'golfhomiez')
+  assert.equal(write.params.at(-1), 'gh-tournament-1')
+  assert.ok(write.params.includes('2026-08-30'))
+  assert.ok(write.params.includes('https://golfhomiez.com/tournaments/summer-scramble-abc123'))
+})
+
+test('unpublished GolfHomiez tournaments are deactivated instead of being returned by search', async () => {
+  const statements = []
+  const db = {
+    async execute(sql, params = []) {
+      statements.push({ sql, params })
+      if (/FROM tournaments t/i.test(sql)) {
+        return [[{
+          id: 'gh-tournament-draft',
+          name: 'Draft Tournament',
+          start_date: '2026-09-10',
+          status: 'draft',
+          tournament_identifier: 'draft-tournament-123',
+        }]]
+      }
+      return [{ affectedRows: 1 }]
+    },
+  }
+
+  const result = await syncGolfHomiezTournamentSearchRecord(db, 'gh-tournament-draft', { correlationId: 'sync-correlation-2' })
+  assert.equal(result.action, 'deactivated')
+  const update = statements.find((statement) => /UPDATE golf_course_tournaments/i.test(statement.sql))
+  assert.ok(update)
+  assert.match(update.sql, /active = 0/)
+  assert.deepEqual(update.params, ['sync-correlation-2', 'golfhomiez', 'gh-tournament-draft'])
+})
+
+test('archived published GolfHomiez tournaments are deactivated from Find Tournaments search', async () => {
+  const statements = []
+  const db = {
+    async execute(sql, params = []) {
+      statements.push({ sql, params })
+      if (/FROM tournaments t/i.test(sql)) {
+        return [[{
+          id: 'gh-tournament-archived',
+          name: 'Archived Published Tournament',
+          start_date: '2026-09-12',
+          status: 'published',
+          archived_at: '2026-08-10 21:00:00',
+          tournament_identifier: 'archived-published-123',
+        }]]
+      }
+      return [{ affectedRows: 1 }]
+    },
+  }
+
+  const result = await syncGolfHomiezTournamentSearchRecord(db, 'gh-tournament-archived', { correlationId: 'sync-correlation-archived' })
+  assert.equal(result.action, 'deactivated')
+  assert.equal(result.active, false)
+  const update = statements.find((statement) => /UPDATE golf_course_tournaments/i.test(statement.sql))
+  assert.ok(update)
+  assert.match(update.sql, /active = 0/)
+  assert.deepEqual(update.params, ['sync-correlation-archived', 'golfhomiez', 'gh-tournament-archived'])
+})
+
+test('GolfHomiez search results expose internal path and registration state before external records', async () => {
+  const captured = []
+  const db = {
+    async execute(sql, params = []) {
+      captured.push({ sql, params })
+      return [[
+        {
+          id: 'internal-search-row',
+          golf_course_id: 'course-1',
+          golf_course_name: 'Mountain View Golf Club',
+          tournament_name: 'GolfHomiez Summer Scramble',
+          state_code: 'UT',
+          city: 'West Jordan',
+          zip_code: '84088',
+          tournament_date: '2026-08-30',
+          tournament_website: '/tournaments/summer-scramble-abc123',
+          source_url: '/tournaments/summer-scramble-abc123',
+          source_type: 'golfhomiez',
+          golfhomiez_tournament_id: 'gh-tournament-1',
+          golfhomiez_tournament_identifier: 'summer-scramble-abc123',
+          is_registered: 1,
+        },
+        {
+          id: 'external-search-row',
+          golf_course_id: 'course-2',
+          golf_course_name: 'Other Golf Club',
+          tournament_name: 'External Scramble',
+          state_code: 'UT',
+          city: 'Sandy',
+          zip_code: '84070',
+          tournament_date: '2026-08-29',
+          tournament_website: 'https://example.com/tournament',
+          source_url: 'https://example.com/tournament',
+          source_type: 'external',
+          is_registered: 0,
+        },
+      ]]
+    },
+  }
+
+  const result = await searchGolfCourseTournaments(db, {
+    state: 'UT',
+    fromDate: '2026-08-01',
+    toDate: '2026-09-30',
+  }, {
+    now: new Date('2026-08-01T12:00:00Z'),
+    viewerUserId: 'user-registered',
+    viewerEmail: 'registered@example.com',
+  })
+
+  assert.equal(result.tournaments[0].isGolfHomiezTournament, true)
+  assert.equal(result.tournaments[0].isRegistered, true)
+  assert.equal(result.tournaments[0].tournamentPath, '/tournaments/summer-scramble-abc123')
+  assert.equal(result.tournaments[1].isGolfHomiezTournament, false)
+  assert.match(captured[0].sql, /ORDER BY CASE WHEN gct\.source_type = 'golfhomiez' THEN 0 ELSE 1 END/i)
+  assert.deepEqual(captured[0].params.slice(0, 4), ['user-registered', 'user-registered', 'registered@example.com', 'registered@example.com'])
+})
 
 test('configurable scheduled-job calculations support Daily, Weekly, Monthly, and Manual modes', () => {
   const now = new Date('2026-07-29T15:00:00Z') // 09:00 in America/Denver
