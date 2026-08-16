@@ -597,17 +597,28 @@ export async function syncGolfHomiezTournamentSearchRecord(db, tournamentId, {
 
   const [rows] = await db.execute(
     `SELECT t.id, t.name, t.description, t.start_date, t.status, t.archived_at, t.tournament_identifier, t.host_account_id,
-            COALESCE(gc.id, gcpp.golf_course_id, ha.golf_course_id) AS golf_course_id,
-            COALESCE(NULLIF(TRIM(gc.name), ''), NULLIF(TRIM(gcpp.golf_course_name), ''),
-                     NULLIF(TRIM(ha.golf_course_name), ''), NULLIF(TRIM(hra.golf_course_name), ''), 'Golf course') AS golf_course_name,
-            COALESCE(NULLIF(TRIM(gc.state_code), ''), NULLIF(TRIM(gcpp.state_code), ''), '') AS state_code,
-            COALESCE(NULLIF(TRIM(gc.city), ''), NULLIF(TRIM(gcpp.city), '')) AS city,
-            COALESCE(NULLIF(TRIM(gc.postal_code), ''), NULLIF(TRIM(gcpp.postal_code), '')) AS postal_code
+            COALESCE(NULLIF(TRIM(gc_by_id.id), ''), NULLIF(TRIM(gc_by_name.id), ''),
+                     NULLIF(TRIM(gcpp.golf_course_id), ''), NULLIF(TRIM(ha.golf_course_id), '')) AS golf_course_id,
+            COALESCE(NULLIF(TRIM(gc_by_id.name), ''), NULLIF(TRIM(gc_by_name.name), ''),
+                     NULLIF(TRIM(gcpp.golf_course_name), ''), NULLIF(TRIM(ha.golf_course_name), ''),
+                     NULLIF(TRIM(hra.golf_course_name), ''), 'Golf course') AS golf_course_name,
+            COALESCE(NULLIF(TRIM(gc_by_id.state_code), ''), NULLIF(TRIM(gc_by_name.state_code), ''),
+                     NULLIF(TRIM(gcpp.state_code), ''), '') AS state_code,
+            COALESCE(NULLIF(TRIM(gc_by_id.city), ''), NULLIF(TRIM(gc_by_name.city), ''),
+                     NULLIF(TRIM(gcpp.city), '')) AS city,
+            COALESCE(NULLIF(TRIM(gc_by_id.postal_code), ''), NULLIF(TRIM(gc_by_name.postal_code), ''),
+                     NULLIF(TRIM(gcpp.postal_code), '')) AS postal_code
        FROM tournaments t
        LEFT JOIN host_role_accounts hra ON BINARY hra.id = BINARY t.host_account_id
        LEFT JOIN host_accounts ha ON BINARY ha.id = BINARY t.host_account_id
        LEFT JOIN golf_course_public_pages gcpp ON BINARY gcpp.host_account_id = BINARY t.host_account_id
-       LEFT JOIN golf_courses gc ON BINARY gc.id = BINARY COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+       LEFT JOIN golf_courses gc_by_id ON BINARY gc_by_id.id = BINARY COALESCE(ha.golf_course_id, gcpp.golf_course_id)
+       LEFT JOIN golf_courses gc_by_name
+         ON LOWER(TRIM(CONVERT(gc_by_name.name USING utf8mb4))) COLLATE utf8mb4_general_ci =
+            LOWER(TRIM(CONVERT(COALESCE(NULLIF(gcpp.golf_course_name, ''), NULLIF(ha.golf_course_name, ''), NULLIF(hra.golf_course_name, '')) USING utf8mb4))) COLLATE utf8mb4_general_ci
+        AND (COALESCE(NULLIF(TRIM(gcpp.state_code), ''), '') = ''
+             OR LOWER(TRIM(CONVERT(gc_by_name.state_code USING utf8mb4))) COLLATE utf8mb4_general_ci =
+                LOWER(TRIM(CONVERT(gcpp.state_code USING utf8mb4))) COLLATE utf8mb4_general_ci)
       WHERE t.id = ?
       LIMIT 1`,
     [resolvedTournamentId],
@@ -615,8 +626,9 @@ export async function syncGolfHomiezTournamentSearchRecord(db, tournamentId, {
   const tournament = rows[0] || null
   if (!tournament) return { action: 'not_found', tournamentId: resolvedTournamentId, active: false }
 
-  const published = String(tournament.status || '').trim().toLowerCase() === 'published' && !tournament.archived_at
-  if (!published) {
+  const status = String(tournament.status || '').trim().toLowerCase()
+  const visibleOnCoursePage = ['published', 'completed'].includes(status) && !tournament.archived_at
+  if (!visibleOnCoursePage) {
     const [result] = await db.execute(
       `UPDATE golf_course_tournaments
           SET active = 0,
@@ -654,8 +666,8 @@ export async function syncGolfHomiezTournamentSearchRecord(db, tournamentId, {
        correlation_id, source_type, golfhomiez_tournament_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       golf_course_id = VALUES(golf_course_id),
-       golf_course_name = VALUES(golf_course_name),
+       golf_course_id = COALESCE(VALUES(golf_course_id), golf_course_id),
+       golf_course_name = COALESCE(NULLIF(VALUES(golf_course_name), ''), golf_course_name),
        tournament_name = VALUES(tournament_name),
        state_code = VALUES(state_code),
        city = VALUES(city),

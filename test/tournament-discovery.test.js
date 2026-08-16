@@ -628,15 +628,50 @@ test('published GolfHomiez tournament synchronization creates a persistent inter
   assert.equal(result.tournamentPath, '/tournaments/summer-scramble-abc123')
   const lookup = statements.find((statement) => /FROM tournaments t/i.test(statement.sql))
   assert.ok(lookup)
-  assert.match(lookup.sql, /BINARY gc\.id = BINARY COALESCE\(ha\.golf_course_id, gcpp\.golf_course_id\)/i)
+  assert.match(lookup.sql, /gc_by_id\.id = BINARY COALESCE\(ha\.golf_course_id, gcpp\.golf_course_id\)/i)
+  assert.match(lookup.sql, /LEFT JOIN golf_courses gc_by_name/i)
   const write = statements.find((statement) => /INSERT INTO golf_course_tournaments/i.test(statement.sql))
   assert.ok(write)
   assert.match(write.sql, /source_type, golfhomiez_tournament_id/i)
   assert.match(write.sql, /ON DUPLICATE KEY UPDATE/i)
+  assert.match(write.sql, /golf_course_id = COALESCE\(VALUES\(golf_course_id\), golf_course_id\)/i)
   assert.equal(write.params.at(-2), 'golfhomiez')
   assert.equal(write.params.at(-1), 'gh-tournament-1')
   assert.ok(write.params.includes('2026-08-30'))
   assert.ok(write.params.includes('https://golfhomiez.com/tournaments/summer-scramble-abc123'))
+})
+
+test('completed GolfHomiez tournaments remain linked for public course pages while draft and archived tournaments deactivate', async () => {
+  const statements = []
+  const db = {
+    async execute(sql, params = []) {
+      statements.push({ sql, params })
+      if (/FROM tournaments t/i.test(sql)) {
+        return [[{
+          id: 'gh-tournament-completed',
+          name: 'Completed Lake View Classic',
+          description: 'Completed scoring and leaderboard are visible on the course page.',
+          start_date: '2026-06-10',
+          status: 'completed',
+          archived_at: null,
+          tournament_identifier: 'completed-lake-view-classic',
+          host_account_id: 'host-1',
+          golf_course_id: 'course-1',
+          golf_course_name: 'Golf Homiez Lake View',
+          state_code: 'UT',
+        }]]
+      }
+      return [{ affectedRows: 1 }]
+    },
+  }
+
+  const result = await syncGolfHomiezTournamentSearchRecord(db, 'gh-tournament-completed', { correlationId: 'sync-completed' })
+
+  assert.equal(result.action, 'upserted')
+  assert.equal(result.active, true)
+  const write = statements.find((statement) => /INSERT INTO golf_course_tournaments/i.test(statement.sql))
+  assert.ok(write)
+  assert.equal(write.params.at(-1), 'gh-tournament-completed')
 })
 
 test('unpublished GolfHomiez tournaments are deactivated instead of being returned by search', async () => {

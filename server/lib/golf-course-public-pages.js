@@ -350,7 +350,7 @@ async function columnsForTable(db, tableName) {
   }
 }
 
-async function listPublicTournamentsForCoursePage(db, { hostAccountId = '', golfCourseId = '', golfCourseName = '' } = {}) {
+async function listPublicTournamentsForCoursePage(db, { hostAccountId = '', golfCourseId = '', golfCourseName = '', stateCode = '' } = {}) {
   const tournamentColumns = await columnsForTable(db, 'tournaments')
   if (!tournamentColumns.has('id')) return []
 
@@ -360,6 +360,7 @@ async function listPublicTournamentsForCoursePage(db, { hostAccountId = '', golf
   const normalizedGolfCourseId = cleanText(golfCourseId, 64)
   const normalizedHostAccountId = cleanText(hostAccountId, 191)
   const normalizedGolfCourseName = cleanText(golfCourseName, 191)
+  const normalizedStateCode = normalizeStateCode(stateCode)
 
   if (normalizedGolfCourseId && tournamentColumns.has('golf_course_id')) {
     predicates.push('CONVERT(t.golf_course_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_general_ci')
@@ -378,17 +379,35 @@ async function listPublicTournamentsForCoursePage(db, { hostAccountId = '', golf
     searchColumns.has('golf_course_id') &&
     searchColumns.has('golfhomiez_tournament_id')
   ) {
-    const activePredicate = searchColumns.has('active') ? 'AND COALESCE(gct.active, 1) = 1' : ''
     predicates.push(
       `EXISTS (
          SELECT 1
            FROM golf_course_tournaments gct
           WHERE CONVERT(gct.golfhomiez_tournament_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_general_ci
             AND CONVERT(gct.golf_course_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_general_ci
-            ${activePredicate}
        )`,
     )
     params.push(normalizedGolfCourseId)
+  }
+  if (
+    normalizedGolfCourseName &&
+    searchColumns.has('golf_course_name') &&
+    searchColumns.has('golfhomiez_tournament_id')
+  ) {
+    const statePredicate = normalizedStateCode && searchColumns.has('state_code')
+      ? `AND LOWER(TRIM(CONVERT(COALESCE(gct.state_code, '') USING utf8mb4))) COLLATE utf8mb4_general_ci = LOWER(TRIM(CONVERT(? USING utf8mb4))) COLLATE utf8mb4_general_ci`
+      : ''
+    predicates.push(
+      `EXISTS (
+         SELECT 1
+           FROM golf_course_tournaments gct
+          WHERE CONVERT(gct.golfhomiez_tournament_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_general_ci
+            AND LOWER(TRIM(CONVERT(gct.golf_course_name USING utf8mb4))) COLLATE utf8mb4_general_ci = LOWER(TRIM(CONVERT(? USING utf8mb4))) COLLATE utf8mb4_general_ci
+            ${statePredicate}
+       )`,
+    )
+    params.push(normalizedGolfCourseName)
+    if (statePredicate) params.push(normalizedStateCode)
   }
 
   if (!predicates.length) return []
@@ -520,7 +539,7 @@ export async function getGolfCoursePublicPageBySlug(db, slug, options = {}) {
   if (!normalizedSlug) return null
   const [rows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE slug = ? AND is_published = 1 LIMIT 1', [normalizedSlug])
   if (!rows[0]) return null
-  const tournaments = await listPublicTournamentsForCoursePage(db, { hostAccountId: rows[0].host_account_id, golfCourseId: rows[0].golf_course_id, golfCourseName: rows[0].golf_course_name })
+  const tournaments = await listPublicTournamentsForCoursePage(db, { hostAccountId: rows[0].host_account_id, golfCourseId: rows[0].golf_course_id, golfCourseName: rows[0].golf_course_name, stateCode: rows[0].state_code })
   return mapPage(rows[0], { baseUrl: options.baseUrl, tournaments })
 }
 
