@@ -387,11 +387,14 @@ export async function createHostPasswordReset(source, identifier) {
   const tokenHash = sha256(token)
   const id = randomId(32)
   const expiresAt = new Date(Date.now() + HOST_RESET_TTL_MS)
+  const resetEmail = String(host.reset_email || host.email || normalizedIdentifier || '').trim().toLowerCase()
   const resetAssignments = [
     ['id', id],
     ['host_account_id', host.id],
     ['host_id', host.id],
     ['account_id', host.id],
+    ['email', resetEmail],
+    ['reset_email', resetEmail],
     ['token_hash', tokenHash],
     ['token', token],
     ['expires_at', expiresAt],
@@ -420,7 +423,10 @@ export async function resetHostPassword(source, { token, password }) {
   const resetColumns = await getColumns(db, 'host_password_reset_tokens')
   const tokenCol = resetColumns.has('token_hash') ? 'token_hash' : (resetColumns.has('token') ? 'token' : 'token_hash')
   const tokenValue = tokenCol === 'token_hash' ? sha256(String(token || '').trim()) : String(token || '').trim()
-  const usedClause = resetColumns.has('used_at') ? 'AND used_at IS NULL' : ''
+  const consumedClauses = []
+  if (resetColumns.has('used_at')) consumedClauses.push('used_at IS NULL')
+  if (resetColumns.has('consumed_at')) consumedClauses.push('consumed_at IS NULL')
+  const usedClause = consumedClauses.length ? `AND ${consumedClauses.join(' AND ')}` : ''
   const expiresClause = resetColumns.has('expires_at') ? 'AND expires_at > NOW()' : ''
   const [rows] = await db.execute(
     `SELECT * FROM host_password_reset_tokens WHERE ${tokenCol} = ? ${usedClause} ${expiresClause} LIMIT 1`,
@@ -429,8 +435,12 @@ export async function resetHostPassword(source, { token, password }) {
   const reset = rows[0]
   if (!reset) throw new Error('Invalid or expired reset token')
   await db.execute('UPDATE host_accounts SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [hashPassword(password), reset.host_account_id || reset.host_id || reset.account_id])
-  if (resetColumns.has('used_at')) {
-    await db.execute('UPDATE host_password_reset_tokens SET used_at = NOW() WHERE id = ?', [reset.id])
+  const consumeColumns = ['used_at', 'consumed_at'].filter((column) => resetColumns.has(column))
+  if (consumeColumns.length) {
+    await db.execute(
+      `UPDATE host_password_reset_tokens SET ${consumeColumns.map((column) => `${column} = NOW()`).join(', ')} WHERE id = ?`,
+      [reset.id],
+    )
   }
   return { ok: true }
 }
