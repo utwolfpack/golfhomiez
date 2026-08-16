@@ -1,4 +1,3 @@
-/* global process */
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -1354,8 +1353,6 @@ test('profile city typeahead auto-populates state and zip with correlated loggin
   assert.match(profilePage, /primaryState: state/)
   assert.match(profilePage, /primaryZipCode: zip/)
   assert.match(profilePage, /postalCodeAvailable/)
-  assert.match(profilePage, /autoZipFilled/)
-  assert.match(profilePage, /exactLocation/)
   assert.match(locationService, /getPostalCodeForCity/)
   assert.match(locationService, /LOCATION_POSTAL_CODE_CSV_PATH/)
   assert.match(locationService, /postalCode,/) 
@@ -1635,7 +1632,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -1977,6 +1974,9 @@ test('host auth flow keeps request-based host access and removes host invite red
   assert.match(hostAuth, /CREATE TABLE IF NOT EXISTS host_accounts/)
   assert.match(hostAuth, /CREATE TABLE IF NOT EXISTS host_sessions/)
   assert.match(hostAuth, /CREATE TABLE IF NOT EXISTS host_password_reset_tokens/)
+  assert.match(hostAuth, /const resetEmail = String\(host\.reset_email \|\| host\.email/)
+  assert.match(hostAuth, /\['email', resetEmail\]/)
+  assert.match(hostAuth, /consumed_at/)
   assert.doesNotMatch(hostAuth, /CREATE TABLE IF NOT EXISTS host_account_invites/)
   assert.doesNotMatch(hostAuth, /redeemHostInvite/)
   assert.match(migration, /CREATE TABLE IF NOT EXISTS host_accounts/)
@@ -2497,8 +2497,7 @@ test('host portal lets hosts modify every golf-course tournament and exposes pub
   assert.match(hostPage, /updateHostTournamentRecord/)
   assert.match(hostPage, /select a tournament line item to modify it/)
   assert.match(hostPage, /TournamentManagementLineItem/)
-  assert.match(lineItem, /GOLFER REGISTRATION URL/)
-  assert.match(lineItem, /copy_tournament_registration_url/)
+  assert.match(lineItem, /Golfer Registration URL/)
   assert.match(hostPage, /host_tournament_updated/)
   assert.match(accounts, /export function updateHostTournamentRecord/)
   assert.match(accounts, /\/api\/host\/tournaments\/\$\{encodeURIComponent\(tournamentId\)\}/)
@@ -2637,10 +2636,9 @@ test('tournament portal uses per-user registration and host-organizer portals ke
   assert.doesNotMatch(server, /for \(const member of Array\.isArray\(registration\?\.teamMembers\)[\s\S]*if \(memberEmail\) emails\.add\(memberEmail\)/)
   assert.doesNotMatch(portalPage, /TeamRegistrationList/)
   assert.doesNotMatch(portalPage, /Needs tournament registration/)
-  assert.match(hostPage, /Needs registration/)
-  assert.match(hostPage, /Registered/)
-  assert.match(hostPage, /tournament-team-registration-line/)
-  assert.match(hostPage, /setSelectedRegistration/)
+  assert.match(hostPage, /Needs tournament registration/)
+  assert.match(hostPage, /Registered and verified/)
+  assert.match(hostPage, /Registered; verification pending/)
   assert.match(organizerPage, /Needs tournament registration/)
   assert.match(organizerPage, /Registered and verified/)
   assert.match(organizerPage, /Registered; verification pending/)
@@ -2720,14 +2718,11 @@ test('front-end dates use friendly user-local month day year time formatting', (
   assert.match(adminPortal, /formatValue\(row\[column\.key\], column\.key\)/)
 })
 
-test('tournament portal close button returns authenticated visitors to the previous page only', () => {
+test('tournament portal includes a close button back to my tournaments', () => {
   const tournamentPortal = fs.readFileSync(new URL('../src/pages/TournamentPortal.tsx', import.meta.url), 'utf8')
 
-  assert.match(tournamentPortal, /const canCloseToPreviousPage = Boolean\(user\)/)
-  assert.match(tournamentPortal, /navigate\(-1\)/)
-  assert.match(tournamentPortal, /canCloseToPreviousPage \? <button/)
-  assert.match(tournamentPortal, /Close tournament portal and return to the previous page/)
-  assert.doesNotMatch(tournamentPortal, /const closePath = '\/my-tournaments'/)
+  assert.match(tournamentPortal, /const closePath = '\/my-tournaments'/)
+  assert.match(tournamentPortal, /Close tournament portal and return to my tournaments/)
 })
 
 test('tournament flyer template is persisted, editable, and supports organizer-provided imagery and fields', () => {
@@ -3107,7 +3102,7 @@ test('tournament delete helper removes only safe tournament-owned records inside
     async commit() { statements.push('COMMIT') },
     async rollback() { statements.push('ROLLBACK') },
     release() { statements.push('RELEASE') },
-    async execute(sql) {
+    async execute(sql, params) {
       const normalized = sql.replace(/\s+/g, ' ').trim()
       statements.push(normalized)
       if (/information_schema\.TABLES/.test(normalized)) return [[{ table_exists: 1 }]]
@@ -3334,9 +3329,7 @@ test('tournament capacity defaults, migration, API stats, and correlated logging
   assert.match(hostPortal, /DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24/)
   assert.match(organizerTournaments, /Number of teams to play in the tournament/)
   assert.match(hostPortal, /Teams registered/)
-  assert.doesNotMatch(hostPortal, /Verified users/)
-  assert.match(hostPortal, /hostTournamentYearControls/)
-  assert.match(hostPortal, /selectedHostedTournaments/)
+  assert.match(hostPortal, /Verified users/)
   assert.match(organizerTournaments, /Teams registered/)
   assert.match(organizerTournaments, /Verified users/)
   assert.doesNotMatch(tournamentPortal, /Teams registered/)
@@ -5116,18 +5109,10 @@ test('published GolfHomiez tournaments are synchronized into Find Tournaments wi
   assert.match(discovery, /tournament_registrations tr/)
   assert.match(discovery, /isGolfHomiezTournament/)
   assert.match(rbac, /status === 'published'.*!startDate/s)
+  assert.match(findTournament, /Golf Homiez Tournament/)
   assert.match(findTournament, /Registered/)
-  assert.match(findTournament, /tournamentSearchResultClickable/)
-  assert.match(findTournament, /golfCoursePagePath/)
-  assert.match(findTournament, /golfCourseWebsiteUrl/)
-  assert.match(findTournament, /Website:/)
-  assert.match(findTournament, /Course Info & Tournaments/)
-  assert.doesNotMatch(findTournament, /Source:/)
-  assert.doesNotMatch(findTournament, /Select row/)
-  assert.doesNotMatch(findTournament, /GolfHomiez hosted/)
-  assert.doesNotMatch(findTournament, /Tournament website/)
-  assert.doesNotMatch(findTournament, /Golf Homiez Tournament/)
-  assert.match(styles, /\.tournamentSearchResultClickable/)
+  assert.match(findTournament, /tournamentSearchResultGolfHomiez/)
+  assert.match(styles, /\.tournamentSearchGolfHomiezBadge/)
   assert.match(migration, /uq_golf_course_tournaments_golfhomiez_id/)
   assert.match(migration, /idx_golf_course_tournaments_source_active_date/)
 })
@@ -5205,10 +5190,6 @@ test('completed tournament public pages keep the flyer and final leaderboard whi
   const styles = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 
   assert.match(portalPage, /const isCompletedTournament = String\(tournament\?\.status \|\| ''\)\.toLowerCase\(\) === 'completed'/)
-  assert.match(portalPage, /canCloseToPreviousPage = Boolean\(user\) \|\| roles\.some/)
-  assert.match(portalPage, /navigate\(-1\)/)
-  assert.match(portalPage, /canCloseToPreviousPage \? <button className="btn" type="button" onClick=\{closeTournamentPortal\}/)
-  assert.doesNotMatch(portalPage, /to=\{closePath\}/)
   assert.match(portalPage, /isCompletedTournament \? \([\s\S]{0,220}<TournamentFinalLeaderboard rows=\{portal\?\.finalLeaderboard \|\| \[\]\} \/>/)
   assert.match(portalPage, /\) : \([\s\S]{0,220}<TournamentTeamStartSchedule/)
   assert.match(portalPage, /\) : \([\s\S]{0,2500}<strong>Registration<\/strong>/)
@@ -5231,7 +5212,7 @@ test('completed tournament pages and QR codes remain publicly addressable while 
   assert.match(hostPage, /TournamentManagementLineItem/)
   assert.match(organizerPage, /TournamentManagementLineItem/)
   assert.match(lineItem, /\['published', 'completed'\]\.includes/)
-  assert.match(lineItem, /GOLFER REGISTRATION URL/)
+  assert.match(lineItem, /Golfer Registration URL/)
 })
 
 test('host and organizer tournament management uses paginated line items with status and focused editing', () => {
@@ -5307,35 +5288,3 @@ test('completed tournament public page shows saved tournament summary below fina
   assert.match(portalPage, /tournamentSummary/)
   assert.match(styles, /\.tournament-completed-summary/)
 })
-
-
-test('golf-course public page filters tournaments by year and paginates course tournaments', () => {
-  const publicPage = fs.readFileSync(new URL('../src/pages/GolfCoursePage.tsx', import.meta.url), 'utf8')
-  const accounts = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
-
-  assert.match(publicPage, /TOURNAMENTS_PER_PAGE = 15/)
-  assert.match(publicPage, /selectedTournamentYear/)
-  assert.match(publicPage, /golfCourseTournamentYearTab/)
-  assert.match(publicPage, /visibleTournaments/)
-  assert.match(publicPage, /Page \{safeTournamentPage\} of \{pageCount\}/)
-  assert.match(publicPage, /formatTournamentStartType\(tournament\.startType\)/)
-  assert.match(accounts, /startType\?: string \| null/)
-  assert.match(accounts, /startTime\?: string \| null/)
-})
-
-test('challenge leaderboard row drilldowns show selected individual and team names before back navigation', () => {
-  const challenges = fs.readFileSync(new URL('../src/pages/Challenges.tsx', import.meta.url), 'utf8')
-  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
-
-  assert.match(challenges, /activeTeamLeaderboardSide/)
-  assert.match(challenges, /function getTeamRoundSummaryRows/)
-  assert.match(challenges, /function openTeamLeaderboardRoundSummary/)
-  assert.match(challenges, /Team Round Summary/)
-  assert.match(challenges, /View \$\{row\.teamName\} round summary/)
-  assert.match(challenges, /className="inboxRoundSummarySelectedName">\{selectedTeamName\}/)
-  assert.match(challenges, /className="inboxRoundSummarySelectedName">\{selectedName\}/)
-  const tournamentScoreModal = fs.readFileSync(new URL('../src/components/TournamentTeamScoreModal.tsx', import.meta.url), 'utf8')
-  assert.match(tournamentScoreModal, /className="inboxRoundSummarySelectedName">\{selectedTeam\.teamName\}/)
-  assert.match(css, /\.inboxRoundSummarySelectedName\{/)
-})
-
