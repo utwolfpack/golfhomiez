@@ -49,6 +49,20 @@ function formatTournamentLocation(tournament: UserRegisteredTournament) {
   return location.length ? location.join(', ') : 'Location to be announced'
 }
 
+function tournamentDisplayStatus(status?: string | null) {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'completed') return { label: 'Completed', className: 'tournamentStatusText tournamentStatusText--completed' }
+  if (normalized === 'published' || normalized === 'active') return { label: 'Active', className: 'tournamentStatusText tournamentStatusText--active' }
+  const label = normalized ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}` : 'Status unavailable'
+  return { label, className: 'tournamentStatusText' }
+}
+
+function tournamentTeamScore(tournament: UserRegisteredTournament) {
+  if (tournament.teamScore == null) return null
+  const score = Number(tournament.teamScore)
+  return Number.isFinite(score) ? score : null
+}
+
 export default function MyTournaments() {
   const [tournaments, setTournaments] = useState<UserRegisteredTournament[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,8 +75,18 @@ export default function MyTournaments() {
       try {
         const result = await fetchUserTournaments()
         if (!active) return
-        setTournaments(result.tournaments || [])
-        logFrontendEvent({ category: 'user.tournaments', message: 'registered_tournaments_loaded', data: { tournamentCount: result.tournaments?.length || 0 } })
+        const loadedTournaments = result.tournaments || []
+        setTournaments(loadedTournaments)
+        logFrontendEvent({
+          category: 'user.tournaments',
+          message: 'registered_tournaments_loaded',
+          data: {
+            tournamentCount: loadedTournaments.length,
+            activeTournamentCount: loadedTournaments.filter((tournament) => ['published', 'active'].includes(String(tournament.status || '').toLowerCase())).length,
+            completedTournamentCount: loadedTournaments.filter((tournament) => String(tournament.status || '').toLowerCase() === 'completed').length,
+            tournamentWithTeamScoreCount: loadedTournaments.filter((tournament) => tournamentTeamScore(tournament) != null).length,
+          },
+        })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not load your registered tournaments.'
         if (active) setError(message)
@@ -103,6 +127,8 @@ export default function MyTournaments() {
           <div className="compactLineItemList tournamentLineItemList">
             {tournaments.map((tournament) => {
               const destination = tournament.portalPath || `/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}`
+              const displayStatus = tournamentDisplayStatus(tournament.status)
+              const teamScore = tournamentTeamScore(tournament)
               const openTournament = () => logFrontendEvent({
                 category: 'user.tournaments',
                 message: 'tournament_line_item_selected',
@@ -110,6 +136,8 @@ export default function MyTournaments() {
                   tournamentId: tournament.id,
                   registrationId: tournament.registration.id,
                   registrationStatus: tournament.registration.status,
+                  tournamentStatus: tournament.status,
+                  teamScore,
                   destination,
                 },
               })
@@ -124,16 +152,17 @@ export default function MyTournaments() {
                   </Link>
                   <span className="compactLineItemSummary tournamentLineItemSummary">
                     <span className="tournamentLineItemActionRow">
-                      <strong className="compactLineItemStatus">{tournament.registration.status || 'Registered'}</strong>
+                      <span className="tournamentStatusLabel">Status: <strong className={displayStatus.className}>{displayStatus.label}</strong></span>
                       <button
                         type="button"
                         className="btn btnSmall tournamentTeamScoreButton"
+                        aria-label={teamScore != null ? `Open team score, current score ${teamScore}` : 'Open team score'}
                         onClick={() => {
                           setActiveScoreTournament(tournament)
-                          logFrontendEvent({ category: 'user.tournaments', message: 'team_score_button_selected', data: { tournamentId: tournament.id, registrationId: tournament.registration.id, teamId: tournament.registration.teamId || null, teamName: tournament.registration.teamName || null } })
+                          logFrontendEvent({ category: 'user.tournaments', message: 'team_score_button_selected', data: { tournamentId: tournament.id, registrationId: tournament.registration.id, tournamentStatus: tournament.status, teamId: tournament.registration.teamId || null, teamName: tournament.registration.teamName || null, teamScore } })
                         }}
                       >
-                        Team Score
+                        {teamScore != null ? `Team Score: ${teamScore}` : 'Team Score'}
                       </button>
                     </span>
                     <span>{formatDateTime(tournament.registration.registeredAt)}</span>
@@ -145,7 +174,17 @@ export default function MyTournaments() {
           </div>
         </section>
       </div>
-      {activeScoreTournament ? <TournamentTeamScoreModal tournament={activeScoreTournament} onClose={() => setActiveScoreTournament(null)} /> : null}
+      {activeScoreTournament ? (
+        <TournamentTeamScoreModal
+          tournament={activeScoreTournament}
+          onClose={() => setActiveScoreTournament(null)}
+          onScoreUpdated={(totalScore) => {
+            setTournaments((current) => current.map((tournament) => tournament.id === activeScoreTournament.id ? { ...tournament, teamScore: totalScore } : tournament))
+            setActiveScoreTournament((current) => current ? { ...current, teamScore: totalScore } : current)
+            logFrontendEvent({ category: 'user.tournaments', message: 'line_item_team_score_updated', data: { tournamentId: activeScoreTournament.id, teamScore: totalScore } })
+          }}
+        />
+      ) : null}
     </div>
   )
 }

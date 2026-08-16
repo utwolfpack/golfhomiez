@@ -1,28 +1,60 @@
+import { gunzipSync } from 'node:zlib'
 import { logApi } from './logger.js'
 import { recordExternalApiCall } from './external-api-metrics.js'
 import { normalizeStateCode, stateNameForCode } from './us-states.js'
 
 const DEFAULT_BASE_URL = 'https://api.opengolfapi.org'
 const DEFAULT_TIMEOUT_MS = 30_000
-const DEFAULT_REQUEST_INTERVAL_MS = 2_000
+const DEFAULT_REQUEST_INTERVAL_MS = 750
 const DEFAULT_MAX_RETRIES = 6
 const DEFAULT_RETRY_BASE_MS = 2_000
 const DEFAULT_RETRY_MAX_MS = 120_000
-const DEFAULT_STATE_PAGE_LIMIT = 50
-const DEFAULT_MAX_STATE_PAGES = 500
+const DEFAULT_RATE_LIMIT_RESERVE = 5
+const DEFAULT_RATE_LIMIT_RESET_GRACE_MS = 5_000
+const DEFAULT_STATE_PAGE_LIMIT = 500
+const DEFAULT_BULK_DATASET_URL = 'https://github.com/opengolfapi/data/releases/latest/download/opengolfapi-us.geojson.gz'
+
+let openGolfApiBulkDatasetPromise = null
 
 let openGolfApiThrottle = Promise.resolve()
 let lastOpenGolfApiRequestAt = 0
+let openGolfApiRateLimitState = {
+  limit: null,
+  remaining: null,
+  resetAt: null,
+  resetAtMs: null,
+  updatedAt: null,
+}
 
 function normalizeText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim()
 }
 
 
-function sleep(ms) {
+function cancellationError(signal = null) {
+  const reason = signal?.reason
+  if (reason instanceof Error) return reason
+  const error = new Error('OpenGolfAPI request cancelled')
+  error.name = 'AbortError'
+  error.code = 'SCHEDULED_JOB_CANCELLED'
+  return error
+}
+
+function sleep(ms, signal = null) {
   const waitMs = Math.max(0, Math.trunc(Number(ms) || 0))
   if (waitMs <= 0) return Promise.resolve()
-  return new Promise((resolve) => globalThis.setTimeout(resolve, waitMs))
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(cancellationError(signal))
+    const onAbort = () => {
+      globalThis.clearTimeout(timer)
+      reject(cancellationError(signal))
+    }
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener?.('abort', onAbort)
+      resolve()
+    }, waitMs)
+    signal?.addEventListener?.('abort', onAbort, { once: true })
+  })
 }
 
 function envInteger(names, fallback, { allowZero = false } = {}) {
@@ -36,19 +68,33 @@ function envInteger(names, fallback, { allowZero = false } = {}) {
   return fallback
 }
 
+function envBoolean(names, fallback) {
+  const keys = Array.isArray(names) ? names : [names]
+  for (const key of keys) {
+    const raw = normalizeText(process.env[key]).toLowerCase()
+    if (!raw) continue
+    if (['1', 'true', 'yes', 'on'].includes(raw)) return true
+    if (['0', 'false', 'no', 'off'].includes(raw)) return false
+  }
+  return fallback
+}
+
 export function getOpenGolfApiRateLimitConfig() {
   return {
     requestIntervalMs: envInteger(['OPEN_GOLF_API_REQUEST_INTERVAL_MS', 'OPENGOLFAPI_REQUEST_INTERVAL_MS'], DEFAULT_REQUEST_INTERVAL_MS, { allowZero: true }),
     maxRetries: envInteger(['OPEN_GOLF_API_MAX_RETRIES', 'OPENGOLFAPI_MAX_RETRIES'], DEFAULT_MAX_RETRIES, { allowZero: true }),
     retryBaseMs: envInteger(['OPEN_GOLF_API_RETRY_BASE_MS', 'OPENGOLFAPI_RETRY_BASE_MS'], DEFAULT_RETRY_BASE_MS),
     retryMaxMs: envInteger(['OPEN_GOLF_API_RETRY_MAX_MS', 'OPENGOLFAPI_RETRY_MAX_MS'], DEFAULT_RETRY_MAX_MS),
+    rateLimitReserve: envInteger(['OPEN_GOLF_API_RATE_LIMIT_RESERVE', 'OPENGOLFAPI_RATE_LIMIT_RESERVE'], DEFAULT_RATE_LIMIT_RESERVE, { allowZero: true }),
+    resetGraceMs: envInteger(['OPEN_GOLF_API_RATE_LIMIT_RESET_GRACE_MS', 'OPENGOLFAPI_RATE_LIMIT_RESET_GRACE_MS'], DEFAULT_RATE_LIMIT_RESET_GRACE_MS, { allowZero: true }),
+    waitForDailyReset: envBoolean(['OPEN_GOLF_API_WAIT_FOR_DAILY_RESET', 'OPENGOLFAPI_WAIT_FOR_DAILY_RESET'], true),
+    adaptiveDailyPacing: envBoolean(['OPEN_GOLF_API_ADAPTIVE_DAILY_PACING', 'OPENGOLFAPI_ADAPTIVE_DAILY_PACING'], false),
   }
 }
 
 export function getOpenGolfApiStateImportConfig() {
   return {
-    pageLimit: envInteger(['OPEN_GOLF_API_STATE_PAGE_LIMIT', 'OPENGOLFAPI_STATE_PAGE_LIMIT'], DEFAULT_STATE_PAGE_LIMIT),
-    maxPages: envInteger(['OPEN_GOLF_API_STATE_MAX_PAGES', 'OPENGOLFAPI_STATE_MAX_PAGES'], DEFAULT_MAX_STATE_PAGES),
+    pageLimit: Math.min(500, envInteger(['OPEN_GOLF_API_STATE_PAGE_LIMIT', 'OPENGOLFAPI_STATE_PAGE_LIMIT'], DEFAULT_STATE_PAGE_LIMIT)),
   }
 }
 
@@ -62,6 +108,72 @@ export function parseOpenGolfApiRetryAfterMs(value, nowMs = Date.now()) {
   return null
 }
 
+export function parseOpenGolfApiRateLimitResetMs(value) {
+  const raw = normalizeText(value)
+  if (!raw) return null
+  const numeric = Number(raw)
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 10_000_000_000 ? Math.trunc(numeric) : Math.trunc(numeric * 1000)
+  }
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function nextUtcDayMs(nowMs = Date.now()) {
+  const now = new Date(nowMs)
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0)
+}
+
+function rateLimitHeaderNumber(headers, name) {
+  const raw = normalizeText(headers?.get?.(name))
+  if (!raw) return null
+  const numeric = Math.trunc(Number(raw))
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null
+}
+
+function captureOpenGolfApiRateLimit(response, payload = null, correlationId = null, endpoint = null) {
+  const limit = rateLimitHeaderNumber(response?.headers, 'x-ratelimit-limit')
+  const remaining = rateLimitHeaderNumber(response?.headers, 'x-ratelimit-remaining')
+  const headerReset = response?.headers?.get?.('x-ratelimit-reset')
+  const bodyReset = payload?.resetAt ?? payload?.reset_at ?? payload?.rateLimitReset ?? null
+  const resetAtMs = parseOpenGolfApiRateLimitResetMs(headerReset || bodyReset)
+  if (limit == null && remaining == null && resetAtMs == null) return getOpenGolfApiRateLimitSnapshot()
+
+  openGolfApiRateLimitState = {
+    limit: limit ?? openGolfApiRateLimitState.limit,
+    remaining: remaining ?? openGolfApiRateLimitState.remaining,
+    resetAt: resetAtMs != null ? new Date(resetAtMs).toISOString() : openGolfApiRateLimitState.resetAt,
+    resetAtMs: resetAtMs ?? openGolfApiRateLimitState.resetAtMs,
+    updatedAt: new Date().toISOString(),
+  }
+  logApi('opengolfapi_rate_limit_observed', {
+    correlationId,
+    apiType: 'opengolfapi',
+    endpoint,
+    limit: openGolfApiRateLimitState.limit,
+    remaining: openGolfApiRateLimitState.remaining,
+    resetAt: openGolfApiRateLimitState.resetAt,
+  })
+  return getOpenGolfApiRateLimitSnapshot()
+}
+
+export function getOpenGolfApiRateLimitSnapshot() {
+  const hasKey = Boolean(normalizeText(process.env.OPEN_GOLF_API_KEY || process.env.OPENGOLFAPI_API_KEY || process.env.OPENGOLFAPI_KEY))
+  return {
+    limit: openGolfApiRateLimitState.limit,
+    remaining: openGolfApiRateLimitState.remaining,
+    resetAt: openGolfApiRateLimitState.resetAt,
+    updatedAt: openGolfApiRateLimitState.updatedAt,
+    authentication: hasKey ? 'keyed' : 'anonymous',
+  }
+}
+
+export function resetOpenGolfApiRateLimitState() {
+  openGolfApiRateLimitState = { limit: null, remaining: null, resetAt: null, resetAtMs: null, updatedAt: null }
+  lastOpenGolfApiRequestAt = 0
+  openGolfApiThrottle = Promise.resolve()
+}
+
 export function isOpenGolfApiRetriableStatus(statusCode) {
   const status = Number(statusCode)
   return status === 408 || status === 429 || (status >= 500 && status <= 599)
@@ -69,6 +181,12 @@ export function isOpenGolfApiRetriableStatus(statusCode) {
 
 function isRetryableNetworkError(error) {
   return error?.name === 'AbortError' || error instanceof TypeError || /fetch failed|network|timeout/i.test(normalizeText(error?.message))
+}
+
+function isDailyRateLimitError(error) {
+  if (Number(error?.statusCode) !== 429) return false
+  const message = normalizeText(error?.message).toLowerCase()
+  return error?.rateLimitRemaining === 0 || Boolean(error?.rateLimitResetAtMs) || /daily.*limit|limit.*daily|anonymous limit reached/.test(message)
 }
 
 export function getOpenGolfApiRetryDelayMs({ statusCode = null, attempt = 0, retryAfterHeader = '' } = {}) {
@@ -79,16 +197,67 @@ export function getOpenGolfApiRetryDelayMs({ statusCode = null, attempt = 0, ret
   return Math.min(retryMaxMs, retryBaseMs * (2 ** retryAttempt))
 }
 
-async function waitForOpenGolfApiRequestSlot(endpoint) {
-  const { requestIntervalMs } = getOpenGolfApiRateLimitConfig()
-  if (requestIntervalMs <= 0) return
+export function getOpenGolfApiAdaptiveIntervalMs({ nowMs = Date.now(), requestIntervalMs = null, rateLimitReserve = null } = {}) {
+  const config = getOpenGolfApiRateLimitConfig()
+  const minimumInterval = Math.max(0, Math.trunc(Number(requestIntervalMs ?? config.requestIntervalMs) || 0))
+  const reserve = Math.max(0, Math.trunc(Number(rateLimitReserve ?? config.rateLimitReserve) || 0))
+  const remaining = Number(openGolfApiRateLimitState.remaining)
+  const resetAtMs = Number(openGolfApiRateLimitState.resetAtMs)
+  if (!Number.isFinite(remaining) || !Number.isFinite(resetAtMs) || resetAtMs <= nowMs) return minimumInterval
+  const usableRequests = Math.max(1, Math.trunc(remaining) - reserve)
+  const timeRemainingMs = Math.max(0, resetAtMs - nowMs)
+  return Math.max(minimumInterval, Math.ceil(timeRemainingMs / usableRequests))
+}
 
+async function waitForOpenGolfApiRequestSlot(endpoint, correlationId = null, { signal = null, waitForDailyReset = false, adaptiveDailyPacing = false, requestIntervalMs = null, onRateLimitEvent = null } = {}) {
+  const config = getOpenGolfApiRateLimitConfig()
   const waitTurn = openGolfApiThrottle.then(async () => {
+    if (signal?.aborted) throw cancellationError(signal)
+    const nowMs = Date.now()
+    const remaining = Number(openGolfApiRateLimitState.remaining)
+    const resetAtMs = Number(openGolfApiRateLimitState.resetAtMs)
+    const shouldWaitForReset = waitForDailyReset
+      && Number.isFinite(remaining)
+      && remaining <= config.rateLimitReserve
+      && Number.isFinite(resetAtMs)
+      && resetAtMs > nowMs
+
+    if (shouldWaitForReset) {
+      const waitMs = Math.max(0, resetAtMs - nowMs + config.resetGraceMs)
+      const waitDetails = {
+        correlationId,
+        apiType: 'opengolfapi',
+        endpoint,
+        waitMs,
+        remaining,
+        limit: openGolfApiRateLimitState.limit,
+        resetAt: openGolfApiRateLimitState.resetAt,
+      }
+      logApi('opengolfapi_daily_limit_wait_started', waitDetails)
+      if (typeof onRateLimitEvent === 'function') onRateLimitEvent('opengolfapi_daily_limit_wait_started', waitDetails)
+      await sleep(waitMs, signal)
+      openGolfApiRateLimitState = { ...openGolfApiRateLimitState, remaining: null, resetAt: null, resetAtMs: null, updatedAt: new Date().toISOString() }
+      const completedDetails = { correlationId, apiType: 'opengolfapi', endpoint, waitMs }
+      logApi('opengolfapi_daily_limit_wait_completed', completedDetails)
+      if (typeof onRateLimitEvent === 'function') onRateLimitEvent('opengolfapi_daily_limit_wait_completed', completedDetails)
+    }
+
+    const effectiveIntervalMs = adaptiveDailyPacing
+      ? getOpenGolfApiAdaptiveIntervalMs({ requestIntervalMs: requestIntervalMs ?? config.requestIntervalMs, rateLimitReserve: config.rateLimitReserve })
+      : Math.max(0, Math.trunc(Number(requestIntervalMs ?? config.requestIntervalMs) || 0))
     const elapsedMs = Date.now() - lastOpenGolfApiRequestAt
-    const waitMs = Math.max(0, requestIntervalMs - elapsedMs)
+    const waitMs = Math.max(0, effectiveIntervalMs - elapsedMs)
     if (waitMs > 0) {
-      logApi('opengolfapi_request_throttled', { apiType: 'opengolfapi', endpoint, waitMs })
-      await sleep(waitMs)
+      logApi('opengolfapi_request_throttled', {
+        correlationId,
+        apiType: 'opengolfapi',
+        endpoint,
+        waitMs,
+        adaptiveDailyPacing,
+        remaining: openGolfApiRateLimitState.remaining,
+        resetAt: openGolfApiRateLimitState.resetAt,
+      })
+      await sleep(waitMs, signal)
     }
     lastOpenGolfApiRequestAt = Date.now()
   })
@@ -124,6 +293,17 @@ export function getOpenGolfApiBaseUrl() {
   return normalizeBaseUrl(process.env.OPEN_GOLF_API_BASE_URL || process.env.OPENGOLFAPI_BASE_URL || DEFAULT_BASE_URL)
 }
 
+export function getOpenGolfApiRequestHeaders() {
+  const headers = { Accept: 'application/json' }
+  const rawKey = normalizeText(process.env.OPEN_GOLF_API_KEY || process.env.OPENGOLFAPI_API_KEY || process.env.OPENGOLFAPI_KEY)
+  if (rawKey) headers.Authorization = `Bearer ${rawKey.replace(/^Bearer\s+/i, '')}`
+  return headers
+}
+
+export function getOpenGolfApiBulkDatasetUrl() {
+  return normalizeText(process.env.OPEN_GOLF_API_BULK_DATASET_URL || process.env.OPENGOLFAPI_BULK_DATASET_URL || DEFAULT_BULK_DATASET_URL) || DEFAULT_BULK_DATASET_URL
+}
+
 export function buildOpenGolfApiUrl(pathname) {
   const cleanPath = String(pathname || '').startsWith('/') ? String(pathname) : `/${pathname}`
   return new URL(`${getOpenGolfApiBaseUrl()}/v1${cleanPath}`)
@@ -149,24 +329,36 @@ export async function openGolfApiRequest(pathname, options = {}) {
   const endpoint = url.pathname
   const config = getOpenGolfApiRateLimitConfig()
   const maxRetries = Math.max(0, Math.trunc(Number(options.maxRetries ?? config.maxRetries) || 0))
+  const waitForDailyReset = options.waitForDailyReset ?? config.waitForDailyReset
+  const adaptiveDailyPacing = options.adaptiveDailyPacing ?? config.adaptiveDailyPacing
+  const requestIntervalMs = Math.max(0, Math.trunc(Number(options.requestIntervalMs ?? config.requestIntervalMs) || 0))
+  const externalSignal = options.signal || null
+  let retryAttempt = 0
+  let totalAttempt = 0
   let lastError = null
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    await waitForOpenGolfApiRequestSlot(endpoint)
+  while (true) {
+    const correlationId = normalizeText(options.correlationId) || null
+    await waitForOpenGolfApiRequestSlot(endpoint, correlationId, { signal: externalSignal, waitForDailyReset, adaptiveDailyPacing, requestIntervalMs, onRateLimitEvent: options.onRateLimitEvent })
+    if (externalSignal?.aborted) throw cancellationError(externalSignal)
 
+    totalAttempt += 1
     const startedAt = Date.now()
     const controller = new AbortController()
-    const timeout = globalThis.setTimeout(() => controller.abort(), getTimeoutMs())
+    const onExternalAbort = () => controller.abort(externalSignal?.reason)
+    externalSignal?.addEventListener?.('abort', onExternalAbort, { once: true })
+    const timeout = globalThis.setTimeout(() => controller.abort(new Error('OpenGolfAPI request timeout')), getTimeoutMs())
     let statusCode = null
     let ok = false
     let retryAfterHeader = ''
     let retryDelayMs = null
+    let dailyLimitWait = false
 
-    logApi('opengolfapi_request_started', { apiType: 'opengolfapi', endpoint, method: 'GET', attempt: attempt + 1, maxAttempts: maxRetries + 1 })
+    logApi('opengolfapi_request_started', { correlationId, apiType: 'opengolfapi', endpoint, method: 'GET', attempt: totalAttempt, retryAttempt, maxRetries, waitForDailyReset, adaptiveDailyPacing, requestIntervalMs })
     try {
       const response = await fetch(url, {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: getOpenGolfApiRequestHeaders(),
         signal: controller.signal,
       })
       statusCode = response.status
@@ -181,42 +373,79 @@ export async function openGolfApiRequest(pathname, options = {}) {
           payload = { message: text }
         }
       }
+      const rateLimit = captureOpenGolfApiRateLimit(response, payload, correlationId, endpoint)
 
       if (!response.ok) {
         const error = new Error(normalizeText(payload?.message || payload?.error || `OpenGolfAPI request failed with status ${response.status}`))
         error.statusCode = response.status
         error.retryAfterMs = parseOpenGolfApiRetryAfterMs(retryAfterHeader)
         error.retryable = isOpenGolfApiRetriableStatus(response.status)
+        error.rateLimitLimit = rateLimit.limit
+        error.rateLimitRemaining = rateLimit.remaining
+        error.rateLimitResetAt = rateLimit.resetAt
+        error.rateLimitResetAtMs = parseOpenGolfApiRateLimitResetMs(rateLimit.resetAt || payload?.resetAt || payload?.reset_at)
         throw error
       }
 
       return payload ?? {}
     } catch (error) {
-      const retryable = Boolean(error?.retryable || isOpenGolfApiRetriableStatus(error?.statusCode || statusCode) || (!statusCode && isRetryableNetworkError(error)))
-      if (retryable && attempt < maxRetries) {
-        retryDelayMs = getOpenGolfApiRetryDelayMs({ statusCode: error?.statusCode || statusCode, attempt, retryAfterHeader })
-        lastError = error
-        logApi('opengolfapi_request_retry_scheduled', {
+      if (externalSignal?.aborted) throw cancellationError(externalSignal)
+      lastError = error
+      const dailyLimit = isDailyRateLimitError(error)
+      if (dailyLimit && waitForDailyReset) {
+        const resetAtMs = error?.rateLimitResetAtMs || openGolfApiRateLimitState.resetAtMs || nextUtcDayMs()
+        openGolfApiRateLimitState = {
+          ...openGolfApiRateLimitState,
+          remaining: 0,
+          resetAtMs,
+          resetAt: new Date(resetAtMs).toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        dailyLimitWait = true
+        retryAttempt = 0
+        const dailyLimitDetails = {
+          correlationId,
           apiType: 'opengolfapi',
           endpoint,
           statusCode: error?.statusCode || statusCode,
-          attempt: attempt + 1,
-          nextAttempt: attempt + 2,
-          maxAttempts: maxRetries + 1,
-          retryDelayMs,
+          limit: error?.rateLimitLimit ?? openGolfApiRateLimitState.limit,
+          remaining: 0,
+          resetAt: openGolfApiRateLimitState.resetAt,
           message: normalizeText(error?.message),
-        })
+          action: 'pause_until_utc_reset_then_retry',
+        }
+        logApi('opengolfapi_daily_limit_reached', dailyLimitDetails)
+        if (typeof options.onRateLimitEvent === 'function') options.onRateLimitEvent('opengolfapi_daily_limit_reached', dailyLimitDetails)
       } else {
-        throw error
+        const retryable = Boolean(error?.retryable || isOpenGolfApiRetriableStatus(error?.statusCode || statusCode) || (!statusCode && isRetryableNetworkError(error)))
+        if (retryable && retryAttempt < maxRetries) {
+          retryDelayMs = getOpenGolfApiRetryDelayMs({ statusCode: error?.statusCode || statusCode, attempt: retryAttempt, retryAfterHeader })
+          retryAttempt += 1
+          logApi('opengolfapi_request_retry_scheduled', {
+            correlationId,
+            apiType: 'opengolfapi',
+            endpoint,
+            statusCode: error?.statusCode || statusCode,
+            attempt: totalAttempt,
+            retryAttempt,
+            maxRetries,
+            retryDelayMs,
+            message: normalizeText(error?.message),
+          })
+        } else {
+          throw error
+        }
       }
     } finally {
       globalThis.clearTimeout(timeout)
+      externalSignal?.removeEventListener?.('abort', onExternalAbort)
       const durationMs = Date.now() - startedAt
-      await recordExternalApiCall({ apiType: 'opengolfapi', endpoint, method: 'GET', statusCode, ok, durationMs })
-      logApi('opengolfapi_request_completed', { apiType: 'opengolfapi', endpoint, statusCode, ok, durationMs, attempt: attempt + 1 })
+      await recordExternalApiCall({ apiType: 'opengolfapi', endpoint, method: 'GET', statusCode, ok, durationMs, correlationId })
+      logApi('opengolfapi_request_completed', { correlationId, apiType: 'opengolfapi', endpoint, statusCode, ok, durationMs, attempt: totalAttempt })
     }
 
-    if (retryDelayMs != null) await sleep(retryDelayMs)
+    if (dailyLimitWait) continue
+    if (retryDelayMs != null) await sleep(retryDelayMs, externalSignal)
   }
 
   throw lastError || new Error('OpenGolfAPI request failed after retry attempts')
@@ -242,33 +471,40 @@ export function extractOpenGolfApiCourseList(payload) {
 
 export function extractOpenGolfApiCoursePage(payload) {
   const courses = extractOpenGolfApiCourseList(payload)
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { courses, total: null }
-  const total = toInteger(payload.total ?? payload.count ?? payload.total_count ?? payload.totalCount ?? payload.meta?.total ?? payload.pagination?.total)
-  return { courses, total: total && total >= 0 ? total : null }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { courses, total: null, returnedCount: courses.length }
+  // OpenGolfAPI's state/search `count` field is the number returned, not the total
+  // number available. Only explicit total-style fields are treated as a total.
+  const total = toInteger(payload.total ?? payload.total_count ?? payload.totalCount ?? payload.meta?.total ?? payload.pagination?.total)
+  const returnedCount = toInteger(payload.count ?? payload.returned_count ?? payload.returnedCount)
+  return {
+    courses,
+    total: total != null && total >= 0 ? total : null,
+    returnedCount: returnedCount != null && returnedCount >= 0 ? returnedCount : courses.length,
+  }
 }
 
-export function buildOpenGolfApiStateCoursesPath(state, { limit = null, offset = null } = {}) {
+export function buildOpenGolfApiStateCoursesPath(state, { limit = null } = {}) {
   const stateCode = normalizeStateCode(state)
   if (!stateCode) throw new Error('OpenGolfAPI state code is required')
-  return buildPathWithQuery(`/courses/state/${encodeURIComponent(stateCode)}`, { limit, offset })
+  return buildPathWithQuery(`/courses/state/${encodeURIComponent(stateCode)}`, { limit })
 }
 
-export async function fetchOpenGolfApiStateCoursePage(state, { limit = null, offset = 0 } = {}) {
+export async function fetchOpenGolfApiStateCoursePage(state, { limit = null, correlationId = null, signal = null, waitForDailyReset = undefined, adaptiveDailyPacing = undefined, requestIntervalMs = undefined, onRateLimitEvent = null } = {}) {
   const stateCode = normalizeStateCode(state)
   if (!stateCode) return { courses: [], total: null, limit: null, offset: 0 }
-  const pageLimit = Math.max(1, Math.trunc(Number(limit || getOpenGolfApiStateImportConfig().pageLimit) || DEFAULT_STATE_PAGE_LIMIT))
-  const pageOffset = Math.max(0, Math.trunc(Number(offset) || 0))
-  const payload = await openGolfApiRequest(buildOpenGolfApiStateCoursesPath(stateCode, { limit: pageLimit, offset: pageOffset }))
+  const pageLimit = Math.min(500, Math.max(1, Math.trunc(Number(limit || getOpenGolfApiStateImportConfig().pageLimit) || DEFAULT_STATE_PAGE_LIMIT)))
+  const payload = await openGolfApiRequest(buildOpenGolfApiStateCoursesPath(stateCode, { limit: pageLimit }), { correlationId, signal, waitForDailyReset, adaptiveDailyPacing, requestIntervalMs, onRateLimitEvent })
   const page = extractOpenGolfApiCoursePage(payload)
   logApi('opengolfapi_state_course_page_loaded', {
+    correlationId,
     apiType: 'opengolfapi',
     state: stateCode,
     limit: pageLimit,
-    offset: pageOffset,
     pageCount: page.courses.length,
     total: page.total,
+    returnedCount: page.returnedCount,
   })
-  return { ...page, limit: pageLimit, offset: pageOffset }
+  return { ...page, limit: pageLimit, offset: 0 }
 }
 
 function courseListDedupKey(record) {
@@ -279,40 +515,135 @@ function courseListDedupKey(record) {
   ].map(normalizeText).join('|')).toLowerCase()
 }
 
-export async function fetchOpenGolfApiStateCourses(state, { pageLimit = null, maxPages = null } = {}) {
+export function extractOpenGolfApiBulkCourseList(payload) {
+  if (!payload || typeof payload !== 'object') return []
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload.features)) {
+    return payload.features.map((feature) => {
+      const properties = feature?.properties && typeof feature.properties === 'object' ? feature.properties : {}
+      const coordinates = feature?.geometry?.type === 'Point' && Array.isArray(feature.geometry.coordinates)
+        ? feature.geometry.coordinates
+        : []
+      return {
+        ...properties,
+        id: firstPresent(properties, ['id', 'course_id', 'courseId', 'uuid']) || feature?.id || null,
+        longitude: firstPresent(properties, ['longitude', 'lng', 'lon']) ?? coordinates[0] ?? null,
+        latitude: firstPresent(properties, ['latitude', 'lat']) ?? coordinates[1] ?? null,
+      }
+    })
+  }
+  return extractOpenGolfApiCourseList(payload)
+}
+
+async function loadOpenGolfApiBulkDataset(correlationId = null) {
+  const datasetUrl = getOpenGolfApiBulkDatasetUrl()
+  const startedAt = Date.now()
+  let statusCode = null
+  let ok = false
+  try {
+    logApi('opengolfapi_bulk_dataset_request_started', { correlationId, apiType: 'opengolfapi', endpoint: datasetUrl })
+    const response = await fetch(datasetUrl, { method: 'GET', headers: { Accept: 'application/gzip, application/geo+json, application/json' } })
+    statusCode = response.status
+    ok = response.ok
+    if (!response.ok) {
+      const error = new Error(`OpenGolfAPI bulk dataset request failed with status ${response.status}`)
+      error.statusCode = response.status
+      throw error
+    }
+    const bytes = Buffer.from(await response.arrayBuffer())
+    const body = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes
+    const payload = JSON.parse(body.toString('utf8'))
+    const courses = extractOpenGolfApiBulkCourseList(payload)
+    logApi('opengolfapi_bulk_dataset_loaded', { correlationId, apiType: 'opengolfapi', endpoint: datasetUrl, courseCount: courses.length })
+    return courses
+  } finally {
+    const durationMs = Date.now() - startedAt
+    await recordExternalApiCall({ apiType: 'opengolfapi', endpoint: '/bulk/opengolfapi-us.geojson.gz', method: 'GET', statusCode, ok, durationMs, correlationId })
+    logApi('opengolfapi_bulk_dataset_request_completed', { correlationId, apiType: 'opengolfapi', endpoint: datasetUrl, statusCode, ok, durationMs })
+  }
+}
+
+export async function fetchOpenGolfApiBulkCourseCatalog({ forceRefresh = false, correlationId = null } = {}) {
+  if (forceRefresh || !openGolfApiBulkDatasetPromise) {
+    openGolfApiBulkDatasetPromise = loadOpenGolfApiBulkDataset(correlationId).catch((error) => {
+      openGolfApiBulkDatasetPromise = null
+      throw error
+    })
+  }
+  return openGolfApiBulkDatasetPromise
+}
+
+export function resetOpenGolfApiBulkDatasetCache() {
+  openGolfApiBulkDatasetPromise = null
+}
+
+function recordStateCode(record) {
+  return normalizeStateCode(firstPresent(record, ['state', 'state_code', 'stateCode']) || firstNested(record, [['location', 'state'], ['address', 'state']]))
+}
+
+function mergeCourseLists(primary, supplemental) {
+  const merged = []
+  const seen = new Set()
+  for (const course of [...primary, ...supplemental]) {
+    const key = courseListDedupKey(course)
+    if (key && seen.has(key)) continue
+    if (key) seen.add(key)
+    merged.push(course)
+  }
+  return merged
+}
+
+export async function fetchOpenGolfApiStateCourses(state, { pageLimit = null, useBulkFallback = true, correlationId = null, signal = null, waitForDailyReset = undefined, adaptiveDailyPacing = undefined, requestIntervalMs = undefined, onRateLimitEvent = null } = {}) {
   const stateCode = normalizeStateCode(state)
   if (!stateCode) return []
   const config = getOpenGolfApiStateImportConfig()
-  const effectiveLimit = Math.max(1, Math.trunc(Number(pageLimit || config.pageLimit) || DEFAULT_STATE_PAGE_LIMIT))
-  const effectiveMaxPages = Math.max(1, Math.trunc(Number(maxPages || config.maxPages) || DEFAULT_MAX_STATE_PAGES))
-  const records = []
-  const seen = new Set()
-  let expectedTotal = null
+  const effectiveLimit = Math.min(500, Math.max(1, Math.trunc(Number(pageLimit || config.pageLimit) || DEFAULT_STATE_PAGE_LIMIT)))
 
-  for (let pageIndex = 0; pageIndex < effectiveMaxPages; pageIndex += 1) {
-    const offset = pageIndex * effectiveLimit
-    const page = await fetchOpenGolfApiStateCoursePage(stateCode, { limit: effectiveLimit, offset })
-    if (expectedTotal == null && page.total != null) expectedTotal = page.total
+  // The current official /courses/state/:code implementation has a hard limit (max 500)
+  // and no offset/cursor support. Always query it, then merge the official bulk dataset
+  // when enabled so states with more rows than the endpoint cap are complete.
+  const page = await fetchOpenGolfApiStateCoursePage(stateCode, { limit: effectiveLimit, correlationId, signal, waitForDailyReset, adaptiveDailyPacing, requestIntervalMs, onRateLimitEvent })
+  let records = mergeCourseLists([], page.courses)
+  let bulkCount = null
+  let bulkAdded = 0
+  let bulkFallbackUsed = false
 
-    for (const course of page.courses) {
-      const key = courseListDedupKey(course)
-      if (key && seen.has(key)) continue
-      if (key) seen.add(key)
-      records.push(course)
+  if (useBulkFallback) {
+    try {
+      const bulkCatalog = await fetchOpenGolfApiBulkCourseCatalog({ correlationId })
+      const bulkStateRecords = bulkCatalog.filter((record) => recordStateCode(record) === stateCode)
+      bulkCount = bulkStateRecords.length
+      const before = records.length
+      records = mergeCourseLists(records, bulkStateRecords)
+      bulkAdded = Math.max(0, records.length - before)
+      bulkFallbackUsed = true
+    } catch (error) {
+      // The state endpoint exposes no offset/cursor. Without the official bulk catalog we
+      // cannot prove the state is complete, so fail this state instead of silently importing
+      // only the capped endpoint response.
+      if (!error.code) error.code = 'OPENGOLFAPI_STATE_COMPLETENESS_UNAVAILABLE'
+      logApi('opengolfapi_state_bulk_completeness_failed', {
+        correlationId,
+        apiType: 'opengolfapi',
+        state: stateCode,
+        endpointCount: page.courses.length,
+        message: normalizeText(error?.message),
+      })
+      throw error
     }
-
-    if (page.courses.length === 0) break
-    if (expectedTotal != null && offset + page.courses.length >= expectedTotal) break
-    if (expectedTotal == null && page.courses.length < effectiveLimit) break
   }
 
   logApi('opengolfapi_state_course_pages_completed', {
+    correlationId,
     apiType: 'opengolfapi',
     state: stateCode,
     pageLimit: effectiveLimit,
+    endpointCount: page.courses.length,
+    bulkCount,
+    bulkAdded,
+    bulkFallbackUsed,
     discovered: records.length,
-    expectedTotal,
-    hitMaxPages: expectedTotal != null ? records.length < expectedTotal : records.length >= effectiveLimit * effectiveMaxPages,
+    endpointHasNoOffsetPagination: true,
   })
   return records
 }
@@ -335,16 +666,16 @@ export function buildOpenGolfApiCourseTeesPath(courseId) {
   return `/courses/${encodeURIComponent(id)}/tees`
 }
 
-export async function fetchOpenGolfApiCourseDetail(courseId) {
-  return openGolfApiRequest(buildOpenGolfApiCourseDetailPath(courseId))
+export async function fetchOpenGolfApiCourseDetail(courseId, options = {}) {
+  return openGolfApiRequest(buildOpenGolfApiCourseDetailPath(courseId), options)
 }
 
-export async function fetchOpenGolfApiCourseHoles(courseId) {
-  return openGolfApiRequest(buildOpenGolfApiCourseHolesPath(courseId))
+export async function fetchOpenGolfApiCourseHoles(courseId, options = {}) {
+  return openGolfApiRequest(buildOpenGolfApiCourseHolesPath(courseId), options)
 }
 
-export async function fetchOpenGolfApiCourseTees(courseId) {
-  return openGolfApiRequest(buildOpenGolfApiCourseTeesPath(courseId))
+export async function fetchOpenGolfApiCourseTees(courseId, options = {}) {
+  return openGolfApiRequest(buildOpenGolfApiCourseTeesPath(courseId), options)
 }
 
 function firstNested(record, paths) {

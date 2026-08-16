@@ -37,7 +37,6 @@ export default function ForgotPassword() {
         <PageHero
           eyebrow="Reset password"
           title="Request a password reset"
-          subtitle="Enter your email and use the generated reset link in local development."
         />
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>

@@ -1325,6 +1325,8 @@ export async function searchGolfCourseTournaments(db, filters = {}, {
             gct.tournament_date, gct.tournament_website, gct.source_url, gct.first_seen_at, gct.last_seen_at,
             COALESCE(NULLIF(TRIM(gct.source_type), ''), '${EXTERNAL_TOURNAMENT_SOURCE}') AS source_type,
             gct.golfhomiez_tournament_id,
+            gcpp_search.slug AS golf_course_public_page_slug,
+            COALESCE(NULLIF(TRIM(gc_search.website), ''), NULLIF(TRIM(gct.source_url), '')) AS golf_course_website,
             COALESCE(NULLIF(TRIM(t.tournament_identifier), ''), gct.golfhomiez_tournament_id) AS golfhomiez_tournament_identifier,
             CASE
               WHEN gct.source_type = '${GOLF_HOMIEZ_TOURNAMENT_SOURCE}'
@@ -1339,6 +1341,13 @@ export async function searchGolfCourseTournaments(db, filters = {}, {
             END AS is_registered
        FROM golf_course_tournaments gct
        LEFT JOIN tournaments t ON BINARY t.id = BINARY gct.golfhomiez_tournament_id
+       LEFT JOIN golf_course_public_pages gcpp_search
+         ON gcpp_search.is_published = 1
+        AND gct.golf_course_id IS NOT NULL
+        AND BINARY gcpp_search.golf_course_id = BINARY gct.golf_course_id
+       LEFT JOIN golf_courses gc_search
+         ON gct.golf_course_id IS NOT NULL
+        AND BINARY gc_search.id = BINARY gct.golf_course_id
       WHERE ${where.join('\n        AND ')}
       ORDER BY CASE WHEN gct.source_type = '${GOLF_HOMIEZ_TOURNAMENT_SOURCE}' THEN 0 ELSE 1 END ASC,
                gct.tournament_date ASC, gct.state_code ASC, gct.golf_course_name ASC`,
@@ -1376,6 +1385,8 @@ export async function searchGolfCourseTournaments(db, filters = {}, {
       zipCode: row.zip_code || null,
       tournamentDate: typeof row.tournament_date === 'string' ? row.tournament_date.slice(0, 10) : isoDate(new Date(row.tournament_date)),
       tournamentWebsite: row.tournament_website || row.source_url || null,
+      golfCoursePagePath: row.golf_course_public_page_slug ? `/${row.golf_course_public_page_slug}` : null,
+      golfCourseWebsiteUrl: row.golf_course_website || null,
       sourceUrl: row.source_url || null,
       sourceType: row.source_type || EXTERNAL_TOURNAMENT_SOURCE,
       isGolfHomiezTournament: row.source_type === GOLF_HOMIEZ_TOURNAMENT_SOURCE,

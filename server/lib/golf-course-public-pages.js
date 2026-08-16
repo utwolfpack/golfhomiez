@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import dns from 'node:dns/promises'
 import net from 'node:net'
@@ -279,14 +280,25 @@ async function nextAvailableSlug(db, baseSlug) {
   return `${baseSlug}${suffix}`
 }
 
+function parseTemplateData(value) {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try { return JSON.parse(String(value)) } catch { return null }
+}
+
 function mapTournament(row) {
   const identifier = row.tournament_identifier || row.id
+  const templateData = parseTemplateData(row.template_data)
+  const startType = cleanText(row.start_type || templateData?.startType, 32)
+  const startTime = cleanText(row.start_time || templateData?.teeTime, 32)
   return {
     id: row.id,
     tournamentIdentifier: row.tournament_identifier || null,
     name: row.name || row.title || `Tournament ${row.id}`,
     startDate: row.start_date || null,
     status: row.status || null,
+    startType: startType || null,
+    startTime: startTime || null,
     portalPath: `/tournaments/${encodeURIComponent(identifier)}`,
   }
 }
@@ -322,18 +334,94 @@ function mapPage(row, { baseUrl = '', tournaments = [] } = {}) {
   }
 }
 
-async function listPublicTournaments(db, hostAccountId) {
+async function columnsForTable(db, tableName) {
+  try {
+    const [rows] = await db.execute(
+      `SELECT COLUMN_NAME
+         FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?`,
+      [tableName],
+    )
+    return new Set((rows || []).map((row) => String(row.COLUMN_NAME || row.column_name || '').toLowerCase()).filter(Boolean))
+  } catch (error) {
+    logWarn('golf_course_public_page_schema_inspection_failed', { tableName, error })
+    return new Set()
+  }
+}
+
+async function listPublicTournamentsForCoursePage(db, { hostAccountId = '', golfCourseId = '', golfCourseName = '' } = {}) {
+  const tournamentColumns = await columnsForTable(db, 'tournaments')
+  if (!tournamentColumns.has('id')) return []
+
+  const searchColumns = await columnsForTable(db, 'golf_course_tournaments')
+  const predicates = []
+  const params = []
+  const normalizedGolfCourseId = cleanText(golfCourseId, 64)
+  const normalizedHostAccountId = cleanText(hostAccountId, 191)
+  const normalizedGolfCourseName = cleanText(golfCourseName, 191)
+
+  if (normalizedGolfCourseId && tournamentColumns.has('golf_course_id')) {
+    predicates.push('CONVERT(t.golf_course_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_general_ci')
+    params.push(normalizedGolfCourseId)
+  }
+  if (normalizedHostAccountId && tournamentColumns.has('host_account_id')) {
+    predicates.push('CONVERT(t.host_account_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_general_ci')
+    params.push(normalizedHostAccountId)
+  }
+  if (normalizedGolfCourseName && tournamentColumns.has('golf_course_name')) {
+    predicates.push('LOWER(TRIM(CONVERT(t.golf_course_name USING utf8mb4))) COLLATE utf8mb4_general_ci = LOWER(TRIM(CONVERT(? USING utf8mb4))) COLLATE utf8mb4_general_ci')
+    params.push(normalizedGolfCourseName)
+  }
+  if (
+    normalizedGolfCourseId &&
+    searchColumns.has('golf_course_id') &&
+    searchColumns.has('golfhomiez_tournament_id')
+  ) {
+    const activePredicate = searchColumns.has('active') ? 'AND COALESCE(gct.active, 1) = 1' : ''
+    predicates.push(
+      `EXISTS (
+         SELECT 1
+           FROM golf_course_tournaments gct
+          WHERE CONVERT(gct.golfhomiez_tournament_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_general_ci
+            AND CONVERT(gct.golf_course_id USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_general_ci
+            ${activePredicate}
+       )`,
+    )
+    params.push(normalizedGolfCourseId)
+  }
+
+  if (!predicates.length) return []
+
+  const visibilityPredicates = []
+  if (tournamentColumns.has('status')) visibilityPredicates.push("LOWER(TRIM(COALESCE(t.status, ''))) IN ('published', 'completed')")
+  if (tournamentColumns.has('is_public')) visibilityPredicates.push('COALESCE(t.is_public, 0) = 1')
+  if (tournamentColumns.has('archived_at')) visibilityPredicates.push('t.archived_at IS NULL')
+
+  const startDateSelect = tournamentColumns.has('start_date')
+    ? 't.start_date'
+    : tournamentColumns.has('starts_at')
+      ? 'DATE(t.starts_at) AS start_date'
+      : 'NULL AS start_date'
+  const titleSelect = tournamentColumns.has('title') ? 't.title' : 'NULL AS title'
+  const nameSelect = tournamentColumns.has('name') ? 't.name' : tournamentColumns.has('title') ? 't.title AS name' : 'NULL AS name'
+  const identifierSelect = tournamentColumns.has('tournament_identifier') ? 't.tournament_identifier' : 'NULL AS tournament_identifier'
+  const statusSelect = tournamentColumns.has('status') ? 't.status' : "'published' AS status"
+  const templateDataSelect = tournamentColumns.has('template_data') ? 't.template_data' : 'NULL AS template_data'
+  const startTypeSelect = tournamentColumns.has('start_type') ? 't.start_type' : 'NULL AS start_type'
+  const startTimeSelect = tournamentColumns.has('start_time') ? 't.start_time' : 'NULL AS start_time'
+  const orderDateColumn = tournamentColumns.has('start_date') ? 't.start_date' : tournamentColumns.has('starts_at') ? 't.starts_at' : 'NULL'
+  const createdColumn = tournamentColumns.has('created_at') ? 't.created_at' : 't.id'
+
   const [rows] = await db.execute(
-    `SELECT id, tournament_identifier, name, title, start_date, status
-       FROM tournaments
-      WHERE host_account_id = ?
-        AND (is_public = 1 OR status = 'published')
-        AND archived_at IS NULL
-        AND COALESCE(status, '') NOT IN ('cancelled', 'deleted')
-      ORDER BY CASE WHEN start_date IS NULL THEN 1 ELSE 0 END,
-               start_date ASC,
-               created_at DESC`,
-    [hostAccountId],
+    `SELECT t.id, ${identifierSelect}, ${nameSelect}, ${titleSelect}, ${startDateSelect}, ${statusSelect}, ${templateDataSelect}, ${startTypeSelect}, ${startTimeSelect}
+       FROM tournaments t
+      WHERE (${predicates.join(' OR ')})
+        ${visibilityPredicates.length ? `AND ${visibilityPredicates.join(' AND ')}` : ''}
+      ORDER BY CASE WHEN ${orderDateColumn} IS NULL THEN 1 ELSE 0 END,
+               ${orderDateColumn} DESC,
+               ${createdColumn} DESC`,
+    params,
   )
   return rows.map(mapTournament)
 }
@@ -432,7 +520,7 @@ export async function getGolfCoursePublicPageBySlug(db, slug, options = {}) {
   if (!normalizedSlug) return null
   const [rows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE slug = ? AND is_published = 1 LIMIT 1', [normalizedSlug])
   if (!rows[0]) return null
-  const tournaments = await listPublicTournaments(db, rows[0].host_account_id)
+  const tournaments = await listPublicTournamentsForCoursePage(db, { hostAccountId: rows[0].host_account_id, golfCourseId: rows[0].golf_course_id, golfCourseName: rows[0].golf_course_name })
   return mapPage(rows[0], { baseUrl: options.baseUrl, tournaments })
 }
 

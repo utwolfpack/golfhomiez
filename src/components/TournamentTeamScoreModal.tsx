@@ -16,6 +16,7 @@ import type { HoleScoreDetail } from '../types'
 type Props = {
   tournament: UserRegisteredTournament
   onClose: () => void
+  onScoreUpdated?: (totalScore: number | null) => void
 }
 
 type ViewMode = 'scorecard' | 'leaderboard' | 'summary'
@@ -149,7 +150,7 @@ function tournamentDate(value?: string | null) {
   return value ? formatFriendlyDate(value) : 'Date not set'
 }
 
-export default function TournamentTeamScoreModal({ tournament, onClose }: Props) {
+export default function TournamentTeamScoreModal({ tournament, onClose, onScoreUpdated }: Props) {
   const [context, setContext] = useState<TournamentTeamScoreContext | null>(null)
   const [holes, setHoles] = useState<HoleScoreDetail[]>([])
   const [view, setView] = useState<ViewMode>('scorecard')
@@ -252,11 +253,16 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
       const result = await updateTournamentTeamScore(tournament.id, { holes: nextHoles, teeColor })
       setHoles(nextHoles)
       applyContext(result, false)
+      const refreshedCurrentTeam = result.teams.find((team) => team.teamKey === result.currentTeamKey) || null
+      const refreshedTotalScore = refreshedCurrentTeam?.totalScore != null && Number.isFinite(Number(refreshedCurrentTeam.totalScore))
+        ? Number(refreshedCurrentTeam.totalScore)
+        : null
+      onScoreUpdated?.(refreshedTotalScore)
       setSaveMessage(providedCount === 18 ? 'Team score saved. All 18 holes are entered.' : `Team score saved. ${providedCount} of 18 holes entered.`)
       logFrontendEvent({
         category: 'tournament.teamScore',
         message: 'score_persist_succeeded',
-        data: { tournamentId: tournament.id, teamKey: currentTeam.teamKey, source, providedHoleCount: providedCount, leaderboardTeamCount: result.teams.length },
+        data: { tournamentId: tournament.id, teamKey: currentTeam.teamKey, source, providedHoleCount: providedCount, totalScore: refreshedTotalScore, leaderboardTeamCount: result.teams.length },
       })
       return result
     } catch (err) {
@@ -268,7 +274,7 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
     } finally {
       setSaving(false)
     }
-  }, [applyContext, context, currentTeam, teeColor, tournament.id])
+  }, [applyContext, context, currentTeam, onScoreUpdated, teeColor, tournament.id])
 
   const flushPendingHole = useCallback(async (source: string) => {
     if (!pendingHoleSaveRef.current) {
@@ -428,6 +434,7 @@ export default function TournamentTeamScoreModal({ tournament, onClose }: Props)
           {view === 'summary' && selectedTeam ? (
             <div className="inboxLeaderboardBoard inboxIndividualRoundSummaryBoard">
               <div className="inboxIndividualRoundSummaryActions">
+                <strong className="inboxRoundSummarySelectedName">{selectedTeam.teamName}</strong>
                 <button type="button" className="btn btnSmall" onClick={() => { setSelectedTeamKey(null); setView('leaderboard') }}>Back to leaderboard</button>
                 {selectedTeam.canEdit && !scoringLocked ? <button type="button" className="btn btnPrimary btnSmall" onClick={editSelectedScore}>Edit my score</button> : null}
               </div>

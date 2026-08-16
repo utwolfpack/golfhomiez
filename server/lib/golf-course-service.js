@@ -32,6 +32,62 @@ function asJson(value) {
   }
 }
 
+
+async function replaceOpenGolfCourseHoles(db, courseId, holes = []) {
+  await db.execute(`DELETE FROM golf_course_holes WHERE course_id = ? AND source = 'opengolfapi'`, [courseId])
+  if (!holes.length) return 0
+
+  const rowSql = `(?, ?, 'opengolfapi', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+  const valuesSql = holes.map(() => rowSql).join(',\n         ')
+  const params = []
+  for (const hole of holes) {
+    params.push(
+      randomUUID(),
+      courseId,
+      hole.holeNumber,
+      hole.teeName || 'default',
+      hole.teeColor || 'default',
+      hole.par,
+      hole.yards,
+      hole.strokeIndex,
+      hole.teeLatitude ?? null,
+      hole.teeLongitude ?? null,
+      hole.frontLatitude ?? null,
+      hole.frontLongitude ?? null,
+      hole.centerLatitude ?? null,
+      hole.centerLongitude ?? null,
+      hole.backLatitude ?? null,
+      hole.backLongitude ?? null,
+      asJson(hole.rawPayload),
+    )
+  }
+
+  await db.execute(
+    `INSERT INTO golf_course_holes (
+       id, course_id, source, hole_number, tee_name, tee_color, par, yards, stroke_index,
+       tee_latitude, tee_longitude, front_latitude, front_longitude, center_latitude, center_longitude,
+       back_latitude, back_longitude, active, raw_payload
+     ) VALUES ${valuesSql}
+     ON DUPLICATE KEY UPDATE
+       tee_color = VALUES(tee_color),
+       par = VALUES(par),
+       yards = VALUES(yards),
+       stroke_index = VALUES(stroke_index),
+       tee_latitude = VALUES(tee_latitude),
+       tee_longitude = VALUES(tee_longitude),
+       front_latitude = VALUES(front_latitude),
+       front_longitude = VALUES(front_longitude),
+       center_latitude = VALUES(center_latitude),
+       center_longitude = VALUES(center_longitude),
+       back_latitude = VALUES(back_latitude),
+       back_longitude = VALUES(back_longitude),
+       active = 1,
+       raw_payload = VALUES(raw_payload)`,
+    params,
+  )
+  return holes.length
+}
+
 let cachedHoleEndpointSchema = null
 
 async function tableColumnExists(db, tableName, columnName) {
@@ -397,7 +453,7 @@ export async function getGolfCourseHolesForCourse({ state = '', course = '', cou
   }
 }
 
-export async function upsertOpenGolfCourse(listRecord = {}, detailPayload = {}, db = getPool()) {
+export async function upsertOpenGolfCourse(listRecord = {}, detailPayload = {}, db = getPool(), { correlationId = null, skipHoleRows = false } = {}) {
   const course = normalizeOpenGolfCoursePayload(listRecord, detailPayload)
   if (!course.name || !course.stateCode) throw new Error('OpenGolfAPI course name and state are required')
   const id = course.id || randomUUID()
@@ -464,54 +520,21 @@ export async function upsertOpenGolfCourse(listRecord = {}, detailPayload = {}, 
     ],
   )
 
-  const holes = extractOpenGolfCourseHoles(detailPayload)
-  if (holes.length > 0) await ensureOpenGolfCourseHoleEndpointSchema(db)
-  await db.execute(`DELETE FROM golf_course_holes WHERE course_id = ? AND source = 'opengolfapi'`, [id])
-  for (const hole of holes) {
-    await db.execute(
-      `INSERT INTO golf_course_holes (
-         id, course_id, source, hole_number, tee_name, tee_color, par, yards, stroke_index,
-         tee_latitude, tee_longitude, front_latitude, front_longitude, center_latitude, center_longitude, back_latitude, back_longitude,
-         active, raw_payload
-       ) VALUES (?, ?, 'opengolfapi', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-       ON DUPLICATE KEY UPDATE
-         tee_color = VALUES(tee_color),
-         par = VALUES(par),
-         yards = VALUES(yards),
-         stroke_index = VALUES(stroke_index),
-         tee_latitude = VALUES(tee_latitude),
-         tee_longitude = VALUES(tee_longitude),
-         front_latitude = VALUES(front_latitude),
-         front_longitude = VALUES(front_longitude),
-         center_latitude = VALUES(center_latitude),
-         center_longitude = VALUES(center_longitude),
-         back_latitude = VALUES(back_latitude),
-         back_longitude = VALUES(back_longitude),
-         active = 1,
-         raw_payload = VALUES(raw_payload)`,
-      [
-        randomUUID(),
-        id,
-        hole.holeNumber,
-        hole.teeName || 'default',
-        hole.teeColor || 'default',
-        hole.par,
-        hole.yards,
-        hole.strokeIndex,
-        hole.teeLatitude ?? null,
-        hole.teeLongitude ?? null,
-        hole.frontLatitude,
-        hole.frontLongitude,
-        hole.centerLatitude,
-        hole.centerLongitude,
-        hole.backLatitude,
-        hole.backLongitude,
-        asJson(hole.rawPayload),
-      ],
-    )
+  const holes = skipHoleRows ? [] : extractOpenGolfCourseHoles(detailPayload)
+  if (!skipHoleRows) {
+    if (holes.length > 0) await ensureOpenGolfCourseHoleEndpointSchema(db)
+    await replaceOpenGolfCourseHoles(db, id, holes)
   }
 
-  logApi('opengolfapi_course_upserted', { courseId: id, externalCourseId, state: course.stateCode, course: course.name, holeCount: holes.length })
+  logApi('opengolfapi_course_upserted', {
+    correlationId,
+    courseId: id,
+    externalCourseId,
+    state: course.stateCode,
+    course: course.name,
+    holeCount: holes.length,
+    skipHoleRows,
+  })
   return { id, externalCourseId, course, holeCount: holes.length }
 }
 
@@ -522,7 +545,7 @@ export function normalizeOpenGolfCourseEndpointDetails(holesPayload = {}, teesPa
   return { holes, teeSummary }
 }
 
-export async function refreshOpenGolfCourseEndpointDetails(courseRow = {}, holesPayload = {}, teesPayload = {}, db = getPool(), { dryRun = false } = {}) {
+export async function refreshOpenGolfCourseEndpointDetails(courseRow = {}, holesPayload = {}, teesPayload = {}, db = getPool(), { dryRun = false, correlationId = null } = {}) {
   const courseId = normalizeText(courseRow.id)
   const externalCourseId = normalizeText(courseRow.external_course_id || courseRow.externalCourseId || courseId)
   if (!courseId) throw new Error('OpenGolfAPI database course id is required')
@@ -545,7 +568,8 @@ export async function refreshOpenGolfCourseEndpointDetails(courseRow = {}, holes
         SET total_yardage = ?,
             course_rating = ?,
             slope_rating = ?,
-            raw_detail_payload = ?,
+            raw_holes_payload = ?,
+            raw_tees_payload = ?,
             imported_at = UTC_TIMESTAMP(),
             updated_at = UTC_TIMESTAMP()
       WHERE id = ?`,
@@ -553,60 +577,18 @@ export async function refreshOpenGolfCourseEndpointDetails(courseRow = {}, holes
       result.totalYardage,
       result.courseRating,
       result.slopeRating,
-      asJson({ holes: holesPayload, tees: teesPayload }),
+      asJson(holesPayload),
+      asJson(teesPayload),
       courseId,
     ],
   )
 
   if (holes.length > 0) {
     await ensureOpenGolfCourseHoleEndpointSchema(db)
-    await db.execute(`DELETE FROM golf_course_holes WHERE course_id = ? AND source = 'opengolfapi'`, [courseId])
-    for (const hole of holes) {
-      await db.execute(
-        `INSERT INTO golf_course_holes (
-           id, course_id, source, hole_number, tee_name, tee_color, par, yards, stroke_index,
-           tee_latitude, tee_longitude, front_latitude, front_longitude, center_latitude, center_longitude,
-           back_latitude, back_longitude, active, raw_payload
-         ) VALUES (?, ?, 'opengolfapi', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-         ON DUPLICATE KEY UPDATE
-           tee_color = VALUES(tee_color),
-           par = VALUES(par),
-           yards = VALUES(yards),
-           stroke_index = VALUES(stroke_index),
-           tee_latitude = VALUES(tee_latitude),
-           tee_longitude = VALUES(tee_longitude),
-           front_latitude = VALUES(front_latitude),
-           front_longitude = VALUES(front_longitude),
-           center_latitude = VALUES(center_latitude),
-           center_longitude = VALUES(center_longitude),
-           back_latitude = VALUES(back_latitude),
-           back_longitude = VALUES(back_longitude),
-           active = 1,
-           raw_payload = VALUES(raw_payload)`,
-        [
-          randomUUID(),
-          courseId,
-          hole.holeNumber,
-          hole.teeName || 'default',
-          hole.teeColor || 'default',
-          hole.par,
-          hole.yards,
-          hole.strokeIndex,
-          hole.teeLatitude,
-          hole.teeLongitude,
-          hole.frontLatitude,
-          hole.frontLongitude,
-          hole.centerLatitude,
-          hole.centerLongitude,
-          hole.backLatitude,
-          hole.backLongitude,
-          asJson(hole.rawPayload),
-        ],
-      )
-    }
+    await replaceOpenGolfCourseHoles(db, courseId, holes)
   }
 
-  logApi('opengolfapi_course_endpoint_details_refreshed', result)
+  logApi('opengolfapi_course_endpoint_details_refreshed', { correlationId, ...result })
   return result
 }
 

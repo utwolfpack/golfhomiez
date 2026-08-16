@@ -4,6 +4,7 @@ import PageHero from '../components/PageHero'
 import { fetchGolfCoursePublicPage, type GolfCoursePublicPage as GolfCoursePublicPageRecord } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
 const defaultGolfCourseBanner = '/DefaultGolfBanner.jpg'
+const TOURNAMENTS_PER_PAGE = 15
 
 function formatTournamentDate(value?: string | null) {
   if (!value) return 'Date to be announced'
@@ -17,11 +18,43 @@ function formatTournamentDate(value?: string | null) {
   }).format(date)
 }
 
+function tournamentYear(value?: string | null) {
+  if (!value) return null
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : date.getFullYear()
+}
+
+function formatTournamentStatus(value?: string | null) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return 'Listed'
+  return normalized.split(/[_\s-]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+}
+
+function formatTournamentStartType(value?: string | null) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'shotgun') return 'Shotgun start'
+  if (normalized === 'tee-times') return 'Tee times'
+  return normalized ? formatTournamentStatus(normalized) : 'Start details posted'
+}
+
+function formatTournamentStartTime(value?: string | null) {
+  if (!value) return ''
+  const [rawHour, rawMinute] = String(value).split(':')
+  const hour = Number(rawHour)
+  const minute = Number(rawMinute)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return String(value)
+  const date = new Date(2000, 0, 1, hour, minute)
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date)
+}
+
 export default function GolfCoursePage() {
   const { golfCourseSlug = '' } = useParams()
   const [page, setPage] = useState<GolfCoursePublicPageRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedTournamentYear, setSelectedTournamentYear] = useState(() => String(new Date().getFullYear()))
+  const [selectedTournamentPage, setSelectedTournamentPage] = useState(1)
 
   useEffect(() => {
     let active = true
@@ -58,6 +91,38 @@ export default function GolfCoursePage() {
     [page?.city, page?.stateCode].filter(Boolean).join(', '),
     page?.postalCode,
   ].filter(Boolean).join(' '), [page])
+
+  const currentYear = new Date().getFullYear()
+  const visiblePublicTournaments = useMemo(() => (page?.tournaments || []).filter((tournament) => ['published', 'completed'].includes(String(tournament.status || '').toLowerCase())), [page?.tournaments])
+  const tournamentYears = useMemo(() => {
+    const years = new Set<number>([currentYear])
+    ;visiblePublicTournaments.forEach((tournament) => {
+      const year = tournamentYear(tournament.startDate)
+      if (year) years.add(year)
+    })
+    return Array.from(years).sort((a, b) => b - a)
+  }, [currentYear, visiblePublicTournaments])
+
+  const selectedYearNumber = Number(selectedTournamentYear) || currentYear
+  const filteredTournaments = useMemo(() => visiblePublicTournaments
+    .filter((tournament) => tournamentYear(tournament.startDate) === selectedYearNumber)
+    .sort((left, right) => String(right.startDate || '').localeCompare(String(left.startDate || ''))), [visiblePublicTournaments, selectedYearNumber])
+  const pageCount = Math.max(1, Math.ceil(filteredTournaments.length / TOURNAMENTS_PER_PAGE))
+  const safeTournamentPage = Math.min(Math.max(selectedTournamentPage, 1), pageCount)
+  const visibleTournaments = filteredTournaments.slice((safeTournamentPage - 1) * TOURNAMENTS_PER_PAGE, safeTournamentPage * TOURNAMENTS_PER_PAGE)
+
+  useEffect(() => {
+    setSelectedTournamentYear(String(new Date().getFullYear()))
+    setSelectedTournamentPage(1)
+  }, [golfCourseSlug])
+
+  useEffect(() => {
+    setSelectedTournamentPage(1)
+  }, [selectedTournamentYear])
+
+  useEffect(() => {
+    if (selectedTournamentPage !== safeTournamentPage) setSelectedTournamentPage(safeTournamentPage)
+  }, [safeTournamentPage, selectedTournamentPage])
 
   if (loading) {
     return <div className="container pageStack"><div className="card pageCardShell">Loading golf-course page…</div></div>
@@ -119,17 +184,51 @@ export default function GolfCoursePage() {
           </div>
 
           {page.tournaments.length ? (
-            <div className="golfCourseTournamentList">
-              {page.tournaments.map((tournament) => (
-                <Link className="golfCourseTournamentRow" to={tournament.portalPath} key={tournament.id}>
-                  <div>
-                    <strong>{tournament.name}</strong>
-                    <div className="small">{formatTournamentDate(tournament.startDate)}</div>
-                  </div>
-                  <span aria-hidden="true">View tournament →</span>
-                </Link>
-              ))}
-            </div>
+            <>
+              <div className="golfCourseTournamentControls" aria-label="Tournament year filters">
+                <div className="golfCourseTournamentYearTabs">
+                  {tournamentYears.map((year) => (
+                    <button
+                      type="button"
+                      key={year}
+                      className={`golfCourseTournamentYearTab ${selectedYearNumber === year ? 'golfCourseTournamentYearTab--active' : ''}`}
+                      onClick={() => setSelectedTournamentYear(String(year))}
+                    >
+                      {year}
+                    </button>
+                  ))}
+                </div>
+                <div className="small">{filteredTournaments.length} tournament{filteredTournaments.length === 1 ? '' : 's'} in {selectedYearNumber}</div>
+              </div>
+              {visibleTournaments.length ? (
+                <div className="golfCourseTournamentList">
+                  {visibleTournaments.map((tournament) => {
+                    const startLabel = [formatTournamentStartType(tournament.startType), formatTournamentStartTime(tournament.startTime)].filter(Boolean).join(' • ')
+                    return (
+                      <Link className="golfCourseTournamentRow" to={tournament.portalPath} key={tournament.id}>
+                        <div>
+                          <strong>{tournament.name}</strong>
+                          <div className="golfCourseTournamentRowMeta">
+                            <span>{formatTournamentDate(tournament.startDate)}</span>
+                            <span>{startLabel}</span>
+                          </div>
+                        </div>
+                        <span aria-hidden="true">View tournament →</span>
+                      </Link>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="small">No public GolfHomiez tournaments are currently listed for {selectedYearNumber}.</div>
+              )}
+              {pageCount > 1 ? (
+                <div className="golfCourseTournamentPagination" aria-label="Tournament pagination">
+                  <button type="button" className="btn btnSmall" disabled={safeTournamentPage <= 1} onClick={() => setSelectedTournamentPage((pageNumber) => Math.max(1, pageNumber - 1))}>Previous</button>
+                  <span className="small">Page {safeTournamentPage} of {pageCount}</span>
+                  <button type="button" className="btn btnSmall" disabled={safeTournamentPage >= pageCount} onClick={() => setSelectedTournamentPage((pageNumber) => Math.min(pageCount, pageNumber + 1))}>Next</button>
+                </div>
+              ) : null}
+            </>
           ) : (
             <div className="small">No public GolfHomiez tournaments are currently listed for this course.</div>
           )}

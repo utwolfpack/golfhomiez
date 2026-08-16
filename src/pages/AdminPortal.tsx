@@ -22,6 +22,7 @@ type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
 type RowRecord = Record<string, unknown>
 type DetailColumn = { key: string; label: string }
 type DetailModalState = { title: string; rows: RowRecord[]; columns: DetailColumn[] } | null
+type AdminPortalPage = 'golf' | 'tournaments' | 'api' | 'admin'
 
 function isDateKey(key?: string) {
   return Boolean(key && /(^|_)(created|updated|expires|consumed|validated|reviewed|started|completed)_?at$|createdAt|updatedAt|expiresAt|consumedAt/i.test(key))
@@ -81,33 +82,39 @@ function MetricButton({ label, value, onClick }: { label: string; value: number;
   )
 }
 
-function SummaryCards({ portal, onOpenDetails }: { portal: PortalState | null; onOpenDetails: (title: string, rows: RowRecord[], columns: DetailColumn[]) => void }) {
-  const summary = portal?.summary ?? {}
-  const items = [
-    { label: 'Users', value: summary.userCount ?? 0, rows: portal?.users ?? [], columns: userColumns },
-    { label: 'App users', value: summary.appUserCount ?? 0, rows: portal?.appUsers ?? [], columns: appUserColumns },
-    { label: 'Teams', value: summary.teamCount ?? 0, rows: portal?.teams ?? [], columns: teamColumns },
-    { label: 'Scores', value: summary.scoreCount ?? 0, rows: portal?.scores ?? [], columns: scoreColumns },
-    { label: 'Hosts', value: summary.hostCount ?? 0, rows: portal?.hosts ?? [], columns: hostColumns },
-    { label: 'Organizers', value: summary.organizerCount ?? 0, rows: portal?.organizers ?? [], columns: organizerColumns },
-    { label: 'Tournaments', value: summary.tournamentCount ?? 0, rows: portal?.tournaments ?? [], columns: tournamentColumns },
-    { label: 'Pending requests', value: summary.hostAccountRequestCount ?? 0, rows: portal?.requests ?? [], columns: requestColumns },
-  ]
-
+function MetricCard({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
   return (
-    <div className="grid grid4 adminSummaryGrid">
-      {items.map((item) => (
-        <MetricButton
-          key={item.label}
-          label={item.label}
-          value={Number(item.value || 0)}
-          onClick={() => onOpenDetails(`${item.label} metadata`, item.rows as RowRecord[], item.columns)}
-        />
-      ))}
+    <div className="card adminSummaryButton adminMetricCard" aria-label={`${label}: ${value}`}>
+      <div className="small" style={{ fontSize: 13 }}>{label}</div>
+      <div className="adminMetricValue">{value}</div>
+      {detail ? <div className="small adminMetricDetail">{detail}</div> : null}
     </div>
   )
 }
 
+function AdminPortalTabs({ activePage, onSelect }: { activePage: AdminPortalPage; onSelect: (page: AdminPortalPage) => void }) {
+  const pages: Array<{ id: AdminPortalPage; label: string }> = [
+    { id: 'golf', label: 'Golf' },
+    { id: 'tournaments', label: 'Tournaments' },
+    { id: 'api', label: 'API Usage' },
+    { id: 'admin', label: 'Admin' },
+  ]
+  return (
+    <nav className="adminPortalPageTabs" aria-label="GolfHomiez admin portal pages">
+      {pages.map((page) => (
+        <button
+          key={page.id}
+          className={`adminPortalPageTab${activePage === page.id ? ' adminPortalPageTab--active' : ''}`}
+          type="button"
+          aria-current={activePage === page.id ? 'page' : undefined}
+          onClick={() => onSelect(page.id)}
+        >
+          {page.label}
+        </button>
+      ))}
+    </nav>
+  )
+}
 
 function apiTypeLabel(apiType?: string) {
   const normalized = String(apiType || '').toLowerCase()
@@ -219,6 +226,15 @@ function ExternalApiCallsSection({
       </form>
 
       {error ? <p className="statusMessage statusError">{error}</p> : null}
+
+      <div className="adminApiMetricGrid" aria-label="API usage summary metrics">
+        <MetricCard label="Total calls" value={Number(report?.totalCalls ?? 0).toLocaleString()} />
+        <MetricCard label="Successful" value={Number(report?.successCount ?? 0).toLocaleString()} />
+        <MetricCard label="Failed" value={Number(report?.failureCount ?? 0).toLocaleString()} />
+        <MetricCard label="Success rate" value={`${Number(report?.successRatePercent ?? 0).toFixed(1)}%`} />
+        <MetricCard label="Average latency" value={report?.averageDurationMs == null ? '—' : `${Number(report.averageDurationMs).toLocaleString()} ms`} />
+        <MetricCard label="Endpoints" value={Number(report?.distinctEndpointCount ?? 0).toLocaleString()} />
+      </div>
 
       <div className="adminStatusGrid" style={{ marginTop: 12 }}>
         {apiTypes.length ? apiTypes.map((entry) => (
@@ -449,17 +465,137 @@ function TournamentSection({ portal, onOpenDetails }: { portal: PortalState | nu
   )
 }
 
+
+function GolfDashboardSection({ portal, onOpenDetails }: { portal: PortalState | null; onOpenDetails: (title: string, rows: RowRecord[], columns: DetailColumn[]) => void }) {
+  const summary = portal?.summary ?? {}
+  return (
+    <div className="adminPageContent" data-admin-page="golf">
+      <section className="adminPageIntro">
+        <h2>GolfHomiez usage</h2>
+        <p className="small">Platform usage metrics for golfers, teams, rounds, tournaments, and challenges.</p>
+      </section>
+      <div className="adminMetricGrid">
+        <MetricButton label="Users" value={Number(summary.userCount || 0)} onClick={() => onOpenDetails('User metadata', (portal?.users ?? []) as RowRecord[], userColumns)} />
+        <MetricCard label="Verified users" value={Number(summary.verifiedUserCount || 0)} />
+        <MetricButton label="Teams" value={Number(summary.teamCount || 0)} onClick={() => onOpenDetails('Team metadata', (portal?.teams ?? []) as RowRecord[], teamColumns)} />
+        <MetricButton label="Rounds / scores" value={Number(summary.scoreCount || 0)} onClick={() => onOpenDetails('Score metadata', (portal?.scores ?? []) as RowRecord[], scoreColumns)} />
+        <MetricButton label="Tournaments" value={Number(summary.tournamentCount || 0)} onClick={() => onOpenDetails('Tournament metadata', (portal?.tournaments ?? []) as RowRecord[], tournamentColumns)} />
+        <MetricButton label="Challenges" value={Number(summary.challengeCount || 0)} onClick={() => onOpenDetails('Challenge metadata', (portal?.challenges ?? []) as RowRecord[], challengeColumns)} />
+        <MetricCard label="Active challenges" value={Number(summary.activeChallengeCount || 0)} />
+        <MetricCard label="Completed challenges" value={Number(summary.completedChallengeCount || 0)} />
+      </div>
+      <div className="adminPortalReviewGrid adminPortalReviewGrid--balanced">
+        <DataTable title="Recent users" rows={(portal?.users ?? []).slice(0, 12) as RowRecord[]} columns={userColumns} />
+        <DataTable title="Recent teams" rows={(portal?.teams ?? []).slice(0, 12) as RowRecord[]} columns={teamColumns} />
+      </div>
+    </div>
+  )
+}
+
+function TournamentDashboardSection({ portal, onOpenDetails }: { portal: PortalState | null; onOpenDetails: (title: string, rows: RowRecord[], columns: DetailColumn[]) => void }) {
+  const summary = portal?.summary ?? {}
+  return (
+    <div className="adminPageContent" data-admin-page="tournaments">
+      <section className="adminPageIntro">
+        <h2>Tournaments</h2>
+        <p className="small">Host, organizer, registration, scoring, and tournament status metrics.</p>
+      </section>
+      <div className="adminMetricGrid">
+        <MetricButton label="Tournaments" value={Number(summary.tournamentCount || 0)} onClick={() => onOpenDetails('Tournament metadata', (portal?.tournaments ?? []) as RowRecord[], tournamentColumns)} />
+        <MetricButton label="Host accounts" value={Number(summary.hostCount || 0)} onClick={() => onOpenDetails('Host account metadata', (portal?.hosts ?? []) as RowRecord[], hostColumns)} />
+        <MetricCard label="Validated hosts" value={Number(summary.validatedHostCount || 0)} />
+        <MetricButton label="Organizer accounts" value={Number(summary.organizerCount || 0)} onClick={() => onOpenDetails('Organizer account metadata', (portal?.organizers ?? []) as RowRecord[], organizerColumns)} />
+        <MetricCard label="Hosts with tournaments" value={Number(summary.tournamentHostCount || 0)} />
+        <MetricCard label="Registrations" value={Number(summary.tournamentRegistrationCount || 0)} />
+        <MetricCard label="Tournaments with registrations" value={Number(summary.tournamentsWithRegistrationsCount || 0)} />
+        <MetricCard label="Scored tournament teams" value={Number(summary.scoredTournamentTeamCount || 0)} />
+      </div>
+      <div className="adminPortalReviewGrid">
+        <div className="adminReviewColumn">
+          <TournamentSection portal={portal} onOpenDetails={onOpenDetails} />
+        </div>
+        <div className="adminReviewColumn">
+          <AccountSummarySection portal={portal} onOpenDetails={onOpenDetails} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AdminDashboardSection({
+  portal,
+  adminUser,
+  adminRows,
+  requestRows,
+  newAdminForm,
+  setNewAdminForm,
+  onCreateAdmin,
+  currentAdminUserId,
+  deletingAdminUserId,
+  onDeleteAdmin,
+  approvingRequestId,
+  deletingRequestId,
+  onApproveRequest,
+  onDeleteRequest,
+}: {
+  portal: PortalState | null
+  adminUser: { id?: string; username: string; email: string }
+  adminRows: RowRecord[]
+  requestRows: RowRecord[]
+  newAdminForm: { username: string; email: string; password: string }
+  setNewAdminForm: React.Dispatch<React.SetStateAction<{ username: string; email: string; password: string }>>
+  onCreateAdmin: (event: FormEvent) => Promise<void>
+  currentAdminUserId?: string | null
+  deletingAdminUserId: string | null
+  onDeleteAdmin: (adminUserId: string) => Promise<void>
+  approvingRequestId: string | null
+  deletingRequestId: string | null
+  onApproveRequest: (requestId: string) => Promise<void>
+  onDeleteRequest: (requestId: string) => Promise<void>
+}) {
+  const summary = portal?.summary ?? {}
+  return (
+    <div className="adminPageContent" data-admin-page="admin">
+      <section className="adminPageIntro adminPageIntro--actions">
+        <div>
+          <h2>Admin</h2>
+          <p className="small">Admin accounts, golf-course access approvals, and operational administration.</p>
+        </div>
+        <Link className="btn" to="/golfadmin/scheduled-jobs">Scheduled jobs</Link>
+      </section>
+      <div className="adminMetricGrid">
+        <MetricCard label="Admin users" value={Number(summary.adminCount || adminRows.length)} />
+        <MetricCard label="Active admins" value={Number(summary.activeAdminCount || 0)} />
+        <MetricCard label="Pending requests" value={Number(summary.hostAccountRequestCount || 0)} />
+        <MetricCard label="Signed in admin" value={adminUser.username} detail={adminUser.email} />
+      </div>
+      <div className="adminPortalReviewGrid">
+        <div className="adminReviewColumn">
+          <RequestTable rows={requestRows} approvingRequestId={approvingRequestId} deletingRequestId={deletingRequestId} onApprove={onApproveRequest} onDelete={onDeleteRequest} />
+        </div>
+        <div className="adminReviewColumn">
+          <div className="grid grid2 adminCompactForms" style={{ alignItems: 'start' }}>
+            <FormCard title="Create admin user" subtitle="Provision another admin for the dedicated portal.">
+              <form className="formStack" onSubmit={onCreateAdmin}>
+                <div><label className="label">Username</label><input className="input" value={newAdminForm.username} onChange={(e) => setNewAdminForm((state) => ({ ...state, username: e.target.value }))} /></div>
+                <div><label className="label">Email</label><input className="input" type="email" value={newAdminForm.email} onChange={(e) => setNewAdminForm((state) => ({ ...state, email: e.target.value }))} /></div>
+                <div><label className="label">Password</label><input className="input" type="password" value={newAdminForm.password} onChange={(e) => setNewAdminForm((state) => ({ ...state, password: e.target.value }))} /></div>
+                <button className="btnPrimary" type="submit">Create admin user</button>
+              </form>
+            </FormCard>
+            <AdminUsersTable rows={adminRows} currentAdminUserId={currentAdminUserId} deletingAdminUserId={deletingAdminUserId} onDelete={onDeleteAdmin} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const userColumns: DetailColumn[] = [
   { key: 'email', label: 'Email' },
   { key: 'name', label: 'Name' },
   { key: 'emailVerified', label: 'Verified' },
   { key: 'createdAt', label: 'Created' },
-]
-const appUserColumns: DetailColumn[] = [
-  { key: 'email', label: 'Email' },
-  { key: 'display_name', label: 'Display name' },
-  { key: 'primary_state', label: 'State' },
-  { key: 'created_at', label: 'Created' },
 ]
 const teamColumns: DetailColumn[] = [
   { key: 'name', label: 'Team' },
@@ -493,15 +629,14 @@ const tournamentColumns: DetailColumn[] = [
   { key: 'created_at', label: 'Created' },
   { key: 'golf_course_name', label: 'Golf course' },
 ]
-const requestColumns: DetailColumn[] = [
+const challengeColumns: DetailColumn[] = [
+  { key: 'message_type', label: 'Type' },
+  { key: 'challenge_status', label: 'Status' },
+  { key: 'proposer_team_name', label: 'Proposer' },
+  { key: 'challenged_team_name', label: 'Challenged' },
+  { key: 'challenge_course', label: 'Golf course' },
+  { key: 'challenge_date', label: 'Challenge date' },
   { key: 'created_at', label: 'Created' },
-  { key: 'first_name', label: 'First name' },
-  { key: 'last_name', label: 'Last name' },
-  { key: 'email', label: 'Email' },
-  { key: 'state_name', label: 'State' },
-  { key: 'golf_course_name', label: 'Golf course' },
-  { key: 'status', label: 'Status' },
-  { key: 'reviewed_by_email', label: 'Reviewed by' },
 ]
 const adminColumns: DetailColumn[] = [
   { key: 'username', label: 'Username' },
@@ -524,6 +659,7 @@ export default function AdminPortal() {
   const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null)
   const [deletingAdminUserId, setDeletingAdminUserId] = useState<string | null>(null)
   const [detailModal, setDetailModal] = useState<DetailModalState>(null)
+  const [activePage, setActivePage] = useState<AdminPortalPage>('golf')
   const [apiCallFilters, setApiCallFilters] = useState<ExternalApiCallFilters>(() => {
     const today = getUserTodayISO()
     return { fromDate: today, toDate: today, apiType: '', endpoint: '' }
@@ -562,11 +698,17 @@ export default function AdminPortal() {
     if (!adminUser) {
       setPortal(null)
       setApiCallReport(null)
+      setActivePage('golf')
       return
     }
     void loadPortal()
-    void loadExternalApiCalls(apiCallFilters)
   }, [adminUser])
+
+  function selectAdminPage(page: AdminPortalPage) {
+    setActivePage(page)
+    logFrontendEvent({ category: 'admin.portal.navigation', message: 'admin_portal_page_selected', data: { page } })
+    if (page === 'api' && !apiCallReport && !apiCallLoading) void loadExternalApiCalls(apiCallFilters)
+  }
 
   function openDetails(title: string, rows: RowRecord[], columns: DetailColumn[]) {
     logFrontendEvent({ category: 'admin.portal.metadata', message: 'admin_metadata_modal_opened', data: { title, recordCount: rows.length } })
@@ -596,6 +738,7 @@ export default function AdminPortal() {
   async function onLogout() {
     await logoutAdmin()
     setPortal(null)
+    setActivePage('golf')
     setLoginForm({ username: '', password: '' })
     setMessage('Signed out of admin portal.')
     navigate('/golfadmin', { replace: true })
@@ -749,55 +892,53 @@ export default function AdminPortal() {
     <div className="container pageStack adminPortalContainer">
       <div className="card pageCardShell adminPortalShell">
         <div className="adminPortalHeader">
-          <PageHero eyebrow="Administration" title="GolfHomiez admin portal" subtitle="Review platform records, tournaments, account requests, scheduled jobs, and admin users from one compact dashboard." />
+          <PageHero eyebrow="Administration" title="GolfHomiez admin portal" subtitle="Golf usage, tournament operations, API usage, and administration are separated into focused pages." />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div className="small">Signed in as <strong>{adminUser.username}</strong> ({adminUser.email})</div>
             <button className="btn" type="button" onClick={onLogout}>Sign out</button>
           </div>
           {message ? <p className="statusMessage statusSuccess">{message}</p> : null}
           {error ? <p className="statusMessage statusError">{error}</p> : null}
-          <SummaryCards portal={portal} onOpenDetails={openDetails} />
+          <AdminPortalTabs activePage={activePage} onSelect={selectAdminPage} />
         </div>
 
-        <div className="adminPortalReviewGrid">
-          <div className="adminReviewColumn">
-            <ExternalApiCallsSection
-              report={apiCallReport}
-              filters={apiCallFilters}
-              loading={apiCallLoading}
-              error={apiCallError}
-              onFilterChange={setApiCallFilters}
-              onApply={() => void loadExternalApiCalls(apiCallFilters)}
-              onReset={resetExternalApiCallFilters}
-              onRefresh={() => void loadExternalApiCalls(apiCallFilters)}
-              refreshedAt={apiCallRefreshedAt}
-            />
-            <AccountSummarySection portal={portal} onOpenDetails={openDetails} />
-            <RequestTable rows={requestRows} approvingRequestId={approvingRequestId} deletingRequestId={deletingRequestId} onApprove={onApproveRequest} onDelete={onDeleteRequest} />
-          </div>
-          <div className="adminReviewColumn">
-            <TournamentSection portal={portal} onOpenDetails={openDetails} />
-            <div className="grid grid2 adminCompactForms" style={{ alignItems: 'start' }}>
-              <FormCard title="Create admin user" subtitle="Provision another admin for the dedicated portal.">
-                <form className="formStack" onSubmit={onCreateAdmin}>
-                  <div>
-                    <label className="label">Username</label>
-                    <input className="input" value={newAdminForm.username} onChange={(e) => setNewAdminForm((s) => ({ ...s, username: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="label">Email</label>
-                    <input className="input" type="email" value={newAdminForm.email} onChange={(e) => setNewAdminForm((s) => ({ ...s, email: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="label">Password</label>
-                    <input className="input" type="password" value={newAdminForm.password} onChange={(e) => setNewAdminForm((s) => ({ ...s, password: e.target.value }))} />
-                  </div>
-                  <button className="btnPrimary" type="submit">Create admin user</button>
-                </form>
-              </FormCard>
-              <AdminUsersTable rows={adminRows} currentAdminUserId={adminUser.id} deletingAdminUserId={deletingAdminUserId} onDelete={onDeleteAdmin} />
+        <div className="adminPortalPageBody">
+          {activePage === 'golf' ? <GolfDashboardSection portal={portal} onOpenDetails={openDetails} /> : null}
+          {activePage === 'tournaments' ? <TournamentDashboardSection portal={portal} onOpenDetails={openDetails} /> : null}
+          {activePage === 'api' ? (
+            <div className="adminPageContent" data-admin-page="api">
+              <section className="adminPageIntro"><h2>API Usage</h2><p className="small">External API volume, reliability, latency, endpoint, and provider metrics.</p></section>
+              <ExternalApiCallsSection
+                report={apiCallReport}
+                filters={apiCallFilters}
+                loading={apiCallLoading}
+                error={apiCallError}
+                onFilterChange={setApiCallFilters}
+                onApply={() => void loadExternalApiCalls(apiCallFilters)}
+                onReset={resetExternalApiCallFilters}
+                onRefresh={() => void loadExternalApiCalls(apiCallFilters)}
+                refreshedAt={apiCallRefreshedAt}
+              />
             </div>
-          </div>
+          ) : null}
+          {activePage === 'admin' ? (
+            <AdminDashboardSection
+              portal={portal}
+              adminUser={adminUser}
+              adminRows={adminRows}
+              requestRows={requestRows}
+              newAdminForm={newAdminForm}
+              setNewAdminForm={setNewAdminForm}
+              onCreateAdmin={onCreateAdmin}
+              currentAdminUserId={adminUser.id}
+              deletingAdminUserId={deletingAdminUserId}
+              onDeleteAdmin={onDeleteAdmin}
+              approvingRequestId={approvingRequestId}
+              deletingRequestId={deletingRequestId}
+              onApproveRequest={onApproveRequest}
+              onDeleteRequest={onDeleteRequest}
+            />
+          ) : null}
         </div>
       </div>
       <DetailModal modal={detailModal} onClose={() => setDetailModal(null)} />

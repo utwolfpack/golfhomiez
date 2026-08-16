@@ -8,6 +8,8 @@ export type GolfCoursePublicPageTournament = {
   name: string
   startDate?: string | null
   status?: string | null
+  startType?: string | null
+  startTime?: string | null
   portalPath: string
 }
 
@@ -261,6 +263,8 @@ export type TournamentPortal = {
 
 export type UserRegisteredTournament = Tournament & {
   registration: TournamentRegistration
+  teamScore?: number | null
+  teamScoreUpdatedAt?: string | null
 }
 
 export type UserTournamentsSummary = {
@@ -278,6 +282,8 @@ export type GolfCourseTournamentSearchResult = {
   zipCode?: string | null
   tournamentDate: string
   tournamentWebsite?: string | null
+  golfCoursePagePath?: string | null
+  golfCourseWebsiteUrl?: string | null
   sourceUrl?: string | null
   sourceType?: 'external' | 'golfhomiez' | string
   isGolfHomiezTournament?: boolean

@@ -193,7 +193,12 @@ export async function getExternalApiCallSummary({ fromDate = '', toDate = '', ap
   )
 
   const [[totalRow = {}] = []] = await db.execute(
-    `SELECT COUNT(*) AS totalCalls
+    `SELECT
+       COUNT(*) AS totalCalls,
+       SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS successCount,
+       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failureCount,
+       ROUND(AVG(duration_ms), 0) AS averageDurationMs,
+       COUNT(DISTINCT endpoint) AS distinctEndpointCount
        FROM external_api_call_metrics
       WHERE ${where.join(' AND ')}`,
     params,
@@ -227,6 +232,13 @@ export async function getExternalApiCallSummary({ fromDate = '', toDate = '', ap
       endpoint: selectedEndpoint,
     },
     totalCalls: countValue(totalRow.totalCalls),
+    successCount: countValue(totalRow.successCount),
+    failureCount: countValue(totalRow.failureCount),
+    successRatePercent: countValue(totalRow.totalCalls) > 0
+      ? Math.round((countValue(totalRow.successCount) / countValue(totalRow.totalCalls)) * 1000) / 10
+      : 0,
+    averageDurationMs: totalRow.averageDurationMs == null ? null : countValue(totalRow.averageDurationMs),
+    distinctEndpointCount: countValue(totalRow.distinctEndpointCount),
     rows: rows.map((row) => ({
       apiType: row.apiType,
       endpoint: row.endpoint,

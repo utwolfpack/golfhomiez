@@ -32,6 +32,8 @@ export async function fetchAdminPortal() {
     organizers: Array<Record<string, unknown>>
     tournaments: Array<Record<string, unknown>>
     tournamentStatusCounts: Array<Record<string, unknown>>
+    challenges: Array<Record<string, unknown>>
+    challengeStatusCounts: Array<Record<string, unknown>>
     users: Array<Record<string, unknown>>
     appUsers: Array<Record<string, unknown>>
     teams: Array<Record<string, unknown>>
@@ -103,6 +105,11 @@ export type ExternalApiCallReport = {
   filters: Required<ExternalApiCallFilters>
   generatedAt: string
   totalCalls: number
+  successCount: number
+  failureCount: number
+  successRatePercent: number
+  averageDurationMs?: number | null
+  distinctEndpointCount: number
   rows: ExternalApiCallSummaryRow[]
   apiTypes: Array<{ apiType: string; callCount: number }>
   endpoints: Array<{ endpoint: string; callCount: number }>
@@ -160,7 +167,7 @@ export async function fetchScheduledJobs() {
 }
 
 export async function runScheduledJob(jobId: string) {
-  return api<{ result: { jobId: string; runId: string; status: string; output?: unknown; nextRunAt?: string | null }; jobs: ScheduledJob[] }>(`/api/admin/scheduled-jobs/${encodeURIComponent(jobId)}/run`, {
+  return api<{ result: { jobId: string; runId: string | null; status: string; output?: unknown; nextRunAt?: string | null; correlationId?: string | null }; jobs: ScheduledJob[] }>(`/api/admin/scheduled-jobs/${encodeURIComponent(jobId)}/run`, {
     method: 'POST',
   })
 }

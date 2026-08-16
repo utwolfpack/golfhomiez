@@ -30,11 +30,7 @@ export default function Login() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero
-          eyebrow="Welcome back"
-          title="Sign in and hit the first tee"
-          subtitle="User, host, and organizer accounts can share the same email address, but each account signs in here only with its own user credentials."
-        />
+        <PageHero eyebrow="Welcome back" />
 
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>

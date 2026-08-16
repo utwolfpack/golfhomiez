@@ -11,6 +11,7 @@ import {
   runRetryFailedTournamentWebsites,
 } from './tournament-discovery.js'
 import { normalizeTournamentScrubValues, runScrubTournaments } from './tournament-scrub.js'
+import { normalizeGolfCourseDataJobConfig, runGetGolfCourseData } from './golf-course-data-import.js'
 import { nextRunForSchedule, normalizeScheduleConfig, scheduleLabel } from './scheduled-job-schedule.js'
 import {
   getScheduledJobRecord,
@@ -63,10 +64,36 @@ function normalizeJobConfig(definition, input) {
   if (definition.id === 'scrubTournaments') {
     return { matchValues: normalizeTournamentScrubValues(config.matchValues) }
   }
+  if (definition.id === 'getGolfCourseData') {
+    return normalizeGolfCourseDataJobConfig(config)
+  }
   return config
 }
 
 export const SCHEDULED_JOB_DEFINITIONS = [
+  {
+    id: 'getGolfCourseData',
+    name: 'getGolfCourseData',
+    description: 'Imports and refreshes the US golf-course catalog from OpenGolfAPI. Fast mode uses the official bulk catalog for course metadata, concurrently enriches courses from holes and tees endpoints, batches database hole writes, and pauses through UTC daily resets if the API quota is exhausted.',
+    scheduleLabel: 'Manual',
+    defaultScheduleLabel: 'Manual',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: normalizeGolfCourseDataJobConfig({ states: 'all', pageLimit: 500, useBulkFallback: true, fastMode: true }),
+    backgroundManualRun: true,
+    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal, jobConfig }) {
+      return runGetGolfCourseData(pool, {
+        correlationId,
+        triggeredBy,
+        logApi,
+        logError,
+        logScheduledJob,
+        signal,
+        jobConfig,
+      })
+    },
+  },
   {
     id: 'getTournaments',
     name: 'getTournaments',
@@ -145,6 +172,10 @@ export const SCHEDULED_JOB_DEFINITIONS = [
 
 function findScheduledJobDefinition(jobId) {
   return SCHEDULED_JOB_DEFINITIONS.find((definition) => definition.id === jobId) || null
+}
+
+export function shouldRunScheduledJobInBackground(jobId) {
+  return Boolean(findScheduledJobDefinition(jobId)?.backgroundManualRun)
 }
 
 function getNextRunForDefinition(definition, schedule, now = new Date()) {
@@ -326,10 +357,11 @@ export async function runScheduledJob(pool, jobId, {
     }
 
     const errorMessage = error?.message || String(error)
+    const failureOutput = error?.output || null
     if (runId) {
-      await recordScheduledJobRunCompleted(pool, definition, { runId, status: 'failed', errorMessage, nextRunAt })
+      await recordScheduledJobRunCompleted(pool, definition, { runId, status: 'failed', output: failureOutput, errorMessage, nextRunAt })
     }
-    logScheduledJob('scheduled_job_run_failed', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, status: 'failed', error: errorMessage, nextRunAt: nextRunAt?.toISOString?.() || null })
+    logScheduledJob('scheduled_job_run_failed', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, status: 'failed', output: failureOutput, error: errorMessage, nextRunAt: nextRunAt?.toISOString?.() || null })
     logError('Scheduled job run failed', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, error })
     throw error
   } finally {
