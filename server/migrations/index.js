@@ -2756,6 +2756,66 @@ JOIN tournaments t ON BINARY t.id = BINARY gct.golfhomiez_tournament_id
   },
 
 
+  {
+    version: '20260811_072',
+    name: 'golf_course_data_import_support',
+    filename: '20260811_072_golf_course_data_import_support.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'golf_courses') &&
+        await tableExists(db, 'golf_course_holes') &&
+        await columnExists(db, 'golf_courses', 'raw_holes_payload') &&
+        await columnExists(db, 'golf_courses', 'raw_tees_payload') &&
+        await columnExists(db, 'golf_course_holes', 'tee_latitude') &&
+        await columnExists(db, 'golf_course_holes', 'tee_longitude') &&
+        await columnExists(db, 'golf_course_holes', 'front_latitude') &&
+        await columnExists(db, 'golf_course_holes', 'front_longitude') &&
+        await columnExists(db, 'golf_course_holes', 'center_latitude') &&
+        await columnExists(db, 'golf_course_holes', 'center_longitude') &&
+        await columnExists(db, 'golf_course_holes', 'back_latitude') &&
+        await columnExists(db, 'golf_course_holes', 'back_longitude')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await tableExists(db, 'golf_courses')) || !(await tableExists(db, 'golf_course_holes'))) {
+        throw new Error('OpenGolfAPI golf course catalog tables are missing; migration 20260630_059 must be applied first')
+      }
+      if (!(await columnExists(db, 'golf_courses', 'raw_holes_payload'))) {
+        statements.push('ALTER TABLE golf_courses ADD COLUMN raw_holes_payload JSON NULL AFTER raw_detail_payload')
+      }
+      if (!(await columnExists(db, 'golf_courses', 'raw_tees_payload'))) {
+        statements.push('ALTER TABLE golf_courses ADD COLUMN raw_tees_payload JSON NULL AFTER raw_holes_payload')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'tee_latitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN tee_latitude DECIMAL(10,7) NULL AFTER stroke_index')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'tee_longitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN tee_longitude DECIMAL(10,7) NULL AFTER tee_latitude')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'front_latitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN front_latitude DECIMAL(10,7) NULL AFTER tee_longitude')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'front_longitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN front_longitude DECIMAL(10,7) NULL AFTER front_latitude')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'center_latitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN center_latitude DECIMAL(10,7) NULL AFTER front_longitude')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'center_longitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN center_longitude DECIMAL(10,7) NULL AFTER center_latitude')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'back_latitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN back_latitude DECIMAL(10,7) NULL AFTER center_longitude')
+      }
+      if (!(await columnExists(db, 'golf_course_holes', 'back_longitude'))) {
+        statements.push('ALTER TABLE golf_course_holes ADD COLUMN back_longitude DECIMAL(10,7) NULL AFTER back_latitude')
+      }
+      return statements.join(';\n') || '-- getGolfCourseData import schema already exists'
+    },
+  },
+
+
 ]
 
 export function sortMigrations(migrations) {

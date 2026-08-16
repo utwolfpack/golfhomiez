@@ -3868,6 +3868,19 @@ button.navDropdownItem{font:inherit;}
   box-shadow:none;
 }
 
+.holeInputScorePageCard--holeChanged{
+  animation:holeInputHoleChanged .22s ease-out both;
+}
+
+@keyframes holeInputHoleChanged{
+  0%{opacity:.58;transform:translateX(10px) scale(.992);}
+  100%{opacity:1;transform:translateX(0) scale(1);}
+}
+
+@media (prefers-reduced-motion: reduce){
+  .holeInputScorePageCard--holeChanged{animation:none;}
+}
+
 .holeInputTeamLabel{
   justify-self:center;
   max-width:100%;
@@ -4009,23 +4022,41 @@ button.navDropdownItem{font:inherit;}
 
 
 .holeInputSaveButton{
+  --hole-score-accent:#166534;
+  --hole-score-border:#86efac;
+  --hole-score-background:#dcfce7;
+  --hole-score-foreground:#14532d;
   min-height:46px;
   border-radius:12px;
-  border:1px solid rgba(15,23,42,.12);
-  color:#0f172a;
+  border:2px solid var(--hole-score-border);
+  background:var(--hole-score-background);
+  color:var(--hole-score-foreground);
   font-size:17px;
   font-weight:950;
   box-shadow:0 5px 12px rgba(15,23,42,.08);
 }
 
-.holeInputSaveButton--par{background:#dcfce7;color:#14532d;}
-.holeInputSaveButton--birdie{background:#dbeafe;color:#1e3a8a;}
-.holeInputSaveButton--eagle{background:#ede9fe;color:#5b21b6;}
-.holeInputSaveButton--albatross{background:#e5e7eb;color:#374151;}
-.holeInputSaveButton--holeInOne{background:#fef3c7;color:#92400e;}
-.holeInputSaveButton--bogey{background:#fee2e2;color:#991b1b;}
-.holeInputSaveButton--doubleBogey{background:#fee2e2;color:#991b1b;}
-.holeInputSaveButton--strokeCount{background:#fee2e2;color:#991b1b;}
+.holeInputSaveButton--par{--hole-score-accent:#16a34a;--hole-score-border:#86efac;--hole-score-background:#dcfce7;--hole-score-foreground:#14532d;}
+.holeInputSaveButton--birdie{--hole-score-accent:#2563eb;--hole-score-border:#93c5fd;--hole-score-background:#dbeafe;--hole-score-foreground:#1e3a8a;}
+.holeInputSaveButton--eagle{--hole-score-accent:#7c3aed;--hole-score-border:#c4b5fd;--hole-score-background:#ede9fe;--hole-score-foreground:#5b21b6;}
+.holeInputSaveButton--albatross{--hole-score-accent:#64748b;--hole-score-border:#cbd5e1;--hole-score-background:#e5e7eb;--hole-score-foreground:#374151;}
+.holeInputSaveButton--holeInOne{--hole-score-accent:#b45309;--hole-score-border:#fcd34d;--hole-score-background:#fef3c7;--hole-score-foreground:#92400e;}
+.holeInputSaveButton--bogey,
+.holeInputSaveButton--doubleBogey,
+.holeInputSaveButton--strokeCount{--hole-score-accent:#dc2626;--hole-score-border:#fca5a5;--hole-score-background:#fee2e2;--hole-score-foreground:#991b1b;}
+
+.holeInputSaveButton--unsaved{
+  background:transparent;
+  border-color:var(--hole-score-border);
+  color:var(--hole-score-accent);
+  box-shadow:none;
+}
+
+.holeInputSaveButton--saved{
+  background:var(--hole-score-background);
+  border-color:var(--hole-score-border);
+  color:var(--hole-score-foreground);
+}
 
 .holeInputSaveButton:disabled{
   opacity:.68;
@@ -4389,18 +4420,17 @@ button.navDropdownItem{font:inherit;}
 }
 
 .holeInputTrackerChip--missing{
-  background:transparent;
-  border-color:#cbd5e1;
-  color:#334155;
+  background:#fee2e2;
+  border-color:#fca5a5;
+  color:#991b1b;
 }
 
 .holeInputTrackerChip--active,
 .holeInputTrackerChip--active.holeInputTrackerChip--saved,
 .holeInputTrackerChip--active.holeInputTrackerChip--missing{
-  background:#bfdbfe;
-  border-color:#60a5fa;
-  color:#1e3a8a;
-  box-shadow:0 0 0 3px rgba(147,197,253,.42);
+  border-color:#2563eb;
+  box-shadow:0 0 0 3px rgba(37,99,235,.28),0 4px 10px rgba(15,23,42,.12);
+  transform:translateY(-1px) scale(1.08);
 }
 
 @media (max-width:720px){
@@ -5386,6 +5416,25 @@ button.navDropdownItem{font:inherit;}
   white-space:nowrap;
 }
 
+.tournamentStatusLabel{
+  color:#64748b;
+  font-size:12px;
+  font-weight:700;
+}
+
+.tournamentStatusText{
+  color:#475569;
+  font-weight:900;
+}
+
+.tournamentStatusText--active{
+  color:#2563eb;
+}
+
+.tournamentStatusText--completed{
+  color:#15803d;
+}
+
 .tournamentTeamScoreButton{
   min-height:28px;
   padding:3px 9px;
@@ -5691,6 +5740,19 @@ button.navDropdownItem{font:inherit;}
   font-weight:600;
   color:#64748b;
   white-space:normal;
+}
+
+.tournamentSearchRegistrationStatus{
+  display:inline-flex;
+  align-items:center;
+  margin-left:8px;
+  padding:2px 7px;
+  border-radius:999px;
+  background:#e5f8ec;
+  color:#155f38;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.01em;
 }
 
 /* Admin scheduled-job configuration modal. */
@@ -6478,5 +6540,293 @@ button.navDropdownItem{font:inherit;}
 
   .tournament-management-line__url {
     grid-column: auto;
+  }
+}
+
+/* Golfadmin portal page organization and metric dashboards. */
+.adminPortalPageTabs{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  padding-top:4px;
+  border-top:1px solid rgba(188,226,202,.7);
+}
+.adminPortalPageTab{
+  min-height:38px;
+  padding:7px 14px;
+  border:1px solid #cfe7d6;
+  border-radius:999px;
+  background:#fff;
+  color:#31563d;
+  font:inherit;
+  font-size:13px;
+  font-weight:900;
+  cursor:pointer;
+}
+.adminPortalPageTab:hover,
+.adminPortalPageTab:focus-visible{
+  border-color:#16a34a;
+  color:#0b3d1d;
+  outline:2px solid rgba(22,163,74,.18);
+  outline-offset:2px;
+}
+.adminPortalPageTab--active{
+  border-color:#15803d;
+  background:#ecfdf3;
+  color:#0b3d1d;
+  box-shadow:inset 0 0 0 1px rgba(21,128,61,.08);
+}
+.adminPortalPageBody{
+  min-height:0;
+  overflow:auto;
+  padding-right:2px;
+}
+.adminPageContent{
+  display:grid;
+  gap:12px;
+  min-height:0;
+}
+.adminPageIntro{
+  display:grid;
+  gap:4px;
+}
+.adminPageIntro h2{
+  margin:0;
+  font-size:1.25rem;
+}
+.adminPageIntro p{margin:0;}
+.adminPageIntro--actions{
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:12px;
+}
+.adminMetricGrid,
+.adminApiMetricGrid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+}
+.adminApiMetricGrid{
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  margin-top:12px;
+}
+.adminMetricCard{cursor:default;}
+.adminMetricValue{
+  margin-top:8px;
+  color:#0f172a;
+  font-size:30px;
+  font-weight:900;
+  line-height:1;
+  overflow-wrap:anywhere;
+}
+.adminMetricDetail{
+  margin-top:7px;
+  overflow-wrap:anywhere;
+}
+.adminPortalReviewGrid--balanced{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+}
+@media (max-width:1200px){
+  .adminApiMetricGrid{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
+@media (max-width:900px){
+  .adminMetricGrid{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .adminPortalReviewGrid--balanced{grid-template-columns:1fr;}
+}
+@media (max-width:640px){
+  .adminPortalPageTabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+  .adminPortalPageTab{width:100%;}
+  .adminMetricGrid,.adminApiMetricGrid{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .adminPageIntro--actions{grid-template-columns:1fr;}
+}
+
+.golfCourseTournamentControls{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  flex-wrap:wrap;
+}
+
+.golfCourseTournamentYearTabs{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.golfCourseTournamentYearTab{
+  appearance:none;
+  border:1px solid rgba(11,61,29,.18);
+  border-radius:999px;
+  padding:8px 14px;
+  background:#fff;
+  color:#0b3d1d;
+  font-weight:800;
+  cursor:pointer;
+}
+
+.golfCourseTournamentYearTab:hover,
+.golfCourseTournamentYearTab:focus-visible{
+  border-color:rgba(11,61,29,.5);
+  box-shadow:0 6px 18px rgba(15,23,42,.08);
+  outline:none;
+}
+
+.golfCourseTournamentYearTab--active{
+  background:#0b3d1d;
+  color:#fff;
+  border-color:#0b3d1d;
+}
+
+.golfCourseTournamentRowMeta{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:4px;
+  color:#64748b;
+  font-size:13px;
+}
+
+.golfCourseTournamentRowMeta span:not(:last-child)::after{
+  content:'•';
+  margin-left:8px;
+  color:#94a3b8;
+}
+
+.golfCourseTournamentStatus{
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:2px 8px;
+  background:rgba(11,61,29,.08);
+  color:#0b3d1d;
+  font-weight:800;
+}
+
+.golfCourseTournamentPagination{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  padding-top:4px;
+}
+
+.inboxRoundSummarySelectedName{
+  margin-right:auto;
+  color:#0b3d1d;
+  font-size:.95rem;
+  font-weight:900;
+  overflow-wrap:anywhere;
+}
+
+@media (max-width:640px){
+  .golfCourseTournamentControls,
+  .golfCourseTournamentPagination{
+    align-items:flex-start;
+    justify-content:flex-start;
+  }
+
+  .golfCourseTournamentRowMeta{
+    gap:6px;
+  }
+}
+
+/* Refined tournament search and host tournament registration line-items. */
+.tournamentSearchResultClickable{
+  cursor:pointer;
+}
+
+.tournamentSearchResultClickable:hover,
+.tournamentSearchResultClickable:focus-visible{
+  border-color:rgba(11,61,29,.45);
+  box-shadow:0 8px 22px rgba(15,23,42,.08);
+  outline:none;
+}
+
+.tournamentSearchCoursePageAction{
+  white-space:nowrap;
+}
+
+.tournament-management-line__url-row{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-width:0;
+}
+
+.tournament-management-line__url-row a{
+  flex:1 1 auto;
+  min-width:0;
+}
+
+.tournament-management-line__copy{
+  flex:0 0 auto;
+  min-width:36px;
+  padding-inline:8px;
+}
+
+.hostTournamentYearControls{
+  margin-top:12px;
+}
+
+.tournament-team-registration-lines{
+  display:grid;
+  gap:8px;
+}
+
+.tournament-team-registration-line{
+  display:grid;
+  grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.2fr);
+  gap:10px;
+  width:100%;
+  padding:12px;
+  border:1px solid rgba(203,213,225,.95);
+  border-radius:12px;
+  background:#fff;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
+}
+
+.tournament-team-registration-line:hover,
+.tournament-team-registration-line:focus-visible{
+  border-color:rgba(11,61,29,.45);
+  box-shadow:0 6px 18px rgba(15,23,42,.08);
+  outline:none;
+}
+
+.tournament-team-registration-line > span{
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+
+.tournament-team-registration-line span span{
+  color:#607166;
+  font-size:.72rem;
+  font-weight:800;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+}
+
+.tournament-team-registration-line strong,
+.tournament-team-registration-line small{
+  overflow-wrap:anywhere;
+}
+
+.tournament-registration-modal{
+  max-width:720px;
+  width:min(720px,calc(100vw - 32px));
+}
+
+@media (max-width:760px){
+  .tournament-team-registration-line{
+    grid-template-columns:1fr;
+  }
+
+  .tournament-management-line__url-row{
+    align-items:flex-start;
   }
 }

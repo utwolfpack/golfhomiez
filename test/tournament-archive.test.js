@@ -76,7 +76,7 @@ test('host and organizer portals expose archive, restore, compact line-item mana
   assert.match(lineItem, /Tournament Date/)
   assert.match(lineItem, /Status/)
   assert.match(lineItem, /Organizer/)
-  assert.match(lineItem, /Golfer Registration URL/)
+  assert.match(lineItem, /GOLFER REGISTRATION URL/)
   assert.match(lineItem, /Teams Registered/)
   assert.match(lineItem, /Team Slots Open/)
   assert.match(lineItem, /Restore to active/)

@@ -31,6 +31,8 @@ import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
 import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType, teamChallengeScoringTypeLabel, type TeamChallengeScoringType } from '../lib/team-challenge-scoring'
 
+type TeamChallengeLeaderboardSide = 'proposer' | 'challenged'
+
 type TeamChallengeScorecardTarget = {
   message: InboxMessage
   side: 'proposer' | 'challenged'
@@ -216,6 +218,7 @@ export default function Challenges() {
   const [activeIndividualChallengeLeaderboard, setActiveIndividualChallengeLeaderboard] = useState<InboxMessage | null>(null)
   const [activeIndividualLeaderboardParticipant, setActiveIndividualLeaderboardParticipant] = useState<IndividualChallengeParticipant | null>(null)
   const [activeTeamChallengeLeaderboard, setActiveTeamChallengeLeaderboard] = useState<InboxMessage | null>(null)
+  const [activeTeamLeaderboardSide, setActiveTeamLeaderboardSide] = useState<TeamChallengeLeaderboardSide | null>(null)
   const [teamChallengeLeaderboardReturnTarget, setTeamChallengeLeaderboardReturnTarget] = useState<TeamChallengeScorecardTarget | null>(null)
   const [individualChallengeLeaderboardReturnTarget, setIndividualChallengeLeaderboardReturnTarget] = useState<IndividualChallengeScorecardTarget | null>(null)
   const [scorecardResumeHoles, setScorecardResumeHoles] = useState<Record<string, number>>({})
@@ -425,7 +428,7 @@ export default function Challenges() {
 
   function getTeamChallengePushPointsForSummary(result: { winner: 'proposer' | 'challenged' | 'tie' | 'pending'; pointsAwarded: number; carryoverAfterHole: number; strokeDifferentialBonus: number }, pointSummary: ReturnType<typeof calculateTeamChallengePoints>) {
     if (pointSummary.scoringType !== 'skins_push') return 0
-    if (result.winner === 'tie') return Math.max(0, result.carryoverAfterHole - pointSummary.pointsPerHole)
+    if (result.winner === 'tie' || result.winner === 'pending') return Math.max(0, result.carryoverAfterHole)
     if (result.winner === 'proposer' || result.winner === 'challenged') return Math.max(0, result.pointsAwarded - pointSummary.pointsPerHole - result.strokeDifferentialBonus)
     return 0
   }
@@ -535,6 +538,40 @@ export default function Challenges() {
       .map((row, index) => ({ ...row, position: index + 1 }))
   }
 
+
+  function getTeamRoundSummaryRows(message: InboxMessage, side: TeamChallengeLeaderboardSide) {
+    let runningPar = 0
+    let runningScore = 0
+    return getTeamChallengeHoles(message, side, false).map((hole) => {
+      const par = Number(hole.par)
+      const score = Number(hole.score)
+      const scoreProvided = Boolean(hole.scoreProvided) && Number.isFinite(score)
+      if (scoreProvided) {
+        runningPar += Number.isFinite(par) ? par : 0
+        runningScore += score
+      }
+      const relativeScore = scoreProvided ? runningScore - runningPar : null
+      return {
+        hole: hole.hole,
+        par: Number.isFinite(par) && par > 0 ? par : null,
+        score: scoreProvided ? score : null,
+        relativeLabel: formatLeaderboardRelative(relativeScore),
+        totalLabel: scoreProvided ? String(runningScore) : '—',
+      }
+    })
+  }
+
+  function openTeamLeaderboardRoundSummary(message: InboxMessage, side: TeamChallengeLeaderboardSide) {
+    setActiveTeamLeaderboardSide(side)
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), side, teamName: getTeamChallengeDisplayName(message, side), course: getTeamChallengeCourseName(message), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'] } })
+  }
+
+  function returnFromTeamRoundSummary(message: InboxMessage) {
+    const side = activeTeamLeaderboardSide
+    setActiveTeamLeaderboardSide(null)
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_round_summary_back_to_leaderboard', data: { messageId: message.id, threadId: messageThreadId(message), side } })
+  }
+
   async function fetchCurrentChallengeForLeaderboard(message: InboxMessage, messageType: 'challenge_request' | 'individual_challenge', trigger: 'open' | 'refresh') {
     const activeThreadId = messageThreadId(message)
     setRefreshingLeaderboard(true)
@@ -569,6 +606,7 @@ export default function Challenges() {
     const pointSummary = getTeamChallengePointSummary(currentMessage)
     const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
     setTeamChallengeLeaderboardReturnTarget(returnTarget)
+    setActiveTeamLeaderboardSide(null)
     setActiveTeamChallengeLeaderboard(currentMessage)
     logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: currentMessage.threadId || currentMessage.id, proposerTeamId: currentMessage.proposerTeamId, challengedTeamId: currentMessage.challengedTeamId, displayOrder: showPointsColumn ? ['Round', 'Points', 'Thru', 'Total'] : ['Round', 'Thru', 'Total'], totalDisplayMode: showPointsColumn ? 'entered_strokes_and_points' : 'entered_strokes', pointsDisplayMode: showPointsColumn ? 'opponent_adjusted_net_points' : 'not_applicable', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length, showPointsColumn, summaryViewVisible: true, summaryViewMode: 'compact_line_item', opponentReadOnlyScoreTileRemoved: true, pushColumnVisible: true, scoreColorLegend: ['win', 'loss', 'push'], skinsPushDifferentialHoleCount: pointSummary.holeResults.filter((hole) => hole.strokeDifferentialBonus > 0).length, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
     return currentMessage
@@ -600,6 +638,7 @@ export default function Challenges() {
   function returnFromTeamChallengeLeaderboard(source: 'back' | 'close' | 'overlay') {
     const returnTarget = teamChallengeLeaderboardReturnTarget
     const leaderboardMessage = activeTeamChallengeLeaderboard
+    setActiveTeamLeaderboardSide(null)
     setActiveTeamChallengeLeaderboard(null)
     setTeamChallengeLeaderboardReturnTarget(null)
     if (!returnTarget) return
@@ -617,7 +656,10 @@ export default function Challenges() {
     const activeThreadId = messageThreadId(activeTeamChallengeLeaderboard)
     logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_refresh_started', data: { messageId: activeTeamChallengeLeaderboard.id, threadId: activeThreadId } })
     const refreshed = await fetchCurrentChallengeForLeaderboard(activeTeamChallengeLeaderboard, 'challenge_request', 'refresh')
-    if (refreshed) setActiveTeamChallengeLeaderboard(refreshed)
+    if (refreshed) {
+      setActiveTeamLeaderboardSide(null)
+      setActiveTeamChallengeLeaderboard(refreshed)
+    }
     logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_refresh_succeeded', data: { messageId: refreshed?.id || activeTeamChallengeLeaderboard.id, threadId: activeThreadId, refreshed: Boolean(refreshed) } })
   }
 
@@ -1708,73 +1750,113 @@ export default function Challenges() {
     const completedCount = rows.filter((row) => row.score != null).length
     const pointSummary = getTeamChallengePointSummary(message)
     const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
+    const selectedSide = activeTeamLeaderboardSide
+    const selectedTeamName = selectedSide ? getTeamChallengeDisplayName(message, selectedSide) : ''
+    const selectedSummaryRows = selectedSide ? getTeamRoundSummaryRows(message, selectedSide) : []
 
     return (
       <div className="modalOverlay inboxLeaderboardModalOverlay" role="presentation" onClick={() => returnFromTeamChallengeLeaderboard('overlay')}>
-        <div className="modalCard inboxLeaderboardModal" role="dialog" aria-modal="true" aria-label="Team Challenge Leaderboard" onClick={(event) => event.stopPropagation()}>
+        <div className="modalCard inboxLeaderboardModal" role="dialog" aria-modal="true" aria-label={selectedSide ? `${selectedTeamName} round summary` : 'Team Challenge Leaderboard'} onClick={(event) => event.stopPropagation()}>
           <div className="inboxLeaderboardHero">
             <div className="inboxLeaderboardHeroTopline">
-              <button type="button" className="inboxLeaderboardIconButton" aria-label={teamChallengeLeaderboardReturnTarget ? `Back to Hole ${scorecardResumeHoles[getTeamChallengeScoreKey(message, teamChallengeLeaderboardReturnTarget.side)] || 1}` : 'Close leaderboard'} onClick={() => returnFromTeamChallengeLeaderboard('back')}>‹</button>
+              <button
+                type="button"
+                className="inboxLeaderboardIconButton"
+                aria-label={selectedSide ? 'Back to leaderboard' : (teamChallengeLeaderboardReturnTarget ? `Back to Hole ${scorecardResumeHoles[getTeamChallengeScoreKey(message, teamChallengeLeaderboardReturnTarget.side)] || 1}` : 'Close leaderboard')}
+                onClick={() => {
+                  if (selectedSide) returnFromTeamRoundSummary(message)
+                  else returnFromTeamChallengeLeaderboard('back')
+                }}
+              >‹</button>
               <div className="inboxLeaderboardCrest" aria-hidden="true">⛳</div>
               <div className="inboxLeaderboardTopRightActions">
-                <button
-                  type="button"
-                  className="inboxLeaderboardIconButton inboxLeaderboardRefreshButton"
-                  aria-label="Refresh Team Challenge leaderboard"
-                  disabled={refreshingLeaderboard}
-                  onClick={() => void refreshTeamChallengeLeaderboard()}
-                >
-                  {refreshingLeaderboard ? '…' : '↻'}
-                </button>
+                {!selectedSide ? (
+                  <button
+                    type="button"
+                    className="inboxLeaderboardIconButton inboxLeaderboardRefreshButton"
+                    aria-label="Refresh Team Challenge leaderboard"
+                    disabled={refreshingLeaderboard}
+                    onClick={() => void refreshTeamChallengeLeaderboard()}
+                  >
+                    {refreshingLeaderboard ? '…' : '↻'}
+                  </button>
+                ) : null}
                 <button type="button" className="inboxLeaderboardIconButton" aria-label={teamChallengeLeaderboardReturnTarget ? `Return to Hole ${scorecardResumeHoles[getTeamChallengeScoreKey(message, teamChallengeLeaderboardReturnTarget.side)] || 1}` : 'Close leaderboard'} onClick={() => returnFromTeamChallengeLeaderboard('close')}>×</button>
               </div>
             </div>
             <div className="inboxLeaderboardYear">Golf Homiez</div>
-            <h2>Team Challenge Leaderboard</h2>
+            <h2>{selectedSide ? 'Team Round Summary' : 'Team Challenge Leaderboard'}</h2>
             <div className="inboxLeaderboardDivider" />
-            <strong>{message.challengeCourse || 'Team Challenge'}</strong>
+            <strong>{selectedSide ? selectedTeamName : (message.challengeCourse || 'Team Challenge')}</strong>
+            {selectedSide ? <span className="inboxIndividualRoundSummaryCourse">{message.challengeCourse || 'Course not provided'}</span> : null}
             <span>{[message.challengeDate, message.challengeState, `${teeColorLabel(getTeamChallengeTeeColor(message))} tees`].filter(Boolean).join(' • ')}</span>
-            <span>{getTeamChallengeScoringLabel(message)}</span>
+            {!selectedSide ? <span>{getTeamChallengeScoringLabel(message)}</span> : null}
           </div>
 
-          <div className="inboxLeaderboardBoard">
-            <div className={`inboxLeaderboardHeaderRow inboxLeaderboardHeaderRow--team ${showPointsColumn ? '' : 'inboxLeaderboardHeaderRow--teamNoPoints'}`}>
-              <span>POS</span>
-              <span>TEAM</span>
-              <span>ROUND</span>
-              {showPointsColumn ? <span>PTS</span> : null}
-              <span>THRU</span>
-              <span>TOTAL</span>
-            </div>
-            {rows.map((row) => {
-              const initials = row.teamName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'GH'
-              const positionClass = row.position <= 3 ? `inboxLeaderboardRow--top${row.position}` : ''
-              return (
-                <div key={row.side} className={`inboxLeaderboardRow inboxLeaderboardRow--team ${showPointsColumn ? '' : 'inboxLeaderboardRow--teamNoPoints'} ${positionClass}`}>
-                  <div className="inboxLeaderboardPosition"><span>{row.position}</span></div>
-                  <div className="inboxLeaderboardPlayer">
-                    <div className="inboxLeaderboardAvatar" aria-hidden="true">{initials}</div>
-                    <div>
-                      <strong>{row.teamName}</strong>
-                      <span>{row.side === 'proposer' ? 'Proposing team' : 'Challenged team'}</span>
-                    </div>
-                  </div>
-                  <span>{row.roundLabel}</span>
-                  {showPointsColumn ? (
-                    <div className="inboxLeaderboardPoints">
-                      <strong>{row.pointsLabel}</strong>
-                      <span>{row.pointsRelativeLabel}</span>
-                    </div>
-                  ) : null}
-                  <span>{row.thru || '—'}</span>
-                  <strong className="inboxLeaderboardScore">{row.totalLabel}</strong>
+          {selectedSide ? (
+            <div className="inboxLeaderboardBoard inboxIndividualRoundSummaryBoard">
+              <div className="inboxIndividualRoundSummaryActions">
+                <strong className="inboxRoundSummarySelectedName">{selectedTeamName}</strong>
+                <button type="button" className="btn btnSmall" onClick={() => returnFromTeamRoundSummary(message)}>Back to leaderboard</button>
+              </div>
+              <div className="inboxIndividualRoundSummaryTable" role="table" aria-label={`${selectedTeamName} hole-by-hole round summary`}>
+                <div className="inboxIndividualRoundSummaryHeader" role="row">
+                  <span>Hole</span><span>Par</span><span>Score</span><span>Round</span><span>Total</span>
                 </div>
-              )
-            })}
-            <div className="inboxLeaderboardUpdated">{completedCount} of {rows.length} team scores entered live{isSkinsTeamChallenge(pointSummary.scoringType) && pointSummary.carryoverPoints ? ` • ${formatPointNumber(pointSummary.carryoverPoints)} carryover points pending` : ''}</div>
-          </div>
+                {selectedSummaryRows.map((row) => (
+                  <div className="inboxIndividualRoundSummaryRow" role="row" key={row.hole}>
+                    <strong>{row.hole}</strong>
+                    <span>{row.par ?? '—'}</span>
+                    <span>{row.score ?? '—'}</span>
+                    <strong>{row.relativeLabel}</strong>
+                    <strong>{row.totalLabel}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="inboxIndividualRoundSummaryLegend">Round is the current cumulative score over or under par. Total is the current cumulative stroke score.</div>
+            </div>
+          ) : (
+            <>
+              <div className="inboxLeaderboardBoard">
+                <div className={`inboxLeaderboardHeaderRow inboxLeaderboardHeaderRow--team ${showPointsColumn ? '' : 'inboxLeaderboardHeaderRow--teamNoPoints'}`}>
+                  <span>POS</span>
+                  <span>TEAM</span>
+                  <span>ROUND</span>
+                  {showPointsColumn ? <span>PTS</span> : null}
+                  <span>THRU</span>
+                  <span>TOTAL</span>
+                </div>
+                {rows.map((row) => {
+                  const initials = row.teamName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'GH'
+                  const positionClass = row.position <= 3 ? `inboxLeaderboardRow--top${row.position}` : ''
+                  return (
+                    <button type="button" key={row.side} className={`inboxLeaderboardRow inboxLeaderboardRow--team inboxLeaderboardRow--clickable ${showPointsColumn ? '' : 'inboxLeaderboardRow--teamNoPoints'} ${positionClass}`} onClick={() => openTeamLeaderboardRoundSummary(message, row.side)} aria-label={`View ${row.teamName} round summary`}>
+                      <div className="inboxLeaderboardPosition"><span>{row.position}</span></div>
+                      <div className="inboxLeaderboardPlayer">
+                        <div className="inboxLeaderboardAvatar" aria-hidden="true">{initials}</div>
+                        <div>
+                          <strong>{row.teamName}</strong>
+                          <span>{row.side === 'proposer' ? 'Proposing team' : 'Challenged team'}</span>
+                        </div>
+                      </div>
+                      <span>{row.roundLabel}</span>
+                      {showPointsColumn ? (
+                        <div className="inboxLeaderboardPoints">
+                          <strong>{row.pointsLabel}</strong>
+                          <span>{row.pointsRelativeLabel}</span>
+                        </div>
+                      ) : null}
+                      <span>{row.thru || '—'}</span>
+                      <strong className="inboxLeaderboardScore">{row.totalLabel}</strong>
+                    </button>
+                  )
+                })}
+                <div className="inboxLeaderboardUpdated">{completedCount} of {rows.length} team scores entered live{isSkinsTeamChallenge(pointSummary.scoringType) && pointSummary.carryoverPoints ? ` • ${formatPointNumber(pointSummary.carryoverPoints)} carryover points pending` : ''} • Select a team for the hole-by-hole round summary</div>
+              </div>
 
-          {renderTeamChallengeSummaryView(message)}
+              {renderTeamChallengeSummaryView(message)}
+            </>
+          )}
         </div>
       </div>
     )
@@ -1827,6 +1909,7 @@ export default function Challenges() {
           {selectedParticipant ? (
             <div className="inboxLeaderboardBoard inboxIndividualRoundSummaryBoard">
               <div className="inboxIndividualRoundSummaryActions">
+                <strong className="inboxRoundSummarySelectedName">{selectedName}</strong>
                 <button type="button" className="btn btnSmall" onClick={() => setActiveIndividualLeaderboardParticipant(null)}>Back to leaderboard</button>
                 {canEditSelected ? (
                   <button type="button" className="btn btnPrimary btnSmall" onClick={() => {

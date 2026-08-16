@@ -11,9 +11,12 @@ Published GolfHomiez-hosted tournaments are synchronized into `golf_course_tourn
 - `draft`, `completed`, and `cancelled` tournaments are deactivated in search.
 - A published tournament must have a start date.
 - GolfHomiez records sort before externally discovered tournaments.
-- Registered users see **Registered** as the tournament-page link label.
-- Other GolfHomiez results use **Golf Homiez Tournament**.
-- External results continue to use **Tournament website**.
+- Search results no longer show a source line.
+- Registered GolfHomiez tournament results still show a compact **Registered** indicator.
+- Each result shows a **Website:** line populated from the related `golf_courses.website` value when available.
+- The full search-result line opens the GolfHomiez tournament page for GolfHomiez-hosted tournaments.
+- The full search-result line opens the related course website for non-GolfHomiez tournament results.
+- Course-linked results include a **Course Info & Tournaments** action that opens the relative GolfHomiez course page when available.
 
 ## Scheduled discovery protection
 
@@ -50,8 +53,9 @@ Relevant events include:
 - `golfhomiez_tournament_search_record_synced`
 - `user_tournament_search_started`
 - `user_tournament_search_completed`
-- `golfhomiez_tournament_opened`
-- `registered_golfhomiez_tournament_opened`
+- `golfhomiez_tournament_line_item_opened`
+- `golf_course_website_line_item_opened`
+- `golf_course_page_opened_from_search`
 ## Application paths
 
 Extract the changed-files ZIP into the GolfHomiez application root and preserve these paths:

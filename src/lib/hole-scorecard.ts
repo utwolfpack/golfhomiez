@@ -52,8 +52,9 @@ function finiteNumber(value: unknown) {
   return Number.isFinite(numberValue) ? numberValue : null
 }
 
-export function hasSavedHoleScoreValue(hole: Pick<HoleScoreDetail, 'score'> | null | undefined) {
+export function hasSavedHoleScoreValue(hole: Pick<HoleScoreDetail, 'score' | 'scoreProvided'> | null | undefined) {
   if (!hole || hole.score == null) return false
+  if (hole.scoreProvided === false) return false
   const score = Number(hole.score)
   return Number.isFinite(score) && score >= 0
 }
@@ -128,7 +129,8 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
     const score = hasScoreValue ? Number(rawScore) : Number.NaN
     const explicitScoreProvided = hasScoreProvidedFlag(record)
     const hasValidScoreValue = hasScoreValue && Number.isFinite(score) && score >= 0
-    const scoreProvided = hasValidScoreValue || (explicitScoreProvided && isProvided(record.scoreProvided ?? record.score_provided))
+    const scoreProvided = hasValidScoreValue
+      && (!explicitScoreProvided || isProvided(record.scoreProvided ?? record.score_provided))
 
     return {
       hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
@@ -149,7 +151,7 @@ export function normalizeHoleScorecard(holes: unknown, fallbackState = '', fallb
       backLongitude: optionalNumberField(record, 'backLongitude', 'back_longitude'),
       flagLatitude: Number.isFinite(Number(record.flagLatitude ?? record.flag_latitude)) ? Number(record.flagLatitude ?? record.flag_latitude) : null,
       flagLongitude: Number.isFinite(Number(record.flagLongitude ?? record.flag_longitude)) ? Number(record.flagLongitude ?? record.flag_longitude) : null,
-      score: hasValidScoreValue ? Math.trunc(score) : (scoreProvided ? (Number.isFinite(par) && par > 0 ? Math.trunc(par) : 0) : null),
+      score: scoreProvided ? Math.trunc(score) : null,
       scoreProvided,
     }
   })
@@ -208,6 +210,7 @@ function normalizePartialProvidedHoleScore(hole: unknown, index: number): HoleSc
   const hasScoreValue = rawScore !== undefined && rawScore !== null && rawScore !== ''
 
   if (!Number.isFinite(holeNumber) || holeNumber < 1 || holeNumber > 18) return null
+  if (hasScoreProvidedFlag(record) && !isProvided(record.scoreProvided ?? record.score_provided)) return null
   if (!hasScoreValue || !Number.isFinite(score) || score < 0) return null
 
   return {
@@ -351,13 +354,13 @@ export function getHoleScoreSavePresentation(par: number | null, score: number) 
   const normalizedScore = Number.isFinite(Number(score)) ? Math.max(0, Math.trunc(Number(score))) : normalizedPar
   const relative = normalizedScore - normalizedPar
 
-  if (normalizedScore === 1) return { label: 'You got a Hole in One', className: 'holeInputSaveButton--holeInOne', outcome: 'hole_in_one', relative }
-  if (relative === 0) return { label: 'You got a Par', className: 'holeInputSaveButton--par', outcome: 'par', relative }
-  if (relative === -1) return { label: 'You got a Birdie', className: 'holeInputSaveButton--birdie', outcome: 'birdie', relative }
-  if (relative === -2) return { label: 'You got an Eagle', className: 'holeInputSaveButton--eagle', outcome: 'eagle', relative }
-  if (relative === -3) return { label: 'You got an Albatross', className: 'holeInputSaveButton--albatross', outcome: 'albatross', relative }
-  if (relative === 1) return { label: 'You got a Bogey', className: 'holeInputSaveButton--bogey', outcome: 'bogey', relative }
-  if (relative === 2) return { label: 'You got a Double-Bogey', className: 'holeInputSaveButton--doubleBogey', outcome: 'double_bogey', relative }
+  if (normalizedScore === 1) return { label: 'Hole in One', className: 'holeInputSaveButton--holeInOne', outcome: 'hole_in_one', relative }
+  if (relative === 0) return { label: 'Par', className: 'holeInputSaveButton--par', outcome: 'par', relative }
+  if (relative === -1) return { label: 'Birdie', className: 'holeInputSaveButton--birdie', outcome: 'birdie', relative }
+  if (relative === -2) return { label: 'Eagle', className: 'holeInputSaveButton--eagle', outcome: 'eagle', relative }
+  if (relative === -3) return { label: 'Albatross', className: 'holeInputSaveButton--albatross', outcome: 'albatross', relative }
+  if (relative === 1) return { label: 'Bogey', className: 'holeInputSaveButton--bogey', outcome: 'bogey', relative }
+  if (relative === 2) return { label: 'Double-Bogey', className: 'holeInputSaveButton--doubleBogey', outcome: 'double_bogey', relative }
   return {
     label: relative > 0 ? `+${relative}` : String(relative),
     className: 'holeInputSaveButton--strokeCount',

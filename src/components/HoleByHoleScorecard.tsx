@@ -270,7 +270,6 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
 
   const parTotal = useMemo(() => holeParTotal(holes), [holes])
   const currentScoreTotal = useMemo(() => providedHoleScoreTotal(holes), [holes])
-  const missingNumbers = useMemo(() => missingHoleScoreNumbers(holes), [holes])
   const activeHole = getSafeHoleByNumber(holes, activeHoleNumber, stateCode, course, selectedTeeColor)
   const activeHoleCount = useMemo(() => getScorecardHoleCount(holes), [holes])
   const trackerHoles = useMemo(() => Array.from({ length: activeHoleCount }, (_, index) => {
@@ -280,6 +279,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   }), [holes, activeHoleCount])
   const providedCount = trackerHoles.filter((hole) => hole.scoreProvided).length
   const providedHoleNumbers = useMemo(() => trackerHoles.filter((hole) => hole.scoreProvided).map((hole) => hole.holeNumber), [trackerHoles])
+  const roundComplete = activeHoleCount > 0 && providedCount === activeHoleCount
 
   useEffect(() => {
     if (!enabled) return
@@ -410,13 +410,19 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
 
         nextHoles = withSelectedTeeColor(nextHoles, selectedTeeColor)
         const loadedProvidedHoleNumbers = getProvidedHoleNumbers(nextHoles)
+        const loadedUnsavedHoleNumbers = nextHoles
+          .filter((hole) => !hasSavedHoleScoreValue(hole))
+          .map((hole) => hole.hole)
+        const unsavedScoreValueCount = nextHoles
+          .filter((hole) => !hasSavedHoleScoreValue(hole) && hole.score != null)
+          .length
         onChange(nextHoles)
         const defaultHoleNumber = defaultHoleNumberForInputFlow(nextHoles, initialHoleNumberRef.current)
         setActiveHoleNumber(defaultHoleNumber)
         logFrontendEvent({
           category: 'scorecard.load',
           message: 'succeeded',
-          data: { correlationId, stateCode, course, courseId, teeColor: selectedTeeColor, source, parTotal: responseParTotal, holeCount: nextHoles.length, providedCount: loadedProvidedHoleNumbers.length, providedHoleNumbers: loadedProvidedHoleNumbers, defaultHole: defaultHoleNumber },
+          data: { correlationId, stateCode, course, courseId, teeColor: selectedTeeColor, source, parTotal: responseParTotal, holeCount: nextHoles.length, providedCount: loadedProvidedHoleNumbers.length, providedHoleNumbers: loadedProvidedHoleNumbers, unsavedHoleNumbers: loadedUnsavedHoleNumbers, unsavedScoreValueCount, scoreValuePolicy: 'saved_holes_only', defaultHole: defaultHoleNumber },
         })
       } catch (error) {
         if (cancelled) return
@@ -465,7 +471,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     }
   }, [activeHoleNumber, activeHoleCount])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setActiveScore(getScoreOrPar(activeHole))
     setActiveScoreDirty(false)
   }, [activeHole.hole])
@@ -479,6 +485,8 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   async function saveHoleScore(hole: HoleScoreDetail, score: number, source: string, options: { throwOnError?: boolean; autoAdvanceAfterSave?: boolean } = {}, baseHoles: HoleScoreDetail[] = holes): Promise<PendingHoleScoreSaveResult> {
     const normalizedScore = Math.max(0, Math.trunc(score))
     const savePresentation = getHoleScoreSavePresentation(hole.par, normalizedScore)
+    const baseHoleCount = getScorecardHoleCount(baseHoles)
+    const wasRoundCompleteBeforeSave = baseHoleCount > 0 && getProvidedHoleNumbers(baseHoles).length === baseHoleCount
     const next = withSelectedTeeColor(updateHoleScore(baseHoles, hole.hole, normalizedScore), selectedTeeColor)
     const correlationId = getCorrelationId()
     const savedHoleNumbers = getProvidedHoleNumbers(next)
@@ -521,17 +529,24 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
       }
       const remainingHoleCount = missingHoleScoreNumbers(next).length
       const nextUnscoredHoleIndex = options.autoAdvanceAfterSave ? findNextUnscoredHoleIndex(next, hole.hole) : null
+      const nextSequentialHole = options.autoAdvanceAfterSave && wasRoundCompleteBeforeSave && hole.hole < getScorecardHoleCount(next)
+        ? hole.hole + 1
+        : null
       if (latestPendingStateRef.current.activeHole.hole === hole.hole) {
         setActiveScoreDirty(false)
       }
       const nextAutoAdvanceHole = nextUnscoredHoleIndex != null ? next[nextUnscoredHoleIndex]?.hole || nextUnscoredHoleIndex + 1 : null
-      if (remainingHoleCount === 0) {
+      if (remainingHoleCount === 0 && nextSequentialHole != null) {
+        setActiveHoleNumber(nextSequentialHole)
+        setSaveStatus(`Hole ${hole.hole} saved. Moved to Hole ${nextSequentialHole}. Complete round ready to log.`)
+        logFrontendEvent({ category: 'scorecard.hole.auto_advance', message: 'completed_round_next_hole_selected', data: { correlationId, savedHole: hole.hole, nextHole: nextSequentialHole, remainingHoleCount, providedHoleNumbers: savedHoleNumbers, progressionMode: 'sequential_completed_round' } })
+      } else if (remainingHoleCount === 0) {
         setSaveStatus(`Hole ${hole.hole} saved. Complete round ready to log.`)
-        logFrontendEvent({ category: 'scorecard.hole.auto_advance', message: 'round_complete', data: { correlationId, savedHole: hole.hole, remainingHoleCount, providedHoleNumbers: savedHoleNumbers } })
+        logFrontendEvent({ category: 'scorecard.hole.auto_advance', message: 'round_complete', data: { correlationId, savedHole: hole.hole, remainingHoleCount, providedHoleNumbers: savedHoleNumbers, progressionMode: 'round_completion' } })
       } else if (nextUnscoredHoleIndex != null) {
         setActiveHoleNumber(nextAutoAdvanceHole || 1)
         setSaveStatus(`Hole ${hole.hole} saved. Moved to Hole ${nextAutoAdvanceHole}.`)
-        logFrontendEvent({ category: 'scorecard.hole.auto_advance', message: 'next_unscored_hole_selected', data: { correlationId, savedHole: hole.hole, nextHole: nextAutoAdvanceHole, nextHoleIndex: nextUnscoredHoleIndex, remainingHoleCount, providedHoleNumbers: savedHoleNumbers } })
+        logFrontendEvent({ category: 'scorecard.hole.auto_advance', message: 'next_unscored_hole_selected', data: { correlationId, savedHole: hole.hole, nextHole: nextAutoAdvanceHole, nextHoleIndex: nextUnscoredHoleIndex, remainingHoleCount, providedHoleNumbers: savedHoleNumbers, progressionMode: 'next_unscored_round_order', transitionStyle: 'scorecard_hole_change' } })
       } else {
         setSaveStatus(`Hole ${hole.hole} saved. Tap another hole circle to continue.`)
         logFrontendEvent({ category: 'scorecard.hole.auto_advance', message: 'no_unscored_hole_available', data: { correlationId, savedHole: hole.hole, remainingHoleCount, providedHoleNumbers: savedHoleNumbers } })
@@ -539,7 +554,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
       logFrontendEvent({
         category: 'scorecard.hole.save',
         message: 'succeeded',
-        data: { correlationId, hole: hole.hole, score: normalizedScore, source, teeColor: savedHole.teeColor || selectedTeeColor, outcome: savePresentation.outcome, relativeToPar: savePresentation.relative, providedCount: savedHoleNumbers.length, providedHoleNumbers: savedHoleNumbers, remainingHoleCount, advancedAfterSave: nextUnscoredHoleIndex != null, nextHole: nextAutoAdvanceHole },
+        data: { correlationId, hole: hole.hole, score: normalizedScore, source, teeColor: savedHole.teeColor || selectedTeeColor, outcome: savePresentation.outcome, relativeToPar: savePresentation.relative, providedCount: savedHoleNumbers.length, providedHoleNumbers: savedHoleNumbers, remainingHoleCount, advancedAfterSave: nextUnscoredHoleIndex != null || nextSequentialHole != null, nextHole: nextSequentialHole ?? nextAutoAdvanceHole, trackerSavedColor: 'light_green', trackerMissingColor: 'light_red' },
       })
       return { saved: true, hole: hole.hole, providedHoleNumbers: savedHoleNumbers, holes: next }
     } catch (error) {
@@ -584,13 +599,13 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
       if (onHoleSaved) {
         await onHoleSaved(next, resetHole, 'reset')
       }
-      const nextDefaultHole = defaultHoleNumberForInputFlow(next)
+      const nextDefaultHole = activeHole.hole
       setActiveHoleNumber(nextDefaultHole)
       setSaveStatus(`Hole ${activeHole.hole} cleared.`)
       logFrontendEvent({
         category: 'scorecard.hole.reset',
         message: 'succeeded',
-        data: { correlationId, hole: activeHole.hole, source, nextHole: nextDefaultHole, remainingProvidedHoleNumbers },
+        data: { correlationId, hole: activeHole.hole, source, nextHole: nextDefaultHole, remainingProvidedHoleNumbers, trackerState: 'not_saved', trackerColor: 'light_red', navigationPreserved: true },
       })
       return { saved: true, hole: activeHole.hole, providedHoleNumbers: remainingProvidedHoleNumbers, holes: next }
     } catch (error) {
@@ -692,7 +707,13 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   if (!enabled) return null
 
   const savePresentation = getHoleScoreSavePresentation(activeHole.par, activeScore)
-  const currentHoleProvided = Boolean(activeHole.scoreProvided)
+  const currentHoleProvided = hasSavedHoleScoreValue(activeHole)
+  const savedActiveScore = Number(activeHole.score)
+  const currentScoreSaved = currentHoleProvided
+    && !activeScoreDirty
+    && Number.isFinite(savedActiveScore)
+    && Math.trunc(savedActiveScore) === Math.trunc(activeScore)
+  const saveButtonLabel = `${savePresentation.label}${currentScoreSaved ? '' : ' – not saved'}`
   const activeHoleParLabel = activeHole.par ?? '—'
   const activeHoleTeeLabel = showTeeData ? teeColorLabel(selectedTeeColor) : ''
   const roundTypeLabel = getRoundTypeLabel(draftContext, scoreOwnerLabel)
@@ -710,7 +731,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   return (
     <div className={`card holeInputPanel ${compactMobileInput ? 'holeInputPanel--compact' : ''}`} style={{ marginTop: 16 }}>
       <section className={`holeInputPhone ${compactMobileInput ? 'holeInputPhone--compact' : ''}`} aria-label={`Score entry for hole ${activeHole.hole}`}>
-        <div className={`holeInputScorePageCard ${compactMobileInput ? 'holeInputScorePageCard--compact' : ''}`}>
+        <div key={activeHole.hole} className={`holeInputScorePageCard holeInputScorePageCard--holeChanged ${compactMobileInput ? 'holeInputScorePageCard--compact' : ''}`}>
           <div className="holeInputScoreHeader">
             <span className="holeInputScoreHeaderLabel">Hole</span>
             <HoleNumberGolfBall holeNumber={activeHole.hole} />
@@ -736,12 +757,12 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
 
           <button
             type="button"
-            className={`btn holeInputSaveButton ${savePresentation.className}`}
+            className={`btn holeInputSaveButton ${savePresentation.className} ${currentScoreSaved ? 'holeInputSaveButton--saved' : 'holeInputSaveButton--unsaved'}`}
             disabled={savingHole}
-            aria-label={`Save Hole ${activeHole.hole} score: ${savePresentation.label}`}
+            aria-label={`Save Hole ${activeHole.hole} score: ${saveButtonLabel}`}
             onClick={() => saveHoleScore(activeHole, activeScore, 'dedicated_hole_page', { autoAdvanceAfterSave: true })}
           >
-            {savingHole ? 'Saving…' : savePresentation.label}
+            {savingHole ? 'Saving…' : saveButtonLabel}
           </button>
           {currentHoleProvided ? (
             <button
@@ -767,7 +788,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
               key={holeNumber}
               type="button"
               className={`holeInputTrackerChip${activeHole.hole === holeNumber ? ' holeInputTrackerChip--active' : ''}${scoreProvided ? ' holeInputTrackerChip--saved' : ' holeInputTrackerChip--missing'}`}
-              aria-label={`Hole ${holeNumber}${scoreProvided ? ' score entered' : ' score needed'}`}
+              aria-label={`Hole ${holeNumber}${scoreProvided ? ' score saved' : ' score not saved'}`}
               aria-current={activeHole.hole === holeNumber ? 'step' : undefined}
               onClick={() => {
                 logFrontendEvent({ category: 'scorecard.hole_tracker', message: 'hole_tracker_selected', data: { correlationId: getCorrelationId(), hole: holeNumber, scoreProvided, providedHoleNumbers } })
@@ -778,7 +799,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
             </button>
           ))}
         </div>
-        {missingNumbers.length ? <span className="small">Tap any circle to jump to that hole.</span> : <strong className="holeInputCompleteBadge">Complete round ready to log</strong>}
+        {roundComplete ? <strong className="holeInputCompleteBadge">Complete round ready to log</strong> : <span className="small">Tap any circle to jump to that hole.</span>}
       </div>
 
       <div className="holeInputPageTotals" aria-label="Round totals">

@@ -666,7 +666,7 @@ const TOURNAMENT_FLYER_PRINT_STYLES = `
 export default function TournamentPortal() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, roles } = useAuth()
   const [portal, setPortal] = useState<TournamentPortalData | null>(null)
   const [loading, setLoading] = useState(true)
   const [registering, setRegistering] = useState(false)
@@ -772,7 +772,11 @@ export default function TournamentPortal() {
   if (loading) return <div className="container"><div className="card">Loading tournament portal…</div></div>
   const tournament = portal?.tournament
   const isCompletedTournament = String(tournament?.status || '').toLowerCase() === 'completed'
-  const closePath = '/my-tournaments'
+  const canCloseToPreviousPage = Boolean(user) || roles.some((role) => ['host', 'organizer', 'admin'].includes(String(role || '').toLowerCase()))
+  const closeTournamentPortal = () => {
+    logFrontendEvent({ category: 'tournament.portal', message: 'tournament_portal_close_to_previous_page', data: { tournamentId: id, roles, authenticated: Boolean(user) } })
+    navigate(-1)
+  }
   const template = getTournamentTemplate(tournament?.templateKey)
   const templateData = { ...emptyTournamentTemplateData(), ...(tournament?.templateData || {}) }
   const attributeIcons = template.attributeIcons
@@ -782,7 +786,7 @@ export default function TournamentPortal() {
       <div className="card pageCardShell">
         <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           {tournament ? <button type="button" className="btn btnPrimary" onClick={() => window.print()}>Print flyer</button> : null}
-          <Link className="btn" to={closePath} aria-label="Close tournament portal and return to my tournaments">Close</Link>
+          {canCloseToPreviousPage ? <button className="btn" type="button" onClick={closeTournamentPortal} aria-label="Close tournament portal and return to the previous page">Close</button> : null}
         </div>
         <style>{TOURNAMENT_FLYER_PRINT_STYLES}</style>
         {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}

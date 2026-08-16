@@ -98,8 +98,13 @@ export default function AdminScheduledJobs() {
       logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_job_manual_run_started', data: { jobId: job.id, jobName: job.name } })
       const result = await runScheduledJob(job.id)
       setJobs(result.jobs || [])
-      setMessage(`${job.name} completed with status: ${result.result.status}.`)
-      logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_job_manual_run_completed', data: { jobId: job.id, jobName: job.name, status: result.result.status, runId: result.result.runId } })
+      if (result.result.status === 'running') {
+        setMessage(`${job.name} started in the background. Refresh jobs to monitor progress or use Cancel job to stop it.`)
+        logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_job_background_run_accepted', data: { jobId: job.id, jobName: job.name, status: result.result.status, runId: result.result.runId, correlationId: result.result.correlationId } })
+      } else {
+        setMessage(`${job.name} completed with status: ${result.result.status}.`)
+        logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_job_manual_run_completed', data: { jobId: job.id, jobName: job.name, status: result.result.status, runId: result.result.runId, correlationId: result.result.correlationId } })
+      }
     } catch (err) {
       const text = err instanceof Error ? err.message : 'Could not run scheduled job.'
       setError(text)
@@ -231,6 +236,12 @@ export default function AdminScheduledJobs() {
                         <strong>{job.name}</strong>
                         <div className="small">{job.scheduleLabel || 'Manual'}{job.scheduleTimeZone ? ` · ${job.scheduleTimeZone}` : ''}</div>
                         {job.id === 'scrubTournaments' ? <div className="small">{job.jobConfig?.matchValues?.length || 0} scrub value(s)</div> : null}
+                        {job.id === 'getGolfCourseData' ? (
+                          <>
+                            <div className="small">All US states + DC · fast mode · {String(job.jobConfig?.courseConcurrency || 8)} concurrent courses · bulk metadata + holes/tees enrichment</div>
+                            <div className="small">Target: ~{String(job.jobConfig?.targetRunHours || 12)} hours. A full US run needs roughly two REST calls per course plus state validation, so use an OpenGolfAPI key with enough daily quota; the run output reports the exact estimate.</div>
+                          </>
+                        ) : null}
                       </td>
                       <td style={{ minWidth: 260 }}>{job.description || '—'}</td>
                       <td>{formatDate(job.createdAt)}</td>

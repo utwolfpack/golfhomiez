@@ -18,7 +18,7 @@ import { calculateHoleScoreTotal, calculateProvidedHoleScoreTotal, getHoleScorec
 import { clearScorecardDraftHoles, deleteScorecardDraftHole, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
-import { cancelScheduledJob, configureScheduledJob, listScheduledJobs, runScheduledJob, startScheduledJobRunner } from './lib/scheduled-jobs.js'
+import { cancelScheduledJob, configureScheduledJob, listScheduledJobs, runScheduledJob, shouldRunScheduledJobInBackground, startScheduledJobRunner } from './lib/scheduled-jobs.js'
 import { searchGolfCourseTournaments, syncGolfHomiezTournamentSearchRecord } from './lib/tournament-discovery.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
@@ -237,6 +237,11 @@ app.get('/api/golf-courses/scorecard', async (req, res) => {
       teeColor,
     })
 
+    const scorecardHoles = Array.isArray(scorecard.holes) ? scorecard.holes : []
+    const providedHoleCount = scorecardHoles.filter((hole) => hole?.scoreProvided === true && Number.isFinite(Number(hole?.score))).length
+    const unsetScoreHoleCount = scorecardHoles.filter((hole) => hole?.score == null).length
+    const unsavedScoreValueCount = scorecardHoles.filter((hole) => hole?.scoreProvided !== true && hole?.score != null).length
+
     logApi('golf_course_scorecard_completed', {
       ...requestContext(req),
       state,
@@ -246,8 +251,12 @@ app.get('/api/golf-courses/scorecard', async (req, res) => {
       teeColor: scorecard.teeColor || teeColor,
       availableTeeColors: scorecard.availableTeeColors || [],
       golferLocationProvided: Number.isFinite(golferLatitude) && Number.isFinite(golferLongitude),
-      holeCount: Array.isArray(scorecard.holes) ? scorecard.holes.length : 0,
-      distanceToFlagCount: Array.isArray(scorecard.holes) ? scorecard.holes.filter((hole) => Number.isFinite(Number(hole.distanceToFlagYards))).length : 0,
+      holeCount: scorecardHoles.length,
+      distanceToFlagCount: scorecardHoles.filter((hole) => Number.isFinite(Number(hole.distanceToFlagYards))).length,
+      providedHoleCount,
+      unsetScoreHoleCount,
+      unsavedScoreValueCount,
+      scoreValuePolicy: 'saved_holes_only',
       parTotal: scorecard.parTotal,
       scoreTotal: scorecard.scoreTotal,
     })
@@ -2094,6 +2103,11 @@ app.get('/api/admin/external-api-calls', adminMiddleware, async (req, res) => {
       filters: report.filters,
       generatedAt: report.generatedAt,
       totalCalls: report.totalCalls,
+      successCount: report.successCount,
+      failureCount: report.failureCount,
+      successRatePercent: report.successRatePercent,
+      averageDurationMs: report.averageDurationMs,
+      distinctEndpointCount: report.distinctEndpointCount,
       rowCount: report.rows.length,
     })
     res.json(report)
@@ -2125,16 +2139,65 @@ app.post('/api/admin/scheduled-jobs/:id/run', adminMiddleware, async (req, res) 
     if (!jobId) return res.status(400).json({ message: 'Scheduled job id is required' })
     logApi('admin_scheduled_job_manual_run_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId })
     logScheduledJob('admin_scheduled_job_manual_run_requested', { ...requestContext(req), adminUserId: req.adminUser.id, jobId })
-    const result = await runScheduledJob(getPool(), jobId, {
+    const runOptions = {
       triggeredBy: 'manual',
       correlationId: req.correlationId,
       adminUser: req.adminUser,
       logApi,
       logError,
       logScheduledJob,
-    })
+    }
+
+    if (shouldRunScheduledJobInBackground(jobId)) {
+      const existingJobs = await listScheduledJobs(getPool())
+      const existingJob = existingJobs.find((job) => job.id === jobId)
+      if (existingJob?.canCancel) {
+        return res.status(409).json({ message: `Scheduled job is already running: ${jobId}` })
+      }
+
+      const backgroundRun = runScheduledJob(getPool(), jobId, runOptions)
+      void backgroundRun.catch((error) => {
+        logError('Admin scheduled background job failed after acceptance', {
+          correlationId: req.correlationId,
+          adminUserId: req.adminUser?.id || null,
+          jobId,
+          error,
+        })
+      })
+
+      // runScheduledJob registers the active run synchronously before its first database await.
+      // Yield once so a run id can normally be persisted before returning the refreshed job list.
+      await new Promise((resolve) => setImmediate(resolve))
+      const jobs = await listScheduledJobs(getPool())
+      const activeJob = jobs.find((job) => job.id === jobId)
+      logApi('admin_scheduled_job_background_run_accepted', {
+        ...requestContext(req),
+        adminUserId: req.adminUser.id,
+        jobId,
+        runId: activeJob?.activeRunId || null,
+      })
+      logScheduledJob('admin_scheduled_job_background_run_accepted', {
+        ...requestContext(req),
+        adminUserId: req.adminUser.id,
+        jobId,
+        runId: activeJob?.activeRunId || null,
+      })
+      return res.status(202).json({
+        result: {
+          jobId,
+          runId: activeJob?.activeRunId || null,
+          status: 'running',
+          output: null,
+          nextRunAt: activeJob?.nextRunAt || null,
+          correlationId: req.correlationId,
+        },
+        jobs,
+      })
+    }
+
+    const result = await runScheduledJob(getPool(), jobId, runOptions)
     const jobs = await listScheduledJobs(getPool())
-    res.json({ result: { jobId: result.job.id, runId: result.runId, status: result.status, output: result.output, nextRunAt: result.nextRunAt }, jobs })
+    res.json({ result: { jobId: result.job.id, runId: result.runId, status: result.status, output: result.output, nextRunAt: result.nextRunAt, correlationId: req.correlationId }, jobs })
   } catch (error) {
     if (error instanceof Error && /Scheduled job not found/i.test(error.message)) {
       return res.status(404).json({ message: error.message })
@@ -3436,9 +3499,8 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
       [req.user.id, email],
     )
     const rowsWithAddresses = await resolveTournamentGolfCourseAddresses(rows, req)
-    const tournaments = rowsWithAddresses.map((row) => ({
-      ...mapTournamentPortalRow(row, req),
-      tournamentIdentifier: row.tournament_identifier || null,
+    const registrationRows = rowsWithAddresses.map((row) => ({
+      row,
       registration: mapTournamentRegistrationRow({
         id: row.registration_id,
         tournament_id: row.id,
@@ -3453,7 +3515,55 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
         updated_at: row.registration_updated_at,
       }),
     }))
-    logApi('user_registered_tournaments_loaded', { ...requestContext(req), authUserId: req.user.id, email, tournamentCount: tournaments.length })
+    const tournamentIds = [...new Set(registrationRows.map(({ row }) => String(row.id || '').trim()).filter(Boolean))]
+    const teamScoreByTournamentAndTeam = new Map()
+    let teamScoreLoadFailed = false
+    if (tournamentIds.length) {
+      try {
+        const placeholders = tournamentIds.map(() => '?').join(',')
+        const [scoreRows] = await pool.execute(
+          `SELECT tournament_id, team_key, total_score, updated_at
+             FROM tournament_team_scores
+            WHERE tournament_id IN (${placeholders})`,
+          tournamentIds,
+        )
+        for (const scoreRow of scoreRows) {
+          const totalScore = scoreRow.total_score == null ? null : Number(scoreRow.total_score)
+          teamScoreByTournamentAndTeam.set(`${scoreRow.tournament_id}::${scoreRow.team_key}`, {
+            totalScore: Number.isFinite(totalScore) ? totalScore : null,
+            updatedAt: scoreRow.updated_at || null,
+          })
+        }
+      } catch (error) {
+        teamScoreLoadFailed = true
+        logWarn('user_registered_tournament_team_scores_load_failed', {
+          ...requestContext(req),
+          authUserId: req.user.id,
+          tournamentCount: tournamentIds.length,
+          error,
+        })
+      }
+    }
+    const tournaments = registrationRows.map(({ row, registration }) => {
+      const score = teamScoreByTournamentAndTeam.get(`${row.id}::${tournamentRegistrationTeamKey(registration)}`) || null
+      return {
+        ...mapTournamentPortalRow(row, req),
+        tournamentIdentifier: row.tournament_identifier || null,
+        registration,
+        teamScore: score?.totalScore ?? null,
+        teamScoreUpdatedAt: score?.updatedAt || null,
+      }
+    })
+    logApi('user_registered_tournaments_loaded', {
+      ...requestContext(req),
+      authUserId: req.user.id,
+      email,
+      tournamentCount: tournaments.length,
+      activeTournamentCount: tournaments.filter((tournament) => ['published', 'active'].includes(String(tournament.status || '').toLowerCase())).length,
+      completedTournamentCount: tournaments.filter((tournament) => String(tournament.status || '').toLowerCase() === 'completed').length,
+      tournamentWithTeamScoreCount: tournaments.filter((tournament) => tournament.teamScore != null).length,
+      teamScoreLoadFailed,
+    })
     res.json({ tournaments })
   } catch (error) {
     logRouteError('User registered tournaments load error', req, error)

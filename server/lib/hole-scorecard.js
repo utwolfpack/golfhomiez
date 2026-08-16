@@ -96,7 +96,9 @@ export function buildDefaultHoleScorecard({ state = '', course = '', courseId = 
     strokeIndex: strokeIndexes[index] || index + 1,
     teeColor: selectedTeeColor,
     teeBoxType: selectedTeeColor,
-    score: par,
+    // A hole does not own a score until the golfer explicitly saves one.
+    // Par is course metadata and must never be used as an unsaved score value.
+    score: null,
     scoreProvided: false,
   }))
 
@@ -164,6 +166,13 @@ export function normalizeHoleScorePayload(holes) {
       const rawScore = hole?.score
       const score = Number(rawScore)
       const hasScoreValue = rawScore !== undefined && rawScore !== null && rawScore !== ''
+      const hasExplicitScoreProvided = Object.prototype.hasOwnProperty.call(hole || {}, 'scoreProvided')
+        || Object.prototype.hasOwnProperty.call(hole || {}, 'score_provided')
+      const explicitScoreProvided = hole?.scoreProvided ?? hole?.score_provided
+      const explicitlyUnsaved = hasExplicitScoreProvided
+        && !(explicitScoreProvided === true || explicitScoreProvided === 1 || explicitScoreProvided === '1' || explicitScoreProvided === 'true')
+      const hasValidScoreValue = hasScoreValue && Number.isFinite(score) && score >= 0
+      const scoreProvided = hasValidScoreValue && !explicitlyUnsaved
 
       return {
         hole: Number.isFinite(holeNumber) && holeNumber > 0 ? Math.min(18, Math.trunc(holeNumber)) : index + 1,
@@ -184,8 +193,8 @@ export function normalizeHoleScorePayload(holes) {
         centerLongitude: Number.isFinite(centerLongitude) ? centerLongitude : null,
         backLatitude: Number.isFinite(backLatitude) ? backLatitude : null,
         backLongitude: Number.isFinite(backLongitude) ? backLongitude : null,
-        score: hasScoreValue && Number.isFinite(score) && score >= 0 ? Math.trunc(score) : null,
-        scoreProvided: hole?.scoreProvided === false || hole?.score_provided === false ? false : hasScoreValue && Number.isFinite(score) && score >= 0,
+        score: scoreProvided ? Math.trunc(score) : null,
+        scoreProvided,
       }
     })
 
@@ -197,7 +206,9 @@ export async function getHoleScorecardForCourse({ state = '', course = '', cours
   const result = await getGolfCourseHolesForCourse({ state, course, courseId, golferLatitude, golferLongitude, teeColor: selectedTeeColor })
   const holes = result.holes.map((hole) => ({
     ...hole,
-    score: Number.isFinite(Number(hole.par)) && Number(hole.par) > 0 ? Number(hole.par) : 0,
+    // Course data supplies par/yardage only. A score remains unset until a
+    // golfer saves that hole through the score-entry flow.
+    score: null,
     scoreProvided: false,
   }))
   if (!holes.length) throw new Error('Database did not return hole data for the selected course')

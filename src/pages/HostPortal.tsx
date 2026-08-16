@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
 import PageHero from '../components/PageHero'
 import { useHostAuth } from '../context/HostAuthContext'
 import { archiveHostTournamentRecord, createHostTournament, restoreHostTournamentRecord, sendHostTournamentInvite, updateHostTournamentRecord, type Tournament, type TournamentInput } from '../lib/accounts'
@@ -53,13 +53,27 @@ function sortTournamentsByCreatedDescending(tournaments: Tournament[] = []) {
   return [...tournaments].sort((left, right) => tournamentCreatedTimestamp(right) - tournamentCreatedTimestamp(left))
 }
 
+function tournamentYear(value?: string | null) {
+  if (!value) return null
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : date.getFullYear()
+}
+
+function tournamentYearOptions(tournaments: Tournament[], currentYear: number) {
+  const years = new Set<number>([currentYear])
+  tournaments.forEach((tournament) => {
+    const year = tournamentYear(tournament.startDate)
+    if (year) years.add(year)
+  })
+  return Array.from(years).sort((a, b) => b - a)
+}
 
 function TournamentCapacitySummary({ tournament }: { tournament: Tournament }) {
   const stats = tournamentStats(tournament)
   return (
     <div className="tournament-capacity-grid" aria-label="Tournament team registration summary">
       <div className="card statCardCompact tournament-capacity-card"><div className="statCardLabel">Teams registered</div><div className="statCardValue">{stats.registeredTeamCount}</div></div>
-      <div className="card statCardCompact tournament-capacity-card"><div className="statCardLabel">Verified users</div><div className="statCardValue">{stats.verifiedUserCount}</div></div>
       <div className="card statCardCompact tournament-capacity-card"><div className="statCardLabel">Team slots open</div><div className="statCardValue">{stats.openTeamSlotCount}</div><div className="small">of {stats.teamSlotLimit} teams</div></div>
     </div>
   )
@@ -106,9 +120,8 @@ function formatRegisteredAt(value?: string | null) {
 
 
 function tournamentMemberStatus(member: { registered?: boolean; verified?: boolean }) {
-  if (member.registered && member.verified) return 'Registered and verified'
-  if (member.registered) return 'Registered; verification pending'
-  return 'Needs tournament registration'
+  if (member.registered) return 'Registered'
+  return 'Needs registration'
 }
 
 function tournamentMemberStatusClass(member: { registered?: boolean; verified?: boolean }) {
@@ -119,6 +132,16 @@ function tournamentMemberStatusClass(member: { registered?: boolean; verified?: 
 
 function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   const registrations = tournament.registrations || []
+  const [selectedRegistration, setSelectedRegistration] = useState<(typeof registrations)[number] | null>(null)
+  const openRegistration = (registration: (typeof registrations)[number]) => {
+    setSelectedRegistration(registration)
+    logFrontendEvent({ category: 'host.portal', message: 'host_tournament_team_registration_opened', data: { tournamentId: tournament.id, registrationId: registration.id, teamName: registration.teamName || registration.name || null } })
+  }
+  const onRegistrationKeyDown = (event: KeyboardEvent<HTMLButtonElement>, registration: (typeof registrations)[number]) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    openRegistration(registration)
+  }
   return (
     <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
       <div style={{ fontWeight: 700 }}>Teams signed up ({tournamentStats(tournament).registeredTeamCount})</div>
@@ -126,33 +149,47 @@ function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
       {registrations.length === 0 ? (
         <div className="small">No teams have signed up yet.</div>
       ) : (
-        <div className="formStack" style={{ marginTop: 8 }}>
-          {registrations.map((registration) => {
-            const members = registration.teamMembers || []
-            const registeredCount = members.filter((member) => member.registered).length
-            return (
-              <div key={registration.id} className="card tournament-team-registration-card" style={{ padding: 12, background: '#fff' }}>
-                <div><strong>{registration.teamName || registration.name || 'Registered team'}</strong> · {formatRegisteredAt(registration.registeredAt)}</div>
-                <div className="small">Registrant: {registration.name || 'Registered golfer'} · {registration.email}</div>
-                <div className="small" style={{ marginTop: 4 }}>{registeredCount} of {members.length || 1} members have registered for this tournament.</div>
-                {members.length ? (
-                  <ul className="tournament-team-member-status-list" aria-label={`${registration.teamName || 'Team'} member registration statuses`}>
-                    {members.map((member) => (
-                      <li key={member.email || member.id || member.name}>
-                        <span className="tournament-team-member-name">{member.name || member.email || 'Team member'}</span>
-                        {member.email ? <span className="small tournament-team-member-email">{member.email}</span> : null}
-                        <span className={tournamentMemberStatusClass(member)}>{tournamentMemberStatus(member)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="small" style={{ marginTop: 6 }}>Team roster unavailable.</div>
-                )}
-              </div>
-            )
-          })}
+        <div className="tournament-team-registration-lines" style={{ marginTop: 8 }}>
+          {registrations.map((registration) => (
+            <button
+              key={registration.id}
+              type="button"
+              className="tournament-team-registration-line"
+              onClick={() => openRegistration(registration)}
+              onKeyDown={(event) => onRegistrationKeyDown(event, registration)}
+            >
+              <span><span>Team name</span><strong>{registration.teamName || registration.name || 'Registered team'}</strong></span>
+              <span><span>Date registered</span><strong>{formatRegisteredAt(registration.registeredAt)}</strong></span>
+              <span><span>Registrant</span><strong>{registration.name || 'Registered golfer'}</strong><small>{registration.email}</small></span>
+            </button>
+          ))}
         </div>
       )}
+      {selectedRegistration ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true" aria-label={`${selectedRegistration.teamName || 'Team'} registration details`} onClick={() => setSelectedRegistration(null)}>
+          <div className="modalCard tournament-registration-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modalHeader">
+              <div>
+                <h3>{selectedRegistration.teamName || selectedRegistration.name || 'Registered team'}</h3>
+                <div className="small">Registered by {selectedRegistration.name || 'Registered golfer'} · {formatRegisteredAt(selectedRegistration.registeredAt)}</div>
+              </div>
+              <button type="button" className="btn btnSmall" onClick={() => setSelectedRegistration(null)}>Close</button>
+            </div>
+            <div className="small" style={{ overflowWrap: 'anywhere' }}>{selectedRegistration.email}</div>
+            {(selectedRegistration.teamMembers || []).length ? (
+              <ul className="tournament-team-member-status-list" aria-label={`${selectedRegistration.teamName || 'Team'} member registration statuses`}>
+                {(selectedRegistration.teamMembers || []).map((member) => (
+                  <li key={member.email || member.id || member.name}>
+                    <span className="tournament-team-member-name">{member.name || member.email || 'Team member'}</span>
+                    {member.email ? <span className="small tournament-team-member-email">{member.email}</span> : null}
+                    <span className={tournamentMemberStatusClass(member)}>{tournamentMemberStatus(member)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <div className="small" style={{ marginTop: 10 }}>Team roster unavailable.</div>}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -195,6 +232,7 @@ export default function HostPortal() {
   const [createTournamentOpen, setCreateTournamentOpen] = useState(false)
   const [createAdditionalFieldsOpen, setCreateAdditionalFieldsOpen] = useState(false)
   const [showArchivedTournaments, setShowArchivedTournaments] = useState(false)
+  const [selectedHostTournamentYear, setSelectedHostTournamentYear] = useState(() => String(new Date().getFullYear()))
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null)
   const [tournamentPage, setTournamentPage] = useState(1)
 
@@ -411,15 +449,26 @@ export default function HostPortal() {
   const hostedTournaments = sortTournamentsByCreatedDescending(portalData?.tournaments || [])
   const activeHostedTournaments = hostedTournaments.filter((tournament) => !tournament.archivedAt)
   const archivedHostedTournaments = hostedTournaments.filter((tournament) => Boolean(tournament.archivedAt))
-  const selectedHostedTournaments = showArchivedTournaments ? archivedHostedTournaments : activeHostedTournaments
+  const selectedTournamentPool = showArchivedTournaments ? archivedHostedTournaments : activeHostedTournaments
+  const currentYear = new Date().getFullYear()
+  const hostTournamentYears = useMemo(() => tournamentYearOptions(selectedTournamentPool, currentYear), [currentYear, selectedTournamentPool])
+  const selectedHostYearNumber = Number(selectedHostTournamentYear) || currentYear
+  const selectedHostedTournaments = selectedTournamentPool.filter((tournament) => tournamentYear(tournament.startDate) === selectedHostYearNumber)
   const totalTournamentPages = Math.max(1, Math.ceil(selectedHostedTournaments.length / TOURNAMENTS_PER_PAGE))
   const safeTournamentPage = Math.min(tournamentPage, totalTournamentPages)
   const pagedHostedTournaments = selectedHostedTournaments.slice((safeTournamentPage - 1) * TOURNAMENTS_PER_PAGE, safeTournamentPage * TOURNAMENTS_PER_PAGE)
-  const visibleHostedTournaments = editingId ? selectedHostedTournaments.filter((tournament) => tournament.id === editingId) : pagedHostedTournaments
+  const visibleHostedTournaments = editingId ? selectedTournamentPool.filter((tournament) => tournament.id === editingId) : pagedHostedTournaments
 
   useEffect(() => {
     if (tournamentPage > totalTournamentPages) setTournamentPage(totalTournamentPages)
   }, [tournamentPage, totalTournamentPages])
+
+  useEffect(() => {
+    if (!hostTournamentYears.includes(selectedHostYearNumber)) {
+      setSelectedHostTournamentYear(String(currentYear))
+      setTournamentPage(1)
+    }
+  }, [currentYear, hostTournamentYears, selectedHostYearNumber])
 
   return (
     <div className="container pageStack">
@@ -568,6 +617,7 @@ export default function HostPortal() {
                         const next = !showArchivedTournaments
                         setShowArchivedTournaments(next)
                         setTournamentPage(1)
+                        setSelectedHostTournamentYear(String(new Date().getFullYear()))
                         setError(null)
                         setSuccess(null)
                         logFrontendEvent({ category: 'host.portal', message: next ? 'host_archived_tournaments_view_opened' : 'host_active_tournaments_view_opened', data: { archivedCount: archivedHostedTournaments.length, activeCount: activeHostedTournaments.length } })
@@ -577,8 +627,29 @@ export default function HostPortal() {
                     </button>
                   ) : null}
                 </div>
+                {!editingId ? (
+                  <div className="golfCourseTournamentControls hostTournamentYearControls" aria-label="Host tournament year filters">
+                    <div className="golfCourseTournamentYearTabs">
+                      {hostTournamentYears.map((year) => (
+                        <button
+                          type="button"
+                          key={year}
+                          className={`golfCourseTournamentYearTab ${selectedHostYearNumber === year ? 'golfCourseTournamentYearTab--active' : ''}`}
+                          onClick={() => {
+                            setSelectedHostTournamentYear(String(year))
+                            setTournamentPage(1)
+                            logFrontendEvent({ category: 'host.portal', message: 'host_tournament_year_selected', data: { archived: showArchivedTournaments, year } })
+                          }}
+                        >
+                          {year}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="small">{selectedHostedTournaments.length} tournament{selectedHostedTournaments.length === 1 ? '' : 's'} in {selectedHostYearNumber}</div>
+                  </div>
+                ) : null}
                 <div className="formStack" style={{ marginTop: 12 }}>
-                  {visibleHostedTournaments.length === 0 ? <div className="small">{showArchivedTournaments ? 'No archived tournaments.' : 'No active tournaments created yet.'}</div> : visibleHostedTournaments.map((tournament) => (
+                  {visibleHostedTournaments.length === 0 ? <div className="small">{showArchivedTournaments ? `No archived tournaments in ${selectedHostYearNumber}.` : `No active tournaments in ${selectedHostYearNumber}.`}</div> : visibleHostedTournaments.map((tournament) => (
                   <div key={tournament.id} className={editingId === tournament.id ? 'card' : undefined} style={editingId === tournament.id ? { padding: 16 } : undefined}>
                     {editingId === tournament.id && editForm ? (
                       <form onSubmit={onSaveTournament} className="formStack" onClick={(e) => e.stopPropagation()}>

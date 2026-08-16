@@ -108,9 +108,11 @@ test('approved host page creation appends a number when the base slug is already
   assert.match(page.summary, /Murray Parkway is a golf destination in Murray, UT/i)
 })
 
-test('public golf-course page includes linked public tournaments and a count', async () => {
+test('public golf-course page includes linked public tournaments for the relative course and a count', async () => {
+  let tournamentQuery = null
+  let tournamentParams = null
   const db = {
-    async execute(sql) {
+    async execute(sql, params = []) {
       if (/FROM golf_course_public_pages WHERE slug/i.test(sql)) {
         return [[{
           id: 'page-1',
@@ -123,10 +125,25 @@ test('public golf-course page includes linked public tournaments and a count', a
           is_published: 1,
         }]]
       }
-      if (/FROM tournaments/i.test(sql)) {
+      if (/FROM information_schema\.COLUMNS/i.test(sql)) {
+        if (params[0] === 'tournaments') {
+          return [[
+            'id', 'tournament_identifier', 'name', 'title', 'start_date', 'status', 'template_data',
+            'is_public', 'archived_at', 'host_account_id', 'golf_course_id', 'created_at',
+          ].map((COLUMN_NAME) => ({ COLUMN_NAME }))]
+        }
+        if (params[0] === 'golf_course_tournaments') {
+          return [[
+            'id', 'golf_course_id', 'golfhomiez_tournament_id', 'active',
+          ].map((COLUMN_NAME) => ({ COLUMN_NAME }))]
+        }
+      }
+      if (/FROM tournaments t/i.test(sql)) {
+        tournamentQuery = sql
+        tournamentParams = params
         return [[
-          { id: 'tournament-1', tournament_identifier: 'summer-open-123', name: 'Summer Open', start_date: '2026-08-10', status: 'published' },
-          { id: 'tournament-2', tournament_identifier: null, name: 'Fall Classic', start_date: '2026-09-12', status: 'published' },
+          { id: 'tournament-1', tournament_identifier: 'summer-open-123', name: 'Summer Open', start_date: '2026-08-10', status: 'published', template_data: JSON.stringify({ startType: 'shotgun', teeTime: '08:00' }) },
+          { id: 'tournament-2', tournament_identifier: null, name: 'Fall Classic', start_date: '2026-09-12', status: 'completed', template_data: JSON.stringify({ startType: 'tee-times', teeTime: '08:30' }) },
         ]]
       }
       throw new Error(`Unexpected SQL: ${sql}`)
@@ -135,8 +152,58 @@ test('public golf-course page includes linked public tournaments and a count', a
 
   const page = await getGolfCoursePublicPageBySlug(db, 'murrayparkwayut', { baseUrl: 'https://golfhomiez.com' })
   assert.equal(page.tournamentCount, 2)
+  assert.match(tournamentQuery, /t\.golf_course_id/)
+  assert.match(tournamentQuery, /t\.host_account_id/)
+  assert.match(tournamentQuery, /golf_course_tournaments gct/)
+  assert.match(tournamentQuery, /LOWER\(TRIM\(COALESCE\(t\.status, ''\)\)\) IN \('published', 'completed'\)/)
+  assert.match(tournamentQuery, /COALESCE\(t\.is_public, 0\) = 1/)
+  assert.match(tournamentQuery, /ORDER BY CASE WHEN t\.start_date IS NULL THEN 1 ELSE 0 END,[\s\S]*t\.start_date DESC/)
+  assert.deepEqual(tournamentParams, ['course-1', 'host-1', 'course-1'])
   assert.equal(page.tournaments[0].portalPath, '/tournaments/summer-open-123')
   assert.equal(page.tournaments[1].portalPath, '/tournaments/tournament-2')
+  assert.equal(page.tournaments[0].startType, 'shotgun')
+  assert.equal(page.tournaments[0].startTime, '08:00')
+  assert.equal(page.tournaments[1].status, 'completed')
+})
+
+test('public golf-course page tournament rollup does not reference missing course columns', async () => {
+  let tournamentQuery = null
+  const db = {
+    async execute(sql, params = []) {
+      if (/FROM golf_course_public_pages WHERE slug/i.test(sql)) {
+        return [[{
+          id: 'page-1',
+          host_account_id: 'host-1',
+          golf_course_id: 'course-1',
+          slug: 'golfhomiezlakeviewut',
+          golf_course_name: 'Golf Homiez Lake View',
+          summary: 'Course summary',
+          state_code: 'UT',
+          is_published: 1,
+        }]]
+      }
+      if (/FROM information_schema\.COLUMNS/i.test(sql)) {
+        if (params[0] === 'tournaments') {
+          return [[
+            'id', 'title', 'starts_at', 'status', 'is_public', 'archived_at', 'host_account_id', 'created_at',
+          ].map((COLUMN_NAME) => ({ COLUMN_NAME }))]
+        }
+        if (params[0] === 'golf_course_tournaments') return [[]]
+      }
+      if (/FROM tournaments t/i.test(sql)) {
+        tournamentQuery = sql
+        return [[{ id: 'tournament-1', tournament_identifier: null, name: 'Lake View Open', start_date: '2026-09-12', status: 'published' }]]
+      }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    },
+  }
+
+  const page = await getGolfCoursePublicPageBySlug(db, 'golfhomiezlakeviewut')
+  assert.equal(page.tournamentCount, 1)
+  assert.match(tournamentQuery, /t\.host_account_id/)
+  assert.doesNotMatch(tournamentQuery, /t\.golf_course_id/)
+  assert.match(tournamentQuery, /DATE\(t\.starts_at\) AS start_date/)
+  assert.match(tournamentQuery, /t\.starts_at DESC/)
 })
 
 

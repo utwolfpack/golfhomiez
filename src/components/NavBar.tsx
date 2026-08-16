@@ -99,6 +99,15 @@ export default function NavBar() {
     })
   }
 
+  function handleGuestNavigation(destination: string, accountType: 'user' | 'host' | 'organizer' | 'registration') {
+    setOpen(false)
+    logFrontendEvent({
+      category: 'app.nav.guest',
+      message: 'guest_navigation_selected',
+      data: { destination, accountType, correlationId: getCorrelationId() },
+    })
+  }
+
   async function handleLogout() {
     setOpen(false)
     try {
@@ -164,7 +173,31 @@ export default function NavBar() {
 
           <div className="navMenuWrap" ref={menuRef}>
             {!user && !hostAccount && !adminUser && !organizerAccount ? (
-              <NavLink to="/login" className="navMenuTrigger">Login/Register</NavLink>
+              <>
+                <button
+                  type="button"
+                  className="navMenuTrigger"
+                  aria-label="Open login and registration menu"
+                  aria-expanded={open}
+                  aria-controls="app-guest-menu"
+                  onClick={() => {
+                    const nextOpen = !open
+                    setOpen(nextOpen)
+                    logFrontendEvent({ category: 'app.nav.guest', message: 'guest_menu_toggled', data: { open: nextOpen, correlationId: getCorrelationId() } })
+                  }}
+                >
+                  <span className="navMenuLabel">Login/Register</span>
+                  <span className={`navMenuCaret ${open ? 'navMenuCaretOpen' : ''}`} aria-hidden="true">▾</span>
+                </button>
+                {open ? (
+                  <div className="navDropdown" id="app-guest-menu">
+                    <NavLink className="navDropdownItem" to="/login" onClick={() => handleGuestNavigation('/login', 'user')}>User Login</NavLink>
+                    <NavLink className="navDropdownItem" to="/register" onClick={() => handleGuestNavigation('/register', 'registration')}>Create account</NavLink>
+                    <NavLink className="navDropdownItem" to="/host/login" onClick={() => handleGuestNavigation('/host/login', 'host')}>Host Login</NavLink>
+                    <NavLink className="navDropdownItem" to="/organizer/login" onClick={() => handleGuestNavigation('/organizer/login', 'organizer')}>Organizer Login</NavLink>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <>
                 <button

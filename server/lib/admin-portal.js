@@ -793,6 +793,7 @@ export async function listPortalData() {
   await ensureAdminPortalSchema()
   const db = pool()
   const [[{ userCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS userCount FROM `user`')
+  const [[{ verifiedUserCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS verifiedUserCount FROM `user` WHERE emailVerified = 1')
   const [[{ appUserCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS appUserCount FROM app_users')
   const [[{ teamCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS teamCount FROM teams')
   const [[{ scoreCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS scoreCount FROM scores')
@@ -818,6 +819,7 @@ export async function listPortalData() {
   const tournamentColumns = await getTableColumns('tournaments')
   const hostRoleColumns = await getTableColumns('host_role_accounts')
   const requestColumns = await getTableColumns('host_account_requests')
+  const inboxMessageColumns = await getTableColumns('inbox_messages')
 
   const requestStateCodeColumn = requestColumns.has('state_code') ? 'state_code' : null
   const requestStateNameColumn = requestColumns.has('state_name') ? 'state_name' : null
@@ -826,6 +828,91 @@ export async function listPortalData() {
   const requestApprovedHostAccountIdColumn = requestColumns.has('approved_host_account_id') ? 'approved_host_account_id' : null
 
   const admins = await listAdminUsers()
+  const adminCount = admins.length
+  const activeAdminCount = admins.filter((admin) => Number(admin.is_active ?? 1) === 1).length
+
+  let validatedHostCount = 0
+  if (hostColumns.has('is_validated')) {
+    const [[row = {}] = []] = await db.query('SELECT COUNT(*) AS validatedHostCount FROM host_accounts WHERE is_validated = 1')
+    validatedHostCount = Number(row.validatedHostCount || 0)
+  } else {
+    validatedHostCount = Number(hostCount || 0)
+  }
+
+  let tournamentHostCount = 0
+  if (tournamentColumns.has('host_account_id')) {
+    const [[row = {}] = []] = await db.query("SELECT COUNT(DISTINCT NULLIF(host_account_id, '')) AS tournamentHostCount FROM tournaments")
+    tournamentHostCount = Number(row.tournamentHostCount || 0)
+  }
+
+  let tournamentRegistrationCount = 0
+  let tournamentsWithRegistrationsCount = 0
+  if (await tableExists('tournament_registrations')) {
+    const registrationColumns = await getTableColumns('tournament_registrations')
+    const registrationTournamentMetric = registrationColumns.has('tournament_id') ? ', COUNT(DISTINCT tournament_id) AS tournamentsWithRegistrationsCount' : ''
+    const [[row = {}] = []] = await db.query(`SELECT COUNT(*) AS tournamentRegistrationCount${registrationTournamentMetric} FROM tournament_registrations`)
+    tournamentRegistrationCount = Number(row.tournamentRegistrationCount || 0)
+    tournamentsWithRegistrationsCount = Number(row.tournamentsWithRegistrationsCount || 0)
+  }
+
+  let scoredTournamentTeamCount = 0
+  if (await tableExists('tournament_team_scores')) {
+    const teamScoreColumns = await getTableColumns('tournament_team_scores')
+    const scorePredicate = teamScoreColumns.has('total_score') ? ' WHERE total_score IS NOT NULL' : ''
+    const [[row = {}] = []] = await db.query(`SELECT COUNT(*) AS scoredTournamentTeamCount FROM tournament_team_scores${scorePredicate}`)
+    scoredTournamentTeamCount = Number(row.scoredTournamentTeamCount || 0)
+  }
+
+  let challengeCount = 0
+  let activeChallengeCount = 0
+  let completedChallengeCount = 0
+  let challenges = []
+  let challengeStatusCounts = []
+  if (inboxMessageColumns.has('message_type')) {
+    const challengeKey = inboxMessageColumns.has('thread_id') ? "COALESCE(NULLIF(thread_id, ''), id)" : 'id'
+    const challengeStatus = inboxMessageColumns.has('challenge_status') ? "LOWER(COALESCE(NULLIF(challenge_status, ''), 'active'))" : "'active'"
+    const [[row = {}] = []] = await db.query(`
+      SELECT
+        COUNT(DISTINCT ${challengeKey}) AS challengeCount,
+        COUNT(DISTINCT CASE WHEN ${challengeStatus} = 'completed' THEN ${challengeKey} END) AS completedChallengeCount,
+        COUNT(DISTINCT CASE WHEN ${challengeStatus} <> 'completed' THEN ${challengeKey} END) AS activeChallengeCount
+      FROM inbox_messages
+      WHERE message_type IN ('challenge_request', 'individual_challenge')
+    `)
+    challengeCount = Number(row.challengeCount || 0)
+    activeChallengeCount = Number(row.activeChallengeCount || 0)
+    completedChallengeCount = Number(row.completedChallengeCount || 0)
+
+    if (inboxMessageColumns.has('challenge_status')) {
+      const [statusRows] = await db.query(`
+        SELECT COALESCE(NULLIF(challenge_status, ''), 'active') AS status, COUNT(DISTINCT ${challengeKey}) AS count
+        FROM inbox_messages
+        WHERE message_type IN ('challenge_request', 'individual_challenge')
+        GROUP BY COALESCE(NULLIF(challenge_status, ''), 'active')
+        ORDER BY count DESC, status ASC
+      `)
+      challengeStatusCounts = statusRows
+    } else if (challengeCount) {
+      challengeStatusCounts = [{ status: 'active', count: challengeCount }]
+    }
+
+    const challengeOrderColumn = inboxMessageColumns.has('created_at') ? 'created_at' : 'id'
+    const challengeSelect = [
+      selectColumn(inboxMessageColumns, 'im', ['id'], 'id'),
+      selectColumn(inboxMessageColumns, 'im', ['thread_id', 'id'], 'thread_id'),
+      selectColumn(inboxMessageColumns, 'im', ['message_type'], 'message_type'),
+      selectColumn(inboxMessageColumns, 'im', ['challenge_status'], 'challenge_status', "'active'"),
+      selectColumn(inboxMessageColumns, 'im', ['proposer_team_name'], 'proposer_team_name'),
+      selectColumn(inboxMessageColumns, 'im', ['challenged_team_name'], 'challenged_team_name'),
+      selectColumn(inboxMessageColumns, 'im', ['challenge_date'], 'challenge_date'),
+      selectColumn(inboxMessageColumns, 'im', ['challenge_course'], 'challenge_course'),
+      selectColumn(inboxMessageColumns, 'im', ['sender_email'], 'sender_email'),
+      selectColumn(inboxMessageColumns, 'im', ['created_at'], 'created_at'),
+    ]
+    const [challengeRows] = await db.query(`SELECT ${challengeSelect.join(', ')} FROM inbox_messages im WHERE im.message_type IN ('challenge_request', 'individual_challenge') ORDER BY im.${escapeIdentifier(challengeOrderColumn)} DESC LIMIT 50`)
+    challenges = challengeRows
+  }
+
   const [hosts] = await db.query(`SELECT ${[
     selectColumn(hostColumns, 'ha', ['id'], 'id'),
     selectColumn(hostColumns, 'ha', ['email'], 'email'),
@@ -935,12 +1022,34 @@ export async function listPortalData() {
   const [requests] = await db.query(`SELECT ${requestSelectColumns.join(', ')} FROM host_account_requests ORDER BY created_at DESC LIMIT 50`)
 
   return {
-    summary: { userCount, appUserCount, teamCount, scoreCount, hostCount, organizerCount, tournamentCount, hostAccountRequestCount },
+    summary: {
+      userCount,
+      verifiedUserCount,
+      appUserCount,
+      teamCount,
+      scoreCount,
+      hostCount,
+      validatedHostCount,
+      organizerCount,
+      tournamentCount,
+      tournamentHostCount,
+      tournamentRegistrationCount,
+      tournamentsWithRegistrationsCount,
+      scoredTournamentTeamCount,
+      challengeCount,
+      activeChallengeCount,
+      completedChallengeCount,
+      hostAccountRequestCount,
+      adminCount,
+      activeAdminCount,
+    },
     admins,
     hosts,
     organizers,
     tournaments,
     tournamentStatusCounts,
+    challenges,
+    challengeStatusCounts,
     users,
     appUsers,
     teams,

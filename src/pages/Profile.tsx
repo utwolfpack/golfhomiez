@@ -127,7 +127,19 @@ function ProfileInner() {
       .then((results) => {
         if (requestId !== citySearchRequestId.current) return
         setCitySuggestions(results)
-        logFrontendEvent({ category: 'profile.citySearch', message: 'city_typeahead_completed', data: { correlationId, query, resultCount: results.length, postalCodeResultCount: results.filter((item) => Boolean(item.postalCode)).length } })
+        const exactLocation = results.find((item) => (item.city || '').toLowerCase() === query.toLowerCase() && item.postalCode)
+        if (exactLocation) {
+          setForm((prev) => {
+            if (prev.primaryCity.trim().toLowerCase() !== query.toLowerCase()) return prev
+            return {
+              ...prev,
+              primaryState: prev.primaryState || exactLocation.stateName || exactLocation.stateCode || '',
+              primaryZipCode: prev.primaryZipCode || exactLocation.postalCode || '',
+            }
+          })
+          setCityHelperText(`Matched ${exactLocation.city}, ${exactLocation.stateCode} ${exactLocation.postalCode}.`)
+        }
+        logFrontendEvent({ category: 'profile.citySearch', message: 'city_typeahead_completed', data: { correlationId, query, resultCount: results.length, postalCodeResultCount: results.filter((item) => Boolean(item.postalCode)).length, autoZipFilled: Boolean(exactLocation) } })
       })
       .catch((err) => {
         if (requestId !== citySearchRequestId.current) return

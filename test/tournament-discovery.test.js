@@ -147,6 +147,7 @@ test('tournament search enforces today through six months, fixes SQL filtering, 
     zip_code: index === 24 ? '84199-1234' : '84101',
     tournament_date: '2026-08-22',
     tournament_website: 'https://course.example/tournament',
+    golf_course_website: 'https://course.example',
     source_url: 'https://course.example/tournament',
     first_seen_at: null,
     last_seen_at: null,
@@ -168,9 +169,12 @@ test('tournament search enforces today through six months, fixes SQL filtering, 
   assert.match(capturedQueries[0].sql, /FROM tournament_registrations tr/i)
   assert.match(capturedQueries[0].sql, /BINARY tr\.tournament_id = BINARY gct\.golfhomiez_tournament_id/i)
   assert.match(capturedQueries[0].sql, /LEFT JOIN tournaments t ON BINARY t\.id = BINARY gct\.golfhomiez_tournament_id/i)
+  assert.match(capturedQueries[0].sql, /LEFT JOIN golf_courses gc_search/i)
+  assert.match(capturedQueries[0].sql, /gc_search\.website/i)
   assert.deepEqual(result.pagination, { page: 2, pageSize: 20, totalResults: 25, totalPages: 2 })
   assert.equal(result.tournaments.length, 5)
   assert.equal(result.tournaments[0].tournamentDate, '2026-08-22')
+  assert.equal(result.tournaments[0].golfCourseWebsiteUrl, 'https://course.example')
 })
 
 test('getTournaments is registered on the scheduled-jobs page model and runs daily in Mountain Time', () => {
@@ -222,9 +226,17 @@ test('tournament discovery migration and dedicated Find Tournament UI/API wiring
   assert.match(golfHomiezSql, /source_type/)
   assert.match(golfHomiezSql, /golfhomiez_tournament_id/)
   assert.match(golfHomiezSql, /WHERE LOWER\(TRIM\(COALESCE\(t\.status, ''\)\)\) = 'published'/)
-  assert.match(findTournament, /Golf Homiez Tournament/)
   assert.match(findTournament, /Registered/)
-  assert.match(findTournament, /GolfHomiez hosted/)
+  assert.match(findTournament, /tournamentSearchResultClickable/)
+  assert.match(findTournament, /golfCoursePagePath/)
+  assert.match(findTournament, /golfCourseWebsiteUrl/)
+  assert.match(findTournament, /Website:/)
+  assert.match(findTournament, /Course Info & Tournaments/)
+  assert.doesNotMatch(findTournament, /Source:/)
+  assert.doesNotMatch(findTournament, /Select row/)
+  assert.doesNotMatch(findTournament, /GolfHomiez hosted/)
+  assert.doesNotMatch(findTournament, /Tournament website/)
+  assert.doesNotMatch(findTournament, /Golf Homiez Tournament/)
   assert.match(packageJson.scripts.postinstall, /db:migrate/)
 })
 
