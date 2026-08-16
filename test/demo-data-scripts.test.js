@@ -258,6 +258,7 @@ test('manual demo and user delete documentation lives in docs', async () => {
   assert.match(demoDocs, /one item per line/)
   assert.match(demoDocs, /not part of `npm install`/)
   assert.match(demoDocs, /Host account schema compatibility/)
+  assert.match(demoDocs, /legacy `password_hash` placeholder/)
   assert.match(demoDocs, /logging\/api\.log/)
 
   assert.match(deleteDocs, /# Manual User Delete Script/)
@@ -292,6 +293,8 @@ test('host demo population fills legacy host account fields and links tournament
   assert.match(script, /email: host\.email/)
   assert.match(script, /contact_name: hostDisplayName/)
   assert.match(script, /phone: course\.phone \|\| '801 555 0101'/)
+  assert.match(script, /password_hash: legacyPasswordHash\(host\.email, 'host'\)/)
+  assert.match(script, /password_hash: legacyPasswordHash\(email, 'host'\)/)
   assert.match(script, /city: course\.city/)
   assert.match(script, /postal_code: course\.postalCode/)
   assert.match(script, /role_assignment_id: host\.roleAssignmentId/)

@@ -186,6 +186,10 @@ function hashText(value) {
   return createHash('sha256').update(String(value || '')).digest('hex')
 }
 
+function legacyPasswordHash(email, accountType) {
+  return hashText(`${DEMO_SEED_TAG}:${accountType}:${normalizeDemoEmail(email)}:legacy-password-placeholder`)
+}
+
 
 const TOURNAMENT_REGISTRATION_TEAM_NAMES = Object.freeze([
   'Cedar Ridge Crew', 'Lake View Low Scores', 'Copper Canyon Four', 'Wasatch Weekend Club',
@@ -451,6 +455,7 @@ async function associateHostToDemoCourse(db, host, course) {
     course_name: course.name,
     name: hostDisplayName,
     reset_email: host.email,
+    password_hash: legacyPasswordHash(host.email, 'host'),
     contact_name: hostDisplayName,
     phone: course.phone || '801 555 0101',
     website_url: course.websitePath,
@@ -824,6 +829,7 @@ async function ensureHostAccounts(db, email) {
     course_name: DEMO_HOST_GOLF_COURSE.name,
     name: hostDisplayName,
     reset_email: email,
+    password_hash: legacyPasswordHash(email, 'host'),
     contact_name: hostDisplayName,
     phone: '801 555 0101',
     website_url: DEMO_HOST_GOLF_COURSE.websitePath,
@@ -832,7 +838,7 @@ async function ensureHostAccounts(db, email) {
     validated_at: new Date(),
     created_at: new Date(),
     updated_at: new Date(),
-  }, ['auth_user_id', 'email', 'golf_course_name', 'account_name', 'course_name', 'name', 'reset_email', 'contact_name', 'phone', 'website_url', 'notes', 'is_validated', 'validated_at', 'updated_at'])
+  }, ['auth_user_id', 'email', 'golf_course_name', 'account_name', 'course_name', 'name', 'reset_email', 'password_hash', 'contact_name', 'phone', 'website_url', 'notes', 'is_validated', 'validated_at', 'updated_at'])
 
   await upsertRow(db, 'host_role_accounts', {
     id: hostRoleAccountId,
@@ -843,6 +849,7 @@ async function ensureHostAccounts(db, email) {
     account_name: 'Golf Homiez Lake View Host Account',
     course_name: DEMO_HOST_GOLF_COURSE.name,
     name: hostDisplayName,
+    password_hash: legacyPasswordHash(email, 'host-role'),
     contact_name: hostDisplayName,
     phone: '801 555 0101',
     website_url: DEMO_HOST_GOLF_COURSE.websitePath,
@@ -855,7 +862,7 @@ async function ensureHostAccounts(db, email) {
     status: 'active',
     created_at: new Date(),
     updated_at: new Date(),
-  }, ['role_assignment_id', 'auth_user_id', 'email', 'golf_course_name', 'account_name', 'course_name', 'name', 'contact_name', 'phone', 'website_url', 'city', 'state', 'postal_code', 'notes', 'is_validated', 'validated_at', 'status', 'updated_at'])
+  }, ['role_assignment_id', 'auth_user_id', 'email', 'golf_course_name', 'account_name', 'course_name', 'name', 'password_hash', 'contact_name', 'phone', 'website_url', 'city', 'state', 'postal_code', 'notes', 'is_validated', 'validated_at', 'status', 'updated_at'])
 
   return { ...authUser, roleAssignmentId, accountId: hostRoleAccountId, hostAccountId, hostRoleAccountId }
 }

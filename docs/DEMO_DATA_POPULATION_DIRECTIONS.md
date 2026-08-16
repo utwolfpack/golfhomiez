@@ -126,7 +126,7 @@ The scripts delete prior generated rows by deterministic identifiers before repo
 
 ## Host account schema compatibility
 
-The host population script writes both the current course association fields and legacy required host account fields when they exist in the target database. This includes `auth_user_id`, `email`, `contact_name`, phone, location fields, validation flags, and timestamps so `host_accounts` and `host_role_accounts` work in strict MySQL schemas where those columns do not have defaults.
+The host population script writes both the current course association fields and legacy required host account fields when they exist in the target database. This includes `auth_user_id`, `email`, `contact_name`, phone, location fields, validation flags, timestamps, and a deterministic legacy `password_hash` placeholder when that column exists, so `host_accounts` and `host_role_accounts` work in strict MySQL schemas where those columns do not have defaults.
 
 ## Logging
 
