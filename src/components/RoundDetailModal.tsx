@@ -248,7 +248,7 @@ function getTeamChallengeRoundSummaryScoreClass(winner: 'proposer' | 'challenged
 
 function getTeamChallengeRoundPushPoints(result: { winner: 'proposer' | 'challenged' | 'tie' | 'pending'; pointsAwarded: number; carryoverAfterHole: number; strokeDifferentialBonus: number }, pointSummary: ReturnType<typeof calculateTeamChallengePoints>) {
   if (pointSummary.scoringType !== 'skins_push') return 0
-  if (result.winner === 'tie') return Math.max(0, result.carryoverAfterHole - pointSummary.pointsPerHole)
+  if (result.winner === 'tie' || result.winner === 'pending') return Math.max(0, result.carryoverAfterHole)
   if (result.winner === 'proposer' || result.winner === 'challenged') return Math.max(0, result.pointsAwarded - pointSummary.pointsPerHole - result.strokeDifferentialBonus)
   return 0
 }

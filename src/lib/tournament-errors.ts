@@ -12,8 +12,8 @@ export function validateTournamentForSave(input: TournamentInput | null | undefi
   const registrationDeadline = String(templateData.registrationDeadline || '').trim().slice(0, 10)
 
   if (!name) return 'Tournament Name is a required field. Enter a tournament name and try again.'
-  if (status === 'published' && !startDate) {
-    return 'Tournament Start Date is a required field before publishing. Add a tournament date and try again.'
+  if (['published', 'completed'].includes(status) && !startDate) {
+    return 'Tournament Start Date is a required field before publishing or completing. Add a tournament date and try again.'
   }
   if (startDate && Number.isNaN(Date.parse(`${startDate}T00:00:00`))) {
     return 'Tournament Start Date is invalid. Select a valid calendar date and try again.'
@@ -30,7 +30,7 @@ export function validateTournamentForSave(input: TournamentInput | null | undefi
 export function getFriendlyTournamentError(error: unknown, action: 'create' | 'save' | 'load' = 'save') {
   const raw = normalizeMessage(error)
   if (/start date.*required|required.*start date/i.test(raw)) {
-    return 'Tournament Start Date is a required field before publishing. Add a tournament date and try again.'
+    return 'Tournament Start Date is a required field before publishing or completing. Add a tournament date and try again.'
   }
   if (/tournament name.*required|required.*tournament name/i.test(raw)) {
     return 'Tournament Name is a required field. Enter a tournament name and try again.'

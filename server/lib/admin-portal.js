@@ -217,6 +217,18 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCo
   const existing = existingRows[0]
   const columns = await getTableColumns('host_accounts')
   const nameColumns = ['golf_course_name', 'account_name', 'course_name', 'name'].filter((columnName) => columns.has(columnName))
+  let shouldBeCourseAdmin = false
+  if (columns.has('is_course_admin')) {
+    let existingCourseCount = 0
+    if (normalizedGolfCourseId && columns.has('golf_course_id')) {
+      const [[row = {}] = []] = await db.execute('SELECT COUNT(*) AS courseCount FROM host_accounts WHERE golf_course_id = ? AND is_validated = 1', [normalizedGolfCourseId])
+      existingCourseCount = Number(row.courseCount || 0)
+    } else if (nameColumns.length && normalizedGolfCourseName) {
+      const [[row = {}] = []] = await db.execute(`SELECT COUNT(*) AS courseCount FROM host_accounts WHERE LOWER(TRIM(COALESCE(${escapeIdentifier(nameColumns[0])}, ''))) = LOWER(?) AND is_validated = 1`, [normalizedGolfCourseName])
+      existingCourseCount = Number(row.courseCount || 0)
+    }
+    shouldBeCourseAdmin = existingCourseCount === 0
+  }
 
   if (existing?.id) {
     const assignments = []
@@ -238,6 +250,7 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCo
       params.push(passwordHash)
     }
     if (columns.has('is_validated')) assignments.push('is_validated = 1')
+    if (columns.has('is_course_admin') && shouldBeCourseAdmin) assignments.push('is_course_admin = 1')
     if (columns.has('validated_at')) assignments.push('validated_at = UTC_TIMESTAMP()')
     for (const columnName of nameColumns) {
       assignments.push(`${escapeIdentifier(columnName)} = ?`)
@@ -290,6 +303,10 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCo
   if (columns.has('is_validated')) {
     insertColumns.push('is_validated')
     insertValues.push('1')
+  }
+  if (columns.has('is_course_admin')) {
+    insertColumns.push('is_course_admin')
+    insertValues.push(shouldBeCourseAdmin ? '1' : '0')
   }
   if (columns.has('validated_at')) {
     insertColumns.push('validated_at')

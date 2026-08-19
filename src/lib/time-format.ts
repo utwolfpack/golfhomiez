@@ -1,3 +1,5 @@
+import { getUserTimeZone } from './time-zone'
+
 function parseDateValue(value: string): Date {
   const trimmed = value.trim()
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
@@ -7,18 +9,19 @@ function parseDateValue(value: string): Date {
   return new Date(trimmed)
 }
 
-export function getUserTimeZone(): string | undefined {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
-  } catch {
-    return undefined
-  }
-}
 
 export function formatFriendlyDate(value?: string | null): string {
   if (!value) return 'Unknown date'
-  const date = parseDateValue(String(value))
-  if (Number.isNaN(date.getTime())) return String(value).replace(/T.*$/, '')
+  const raw = String(value).trim()
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly
+    const localCalendarDate = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0)
+    return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(localCalendarDate)
+  }
+
+  const date = parseDateValue(raw)
+  if (Number.isNaN(date.getTime())) return raw.replace(/T.*$/, '')
 
   const formatter = new Intl.DateTimeFormat(undefined, {
     year: 'numeric',

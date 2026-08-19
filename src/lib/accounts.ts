@@ -10,6 +10,10 @@ export type GolfCoursePublicPageTournament = {
   status?: string | null
   startType?: string | null
   startTime?: string | null
+  golfCourseName?: string | null
+  contactPerson?: string | null
+  contactPhone?: string | null
+  contactEmail?: string | null
   portalPath: string
 }
 
@@ -33,6 +37,9 @@ export type GolfCoursePublicPage = GolfCoursePublicPageInput & {
   slug: string
   path: string
   url: string
+  calendarAvailable: boolean
+  calendarPath: string
+  calendarUrl: string
   golfCourseName: string
   sourceWebsiteUrl?: string | null
   sourceLastSyncedAt?: string | null
@@ -314,6 +321,45 @@ export type GolfCourseTournamentSearchResponse = {
   tournaments: GolfCourseTournamentSearchResult[]
 }
 
+export type GolfHomiezCourseSearchResult = {
+  id: string
+  golfCourseId?: string | null
+  golfCourseName: string
+  city?: string | null
+  state: string
+  zipCode?: string | null
+  websiteUrl?: string | null
+  golfCoursePagePath?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  hostedTournamentCount: number
+  distanceMiles?: number | null
+}
+
+export type GolfHomiezCourseSearchFilters = {
+  state?: string
+  city?: string
+  zipCode?: string
+  golfCourseName?: string
+}
+
+export type GolfHomiezCourseSearchResponse = {
+  filters: Required<Pick<GolfHomiezCourseSearchFilters, 'state' | 'city' | 'zipCode' | 'golfCourseName'>>
+  zipSearch: {
+    requestedZipCode?: string | null
+    radiusMiles: number
+    radiusResolved: boolean
+    source?: string | null
+  }
+  pagination: {
+    page: number
+    pageSize: number
+    totalResults: number
+    totalPages: number
+  }
+  courses: GolfHomiezCourseSearchResult[]
+}
+
 export type TournamentTeamScoreTeam = {
   teamKey: string
   teamId?: string | null
@@ -508,6 +554,17 @@ export function searchGolfCourseTournaments(filters: GolfCourseTournamentSearchF
   params.set('page', String(Math.max(1, Math.trunc(page) || 1)))
   const query = params.toString()
   return api<GolfCourseTournamentSearchResponse>(`/api/users/tournament-search?${query}`)
+}
+
+export function searchGolfHomiezCourses(filters: GolfHomiezCourseSearchFilters, page = 1) {
+  const params = new URLSearchParams()
+  if (filters.state) params.set('state', filters.state)
+  if (filters.city) params.set('city', filters.city)
+  if (filters.zipCode) params.set('zipCode', filters.zipCode)
+  if (filters.golfCourseName) params.set('golfCourseName', filters.golfCourseName)
+  params.set('page', String(Math.max(1, Math.trunc(page) || 1)))
+  const query = params.toString()
+  return api<GolfHomiezCourseSearchResponse>(`/api/users/golf-course-search?${query}`)
 }
 
 export function fetchTournamentTeamScore(tournamentId: string) {

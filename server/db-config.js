@@ -10,5 +10,6 @@ export function getMySqlConfig() {
     queueLimit: 0,
     multipleStatements: true,
     timezone: 'Z',
+    dateStrings: ['DATE'],
   }
 }

@@ -49,8 +49,9 @@ test('npm audit v2 remediation pins direct dependencies to patched major lines',
   assert.equal(packageJson.devDependencies['@types/react-dom'], '^19.2.3')
 })
 
-test('npm audit remediation keeps patched transitive overrides without unsafe cross-major brace overrides', async () => {
+test('npm audit remediation keeps patched transitive dependencies without unsafe cross-major overrides', async () => {
   const packageJson = await readProjectJson('package.json')
+  const packageLock = await readProjectJson('package-lock.json')
 
   assert.deepEqual(packageJson.overrides, {
     '@babel/core': '7.29.7',
@@ -61,6 +62,12 @@ test('npm audit remediation keeps patched transitive overrides without unsafe cr
     qs: '6.15.3',
   })
   assert.equal(Object.keys(packageJson.overrides).some((key) => key.startsWith('brace-expansion')), false)
+  assert.equal(Object.keys(packageJson.overrides).some((key) => key.startsWith('nanoid')), false)
+
+  assert.equal(packageLock.packages['node_modules/brace-expansion']?.version, '5.0.9')
+  assert.equal(packageLock.packages['node_modules/nanoid']?.version, '3.3.18')
+  assert.match(packageLock.packages['node_modules/minimatch']?.dependencies?.['brace-expansion'] ?? '', /^\^5\.0\.8$/)
+  assert.match(packageLock.packages['node_modules/postcss']?.dependencies?.nanoid ?? '', /^\^3\.3\.16$/)
 })
 
 test('security checks are part of the normal test suite and available as explicit npm scripts', async () => {

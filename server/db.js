@@ -21,6 +21,7 @@ export function getDbConfig() {
     queueLimit: 0,
     multipleStatements: true,
     timezone: 'Z',
+    dateStrings: ['DATE'],
   }
 }
 

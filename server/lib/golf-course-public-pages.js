@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import dns from 'node:dns/promises'
 import net from 'node:net'
 import { logApi, logWarn } from './logger.js'
+import { normalizeTournamentScheduleDate } from './tournament-schedule-conflicts.js'
 
 const MAX_WEBSITE_HTML_BYTES = 1_000_000
 const WEBSITE_FETCH_TIMEOUT_MS = 7_500
@@ -295,18 +296,26 @@ function mapTournament(row) {
     id: row.id,
     tournamentIdentifier: row.tournament_identifier || null,
     name: row.name || row.title || `Tournament ${row.id}`,
-    startDate: row.start_date || null,
+    startDate: normalizeTournamentScheduleDate(row.start_date || row.starts_at) || null,
     status: row.status || null,
     startType: startType || null,
     startTime: startTime || null,
+    contactPerson: cleanText(templateData?.contactPerson, 191),
+    contactPhone: cleanText(templateData?.contactPhone, 64),
+    contactEmail: cleanText(templateData?.contactEmail, 191),
     portalPath: `/tournaments/${encodeURIComponent(identifier)}`,
   }
 }
 
-function mapPage(row, { baseUrl = '', tournaments = [] } = {}) {
+function mapPage(row, { baseUrl = '', tournaments = [], calendarAvailable = tournaments.length > 0 } = {}) {
   if (!row) return null
   const path = `/${row.slug}`
+  const calendarPath = `${path}/calendar`
   const normalizedBaseUrl = String(baseUrl || '').replace(/\/$/, '')
+  const mappedTournaments = tournaments.map((tournament) => ({
+    ...tournament,
+    golfCourseName: tournament.golfCourseName || row.golf_course_name,
+  }))
   return {
     id: row.id,
     hostAccountId: row.host_account_id,
@@ -314,6 +323,9 @@ function mapPage(row, { baseUrl = '', tournaments = [] } = {}) {
     slug: row.slug,
     path,
     url: normalizedBaseUrl ? `${normalizedBaseUrl}${path}` : path,
+    calendarAvailable: Boolean(calendarAvailable),
+    calendarPath,
+    calendarUrl: normalizedBaseUrl ? `${normalizedBaseUrl}${calendarPath}` : calendarPath,
     golfCourseName: row.golf_course_name,
     summary: row.summary || '',
     bannerImageUrl: row.banner_image_url || null,
@@ -327,8 +339,8 @@ function mapPage(row, { baseUrl = '', tournaments = [] } = {}) {
     isPublished: Boolean(row.is_published),
     sourceWebsiteUrl: row.source_website_url || null,
     sourceLastSyncedAt: row.source_last_synced_at || null,
-    tournamentCount: tournaments.length,
-    tournaments,
+    tournamentCount: mappedTournaments.length,
+    tournaments: mappedTournaments,
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
   }
@@ -350,11 +362,7 @@ async function columnsForTable(db, tableName) {
   }
 }
 
-async function listPublicTournamentsForCoursePage(db, { hostAccountId = '', golfCourseId = '', golfCourseName = '', stateCode = '' } = {}) {
-  const tournamentColumns = await columnsForTable(db, 'tournaments')
-  if (!tournamentColumns.has('id')) return []
-
-  const searchColumns = await columnsForTable(db, 'golf_course_tournaments')
+function buildCourseTournamentPredicates(tournamentColumns, searchColumns, { hostAccountId = '', golfCourseId = '', golfCourseName = '', stateCode = '' } = {}) {
   const predicates = []
   const params = []
   const normalizedGolfCourseId = cleanText(golfCourseId, 64)
@@ -410,6 +418,33 @@ async function listPublicTournamentsForCoursePage(db, { hostAccountId = '', golf
     if (statePredicate) params.push(normalizedStateCode)
   }
 
+  return { predicates, params }
+}
+
+async function getCourseTournamentCalendarAvailability(db, criteria = {}, schema = {}) {
+  const tournamentColumns = schema.tournamentColumns || await columnsForTable(db, 'tournaments')
+  if (!tournamentColumns.has('id')) return false
+
+  const searchColumns = schema.searchColumns || await columnsForTable(db, 'golf_course_tournaments')
+  const { predicates, params } = buildCourseTournamentPredicates(tournamentColumns, searchColumns, criteria)
+  if (!predicates.length) return false
+
+  const [rows] = await db.execute(
+    `SELECT t.id
+       FROM tournaments t
+      WHERE (${predicates.join(' OR ')})
+      LIMIT 1`,
+    params,
+  )
+  return Boolean(rows?.[0])
+}
+
+async function listPublicTournamentsForCoursePage(db, criteria = {}, schema = {}) {
+  const tournamentColumns = schema.tournamentColumns || await columnsForTable(db, 'tournaments')
+  if (!tournamentColumns.has('id')) return []
+
+  const searchColumns = schema.searchColumns || await columnsForTable(db, 'golf_course_tournaments')
+  const { predicates, params } = buildCourseTournamentPredicates(tournamentColumns, searchColumns, criteria)
   if (!predicates.length) return []
 
   const visibilityPredicates = []
@@ -449,8 +484,8 @@ export async function createGolfCoursePublicPageForApprovedHost(db, input = {}) 
   const hostAccountId = cleanText(input.hostAccountId, 191)
   if (!hostAccountId) throw new Error('Host account id is required to create a golf-course page.')
 
-  const [existingRows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE host_account_id = ? LIMIT 1', [hostAccountId])
-  if (existingRows[0]) return mapPage(existingRows[0], { baseUrl: input.baseUrl })
+  const existingPage = await getGolfCoursePublicPageByHostAccount(db, hostAccountId, { baseUrl: input.baseUrl })
+  if (existingPage) return existingPage
 
   const course = await findCatalogCourse(db, input)
   const golfCourseName = cleanText(course?.name || input.golfCourseName, 191)
@@ -531,7 +566,13 @@ export async function createGolfCoursePublicPageForApprovedHost(db, input = {}) 
 
 export async function getGolfCoursePublicPageByHostAccount(db, hostAccountId, options = {}) {
   const [rows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE host_account_id = ? LIMIT 1', [hostAccountId])
-  return mapPage(rows[0] || null, { baseUrl: options.baseUrl })
+  if (rows[0]) return mapPage(rows[0], { baseUrl: options.baseUrl })
+
+  const [hostRows] = await db.execute('SELECT golf_course_id FROM host_accounts WHERE id = ? LIMIT 1', [hostAccountId])
+  const golfCourseId = cleanText(hostRows[0]?.golf_course_id, 64)
+  if (!golfCourseId) return null
+  const [sharedRows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE golf_course_id = ? LIMIT 1', [golfCourseId])
+  return mapPage(sharedRows[0] || null, { baseUrl: options.baseUrl })
 }
 
 export async function getGolfCoursePublicPageBySlug(db, slug, options = {}) {
@@ -539,8 +580,13 @@ export async function getGolfCoursePublicPageBySlug(db, slug, options = {}) {
   if (!normalizedSlug) return null
   const [rows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE slug = ? AND is_published = 1 LIMIT 1', [normalizedSlug])
   if (!rows[0]) return null
-  const tournaments = await listPublicTournamentsForCoursePage(db, { hostAccountId: rows[0].host_account_id, golfCourseId: rows[0].golf_course_id, golfCourseName: rows[0].golf_course_name, stateCode: rows[0].state_code })
-  return mapPage(rows[0], { baseUrl: options.baseUrl, tournaments })
+  const criteria = { hostAccountId: rows[0].host_account_id, golfCourseId: rows[0].golf_course_id, golfCourseName: rows[0].golf_course_name, stateCode: rows[0].state_code }
+  const tournamentColumns = await columnsForTable(db, 'tournaments')
+  const searchColumns = await columnsForTable(db, 'golf_course_tournaments')
+  const schema = { tournamentColumns, searchColumns }
+  const calendarAvailable = await getCourseTournamentCalendarAvailability(db, criteria, schema)
+  const tournaments = await listPublicTournamentsForCoursePage(db, criteria, schema)
+  return mapPage(rows[0], { baseUrl: options.baseUrl, tournaments, calendarAvailable })
 }
 
 function firstProvidedValue(input, keys, fallback) {
@@ -551,6 +597,8 @@ function firstProvidedValue(input, keys, fallback) {
 }
 
 export async function syncGolfCoursePublicPageCatalogDefaults(db, hostAccountId, options = {}) {
+  const resolvedPage = await getGolfCoursePublicPageByHostAccount(db, hostAccountId, options)
+  if (!resolvedPage?.id) return null
   const [rows] = await db.execute(
     `SELECT gcpp.*,
             gc.name AS catalog_golf_course_name,
@@ -562,9 +610,9 @@ export async function syncGolfCoursePublicPageCatalogDefaults(db, hostAccountId,
             COALESCE(NULLIF(TRIM(gc.website), ''), NULLIF(TRIM(gc.golf_course_website), '')) AS catalog_website_url
        FROM golf_course_public_pages gcpp
        LEFT JOIN golf_courses gc ON gc.id = gcpp.golf_course_id
-      WHERE gcpp.host_account_id = ?
+      WHERE gcpp.id = ?
       LIMIT 1`,
-    [hostAccountId],
+    [resolvedPage.id],
   )
   const existing = rows[0]
   if (!existing) return null
@@ -593,7 +641,7 @@ export async function syncGolfCoursePublicPageCatalogDefaults(db, hostAccountId,
       `UPDATE golf_course_public_pages
           SET golf_course_name = ?, website_url = ?, contact_phone = ?, address_line1 = ?,
               city = ?, state_code = ?, postal_code = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE host_account_id = ?`,
+        WHERE id = ?`,
       [
         values.golfCourseName,
         values.websiteUrl,
@@ -602,7 +650,7 @@ export async function syncGolfCoursePublicPageCatalogDefaults(db, hostAccountId,
         values.city,
         values.stateCode,
         values.postalCode,
-        hostAccountId,
+        resolvedPage.id,
       ],
     )
     logApi('golf_course_public_page_catalog_defaults_applied', {
@@ -618,7 +666,9 @@ export async function syncGolfCoursePublicPageCatalogDefaults(db, hostAccountId,
 }
 
 export async function updateGolfCoursePublicPageForHost(db, hostAccountId, input = {}, options = {}) {
-  const [existingRows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE host_account_id = ? LIMIT 1', [hostAccountId])
+  const resolvedPage = await getGolfCoursePublicPageByHostAccount(db, hostAccountId, options)
+  if (!resolvedPage?.id) throw new Error('Golf-course public page not found.')
+  const [existingRows] = await db.execute('SELECT * FROM golf_course_public_pages WHERE id = ? LIMIT 1', [resolvedPage.id])
   const existing = existingRows[0]
   if (!existing) throw new Error('Golf-course public page not found.')
 
@@ -650,7 +700,7 @@ export async function updateGolfCoursePublicPageForHost(db, hostAccountId, input
         SET golf_course_name = ?, summary = ?, banner_image_url = ?, banner_image_data = ?, website_url = ?,
             contact_phone = ?, address_line1 = ?, city = ?, state_code = ?, postal_code = ?,
             is_published = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE host_account_id = ?`,
+      WHERE id = ?`,
     [
       values.golfCourseName,
       values.summary,
@@ -663,7 +713,7 @@ export async function updateGolfCoursePublicPageForHost(db, hostAccountId, input
       values.stateCode,
       values.postalCode,
       values.isPublished ? 1 : 0,
-      hostAccountId,
+      existing.id,
     ],
   )
   const page = await getGolfCoursePublicPageByHostAccount(db, hostAccountId, options)

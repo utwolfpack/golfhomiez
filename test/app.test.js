@@ -17,6 +17,7 @@ import { buildProfileSummaryFromScores } from '../server/lib/profile-summary.js'
 import { getFeatureFlags, parseFeatureFlagBoolean } from '../server/lib/feature-flags.js'
 import { validateTeamChallengeIdentifier } from '../server/lib/inbox-service.js'
 import { sanitizeHostManagedTournamentPayload, sanitizeTournamentTemplateData } from '../server/lib/rbac.js'
+import { findTournamentDateConflict, formatTournamentScheduleDate, normalizeTournamentScheduleDate } from '../server/lib/tournament-schedule-conflicts.js'
 
 after(async () => {
   await closeDb()
@@ -40,6 +41,34 @@ test('forgot password client points at the correct Better Auth endpoint', () => 
   assert.doesNotMatch(source, /\$\{AUTH_BASE\}\/forget-password/)
 })
 
+test('tournament schedule conflict helpers block active same-day tournaments while ignoring cancelled, archived, and the edited tournament', () => {
+  const tournaments = [
+    { id: 'active-1', name: 'Active Tournament', startDate: '2026-09-12', status: 'published' },
+    { id: 'cancelled-1', name: 'Cancelled Tournament', startDate: '2026-09-13', status: 'cancelled' },
+    { id: 'archived-1', name: 'Archived Tournament', startDate: '2026-09-14', status: 'draft', archivedAt: '2026-08-19T10:00:00Z' },
+  ]
+
+  assert.equal(normalizeTournamentScheduleDate('2026-09-12T08:30:00Z'), '2026-09-12')
+  assert.equal(formatTournamentScheduleDate('2026-09-12'), 'September 12, 2026')
+  assert.equal(findTournamentDateConflict(tournaments, '2026-09-12')?.id, 'active-1')
+  assert.equal(findTournamentDateConflict(tournaments, '2026-09-13'), null)
+  assert.equal(findTournamentDateConflict(tournaments, '2026-09-14'), null)
+  assert.equal(findTournamentDateConflict(tournaments, '2026-09-12', 'active-1'), null)
+})
+
+test('password reset pages use Request Password Reset wording and remove host and organizer helper subtitles', () => {
+  const userReset = fs.readFileSync(new URL('../src/pages/ForgotPassword.tsx', import.meta.url), 'utf8')
+  const hostReset = fs.readFileSync(new URL('../src/pages/HostForgotPassword.tsx', import.meta.url), 'utf8')
+  const organizerReset = fs.readFileSync(new URL('../src/pages/OrganizerForgotPassword.tsx', import.meta.url), 'utf8')
+
+  assert.match(userReset, /title="Request Password Reset"/)
+  assert.match(userReset, /Request Password Reset/)
+  assert.match(hostReset, /title="Request Password Reset"/)
+  assert.doesNotMatch(hostReset, /Enter the golf-course account email and we will send a reset link\./)
+  assert.match(organizerReset, /title="Request Password Reset"/)
+  assert.doesNotMatch(organizerReset, /Enter the organizer account email and we will send a reset link\./)
+})
+
 test('better auth client prefers same-origin in deployed environments and only allows loopback cross-origin locally', () => {
   const source = fs.readFileSync(new URL('../src/lib/auth-client.ts', import.meta.url), 'utf8')
   assert.match(source, /const sameOriginDefault = '\/api\/auth'/)
@@ -48,10 +77,13 @@ test('better auth client prefers same-origin in deployed environments and only a
   assert.match(source, /pageIsLoopback && targetIsLoopback/)
 })
 
-test('API client attaches the user timezone header for server-side date validation', () => {
+test('API client attaches the user timezone header and defaults to Mountain Time when browser timezone is unavailable', () => {
   const source = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8')
+  const timeZone = fs.readFileSync(new URL('../src/lib/time-zone.ts', import.meta.url), 'utf8')
   assert.match(source, /X-User-Timezone/)
-  assert.match(source, /resolvedOptions\(\)\.timeZone/)
+  assert.match(source, /getUserTimeZone\(\)/)
+  assert.match(timeZone, /resolvedOptions\(\)\.timeZone/)
+  assert.match(timeZone, /America\/Denver/)
 })
 
 test('create-team normalization always makes the signed-in user the first member', () => {
@@ -1632,7 +1664,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -2705,7 +2737,10 @@ test('front-end dates use friendly user-local month day year time formatting', (
   const adminPortal = fs.readFileSync(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8')
 
   assert.match(timeFormat, /formatFriendlyDateTime/)
-  assert.match(timeFormat, /resolvedOptions\(\)\.timeZone/)
+  const timeZone = fs.readFileSync(new URL('../src/lib/time-zone.ts', import.meta.url), 'utf8')
+  assert.match(timeFormat, /getUserTimeZone\(\)/)
+  assert.match(timeZone, /resolvedOptions\(\)\.timeZone/)
+  assert.match(timeZone, /America\/Denver/)
   assert.match(timeFormat, /month: 'short'/)
   assert.match(timeFormat, /hour12: true/)
   assert.match(timeFormat, / – /)
@@ -3851,8 +3886,9 @@ test('golf user inbox supports messages, Team Challenges, unread indicators, inv
   assert.doesNotMatch(nav, /inboxNavIndicator/)
   assert.doesNotMatch(nav, /to="\/inbox"/)
   assert.match(inboxPage, /title="Messages"/)
-  assert.match(nav, />Challenges<|>Challenges<\/NavLink>/)
-  assert.match(nav, /to="\/challenges"/)
+  assert.match(nav, /label: 'Challenges'/)
+  assert.doesNotMatch(nav, /to="\/challenges"[^>]*>Challenges<\/NavLink>/)
+  assert.match(nav, /to: '\/challenges'/)
   assert.match(inboxFeatureFiles, /Recipient email/)
   assert.match(inboxFeatureFiles, /Team Challenge/)
   assert.match(inboxFeatureFiles, /GolfHomiez Team ID/)
@@ -4467,7 +4503,9 @@ test('team challenge skins and skins-push points are persisted, logged, and show
   assert.match(scoring, /proposerNetPoints = proposerPoints - challengedPoints/)
   assert.match(scoring, /challengedNetPoints = challengedPoints - proposerPoints/)
   assert.match(scoring, /strokeDifferential = Math\.abs\(proposerScore - challengedScore\)/)
-  assert.match(scoring, /strokeDifferentialBonus = scoringType === 'skins_push' && strokeDifferential > 1 \? \(strokeDifferential - 1\) \* pointsPerHole : 0/)
+  assert.match(scoring, /additionalStrokeBonus = scoringType === 'skins_push' && strokeDifferential > 1 \? \(strokeDifferential - 1\) \* pointsPerHole : 0/)
+  assert.match(scoring, /acrossParBonus/)
+  assert.match(scoring, /const strokeDifferentialBonus = additionalStrokeBonus \+ acrossParBonus/)
   assert.match(scoring, /\+ strokeDifferentialBonus/)
 
   assert.match(server, /challengeScoringType/)
@@ -5287,4 +5325,19 @@ test('completed tournament public page shows saved tournament summary below fina
   assert.match(portalPage, /Tournament Summary/)
   assert.match(portalPage, /tournamentSummary/)
   assert.match(styles, /\.tournament-completed-summary/)
+})
+
+
+test('host tournament builder blocks same-day course conflicts with detailed feedback and correlated logging', () => {
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  const hostPortal = fs.readFileSync(new URL('../src/pages/HostPortal.tsx', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(hostPortal, /Update profile page/)
+  assert.match(server, /findHostTournamentDateConflict\(db, req\.hostAccount, input\.startDate, req\)/)
+  assert.match(server, /TOURNAMENT_DATE_CONFLICT/)
+  assert.match(server, /Point of Contact:/)
+  assert.match(server, /host_tournament_date_conflict_detected/)
+  assert.match(server, /host_tournament_update_date_conflict_detected/)
+  assert.match(hostPortal, /host_tournament_date_conflict_displayed/)
+  assert.match(hostPortal, /host_tournament_update_date_conflict_displayed/)
 })

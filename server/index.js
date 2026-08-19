@@ -20,11 +20,14 @@ import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
 import { cancelScheduledJob, configureScheduledJob, listScheduledJobs, runScheduledJob, shouldRunScheduledJobInBackground, startScheduledJobRunner } from './lib/scheduled-jobs.js'
 import { searchGolfCourseTournaments, syncGolfHomiezTournamentSearchRecord } from './lib/tournament-discovery.js'
+import { searchGolfHomiezCourses } from './lib/golf-course-search.js'
 import { v4 as uuidv4 } from 'uuid'
-import { authenticateHostLogin, clearHostSessionCookie, createHostPasswordReset, createHostSession, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, resetHostPassword, serializeHostSessionCookie } from './lib/host-auth.js'
+import { authenticateHostLogin, clearHostSessionCookie, createAdditionalHostAccount, createHostPasswordReset, createHostSession, deleteHostCourseAccount, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, resetHostPassword, serializeHostSessionCookie, transferHostCourseAdmin } from './lib/host-auth.js'
 import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerPasswordReset, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, resetOrganizerPassword, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
 import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, consumeAdminResetToken, deleteAdminUser, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
-import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listHostManagedTournaments, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload, sanitizeTournamentTemplateData } from './lib/rbac.js'
+import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload, sanitizeTournamentTemplateData } from './lib/rbac.js'
+import { findTournamentDateConflict, formatTournamentScheduleDate, normalizeTournamentScheduleDate } from './lib/tournament-schedule-conflicts.js'
+import { requestUserTimeZone } from './lib/time-zone.js'
 import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles } from './lib/inbox-service.js'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './lib/tee-colors.js'
 import { getExternalApiCallSummary } from './lib/external-api-metrics.js'
@@ -769,6 +772,8 @@ function normalizeHostPortalAccount(account = {}) {
     phone: account.phone || null,
     websiteUrl: account.websiteUrl || account.website_url || null,
     notes: account.notes || null,
+    isCourseAdmin: Boolean(account.isCourseAdmin ?? account.is_course_admin),
+    createdByHostAccountId: account.createdByHostAccountId || account.created_by_host_account_id || null,
     isValidated: Boolean(account.isValidated ?? account.is_validated),
     validatedAt: account.validatedAt || account.validated_at || null,
     createdAt: account.createdAt || account.created_at || null,
@@ -957,8 +962,8 @@ function mapTournamentPortalRow(row, req = null) {
     hostAccountId: row.host_account_id || null,
     name: row.name || row.title,
     description: row.description,
-    startDate: row.start_date || row.starts_at,
-    endDate: row.end_date || row.ends_at,
+    startDate: normalizeTournamentScheduleDate(row.start_date || row.starts_at) || null,
+    endDate: normalizeTournamentScheduleDate(row.end_date || row.ends_at) || null,
     status: row.status,
     archivedAt: row.archived_at || null,
     isPublic: Boolean(row.is_public),
@@ -1494,7 +1499,7 @@ function sanitizeOrganizerTournamentUpdatePayload(body = {}) {
   const templateData = sanitizeTournamentTemplateData(body.templateData)
   const registrationDeadline = String(templateData.registrationDeadline || '').trim().slice(0, 10)
   if (!allowedStatuses.has(status)) throw new Error('Tournament Status is invalid. Select Draft, Published, Completed, or Cancelled.')
-  if (status === 'published' && !startDate) throw new Error('Tournament Start Date is a required field before publishing. Add a tournament date and try again.')
+  if (['published', 'completed'].includes(status) && !startDate) throw new Error('Tournament Start Date is a required field before publishing or completing. Add a tournament date and try again.')
   if (startDate && Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) throw new Error('Tournament Start Date is invalid. Select a valid calendar date and try again.')
   if (registrationDeadline && Number.isNaN(Date.parse(`${registrationDeadline}T00:00:00Z`))) throw new Error('Registration Deadline is invalid. Select a valid calendar date and try again.')
   if (startDate && registrationDeadline && registrationDeadline > startDate) throw new Error('Registration Deadline cannot be after the Tournament Start Date. Select a deadline on or before the tournament date and try again.')
@@ -1848,6 +1853,36 @@ async function listHostPortalTournaments(pool, hostAccount, req = null) {
     registrationUrl: ['published', 'completed'].includes(String(row.status || '').toLowerCase()) ? (req ? tournamentPortalUrl(req, row.tournament_identifier || row.id) : tournamentPortalPath(row.tournament_identifier || row.id)) : null,
   }))
   return attachTournamentRegistrations(pool, tournaments)
+}
+
+function hostTournamentConflictDetails(tournament, hostAccount) {
+  const templateData = tournament?.templateData && typeof tournament.templateData === 'object'
+    ? tournament.templateData
+    : parseTournamentTemplateData(tournament?.template_data) || {}
+  const host = normalizeHostPortalAccount(hostAccount)
+  return {
+    tournamentId: tournament?.id || null,
+    tournamentIdentifier: tournament?.tournamentIdentifier || tournament?.tournament_identifier || null,
+    tournamentName: tournament?.name || 'Existing GolfHomiez tournament',
+    startDate: normalizeTournamentScheduleDate(tournament?.startDate || tournament?.start_date),
+    golfCourseName: tournament?.hostGolfCourseName || tournament?.host_golf_course_name || host.golfCourseName || 'Golf course',
+    contactPerson: String(templateData.contactPerson || host.contactName || '').trim() || null,
+    contactPhone: String(templateData.contactPhone || host.phone || '').trim() || null,
+    contactEmail: normalizeEmail(templateData.contactEmail || tournament?.organizerEmail || host.email) || null,
+  }
+}
+
+async function findHostTournamentDateConflict(pool, hostAccount, startDate, req = null, excludeTournamentId = null) {
+  if (!normalizeTournamentScheduleDate(startDate)) return null
+  const tournaments = await listHostPortalTournaments(pool, hostAccount, req)
+  const conflict = findTournamentDateConflict(tournaments, startDate, excludeTournamentId)
+  return conflict ? hostTournamentConflictDetails(conflict, hostAccount) : null
+}
+
+function formatHostTournamentDateConflictMessage(conflict) {
+  const contactParts = [conflict.contactPerson, conflict.contactPhone, conflict.contactEmail].filter(Boolean)
+  const contactText = contactParts.length ? contactParts.join(' · ') : 'not yet provided'
+  return `Another GolfHomiez tournament is already scheduled for ${conflict.golfCourseName} on ${formatTournamentScheduleDate(conflict.startDate)}. Tournament: ${conflict.tournamentName}. Point of Contact: ${contactText}. Choose a different Tournament Start Date.`
 }
 
 async function getHostEditableTournament(pool, hostAccount, tournamentId) {
@@ -2508,10 +2543,77 @@ app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
       tournamentCount: tournaments.length,
       defaultTournamentLocationAvailable: Boolean(portalAccount.defaultTournamentLocation),
     })
-    res.json({ ...data, account: portalAccount, host: portalAccount, tournaments })
+    const hostAccounts = (data.hostAccounts || []).map((host) => normalizeHostPortalAccount(host))
+    res.json({ ...data, account: portalAccount, host: portalAccount, hostAccounts, tournaments })
   } catch (error) {
     logRouteError('Host portal load error', req, error)
     res.status(500).json({ message: 'Could not load golf-course portal' })
+  }
+})
+
+
+app.post('/api/host/accounts', hostAuthMiddleware, async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    const contactName = String(req.body?.contactName || '').trim()
+    const password = String(req.body?.password || '')
+    logApi('host_additional_account_create_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, email })
+    const hostAccount = await createAdditionalHostAccount(getPool(), {
+      actingHostAccountId: req.hostAccount.id,
+      email,
+      contactName,
+      password,
+    })
+    const normalized = normalizeHostPortalAccount(hostAccount)
+    logApi('host_additional_account_created', { ...requestContext(req), hostAccountId: req.hostAccount.id, createdHostAccountId: normalized.id, email: normalized.email })
+    return res.status(201).json({ hostAccount: normalized })
+  } catch (error) {
+    if (error instanceof Error && /valid email|host name|at least 8|already uses|not available/i.test(error.message)) {
+      logApi('host_additional_account_create_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, reason: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Additional host account create error', req, error)
+    return res.status(500).json({ message: 'The host account could not be created. Try again. If the problem continues, contact support with the correlation ID from this request.' })
+  }
+})
+
+app.post('/api/host/accounts/admin-transfer', hostAuthMiddleware, async (req, res) => {
+  try {
+    const targetHostAccountId = String(req.body?.targetHostAccountId || '').trim()
+    const deleteCurrentAdmin = Boolean(req.body?.deleteCurrentAdmin)
+    logApi('host_admin_transfer_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, targetHostAccountId, deleteCurrentAdmin })
+    const result = await transferHostCourseAdmin(getPool(), {
+      actingHostAccountId: req.hostAccount.id,
+      targetHostAccountId,
+      deleteCurrentAdmin,
+    })
+    if (deleteCurrentAdmin) res.setHeader('Set-Cookie', clearHostSessionCookie())
+    logApi('host_admin_transferred', { ...requestContext(req), hostAccountId: req.hostAccount.id, targetHostAccountId: result.targetHostAccountId, deletedCurrentAdmin: result.deletedCurrentAdmin })
+    return res.json(result)
+  } catch (error) {
+    if (error instanceof Error && /Only the golf-course host admin|Select another host|not available/i.test(error.message)) {
+      logApi('host_admin_transfer_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, reason: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host admin transfer error', req, error)
+    return res.status(500).json({ message: 'Admin access could not be transferred. Refresh the portal and try again. If the problem continues, contact support with the correlation ID from this request.' })
+  }
+})
+
+app.delete('/api/host/accounts/:id', hostAuthMiddleware, async (req, res) => {
+  try {
+    const targetHostAccountId = String(req.params.id || '').trim()
+    logApi('host_account_delete_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, targetHostAccountId })
+    const result = await deleteHostCourseAccount(getPool(), { actingHostAccountId: req.hostAccount.id, targetHostAccountId })
+    logApi('host_account_deleted', { ...requestContext(req), hostAccountId: req.hostAccount.id, targetHostAccountId })
+    return res.json(result)
+  } catch (error) {
+    if (error instanceof Error && /Only the golf-course host admin|not found|Transfer admin|not available/i.test(error.message)) {
+      logApi('host_account_delete_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, reason: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host account delete error', req, error)
+    return res.status(500).json({ message: 'The host account could not be deleted. Refresh the portal and try again. If the problem continues, contact support with the correlation ID from this request.' })
   }
 })
 
@@ -2524,7 +2626,7 @@ app.get('/api/golf-course-pages/:slug', async (req, res) => {
       logApi('golf_course_public_page_not_found', { ...requestContext(req), slug })
       return res.status(404).json({ message: 'Golf-course page not found.' })
     }
-    logApi('golf_course_public_page_loaded', { ...requestContext(req), slug: page.slug, hostAccountId: page.hostAccountId, tournamentCount: page.tournamentCount })
+    logApi('golf_course_public_page_loaded', { ...requestContext(req), slug: page.slug, hostAccountId: page.hostAccountId, tournamentCount: page.tournamentCount, calendarAvailable: page.calendarAvailable, calendarPath: page.calendarPath })
     return res.json(page)
   } catch (error) {
     logRouteError('Golf-course public page load error', req, error)
@@ -2748,6 +2850,7 @@ app.post('/api/host/tournaments', hostAuthMiddleware, async (req, res) => {
     const db = getPool()
     await ensureTournamentInviteSchema(db)
     const context = requestContext(req)
+    const userTimeZone = requestUserTimeZone(req)
     const defaultTournamentLocation = await resolveHostTournamentDefaultLocation(db, req.hostAccount, req)
     const golfCourseName = normalizeHostPortalAccount(req.hostAccount).golfCourseName
     const input = applyHostTournamentDefaults(req.body || {}, { defaultLocation: defaultTournamentLocation, golfCourseName })
@@ -2766,7 +2869,22 @@ app.post('/api/host/tournaments', hostAuthMiddleware, async (req, res) => {
       defaultCheckInTimeApplied: Boolean(!submittedCheckInTime && input.templateData?.checkInTime === DEFAULT_TOURNAMENT_CHECK_IN_TIME),
       defaultTeeTimeApplied: Boolean(!submittedTeeTime && input.templateData?.teeTime === DEFAULT_TOURNAMENT_TEE_TIME),
       optionalContentProvided: Boolean(input.description || input.startDate || submittedLocation),
+      userTimeZone,
+      requestedStartDate: normalizeTournamentScheduleDate(input.startDate) || null,
     })
+    const dateConflict = await findHostTournamentDateConflict(db, req.hostAccount, input.startDate, req)
+    if (dateConflict) {
+      const message = formatHostTournamentDateConflictMessage(dateConflict)
+      logApi('host_tournament_date_conflict_detected', {
+        ...context,
+        hostAccountId: req.hostAccount.id,
+        requestedStartDate: normalizeTournamentScheduleDate(input.startDate),
+        conflictingTournamentId: dateConflict.tournamentId,
+        conflictingTournamentIdentifier: dateConflict.tournamentIdentifier,
+        golfCourseName: dateConflict.golfCourseName,
+      })
+      return res.status(409).json({ message, code: 'TOURNAMENT_DATE_CONFLICT', conflict: dateConflict })
+    }
     const tournament = await createHostManagedTournament(db, req.hostAccount.id, input)
     const searchRecord = await syncGolfHomiezTournamentSearchRecord(db, tournament.id, {
       correlationId: context.correlationId,
@@ -2786,6 +2904,8 @@ app.post('/api/host/tournaments', hostAuthMiddleware, async (req, res) => {
       checkInTime: input.templateData?.checkInTime || null,
       teeTime: input.templateData?.teeTime || null,
       templateKey: tournament.templateKey || input.templateKey || 'classic-flyer',
+      userTimeZone,
+      storedStartDate: normalizeTournamentScheduleDate(tournament.startDate) || null,
     })
     res.status(201).json({ tournament })
   } catch (error) {
@@ -2800,9 +2920,32 @@ app.post('/api/host/tournaments', hostAuthMiddleware, async (req, res) => {
 
 app.put('/api/host/tournaments/:id', hostAuthMiddleware, async (req, res) => {
   try {
+    const userTimeZone = requestUserTimeZone(req)
     const tournamentId = String(req.params.id || '').trim()
     const input = sanitizeOrganizerTournamentUpdatePayload(req.body || {})
-    const tournament = await updateHostOwnedTournament(getPool(), req.hostAccount, tournamentId, input, req)
+    const db = getPool()
+    const existingTournament = await getHostEditableTournament(db, req.hostAccount, tournamentId)
+    if (!existingTournament) {
+      logApi('host_tournament_update_not_found', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, tournamentId })
+      return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    }
+    const requestedStartDate = input.startDate || null
+    const dateConflict = await findHostTournamentDateConflict(db, req.hostAccount, requestedStartDate, req, existingTournament.id)
+    if (dateConflict) {
+      const context = requestContext(req)
+      const message = formatHostTournamentDateConflictMessage(dateConflict)
+      logApi('host_tournament_update_date_conflict_detected', {
+        ...context,
+        hostAccountId: req.hostAccount.id,
+        tournamentId: existingTournament.id,
+        requestedStartDate: normalizeTournamentScheduleDate(requestedStartDate),
+        conflictingTournamentId: dateConflict.tournamentId,
+        conflictingTournamentIdentifier: dateConflict.tournamentIdentifier,
+        golfCourseName: dateConflict.golfCourseName,
+      })
+      return res.status(409).json({ message, code: 'TOURNAMENT_DATE_CONFLICT', conflict: dateConflict })
+    }
+    const tournament = await updateHostOwnedTournament(db, req.hostAccount, tournamentId, input, req)
     if (!tournament) {
       logApi('host_tournament_update_not_found', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, tournamentId })
       return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
@@ -2813,7 +2956,7 @@ app.put('/api/host/tournaments/:id', hostAuthMiddleware, async (req, res) => {
       tournamentUrl: tournament.status === 'published' ? tournamentPortalUrl(req, tournament.tournamentIdentifier || tournament.id) : null,
     })
     logApi('golfhomiez_tournament_search_record_synced', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, ...searchRecord })
-    logApi('host_tournament_updated', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length })
+    logApi('host_tournament_updated', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, userTimeZone, requestedStartDate: normalizeTournamentScheduleDate(input.startDate) || null, storedStartDate: normalizeTournamentScheduleDate(tournament.startDate) || null })
     res.json(tournament)
   } catch (error) {
     if (error instanceof Error && /required|invalid|cannot be after|Restore the archived/i.test(error.message)) {
@@ -2880,7 +3023,7 @@ app.post('/api/host/tournaments/:id/invite', hostAuthMiddleware, async (req, res
     const payload = sanitizeOrganizerTournamentInvitePayload(req.body || {})
     const db = getPool()
     await ensureTournamentInviteSchema(db)
-    const tournaments = await listHostManagedTournaments(db, req.hostAccount.id)
+    const tournaments = await listHostPortalTournaments(db, req.hostAccount, req)
     const tournament = tournaments.find((item) => item.id === tournamentId)
     if (!tournament) return res.status(404).json({ message: 'Tournament not found for this host account.' })
     if (tournament.archivedAt) return res.status(409).json({ message: 'Restore the archived tournament before inviting an organizer.' })
@@ -3424,6 +3567,50 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
   }
 })
 
+
+
+app.get('/api/users/golf-course-search', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    logApi('user_golf_course_search_started', { ...requestContext(req), authUserId: req.user.id })
+    const result = await searchGolfHomiezCourses(getPool(), {
+      state: req.query.state,
+      city: req.query.city,
+      zipCode: req.query.zipCode,
+      golfCourseName: req.query.golfCourseName,
+    }, {
+      page: req.query.page,
+    })
+    logApi('user_golf_course_search_completed', {
+      ...requestContext(req),
+      authUserId: req.user.id,
+      filters: result.filters,
+      page: result.pagination.page,
+      pageSize: result.pagination.pageSize,
+      resultCount: result.courses.length,
+      totalResults: result.pagination.totalResults,
+      golfHomiezHostedResultsOnPage: result.courses.filter((course) => Number(course.hostedTournamentCount) > 0).length,
+      zipRadiusMiles: result.zipSearch.radiusMiles,
+      zipRadiusResolved: result.zipSearch.radiusResolved,
+      zipRadiusSource: result.zipSearch.source,
+    })
+    if (result.filters.zipCode && !result.zipSearch.radiusResolved) {
+      logApi('user_golf_course_search_zip_radius_unavailable', {
+        ...requestContext(req),
+        authUserId: req.user.id,
+        zipCode: result.filters.zipCode,
+        fallback: 'exact_zip_only',
+      })
+    }
+    return res.json(result)
+  } catch (error) {
+    if (error instanceof Error && /Zip Code|ZIP code/i.test(error.message)) {
+      logApi('user_golf_course_search_validation_failed', { ...requestContext(req), authUserId: req.user?.id || null, error: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('User golf course search error', req, error)
+    return res.status(500).json({ message: 'Could not search golf courses' })
+  }
+})
 
 app.get('/api/users/tournament-search', requireStorage, authMiddleware, async (req, res) => {
   try {

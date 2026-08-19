@@ -148,6 +148,8 @@ export async function ensureHostAuthSchema(source) {
     password_hash VARCHAR(255) NULL,
     invite_id VARCHAR(64) NULL,
     reset_email VARCHAR(191) NULL,
+    is_course_admin TINYINT(1) NOT NULL DEFAULT 0,
+    created_by_host_account_id VARCHAR(191) NULL,
     is_validated TINYINT(1) NOT NULL DEFAULT 0,
     validated_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -184,12 +186,15 @@ export async function ensureHostAuthSchema(source) {
     await ensureColumn(db, 'host_accounts', 'phone VARCHAR(64) NULL')
     await ensureColumn(db, 'host_accounts', 'website_url VARCHAR(512) NULL')
     await ensureColumn(db, 'host_accounts', 'notes TEXT NULL')
+    await ensureColumn(db, 'host_accounts', 'is_course_admin TINYINT(1) NOT NULL DEFAULT 0')
+    await ensureColumn(db, 'host_accounts', 'created_by_host_account_id VARCHAR(191) NULL')
     await ensureColumn(db, 'host_accounts', 'is_validated TINYINT(1) NOT NULL DEFAULT 0')
     await ensureColumn(db, 'host_accounts', 'validated_at DATETIME NULL')
   }
 
   await ensureIndex(db, 'host_accounts', 'idx_host_accounts_email', 'CREATE INDEX idx_host_accounts_email ON host_accounts (email)')
   await ensureIndex(db, 'host_accounts', 'idx_host_accounts_golf_course_id', 'CREATE INDEX idx_host_accounts_golf_course_id ON host_accounts (golf_course_id)')
+  await ensureIndex(db, 'host_accounts', 'idx_host_accounts_course_admin', 'CREATE INDEX idx_host_accounts_course_admin ON host_accounts (golf_course_id, is_course_admin)')
   return true
 }
 
@@ -226,7 +231,7 @@ export async function getHostAccountByEmail(source, email) {
   const nameCol = await resolvePrimaryNameColumn(db)
   const selectName = nameCol ? `${nameCol} AS golf_course_name,` : ''
   const [rows] = await db.execute(
-    `SELECT id, email, auth_user_id, golf_course_id, password_hash, invite_id, reset_email, contact_name, phone, website_url, notes, is_validated, validated_at, ${selectName} created_at, updated_at FROM host_accounts WHERE email = ? LIMIT 1`,
+    `SELECT id, email, auth_user_id, golf_course_id, password_hash, invite_id, reset_email, contact_name, phone, website_url, notes, is_course_admin, created_by_host_account_id, is_validated, validated_at, ${selectName} created_at, updated_at FROM host_accounts WHERE email = ? LIMIT 1`,
     [email],
   )
   return rows[0] || null
@@ -348,7 +353,7 @@ export async function getHostAccountBySession(source, sessionId) {
   const matchValue = matchCol === 'token_hash' ? sha256(sessionId) : sessionId
   const expiryClause = sessionColumns.has('expires_at') ? 'AND s.expires_at > NOW()' : ''
   const [rows] = await db.execute(
-    `SELECT h.id, h.email, h.auth_user_id, h.invite_id, h.reset_email, h.contact_name, h.phone, h.website_url, h.notes, h.is_validated, h.validated_at, ${selectName} h.created_at, h.updated_at
+    `SELECT h.id, h.email, h.auth_user_id, h.invite_id, h.reset_email, h.contact_name, h.phone, h.website_url, h.notes, h.golf_course_id, h.is_course_admin, h.created_by_host_account_id, h.is_validated, h.validated_at, ${selectName} h.created_at, h.updated_at
      FROM host_sessions s
      JOIN host_accounts h ON h.id = s.${joinCol}
      WHERE s.${matchCol} = ? ${expiryClause}
@@ -446,13 +451,205 @@ export async function resetHostPassword(source, { token, password }) {
 }
 
 
-export async function getHostPortalData(source, hostAccountId) {
+function normalizeHostEmail(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isHostEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeHostEmail(value))
+}
+
+async function getHostAccountById(source, hostAccountId) {
   const db = getDb(source)
+  await ensureHostAuthSchema(db)
   const nameCol = await resolvePrimaryNameColumn(db)
   const selectName = nameCol ? `${nameCol} AS golf_course_name,` : ''
-  const [accounts] = await db.execute(
-    `SELECT id, email, contact_name, phone, website_url, notes, ${selectName} is_validated, validated_at, created_at, updated_at FROM host_accounts WHERE id = ? LIMIT 1`,
+  const [rows] = await db.execute(
+    `SELECT id, email, auth_user_id, golf_course_id, password_hash, invite_id, reset_email, contact_name, phone, website_url, notes, is_course_admin, created_by_host_account_id, is_validated, validated_at, ${selectName} created_at, updated_at
+       FROM host_accounts WHERE id = ? LIMIT 1`,
     [hostAccountId],
   )
-  return { host: accounts[0] || null }
+  return rows[0] || null
+}
+
+function hostCourseIdentity(host = {}) {
+  return {
+    golfCourseId: String(host.golf_course_id || '').trim() || null,
+    golfCourseName: String(host.golf_course_name || host.account_name || host.course_name || host.name || '').trim(),
+  }
+}
+
+async function listHostCourseAccountRows(db, host) {
+  const nameCol = await resolvePrimaryNameColumn(db)
+  const selectName = nameCol ? `${nameCol} AS golf_course_name,` : `NULL AS golf_course_name,`
+  const identity = hostCourseIdentity(host)
+  if (identity.golfCourseId) {
+    const [rows] = await db.execute(
+      `SELECT id, email, golf_course_id, contact_name, phone, website_url, notes, is_course_admin, created_by_host_account_id, is_validated, validated_at, ${selectName} created_at, updated_at
+         FROM host_accounts
+        WHERE golf_course_id = ? AND is_validated = 1
+        ORDER BY created_at ASC, id ASC`,
+      [identity.golfCourseId],
+    )
+    return rows
+  }
+  if (!nameCol || !identity.golfCourseName) return [host]
+  const [rows] = await db.execute(
+    `SELECT id, email, golf_course_id, contact_name, phone, website_url, notes, is_course_admin, created_by_host_account_id, is_validated, validated_at, ${selectName} created_at, updated_at
+       FROM host_accounts
+      WHERE LOWER(TRIM(COALESCE(${nameCol}, ''))) = LOWER(?) AND is_validated = 1
+      ORDER BY created_at ASC, id ASC`,
+    [identity.golfCourseName],
+  )
+  return rows
+}
+
+async function ensureFirstHostCourseAdmin(db, host) {
+  const rows = await listHostCourseAccountRows(db, host)
+  if (!rows.length || rows.some((row) => Boolean(row.is_course_admin))) return rows
+  await db.execute('UPDATE host_accounts SET is_course_admin = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [rows[0].id])
+  rows[0].is_course_admin = 1
+  return rows
+}
+
+export async function listHostCourseAccounts(source, actingHostAccountId) {
+  const db = getDb(source)
+  const host = await getHostAccountById(db, actingHostAccountId)
+  if (!host || !host.is_validated) throw new Error('Host account is not available.')
+  return ensureFirstHostCourseAdmin(db, host)
+}
+
+export async function createAdditionalHostAccount(source, { actingHostAccountId, email, contactName, password }) {
+  const db = getDb(source)
+  const actingHost = await getHostAccountById(db, actingHostAccountId)
+  if (!actingHost || !actingHost.is_validated) throw new Error('Host account is not available.')
+  const normalizedEmail = normalizeHostEmail(email)
+  const normalizedContactName = String(contactName || '').trim()
+  if (!isHostEmail(normalizedEmail)) throw new Error('Enter a valid email address for the new host account.')
+  if (!normalizedContactName) throw new Error('Enter the host name and try again.')
+  if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
+  if (await getHostAccountByEmail(db, normalizedEmail)) throw new Error('A host account already uses that email address.')
+
+  const identity = hostCourseIdentity(actingHost)
+  const nameColumns = await resolveNameColumns(db)
+  const newId = randomId(32)
+  const assignments = [
+    ['id', newId],
+    ['email', normalizedEmail],
+    ['auth_user_id', `host:${newId}`],
+    ['golf_course_id', identity.golfCourseId],
+    ['password_hash', hashPassword(password)],
+    ['reset_email', normalizedEmail],
+    ['contact_name', normalizedContactName],
+    ['phone', null],
+    ['website_url', null],
+    ['notes', null],
+    ['is_course_admin', 0],
+    ['created_by_host_account_id', actingHost.id],
+    ['is_validated', 1],
+    ['validated_at', '__NOW__'],
+    ['created_at', '__NOW__'],
+    ['updated_at', '__NOW__'],
+    ...nameColumns.map((column) => [column, identity.golfCourseName]),
+  ]
+  const { columns, values, params, missingRequired } = await buildInsertParts(db, 'host_accounts', assignments)
+  if (missingRequired.length) throw new Error(`host_accounts missing values for required columns: ${missingRequired.join(', ')}`)
+  await db.execute(`INSERT INTO host_accounts (${columns.join(', ')}) VALUES (${values.join(', ')})`, params)
+  return getHostAccountById(db, newId)
+}
+
+async function assertHostCourseAdmin(db, actingHostAccountId) {
+  const actingHost = await getHostAccountById(db, actingHostAccountId)
+  if (!actingHost || !actingHost.is_validated) throw new Error('Host account is not available.')
+  const accounts = await ensureFirstHostCourseAdmin(db, actingHost)
+  const refreshed = accounts.find((account) => account.id === actingHost.id) || actingHost
+  if (!refreshed.is_course_admin) throw new Error('Only the golf-course host admin can perform this action.')
+  return { actingHost: refreshed, accounts }
+}
+
+async function reassignSharedCoursePage(db, fromHostAccountId, toHostAccountId) {
+  if (!await tableExists(db, 'golf_course_public_pages')) return
+  await db.execute(
+    'UPDATE golf_course_public_pages SET host_account_id = ?, updated_at = CURRENT_TIMESTAMP WHERE host_account_id = ?',
+    [toHostAccountId, fromHostAccountId],
+  )
+}
+
+async function deleteHostAuthenticationArtifacts(db, host = {}) {
+  const hostAccountId = String(host.id || '').trim()
+  const hostEmail = normalizeHostEmail(host.email)
+  if (!hostAccountId) return
+
+  if (await tableExists(db, 'host_sessions')) {
+    const sessionColumns = await getColumns(db, 'host_sessions')
+    const idColumns = ['host_account_id', 'host_id', 'account_id'].filter((column) => sessionColumns.has(column))
+    if (idColumns.length) {
+      await db.execute(
+        `DELETE FROM host_sessions WHERE ${idColumns.map((column) => `${column} = ?`).join(' OR ')}`,
+        idColumns.map(() => hostAccountId),
+      )
+    }
+  }
+
+  if (await tableExists(db, 'host_password_reset_tokens')) {
+    const resetColumns = await getColumns(db, 'host_password_reset_tokens')
+    const predicates = []
+    const params = []
+    for (const column of ['host_account_id', 'host_id', 'account_id']) {
+      if (!resetColumns.has(column)) continue
+      predicates.push(`${column} = ?`)
+      params.push(hostAccountId)
+    }
+    if (hostEmail) {
+      for (const column of ['email', 'reset_email']) {
+        if (!resetColumns.has(column)) continue
+        predicates.push(`LOWER(${column}) = ?`)
+        params.push(hostEmail)
+      }
+    }
+    if (predicates.length) {
+      await db.execute(`DELETE FROM host_password_reset_tokens WHERE ${predicates.join(' OR ')}`, params)
+    }
+  }
+}
+
+export async function transferHostCourseAdmin(source, { actingHostAccountId, targetHostAccountId, deleteCurrentAdmin = false }) {
+  const db = getDb(source)
+  const { actingHost, accounts } = await assertHostCourseAdmin(db, actingHostAccountId)
+  const target = accounts.find((account) => account.id === String(targetHostAccountId || '').trim())
+  if (!target || target.id === actingHost.id) throw new Error('Select another host account to receive admin access.')
+
+  const ids = accounts.map((account) => account.id)
+  const placeholders = ids.map(() => '?').join(',')
+  await db.execute(
+    `UPDATE host_accounts SET is_course_admin = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+    [target.id, ...ids],
+  )
+  await reassignSharedCoursePage(db, actingHost.id, target.id)
+
+  if (deleteCurrentAdmin) {
+    await deleteHostAuthenticationArtifacts(db, actingHost)
+    await db.execute('DELETE FROM host_accounts WHERE id = ?', [actingHost.id])
+  }
+  return { targetHostAccountId: target.id, deletedCurrentAdmin: Boolean(deleteCurrentAdmin) }
+}
+
+export async function deleteHostCourseAccount(source, { actingHostAccountId, targetHostAccountId }) {
+  const db = getDb(source)
+  const { actingHost, accounts } = await assertHostCourseAdmin(db, actingHostAccountId)
+  const target = accounts.find((account) => account.id === String(targetHostAccountId || '').trim())
+  if (!target) throw new Error('Host account was not found for this golf course.')
+  if (target.id === actingHost.id) throw new Error('Transfer admin access before deleting the current admin account.')
+  if (target.is_course_admin) throw new Error('Transfer admin access before deleting an admin account.')
+  await reassignSharedCoursePage(db, target.id, actingHost.id)
+  await deleteHostAuthenticationArtifacts(db, target)
+  await db.execute('DELETE FROM host_accounts WHERE id = ?', [target.id])
+  return { deleted: true, hostAccountId: target.id }
+}
+
+export async function getHostPortalData(source, hostAccountId) {
+  const db = getDb(source)
+  const accounts = await listHostCourseAccounts(db, hostAccountId)
+  const host = accounts.find((account) => account.id === hostAccountId) || null
+  return { host, hostAccounts: accounts }
 }

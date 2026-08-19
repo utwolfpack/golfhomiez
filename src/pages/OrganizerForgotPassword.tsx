@@ -34,7 +34,7 @@ export default function OrganizerForgotPassword() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero eyebrow="Organizer password reset" title="Reset your organizer password" subtitle="Enter the organizer account email and we will send a reset link." />
+        <PageHero eyebrow="Organizer password reset" title="Request Password Reset" />
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">Email</label>
