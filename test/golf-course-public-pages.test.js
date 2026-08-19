@@ -5,6 +5,7 @@ import {
   buildGolfCoursePageBaseSlug,
   createGolfCoursePublicPageForApprovedHost,
   extractGolfCourseWebsiteMetadata,
+  getGolfCoursePublicPageByHostAccount,
   getGolfCoursePublicPageBySlug,
   isPrivateNetworkAddress,
   sanitizeUploadedBannerData,
@@ -47,6 +48,8 @@ test('approved host page creation appends a number when the base slug is already
   const db = {
     async execute(sql, params = []) {
       if (/FROM golf_course_public_pages WHERE host_account_id/i.test(sql)) return [[]]
+      if (/SELECT golf_course_id FROM host_accounts WHERE id/i.test(sql)) return [[{ golf_course_id: 'course-1' }]]
+      if (/FROM golf_course_public_pages WHERE golf_course_id/i.test(sql)) return [[]]
       if (/FROM golf_courses WHERE id = \?/i.test(sql)) {
         return [[{
           id: 'course-1',
@@ -142,7 +145,7 @@ test('public golf-course page includes linked public tournaments for the relativ
         tournamentQuery = sql
         tournamentParams = params
         return [[
-          { id: 'tournament-1', tournament_identifier: 'summer-open-123', name: 'Summer Open', start_date: '2026-08-10', status: 'published', template_data: JSON.stringify({ startType: 'shotgun', teeTime: '08:00' }) },
+          { id: 'tournament-1', tournament_identifier: 'summer-open-123', name: 'Summer Open', start_date: '2026-08-10', status: 'published', template_data: JSON.stringify({ startType: 'shotgun', teeTime: '08:00', contactPerson: 'Casey Host', contactPhone: '801 555 0101', contactEmail: 'casey@example.com' }) },
           { id: 'tournament-2', tournament_identifier: null, name: 'Fall Classic', start_date: '2026-09-12', status: 'completed', template_data: JSON.stringify({ startType: 'tee-times', teeTime: '08:30' }) },
         ]]
       }
@@ -163,7 +166,63 @@ test('public golf-course page includes linked public tournaments for the relativ
   assert.equal(page.tournaments[1].portalPath, '/tournaments/tournament-2')
   assert.equal(page.tournaments[0].startType, 'shotgun')
   assert.equal(page.tournaments[0].startTime, '08:00')
+  assert.equal(page.tournaments[0].golfCourseName, 'Murray Parkway')
+  assert.equal(page.tournaments[0].contactPerson, 'Casey Host')
+  assert.equal(page.tournaments[0].contactPhone, '801 555 0101')
+  assert.equal(page.tournaments[0].contactEmail, 'casey@example.com')
   assert.equal(page.tournaments[1].status, 'completed')
+  assert.equal(page.calendarAvailable, true)
+  assert.equal(page.calendarPath, '/murrayparkwayut/calendar')
+  assert.equal(page.calendarUrl, 'https://golfhomiez.com/murrayparkwayut/calendar')
+})
+
+test('golf-course calendar becomes available after the first tournament without exposing draft tournaments publicly', async () => {
+  let availabilityQuery = null
+  let publicQuery = null
+  const db = {
+    async execute(sql, params = []) {
+      if (/FROM golf_course_public_pages WHERE slug/i.test(sql)) {
+        return [[{
+          id: 'page-1',
+          host_account_id: 'host-1',
+          golf_course_id: 'course-1',
+          slug: 'golfhomiezlakeviewut',
+          golf_course_name: 'Golf Homiez Lake View',
+          state_code: 'UT',
+          is_published: 1,
+        }]]
+      }
+      if (/FROM information_schema\.COLUMNS/i.test(sql)) {
+        if (params[0] === 'tournaments') {
+          return [[
+            'id', 'name', 'start_date', 'status', 'is_public', 'archived_at', 'golf_course_id', 'created_at',
+          ].map((COLUMN_NAME) => ({ COLUMN_NAME }))]
+        }
+        if (params[0] === 'golf_course_tournaments') return [[]]
+      }
+      if (/SELECT t\.id\s+FROM tournaments t/i.test(sql)) {
+        availabilityQuery = sql
+        return [[{ id: 'draft-tournament' }]]
+      }
+      if (/SELECT t\.id,/i.test(sql) && /FROM tournaments t/i.test(sql)) {
+        publicQuery = sql
+        return [[]]
+      }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    },
+  }
+
+  const page = await getGolfCoursePublicPageBySlug(db, 'golfhomiezlakeviewut')
+
+  assert.equal(page.calendarAvailable, true)
+  assert.equal(page.calendarPath, '/golfhomiezlakeviewut/calendar')
+  assert.equal(page.tournamentCount, 0)
+  assert.deepEqual(page.tournaments, [])
+  assert.doesNotMatch(availabilityQuery, /status/)
+  assert.doesNotMatch(availabilityQuery, /archived_at/)
+  assert.doesNotMatch(availabilityQuery, /IN \('published', 'completed'\)/)
+  assert.match(publicQuery, /IN \('published', 'completed'\)/)
+  assert.match(publicQuery, /COALESCE\(t\.is_public, 0\) = 1/)
 })
 
 test('public golf-course page includes synced GolfHomiez tournaments when course id is missing but course name matches', async () => {
@@ -260,6 +319,33 @@ test('public golf-course page tournament rollup does not reference missing cours
 })
 
 
+
+test('additional host accounts resolve the shared golf-course public page by golf course id', async () => {
+  const sharedPage = {
+    id: 'page-1',
+    host_account_id: 'host-admin',
+    golf_course_id: 'course-1',
+    slug: 'murrayparkwayut',
+    golf_course_name: 'Murray Parkway',
+    summary: 'Shared course page',
+    state_code: 'UT',
+    is_published: 1,
+  }
+  const db = {
+    async execute(sql) {
+      if (/FROM golf_course_public_pages WHERE host_account_id/i.test(sql)) return [[]]
+      if (/SELECT golf_course_id FROM host_accounts WHERE id/i.test(sql)) return [[{ golf_course_id: 'course-1' }]]
+      if (/FROM golf_course_public_pages WHERE golf_course_id/i.test(sql)) return [[sharedPage]]
+      throw new Error(`Unexpected SQL: ${sql}`)
+    },
+  }
+
+  const page = await getGolfCoursePublicPageByHostAccount(db, 'host-additional')
+  assert.equal(page.hostAccountId, 'host-admin')
+  assert.equal(page.golfCourseId, 'course-1')
+  assert.equal(page.slug, 'murrayparkwayut')
+})
+
 test('host public-page updates can clear optional website, banner, and contact fields', async () => {
   let updateParams = null
   const existing = {
@@ -282,6 +368,7 @@ test('host public-page updates can clear optional website, banner, and contact f
   const db = {
     async execute(sql, params = []) {
       if (/SELECT \* FROM golf_course_public_pages WHERE host_account_id/i.test(sql)) return [[existing]]
+      if (/SELECT \* FROM golf_course_public_pages WHERE id = \?/i.test(sql)) return [[existing]]
       if (/UPDATE golf_course_public_pages/i.test(sql)) {
         updateParams = params
         Object.assign(existing, {
@@ -399,7 +486,18 @@ test('migration, API route, host editor, frontend route, and correlated logging 
   assert.match(server, /app\.get\('\/api\/golf-course-pages\/:slug'/)
   assert.match(server, /golf_course_public_page_loaded/)
   assert.match(adminPortal, /createGolfCoursePublicPageForApprovedHost/)
+  assert.match(app, /path="\/:golfCourseSlug\/calendar"/)
   assert.match(app, /path="\/:golfCourseSlug"/)
+  const coursePage = fs.readFileSync(new URL('../src/pages/GolfCoursePage.tsx', import.meta.url), 'utf8')
+  const calendarPage = fs.readFileSync(new URL('../src/pages/GolfCourseCalendarPage.tsx', import.meta.url), 'utf8')
+  const courseNav = fs.readFileSync(new URL('../src/components/GolfCoursePublicNav.tsx', import.meta.url), 'utf8')
+  assert.match(coursePage, /Tournament Calendar/)
+  assert.match(coursePage, /golfCourseCalendarHappyLink/)
+  assert.match(calendarPage, /golfCourseCalendarGrid/)
+  assert.match(calendarPage, /Point of Contact/)
+  assert.match(calendarPage, /Name of Course/)
+  assert.match(calendarPage, /calendar_tournament_selected/)
+  assert.match(courseNav, /Tournament Calendar/)
   assert.match(hostProfile, /Public golf-course page/)
   assert.match(hostProfile, /ImageUploadField/)
   assert.match(hostProfile, /defaultGolfCourseBanner/)

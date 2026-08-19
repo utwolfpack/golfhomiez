@@ -19,6 +19,7 @@ import ResetPassword from './pages/ResetPassword'
 import MyGolfScores from './pages/MyGolfScores'
 import MyTournaments from './pages/MyTournaments'
 import FindTournament from './pages/FindTournament'
+import FindCourse from './pages/FindCourse'
 import VerifyContact from './pages/VerifyContact'
 import Profile from './pages/Profile'
 import CreateHostAccount from './pages/CreateHostAccount'
@@ -39,6 +40,7 @@ import Challenges from './pages/Challenges'
 import InviteHomie from './pages/InviteHomie'
 import TournamentPortal from './pages/TournamentPortal'
 import GolfCoursePage from './pages/GolfCoursePage'
+import GolfCourseCalendarPage from './pages/GolfCourseCalendarPage'
 import ProtectedRoute from './components/ProtectedRoute'
 import HostProtectedRoute from './components/HostProtectedRoute'
 import { emitFrontendStage } from './lib/frontend-logger'
@@ -149,6 +151,7 @@ export default function App() {
               <Route path="/my-golf-scores" element={<ProtectedRoute><MyGolfScores /></ProtectedRoute>} />
               <Route path="/my-tournaments" element={<ProtectedRoute><MyTournaments /></ProtectedRoute>} />
               <Route path="/find-tournament" element={<ProtectedRoute><FindTournament /></ProtectedRoute>} />
+              <Route path="/find-course" element={<ProtectedRoute><FindCourse /></ProtectedRoute>} />
               <Route path="/host/register" element={<CreateHostAccount />} />
               <Route path="/host/login" element={<LoginEntryRoute mode="host"><HostLogin /></LoginEntryRoute>} />
               <Route path="/host/request-password-reset" element={<HostForgotPassword />} />
@@ -166,6 +169,7 @@ export default function App() {
               <Route path="/golfadmin/forgot-password" element={<AdminResetPassword />} />
               <Route path="/golfadmin/reset-password" element={<AdminResetPassword />} />
               <Route path="/golfadmin/scheduled-jobs" element={<AdminEntryRoute><AdminScheduledJobs /></AdminEntryRoute>} />
+              <Route path="/:golfCourseSlug/calendar" element={<GolfCourseCalendarPage />} />
               <Route path="/:golfCourseSlug" element={<GolfCoursePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

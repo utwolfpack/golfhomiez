@@ -28,7 +28,7 @@ export default function HostForgotPassword() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero eyebrow="Host password reset" title="Reset your golf-course password" subtitle="Enter the golf-course account email and we will send a reset link." />
+        <PageHero eyebrow="Host password reset" title="Request Password Reset" />
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">Email</label>

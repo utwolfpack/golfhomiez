@@ -1,23 +1,17 @@
 import { handleExpiredSession } from './session-expiration'
 import { attachRequestMetadata, logFrontendEvent } from './frontend-logger'
+import { toUserFacingErrorMessage } from './user-facing-errors'
+import { getUserTimeZone } from './time-zone'
 
 export type ApiError = Error & { message: string; suggestedTeamName?: string; [key: string]: unknown }
-
-function getUserTimeZoneHeader() {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-  } catch {
-    return ''
-  }
-}
 
 export async function api<T>(url: string, opts: RequestInit = {}): Promise<T> {
   const startedAt = Date.now()
   const requestOptions = attachRequestMetadata(opts)
   const headers = new Headers(requestOptions.headers || {})
   if (!headers.has('Content-Type') && opts.body) headers.set('Content-Type', 'application/json')
-  const timeZone = getUserTimeZoneHeader()
-  if (timeZone && !headers.has('X-User-Timezone')) headers.set('X-User-Timezone', timeZone)
+  const timeZone = getUserTimeZone()
+  if (!headers.has('X-User-Timezone')) headers.set('X-User-Timezone', timeZone)
 
   try {
     const res = await fetch(url, { ...requestOptions, headers, credentials: 'include' })
@@ -39,9 +33,13 @@ export async function api<T>(url: string, opts: RequestInit = {}): Promise<T> {
 
     if (!res.ok) {
       handleExpiredSession('api', res.status)
-      const msg = (data && data.message) ? data.message : `Request failed (${res.status})`
+      const correlationId = res.headers.get('X-Correlation-Id') || headers.get('X-Correlation-Id')
+      const rawMessage = (data && data.message) ? data.message : `Request failed (${res.status})`
+      const msg = toUserFacingErrorMessage(rawMessage, { status: res.status, correlationId })
       const error = new Error(msg) as ApiError
       if (data && typeof data === 'object') Object.assign(error, data)
+      error.message = msg
+      error.correlationId = correlationId
       throw error
     }
     return data as T
@@ -57,6 +55,7 @@ export async function api<T>(url: string, opts: RequestInit = {}): Promise<T> {
         error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
       },
     })
-    throw error
+    if (error instanceof Error && 'correlationId' in error) throw error
+    throw new Error(toUserFacingErrorMessage(error, { fallback: 'We could not reach GolfHomiez. Check your connection and try again.' }))
   }
 }

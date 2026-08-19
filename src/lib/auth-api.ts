@@ -1,5 +1,7 @@
 import { handleExpiredSession } from './session-expiration'
 import { attachRequestMetadata, logFrontendEvent } from './frontend-logger'
+import { toUserFacingErrorMessage } from './user-facing-errors'
+import { getUserTimeZone } from './time-zone'
 
 export type SessionUser = { id: string; email: string; name?: string | null }
 
@@ -47,12 +49,7 @@ const AUTH_BASE = getAuthBase()
 
 function getCommonHeaders() {
   const headers = new Headers({ 'Content-Type': 'application/json' })
-  try {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    if (timeZone) headers.set('X-User-Timezone', timeZone)
-  } catch {
-    // ignore
-  }
+  headers.set('X-User-Timezone', getUserTimeZone())
   return headers
 }
 
@@ -60,8 +57,10 @@ async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
   const text = await res.text()
   const data = text ? JSON.parse(text) : null
   if (!res.ok) {
+    const correlationId = res.headers.get('X-Correlation-Id')
+    const rawMessage = data?.message || data?.error?.message || `Request failed (${res.status})`
     return {
-      error: { code: data?.code || data?.error?.code, message: data?.message || data?.error?.message || `Request failed (${res.status})` },
+      error: { code: data?.code || data?.error?.code, message: toUserFacingErrorMessage(rawMessage, { status: res.status, correlationId }) },
     }
   }
   return { data: data as T }
@@ -70,10 +69,13 @@ async function parseResponse<T>(res: Response): Promise<AuthResult<T>> {
 async function authFetch<T>(url: string, init: RequestInit, requestName: string) {
   const startedAt = Date.now()
   const requestInit = attachRequestMetadata(init)
+  const headers = new Headers(requestInit.headers || {})
+  if (!headers.has('X-User-Timezone')) headers.set('X-User-Timezone', getUserTimeZone())
 
   try {
     const res = await fetch(url, {
       ...requestInit,
+      headers,
       credentials: 'include',
     })
 
@@ -104,7 +106,7 @@ async function authFetch<T>(url: string, init: RequestInit, requestName: string)
         error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
       },
     })
-    throw error
+    throw new Error(toUserFacingErrorMessage(error, { fallback: 'We could not reach GolfHomiez. Check your connection and try again.' }))
   }
 }
 
@@ -176,14 +178,6 @@ export async function sendVerificationEmail(email: string, callbackURL: string) 
     headers: getCommonHeaders(),
     body: JSON.stringify({ email, callbackURL }),
   }, 'auth_send_verification_email')
-}
-
-export async function getLatestResetLink(email: string) {
-  const url = new URL('/api/auth-debug/latest-reset', window.location.origin)
-  url.searchParams.set('email', email)
-  return authFetch<{ email: string; token: string; url: string; expiresAt?: string | null } | null>(url.toString(), {
-    method: 'GET',
-  }, 'auth_debug_latest_reset')
 }
 
 export async function getLatestVerificationLink(email: string) {

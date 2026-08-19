@@ -238,10 +238,12 @@ export default function NavBar() {
                     ) : null}
                     {restrictedSession ? null : (
                       <>
-                        <NavLink className="navDropdownItem" to="/challenges" onClick={() => setOpen(false)}>Challenges</NavLink>
-                        <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => setOpen(false)}>My Scores</NavLink>
-                        <NavLink className="navDropdownItem" to="/my-tournaments" onClick={() => setOpen(false)}>My Tournaments</NavLink>
-                        <NavLink className="navDropdownItem" to="/profile" onClick={() => setOpen(false)}>Profile</NavLink>
+                        <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'my_scores_selected', data: { destination: '/my-golf-scores', correlationId: getCorrelationId() } }) }}>My Scores</NavLink>
+                        <NavLink className="navDropdownItem" to="/my-tournaments" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'my_tournaments_selected', data: { destination: '/my-tournaments', correlationId: getCorrelationId() } }) }}>My Tournaments</NavLink>
+                        <NavLink className="navDropdownItem" to="/challenges" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'challenges_selected', data: { destination: '/challenges', correlationId: getCorrelationId() } }) }}>Challenges</NavLink>
+                        <NavLink className="navDropdownItem" to="/find-tournament" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'find_tournament_selected', data: { destination: '/find-tournament', correlationId: getCorrelationId() } }) }}>Find a Tournament</NavLink>
+                        <NavLink className="navDropdownItem" to="/find-course" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'find_golf_course_selected', data: { destination: '/find-course', correlationId: getCorrelationId() } }) }}>Find a Golf Course</NavLink>
+                        <NavLink className="navDropdownItem" to="/profile" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'profile_selected', data: { destination: '/profile', correlationId: getCorrelationId() } }) }}>Profile</NavLink>
                       </>
                     )}
                     <button type="button" className="navDropdownItem" onClick={() => void handleLogout()}>Logout</button>

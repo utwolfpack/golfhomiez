@@ -6830,3 +6830,209 @@ button.navDropdownItem{font:inherit;}
     align-items:flex-start;
   }
 }
+
+/* Public golf-course tournament calendar. */
+.golfCoursePublicNav{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:8px;
+  border:1px solid rgba(15,23,42,.1);
+  border-radius:14px;
+  background:#fff;
+}
+
+.golfCoursePublicNavLink{
+  display:inline-flex;
+  align-items:center;
+  min-height:42px;
+  padding:9px 14px;
+  border-radius:10px;
+  color:#0b3d1d;
+  font-weight:750;
+  text-decoration:none;
+}
+
+.golfCoursePublicNavLink:hover,
+.golfCoursePublicNavLink--active{
+  background:#eef7f0;
+}
+
+.golfCoursePublicSummaryHeading,
+.golfCourseCalendarHeader,
+.golfCourseCalendarDetailsHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  flex-wrap:wrap;
+}
+
+.golfCourseCalendarHappyLink{
+  display:inline-flex;
+  align-items:center;
+  min-height:42px;
+  padding:9px 14px;
+  border:1px solid rgba(11,61,29,.22);
+  border-radius:999px;
+  background:#eef7f0;
+  color:#0b3d1d;
+  font-weight:800;
+  text-decoration:none;
+  white-space:nowrap;
+}
+
+.golfCourseCalendarHappyLink:hover{
+  border-color:rgba(11,61,29,.48);
+  box-shadow:0 6px 18px rgba(15,23,42,.08);
+}
+
+.golfCourseCalendarCard,
+.golfCourseCalendarDetails,
+.golfCourseCalendarUnavailable{
+  display:grid;
+  gap:18px;
+}
+
+.golfCourseCalendarCard h2,
+.golfCourseCalendarDetails h2,
+.golfCourseCalendarUnavailable h2{
+  margin:0;
+}
+
+.golfCourseCalendarActions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.golfCourseCalendarWeekdays,
+.golfCourseCalendarGrid{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+}
+
+.golfCourseCalendarWeekdays{
+  border:1px solid rgba(15,23,42,.12);
+  border-bottom:0;
+  border-radius:12px 12px 0 0;
+  overflow:hidden;
+  background:#f3f6f4;
+}
+
+.golfCourseCalendarWeekdays > div{
+  padding:9px 6px;
+  text-align:center;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+
+.golfCourseCalendarGrid{
+  border-top:1px solid rgba(15,23,42,.12);
+  border-left:1px solid rgba(15,23,42,.12);
+}
+
+.golfCourseCalendarDay{
+  min-height:118px;
+  padding:8px;
+  border-right:1px solid rgba(15,23,42,.12);
+  border-bottom:1px solid rgba(15,23,42,.12);
+  background:#fff;
+}
+
+.golfCourseCalendarDay--blank{
+  background:#f7f8f7;
+}
+
+.golfCourseCalendarDay--today{
+  box-shadow:inset 0 0 0 2px #1f7a3f;
+}
+
+.golfCourseCalendarDayNumber{
+  margin-bottom:7px;
+  font-size:13px;
+  font-weight:800;
+}
+
+.golfCourseCalendarEvents{
+  display:grid;
+  gap:5px;
+}
+
+.golfCourseCalendarEvent{
+  width:100%;
+  padding:6px 7px;
+  border:1px solid rgba(11,61,29,.22);
+  border-radius:7px;
+  background:#eef7f0;
+  color:#0b3d1d;
+  font:inherit;
+  font-size:12px;
+  font-weight:750;
+  line-height:1.25;
+  text-align:left;
+  cursor:pointer;
+}
+
+.golfCourseCalendarEvent:hover,
+.golfCourseCalendarEvent:focus-visible{
+  border-color:rgba(11,61,29,.58);
+  background:#e3f2e7;
+}
+
+.golfCourseCalendarDetailGrid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:16px;
+}
+
+.golfCourseCalendarContact{
+  display:grid;
+  gap:4px;
+}
+
+@media (max-width:760px){
+  .golfCourseCalendarWeekdays{
+    display:none;
+  }
+
+  .golfCourseCalendarGrid{
+    grid-template-columns:1fr;
+    gap:8px;
+    border:0;
+  }
+
+  .golfCourseCalendarDay,
+  .golfCourseCalendarDay--blank{
+    min-height:0;
+    border:1px solid rgba(15,23,42,.12);
+    border-radius:10px;
+  }
+
+  .golfCourseCalendarDay--blank{
+    display:none;
+  }
+
+  .golfCourseCalendarDayNumber::before{
+    content:'Day ';
+    font-weight:600;
+  }
+
+  .golfCourseCalendarDetailGrid{
+    grid-template-columns:1fr;
+  }
+
+  .golfCourseCalendarActions,
+  .golfCourseCalendarActions .btn,
+  .golfCourseCalendarHappyLink{
+    width:100%;
+  }
+
+  .golfCourseCalendarActions .btn,
+  .golfCourseCalendarHappyLink{
+    justify-content:center;
+    text-align:center;
+  }
+}

@@ -11,6 +11,8 @@ export type HostAccount = {
   notes?: string | null
   golfCourseAddress?: string | null
   defaultTournamentLocation?: string | null
+  isCourseAdmin?: boolean
+  createdByHostAccountId?: string | null
   isValidated: boolean
   validatedAt: string | null
 }
@@ -65,5 +67,26 @@ export async function resetHostPassword(token: string, password: string) {
 }
 
 export async function fetchHostPortal() {
-  return requestJson<{ account: HostAccount & { createdAt?: string | null; updatedAt?: string | null }; invites: Array<{ id: string; email: string; inviteeName: string | null; golfCourseName: string | null; createdAt: string | null; consumedAt: string | null; expiresAt: string | null }>; tournaments: Array<{ id: string; name: string; tournamentIdentifier?: string | null; organizerEmail?: string | null; inviteStatus?: string | null; inviteUrl?: string | null; startDate?: string | null; endDate?: string | null; status?: string | null }> }>('/api/host/portal')
+  return requestJson<{ account: HostAccount & { createdAt?: string | null; updatedAt?: string | null }; hostAccounts: Array<HostAccount & { createdAt?: string | null; updatedAt?: string | null }>; invites: Array<{ id: string; email: string; inviteeName: string | null; golfCourseName: string | null; createdAt: string | null; consumedAt: string | null; expiresAt: string | null }>; tournaments: Array<{ id: string; name: string; tournamentIdentifier?: string | null; organizerEmail?: string | null; inviteStatus?: string | null; inviteUrl?: string | null; startDate?: string | null; endDate?: string | null; status?: string | null }> }>('/api/host/portal')
+}
+
+
+export async function createAdditionalHostAccount(payload: { email: string; contactName: string; password: string }) {
+  return requestJson<{ hostAccount: HostAccount }>('/api/host/accounts', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function transferHostAdmin(payload: { targetHostAccountId: string; deleteCurrentAdmin?: boolean }) {
+  return requestJson<{ targetHostAccountId: string; deletedCurrentAdmin: boolean }>('/api/host/accounts/admin-transfer', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteHostAccount(hostAccountId: string) {
+  return requestJson<{ deleted: boolean; hostAccountId: string }>(`/api/host/accounts/${encodeURIComponent(hostAccountId)}`, {
+    method: 'DELETE',
+  })
 }

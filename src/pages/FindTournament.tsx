@@ -191,7 +191,7 @@ export default function FindTournament() {
         </div>
 
         <section className="card tournamentSearchCard" aria-labelledby="tournament-search-heading">
-          <h2 id="tournament-search-heading" style={{ margin: '0 0 14px' }}>Search tournaments</h2>
+          <h2 id="tournament-search-heading" style={{ margin: '0 0 14px' }}>Find a Tournament</h2>
           <form onSubmit={onSearch} className="tournamentSearchForm">
             <div className="tournamentSearchGrid">
               <label className="field">
@@ -224,7 +224,7 @@ export default function FindTournament() {
             </div>
             <div className="tournamentSearchActions">
               <div className="tournamentSearchSubmitBlock">
-                <button className="btnPrimary" type="submit" disabled={searching}>{searching ? 'Searching…' : 'Search tournaments'}</button>
+                <button className="btnPrimary" type="submit" disabled={searching}>{searching ? 'Searching…' : 'Find a Tournament'}</button>
                 {hasSearched && !searchError ? (
                   <div className="small tournamentSearchResultCount" aria-live="polite">
                     {pagination.totalResults.toLocaleString('en-US')} search {pagination.totalResults === 1 ? 'result' : 'results'}

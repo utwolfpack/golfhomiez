@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { isEmail, normalizeEmail } from './team-utils.js'
 import { getOrganizerAuthAccountByEmail } from './organizer-auth.js'
+import { normalizeTournamentScheduleDate } from './tournament-schedule-conflicts.js'
 
 export const ROLE_USER = 'user'
 export const ROLE_HOST = 'host'
@@ -404,7 +405,7 @@ export function sanitizeOrganizerAccountPayload(body = {}) {
 export function sanitizeTournamentPayload(body = {}, options = {}) {
   const name = String(body.name || '').trim()
   const description = String(body.description || '').trim()
-  const startDate = String(body.startDate || '').trim()
+  const startDate = normalizeTournamentScheduleDate(body.startDate)
   const endDate = ''
   const hostAccountId = String(body.hostAccountId || '').trim()
   const status = String(body.status || 'draft').trim().toLowerCase()
@@ -418,7 +419,7 @@ export function sanitizeTournamentPayload(body = {}, options = {}) {
   const registrationDeadline = String(templateData.registrationDeadline || '').trim().slice(0, 10)
 
   if (!name) throw new Error('Tournament Name is a required field. Enter a tournament name and try again.')
-  if ((requireDates || status === 'published') && !startDate) throw new Error('Tournament Start Date is a required field before publishing. Add a tournament date and try again.')
+  if ((requireDates || ['published', 'completed'].includes(status)) && !startDate) throw new Error('Tournament Start Date is a required field before publishing or completing. Add a tournament date and try again.')
   if (startDate && Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) throw new Error('Tournament Start Date is invalid. Select a valid calendar date and try again.')
   if (registrationDeadline && Number.isNaN(Date.parse(`${registrationDeadline}T00:00:00Z`))) throw new Error('Registration Deadline is invalid. Select a valid calendar date and try again.')
   if (startDate && registrationDeadline && registrationDeadline > startDate.slice(0, 10)) throw new Error('Registration Deadline cannot be after the Tournament Start Date. Select a deadline on or before the tournament date and try again.')
@@ -553,7 +554,7 @@ function mapTournamentRow(row) {
     tournamentIdentifier: row.tournament_identifier,
     organizerEmail: row.organizer_email,
     description: row.description,
-    startDate: row.start_date,
+    startDate: normalizeTournamentScheduleDate(row.start_date || row.starts_at) || null,
     endDate: row.end_date,
     status: row.status,
     archivedAt: row.archived_at || null,

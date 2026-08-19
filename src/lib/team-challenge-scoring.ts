@@ -66,6 +66,11 @@ function holeScore(hole?: HoleScoreDetail | null): number | null {
   return Number.isFinite(score) ? score : null
 }
 
+function toFiniteHolePar(value: unknown): number | null {
+  const par = Number(value)
+  return Number.isFinite(par) && par > 0 ? par : null
+}
+
 function holesByNumber(holes?: HoleScoreDetail[] | null) {
   const byHole = new Map<number, HoleScoreDetail>()
   ;(holes || []).forEach((hole, index) => {
@@ -88,12 +93,14 @@ export function calculateTeamChallengePoints(
   let proposerPoints = 0
   let challengedPoints = 0
   let completedHoles = 0
-  let carryoverPoints = pointsPerHole
+  let carryoverPoints = 0
   const holeResults: TeamChallengeHolePointResult[] = []
 
   for (let hole = 1; hole <= 18; hole += 1) {
-    const proposerScore = holeScore(proposerByHole.get(hole))
-    const challengedScore = holeScore(challengedByHole.get(hole))
+    const proposerHole = proposerByHole.get(hole)
+    const challengedHole = challengedByHole.get(hole)
+    const proposerScore = holeScore(proposerHole)
+    const challengedScore = holeScore(challengedHole)
     if (proposerScore === null || challengedScore === null) {
       holeResults.push({ hole, winner: 'pending', proposerScore, challengedScore, pointsAwarded: 0, carryoverAfterHole: scoringType === 'skins_push' ? carryoverPoints : 0, strokeDifferential: 0, strokeDifferentialBonus: 0 })
       continue
@@ -108,12 +115,21 @@ export function calculateTeamChallengePoints(
 
     const winner: Exclude<PointSide, 'tie' | 'pending'> = proposerScore < challengedScore ? 'proposer' : 'challenged'
     const strokeDifferential = Math.abs(proposerScore - challengedScore)
-    const strokeDifferentialBonus = scoringType === 'skins_push' && strokeDifferential > 1 ? (strokeDifferential - 1) * pointsPerHole : 0
-    const awarded = (scoringType === 'skins_push' ? carryoverPoints : pointsPerHole) + strokeDifferentialBonus
+    const additionalStrokeBonus = scoringType === 'skins_push' && strokeDifferential > 1 ? (strokeDifferential - 1) * pointsPerHole : 0
+    const holePar = toFiniteHolePar(proposerHole?.par ?? challengedHole?.par)
+    const winnerScore = Math.min(proposerScore, challengedScore)
+    const loserScore = Math.max(proposerScore, challengedScore)
+    // The requested scoring examples treat Birdie vs Bogey as three points at a one-point base:
+    // one for the hole, one for the extra stroke, and one because the result spans both sides of par.
+    const acrossParBonus = scoringType === 'skins_push' && strokeDifferential > 1 && holePar !== null && winnerScore < holePar && loserScore > holePar
+      ? pointsPerHole
+      : 0
+    const strokeDifferentialBonus = additionalStrokeBonus + acrossParBonus
+    const awarded = pointsPerHole + (scoringType === 'skins_push' ? carryoverPoints : 0) + strokeDifferentialBonus
     if (winner === 'proposer') proposerPoints += awarded
     if (winner === 'challenged') challengedPoints += awarded
     holeResults.push({ hole, winner, proposerScore, challengedScore, pointsAwarded: awarded, carryoverAfterHole: 0, strokeDifferential, strokeDifferentialBonus })
-    carryoverPoints = pointsPerHole
+    carryoverPoints = 0
   }
 
   const proposerNetPoints = proposerPoints - challengedPoints
@@ -127,7 +143,7 @@ export function calculateTeamChallengePoints(
     proposerNetPoints,
     challengedNetPoints,
     completedHoles,
-    carryoverPoints: scoringType === 'skins_push' && carryoverPoints > pointsPerHole ? carryoverPoints : 0,
+    carryoverPoints: scoringType === 'skins_push' ? carryoverPoints : 0,
     holeResults,
   }
 }

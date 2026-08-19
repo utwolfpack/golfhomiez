@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import PageHero from '../components/PageHero'
+import GolfCoursePublicNav from '../components/GolfCoursePublicNav'
 import { fetchGolfCoursePublicPage, type GolfCoursePublicPage as GolfCoursePublicPageRecord } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
 const defaultGolfCourseBanner = '/DefaultGolfBanner.jpg'
@@ -152,8 +153,21 @@ export default function GolfCoursePage() {
       </section>
 
       <div className="container golfCoursePublicContent">
+        <GolfCoursePublicNav slug={page.slug} golfCourseName={page.golfCourseName} calendarAvailable={page.calendarAvailable} />
+
         <section className="card golfCoursePublicSummaryCard">
-          <h2>About the course</h2>
+          <div className="golfCoursePublicSummaryHeading">
+            <h2>About the course</h2>
+            {page.calendarAvailable ? (
+              <Link
+                className="golfCourseCalendarHappyLink"
+                to={page.calendarPath}
+                onClick={() => logFrontendEvent({ category: 'golf-course.public-page', message: 'tournament_calendar_happy_link_selected', data: { slug: page.slug, calendarPath: page.calendarPath } })}
+              >
+                Tournament Calendar
+              </Link>
+            ) : null}
+          </div>
           <p>{page.summary}</p>
           <div className="golfCoursePublicContactGrid">
             {address ? (
