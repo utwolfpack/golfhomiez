@@ -157,3 +157,34 @@ test('cross-table collation repair migration and migration failure diagnostics a
   assert.match(runnerSource, /migrationFilename: migration\.filename/)
   assert.match(runnerSource, /logger\.error\?\./)
 })
+
+test('find-course profile schema repair migration restores score rating columns after schema drift', async () => {
+  const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260819_074')
+  assert.ok(migration)
+  assert.equal(migration.name, 'find_course_profile_schema_repair')
+
+  const existingColumns = new Set(['id', 'mode', 'date', 'course'])
+  const db = {
+    async execute(sql, params = []) {
+      if (/information_schema\.COLUMNS/i.test(sql)) {
+        const [, columnName] = params
+        return [existingColumns.has(columnName) ? [{}] : []]
+      }
+      if (/information_schema\.STATISTICS/i.test(sql)) return [[]]
+      throw new Error(`Unexpected execute call: ${sql}`)
+    },
+  }
+
+  assert.equal(await migration.isSatisfied(db), false)
+  const sql = await migration.getSql(db)
+  assert.match(sql, /ADD COLUMN golf_course_id VARCHAR\(191\)/)
+  assert.match(sql, /ADD COLUMN course_rating DECIMAL\(4,1\)/)
+  assert.match(sql, /ADD COLUMN slope_rating INT/)
+  assert.match(sql, /ADD COLUMN course_par INT/)
+  assert.match(sql, /CREATE INDEX idx_scores_golf_course_id/)
+
+  const migrationSql = await readFile(new URL('../migration_scripts/20260819_074_find_course_profile_schema_repair.sql', import.meta.url), 'utf8')
+  assert.match(migrationSql, /information_schema\.COLUMNS/)
+  assert.match(migrationSql, /course_rating/)
+  assert.match(migrationSql, /idx_scores_golf_course_id/)
+})

@@ -39,11 +39,54 @@ function searchRows() {
 
 function createSearchDb(rows = searchRows()) {
   const calls = []
+  const courseRows = rows.map((row) => ({
+    golf_course_id: row.golf_course_id,
+    golf_course_name: row.golf_course_name,
+    city: row.city,
+    state_code: row.state_code,
+    postal_code: row.postal_code,
+    golf_course_website: row.website_url,
+    catalog_website: row.website_url,
+    latitude: row.latitude,
+    longitude: row.longitude,
+  }))
+  const pageRows = rows.filter((row) => row.page_id).map((row) => ({
+    page_id: row.page_id,
+    golf_course_id: row.golf_course_id,
+    slug: row.slug,
+    golf_course_name: row.golf_course_name,
+    city: row.city,
+    state_code: row.state_code,
+    postal_code: row.postal_code,
+    website_url: row.website_url,
+  }))
+  const hostRows = [
+    { host_account_id: 'host-1', golf_course_id: 'course-1' },
+    { host_account_id: 'host-3', golf_course_id: 'course-3' },
+  ]
+  const tournamentRows = [
+    { host_account_id: 'host-1', status: 'published' },
+    { host_account_id: 'host-1', status: 'completed' },
+    { host_account_id: 'host-3', status: 'published' },
+    { host_account_id: 'host-3', status: 'completed' },
+    { host_account_id: 'host-3', status: 'published' },
+    { host_account_id: 'host-3', status: 'draft' },
+  ]
+  const indexedRows = [
+    { golf_course_id: 'course-1', golf_course_name: 'Murray Parkway Golf Course', state_code: 'UT', source_type: 'golfhomiez', active: 1 },
+    { golf_course_id: 'course-2', golf_course_name: 'Lake View Golf Course', state_code: 'UT', source_type: 'golfhomiez', active: 1 },
+    { golf_course_id: 'course-3', golf_course_name: 'Far Away Golf Course', state_code: 'UT', source_type: 'golfhomiez', active: 1 },
+    { golf_course_id: 'course-4', golf_course_name: 'Nearby Public Golf Course', state_code: 'UT', source_type: 'external', active: 1 },
+  ]
   return {
     calls,
     async execute(sql, params = []) {
       calls.push({ sql, params })
-      if (/LEFT JOIN golf_course_public_pages gcpp/i.test(sql)) return [rows]
+      if (/FROM golf_courses\s+ORDER BY state_code/i.test(sql)) return [courseRows]
+      if (/FROM golf_course_public_pages\s+WHERE is_published = 1/i.test(sql)) return [pageRows]
+      if (/FROM host_accounts\s+WHERE golf_course_id IS NOT NULL/i.test(sql)) return [hostRows]
+      if (/FROM tournaments\s+WHERE host_account_id IS NOT NULL/i.test(sql)) return [tournamentRows]
+      if (/FROM golf_course_tournaments\s+WHERE active = 1/i.test(sql)) return [indexedRows]
       if (/SELECT latitude, longitude\s+FROM golf_courses/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
@@ -93,13 +136,14 @@ test('Find a Golf Course searches the full golf_courses catalog, prioritizes Gol
   assert.equal(result.zipSearch.radiusResolved, true)
   assert.equal(result.zipSearch.source, 'nominatim')
 
-  assert.match(db.calls[0].sql, /FROM golf_courses gc/)
-  assert.match(db.calls[0].sql, /LEFT JOIN golf_course_public_pages gcpp/)
-  assert.match(db.calls[0].sql, /gcpp\.is_published = 1/)
-  assert.doesNotMatch(db.calls[0].sql, /WHERE\s+gcpp\.is_published\s*=\s*1/)
-  assert.match(db.calls[0].sql, /FROM tournaments hosted_tournament/)
-  assert.match(db.calls[0].sql, /hosted_tournament\.status[^\n]+published[^\n]+completed/)
-  assert.match(db.calls[0].sql, /search_tournament\.source_type = 'golfhomiez'/)
+  assert.match(db.calls[0].sql, /FROM golf_courses/)
+  assert.ok(db.calls.some((call) => /FROM golf_course_public_pages/.test(call.sql)))
+  assert.ok(db.calls.some((call) => /FROM host_accounts/.test(call.sql)))
+  assert.ok(db.calls.some((call) => /FROM tournaments/.test(call.sql)))
+  assert.ok(db.calls.some((call) => /FROM golf_course_tournaments/.test(call.sql)))
+  assert.ok(db.calls.every((call) => !/\bJOIN\b/i.test(call.sql)), 'search catalog queries should not depend on cross-table SQL joins')
+  assert.ok(db.calls.every((call) => !/\bBINARY\b/i.test(call.sql)), 'search catalog queries should not depend on cross-collation BINARY equality')
+  assert.equal(allResult.diagnostics.strategy, 'collation_independent_application_join')
 })
 
 test('Find a Golf Course supports typo-tolerant full fuzzy city and course-name matching', async () => {
@@ -124,8 +168,13 @@ test('Find a Golf Course frontend route, profile-state default, navigation order
   assert.match(server, /user_golf_course_search_started/)
   assert.match(server, /user_golf_course_search_completed/)
   assert.match(server, /golfHomiezHostedResultsOnPage/)
+  assert.match(server, /searchStrategy: result\.diagnostics\?\.strategy/)
+  assert.match(server, /user_golf_course_search_failed/)
+  assert.match(server, /searchStage: error\?\.golfCourseSearchStage/)
   assert.match(findCourse, /Find a Golf Course/)
   assert.match(findCourse, /fetchProfile\(\)/)
+  assert.match(findCourse, /const FALLBACK_STATE = 'UT'/)
+  assert.doesNotMatch(findCourse, />All states<\/option>/)
   assert.match(findCourse, /profileStateCode\(profile\.primaryState\)/)
   assert.match(findCourse, /Golf Course Name/)
   assert.match(findCourse, /zipRadiusResolved/)
