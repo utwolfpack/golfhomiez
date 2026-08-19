@@ -3592,6 +3592,12 @@ app.get('/api/users/golf-course-search', requireStorage, authMiddleware, async (
       zipRadiusMiles: result.zipSearch.radiusMiles,
       zipRadiusResolved: result.zipSearch.radiusResolved,
       zipRadiusSource: result.zipSearch.source,
+      searchStrategy: result.diagnostics?.strategy || null,
+      catalogCourseRows: result.diagnostics?.catalogCourseRows ?? null,
+      publicPageRows: result.diagnostics?.publicPageRows ?? null,
+      hostRows: result.diagnostics?.hostRows ?? null,
+      tournamentRows: result.diagnostics?.tournamentRows ?? null,
+      indexedTournamentRows: result.diagnostics?.indexedTournamentRows ?? null,
     })
     if (result.filters.zipCode && !result.zipSearch.radiusResolved) {
       logApi('user_golf_course_search_zip_radius_unavailable', {
@@ -3607,6 +3613,13 @@ app.get('/api/users/golf-course-search', requireStorage, authMiddleware, async (
       logApi('user_golf_course_search_validation_failed', { ...requestContext(req), authUserId: req.user?.id || null, error: error.message })
       return res.status(400).json({ message: error.message })
     }
+    logApi('user_golf_course_search_failed', {
+      ...requestContext(req),
+      authUserId: req.user?.id || null,
+      searchStage: error?.golfCourseSearchStage || null,
+      errorCode: error?.code || null,
+      errorNumber: error?.errno || null,
+    })
     logRouteError('User golf course search error', req, error)
     return res.status(500).json({ message: 'Could not search golf courses' })
   }

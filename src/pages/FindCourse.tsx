@@ -11,6 +11,7 @@ import { fetchProfile } from '../lib/profile'
 import { US_STATES } from '../data/usStates'
 
 const SEARCH_PAGE_SIZE = 20
+const FALLBACK_STATE = 'UT'
 
 type SearchPagination = {
   page: number
@@ -51,8 +52,8 @@ function visiblePageNumbers(currentPage: number, totalPages: number) {
 
 export default function FindCourse() {
   const navigate = useNavigate()
-  const [defaultState, setDefaultState] = useState('')
-  const [searchFilters, setSearchFilters] = useState<GolfHomiezCourseSearchFilters>({ state: '', city: '', zipCode: '', golfCourseName: '' })
+  const [defaultState, setDefaultState] = useState(FALLBACK_STATE)
+  const [searchFilters, setSearchFilters] = useState<GolfHomiezCourseSearchFilters>({ state: FALLBACK_STATE, city: '', zipCode: '', golfCourseName: '' })
   const [searchResults, setSearchResults] = useState<GolfHomiezCourseSearchResult[]>([])
   const [submittedFilters, setSubmittedFilters] = useState<GolfHomiezCourseSearchFilters | null>(null)
   const [pagination, setPagination] = useState<SearchPagination>(EMPTY_PAGINATION)
@@ -66,15 +67,16 @@ export default function FindCourse() {
     fetchProfile()
       .then((profile) => {
         if (!active) return
-        const state = profileStateCode(profile.primaryState)
-        if (!state) return
+        const state = profileStateCode(profile.primaryState) || FALLBACK_STATE
         setDefaultState(state)
         setSearchFilters((current) => current.state ? current : { ...current, state })
         logFrontendEvent({ category: 'user.golfCourses.search', message: 'golf_course_search_defaults_loaded', data: { route: '/find-course', state } })
       })
       .catch((err) => {
         if (!active) return
-        logFrontendEvent({ category: 'user.golfCourses.search', level: 'warn', message: 'golf_course_search_profile_default_failed', data: { route: '/find-course', error: err instanceof Error ? err.message : String(err) } })
+        setDefaultState(FALLBACK_STATE)
+        setSearchFilters((current) => current.state ? current : { ...current, state: FALLBACK_STATE })
+        logFrontendEvent({ category: 'user.golfCourses.search', level: 'warn', message: 'golf_course_search_profile_default_failed', data: { route: '/find-course', fallbackState: FALLBACK_STATE, error: err instanceof Error ? err.message : String(err) } })
       })
     return () => { active = false }
   }, [])
@@ -165,7 +167,6 @@ export default function FindCourse() {
               <label className="field">
                 <span>State</span>
                 <select className="input" value={searchFilters.state || ''} onChange={(event) => setSearchFilters((current) => ({ ...current, state: event.target.value }))}>
-                  <option value="">All states</option>
                   {US_STATES.map((state) => <option key={state.abbr} value={state.abbr}>{state.name}</option>)}
                 </select>
               </label>

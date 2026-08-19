@@ -2865,6 +2865,41 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
     },
   },
 
+  {
+    version: '20260819_074',
+    name: 'find_course_profile_schema_repair',
+    filename: '20260819_074_find_course_profile_schema_repair.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'scores', 'golf_course_id') &&
+        await columnExists(db, 'scores', 'course_rating') &&
+        await columnExists(db, 'scores', 'slope_rating') &&
+        await columnExists(db, 'scores', 'course_par') &&
+        await indexExists(db, 'scores', 'idx_scores_golf_course_id')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'scores', 'golf_course_id'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN golf_course_id VARCHAR(191) NULL AFTER course')
+      }
+      if (!(await columnExists(db, 'scores', 'course_rating'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN course_rating DECIMAL(4,1) NULL AFTER golf_course_id')
+      }
+      if (!(await columnExists(db, 'scores', 'slope_rating'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN slope_rating INT NULL AFTER course_rating')
+      }
+      if (!(await columnExists(db, 'scores', 'course_par'))) {
+        statements.push('ALTER TABLE scores ADD COLUMN course_par INT NULL AFTER slope_rating')
+      }
+      if (!(await indexExists(db, 'scores', 'idx_scores_golf_course_id'))) {
+        statements.push('CREATE INDEX idx_scores_golf_course_id ON scores (golf_course_id)')
+      }
+      return statements.join(';\n')
+    },
+  },
+
+
 
 ]
 

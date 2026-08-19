@@ -173,53 +173,150 @@ function uniqueCourses(rows) {
   return result
 }
 
+function identifierKey(value) {
+  return cleanText(value, 191)
+}
+
+function courseNameStateKey(name, state) {
+  const normalizedName = cleanText(name, 191).toLowerCase()
+  const normalizedState = normalizeStateCode(state)
+  if (!normalizedName || !normalizedState) return ''
+  return `${normalizedName}|${normalizedState}`
+}
+
+function incrementCount(map, key) {
+  if (!key) return
+  map.set(key, (map.get(key) || 0) + 1)
+}
+
+async function executeCatalogQuery(db, stage, sql, params = []) {
+  try {
+    return await db.execute(sql, params)
+  } catch (error) {
+    if (error && typeof error === 'object' && !error.golfCourseSearchStage) {
+      error.golfCourseSearchStage = stage
+    }
+    throw error
+  }
+}
+
+async function loadGolfCourseSearchCatalog(db) {
+  // Keep cross-table identifier comparisons out of SQL. Stage databases can contain
+  // identifiers created under different utf8mb4 collations after backup/restore or
+  // historical migrations. Joining the small catalog data sets in JavaScript makes
+  // Find a Golf Course independent of those collation differences.
+  const [courseRows] = await executeCatalogQuery(
+    db,
+    'catalog_courses',
+    `SELECT id AS golf_course_id, name AS golf_course_name, city, state_code, postal_code,
+            golf_course_website, website AS catalog_website, latitude, longitude
+       FROM golf_courses
+      ORDER BY state_code ASC, name ASC`,
+  )
+  const [pageRows] = await executeCatalogQuery(
+    db,
+    'public_pages',
+    `SELECT id AS page_id, golf_course_id, slug, golf_course_name, city, state_code, postal_code, website_url
+       FROM golf_course_public_pages
+      WHERE is_published = 1`,
+  )
+  const [hostRows] = await executeCatalogQuery(
+    db,
+    'host_course_map',
+    `SELECT id AS host_account_id, golf_course_id
+       FROM host_accounts
+      WHERE golf_course_id IS NOT NULL`,
+  )
+  const [tournamentRows] = await executeCatalogQuery(
+    db,
+    'hosted_tournaments',
+    `SELECT host_account_id, status
+       FROM tournaments
+      WHERE host_account_id IS NOT NULL
+        AND archived_at IS NULL`,
+  )
+  const [indexedTournamentRows] = await executeCatalogQuery(
+    db,
+    'indexed_golfhomiez_tournaments',
+    `SELECT golf_course_id, golf_course_name, state_code, source_type, active
+       FROM golf_course_tournaments
+      WHERE active = 1`,
+  )
+
+  const pageByCourseId = new Map()
+  for (const row of pageRows || []) {
+    const key = identifierKey(row.golf_course_id)
+    if (key && !pageByCourseId.has(key)) pageByCourseId.set(key, row)
+  }
+
+  const courseIdByHostId = new Map()
+  for (const row of hostRows || []) {
+    const hostId = identifierKey(row.host_account_id)
+    const courseId = identifierKey(row.golf_course_id)
+    if (hostId && courseId) courseIdByHostId.set(hostId, courseId)
+  }
+
+  const hostedCountsByCourseId = new Map()
+  for (const row of tournamentRows || []) {
+    const status = cleanText(row.status, 32).toLowerCase()
+    if (status !== 'published' && status !== 'completed') continue
+    const courseId = courseIdByHostId.get(identifierKey(row.host_account_id))
+    incrementCount(hostedCountsByCourseId, courseId)
+  }
+
+  const indexedCountsByCourseId = new Map()
+  const indexedCountsByNameState = new Map()
+  for (const row of indexedTournamentRows || []) {
+    if (cleanText(row.source_type, 32).toLowerCase() !== GOLF_HOMIEZ_TOURNAMENT_SOURCE) continue
+    if (Number(row.active) === 0) continue
+    const courseId = identifierKey(row.golf_course_id)
+    if (courseId) incrementCount(indexedCountsByCourseId, courseId)
+    else incrementCount(indexedCountsByNameState, courseNameStateKey(row.golf_course_name, row.state_code))
+  }
+
+  const rows = (courseRows || []).map((course) => {
+    const courseId = identifierKey(course.golf_course_id)
+    const page = pageByCourseId.get(courseId) || null
+    const golfCourseName = cleanText(course.golf_course_name || page?.golf_course_name, 191)
+    const stateCode = normalizeStateCode(course.state_code || page?.state_code)
+    const directCount = hostedCountsByCourseId.get(courseId) || 0
+    const indexedCount = Math.max(
+      indexedCountsByCourseId.get(courseId) || 0,
+      indexedCountsByNameState.get(courseNameStateKey(golfCourseName, stateCode)) || 0,
+    )
+    return {
+      ...course,
+      page_id: page?.page_id || null,
+      slug: page?.slug || null,
+      golf_course_name: golfCourseName,
+      city: cleanText(course.city || page?.city, 128),
+      state_code: stateCode,
+      postal_code: cleanText(course.postal_code || page?.postal_code, 32),
+      website_url: cleanText(page?.website_url || course.golf_course_website || course.catalog_website, 1024),
+      hosted_tournament_count: Math.max(directCount, indexedCount),
+    }
+  })
+
+  return {
+    rows,
+    diagnostics: {
+      strategy: 'collation_independent_application_join',
+      catalogCourseRows: courseRows?.length || 0,
+      publicPageRows: pageRows?.length || 0,
+      hostRows: hostRows?.length || 0,
+      tournamentRows: tournamentRows?.length || 0,
+      indexedTournamentRows: indexedTournamentRows?.length || 0,
+    },
+  }
+}
+
 export async function searchGolfHomiezCourses(db, filters = {}, {
   page = 1,
   fetchImpl = globalThis.fetch,
   zipRadiusMiles = GOLF_COURSE_ZIP_RADIUS_MILES,
 } = {}) {
   const normalized = normalizeGolfCourseSearchFilters(filters)
-  const params = []
-  const where = []
-  if (normalized.state) {
-    where.push(`UPPER(TRIM(COALESCE(NULLIF(gc.state_code, ''), NULLIF(gcpp.state_code, '')))) = ?`)
-    params.push(normalized.state)
-  }
-
-  const [rows] = await db.execute(
-    `SELECT gc.id AS golf_course_id, gcpp.id AS page_id, gcpp.slug,
-            COALESCE(NULLIF(TRIM(gc.name), ''), NULLIF(TRIM(gcpp.golf_course_name), '')) AS golf_course_name,
-            COALESCE(NULLIF(TRIM(gc.city), ''), NULLIF(TRIM(gcpp.city), '')) AS city,
-            COALESCE(NULLIF(TRIM(gc.state_code), ''), NULLIF(TRIM(gcpp.state_code), '')) AS state_code,
-            COALESCE(NULLIF(TRIM(gc.postal_code), ''), NULLIF(TRIM(gcpp.postal_code), '')) AS postal_code,
-            COALESCE(NULLIF(TRIM(gcpp.website_url), ''), NULLIF(TRIM(gc.golf_course_website), ''), NULLIF(TRIM(gc.website), '')) AS website_url,
-            gc.website AS catalog_website, gc.latitude, gc.longitude,
-            GREATEST(
-              (SELECT COUNT(*)
-                 FROM tournaments hosted_tournament
-                 JOIN host_accounts tournament_host
-                   ON BINARY tournament_host.id = BINARY hosted_tournament.host_account_id
-                WHERE LOWER(COALESCE(hosted_tournament.status, '')) IN ('published', 'completed')
-                  AND BINARY tournament_host.golf_course_id = BINARY gc.id),
-              (SELECT COUNT(*)
-                 FROM golf_course_tournaments search_tournament
-                WHERE search_tournament.source_type = '${GOLF_HOMIEZ_TOURNAMENT_SOURCE}'
-                  AND ((search_tournament.golf_course_id IS NOT NULL
-                        AND BINARY search_tournament.golf_course_id = BINARY gc.id)
-                       OR (search_tournament.golf_course_id IS NULL
-                           AND LOWER(TRIM(CONVERT(search_tournament.golf_course_name USING utf8mb4))) COLLATE utf8mb4_general_ci =
-                               LOWER(TRIM(CONVERT(gc.name USING utf8mb4))) COLLATE utf8mb4_general_ci
-                           AND LOWER(TRIM(CONVERT(COALESCE(search_tournament.state_code, '') USING utf8mb4))) COLLATE utf8mb4_general_ci =
-                               LOWER(TRIM(CONVERT(COALESCE(gc.state_code, '') USING utf8mb4))) COLLATE utf8mb4_general_ci)))
-            ) AS hosted_tournament_count
-       FROM golf_courses gc
-       LEFT JOIN golf_course_public_pages gcpp
-         ON BINARY gcpp.golf_course_id = BINARY gc.id
-        AND gcpp.is_published = 1
-      WHERE ${where.length ? where.join('\n        AND ') : '1 = 1'}
-      ORDER BY gc.state_code ASC, gc.name ASC`,
-    params,
-  )
+  const { rows, diagnostics } = await loadGolfCourseSearchCatalog(db)
 
   const zipBounds = normalized.zipCode
     ? await resolvePostalSearchBounds(db, normalized.zipCode, { fetchImpl })
@@ -227,6 +324,7 @@ export async function searchGolfHomiezCourses(db, filters = {}, {
   const resolvedRadius = Math.max(1, Number(zipRadiusMiles) || GOLF_COURSE_ZIP_RADIUS_MILES)
 
   const matchingCourses = uniqueCourses(rows)
+    .filter((course) => !normalized.state || course.state === normalized.state)
     .filter((course) => fuzzyTextMatch(course.city, normalized.city))
     .filter((course) => fuzzyTextMatch(course.golfCourseName, normalized.golfCourseName))
     .map((course) => {
@@ -274,5 +372,6 @@ export async function searchGolfHomiezCourses(db, filters = {}, {
       totalPages,
     },
     courses: matchingCourses.slice(offset, offset + GOLF_COURSE_SEARCH_PAGE_SIZE),
+    diagnostics,
   }
 }
