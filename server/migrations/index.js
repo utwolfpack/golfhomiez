@@ -2901,6 +2901,56 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
 
 
 
+  {
+    version: '20260820_075',
+    name: 'notifications_groups_and_tournament_messaging',
+    filename: '20260820_075_notifications_groups_and_tournament_messaging.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'inbox_thread_user_state') &&
+        await tableExists(db, 'message_groups') &&
+        await tableExists(db, 'message_group_members') &&
+        await columnExists(db, 'inbox_messages', 'sender_role') &&
+        await columnExists(db, 'inbox_messages', 'group_id') &&
+        await columnExists(db, 'inbox_messages', 'tournament_id') &&
+        await columnExists(db, 'inbox_messages', 'tournament_name') &&
+        await columnExists(db, 'inbox_messages', 'event_date') &&
+        await columnExists(db, 'inbox_messages', 'action_url') &&
+        await columnExists(db, 'inbox_messages', 'correlation_id') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_group_created') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_tournament_created') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_correlation') &&
+        await indexExists(db, 'message_group_members', 'idx_message_group_members_email')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260820_075_notifications_groups_and_tournament_messaging.sql')
+    },
+  },
+
+
+  {
+    version: '20260820_076',
+    name: 'tournament_message_dialogue',
+    filename: '20260820_076_tournament_message_dialogue.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'inbox_messages', 'tournament_conversation_id') &&
+        await indexExists(db, 'inbox_messages', 'idx_inbox_messages_tournament_conversation') &&
+        await tableExists(db, 'tournament_message_threads') &&
+        await tableExists(db, 'tournament_message_thread_members') &&
+        await tableExists(db, 'tournament_message_entries') &&
+        await tableExists(db, 'tournament_message_portal_state') &&
+        await indexExists(db, 'tournament_message_thread_members', 'idx_tournament_message_thread_members_email') &&
+        await indexExists(db, 'tournament_message_entries', 'idx_tournament_message_entries_thread_created')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260820_076_tournament_message_dialogue.sql')
+    },
+  },
+
+
 ]
 
 export function sortMigrations(migrations) {

@@ -8,6 +8,7 @@ import { formatFriendlyDateTime } from '../lib/time-format'
 import TournamentTemplateFields, { TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
+import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
 import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_CHECK_IN_TIME, DEFAULT_TOURNAMENT_TEE_TIME, emptyTournamentTemplateData } from '../lib/tournament-templates'
 import { getFriendlyTournamentError, validateTournamentForSave } from '../lib/tournament-errors'
 
@@ -62,40 +63,58 @@ function tournamentMemberStatusClass(member: { registered?: boolean; verified?: 
 
 function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   const registrations = tournament.registrations || []
+  const [open, setOpen] = useState(false)
+  const toggleOpen = () => {
+    const nextOpen = !open
+    setOpen(nextOpen)
+    logFrontendEvent({ category: 'tournaments.organizer', message: nextOpen ? 'tournament_teams_section_opened' : 'tournament_teams_section_closed', data: { tournamentId: tournament.id, registeredTeamCount: tournamentStats(tournament).registeredTeamCount } })
+  }
   return (
-    <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
-      <div style={{ fontWeight: 700 }}>Teams signed up ({tournamentStats(tournament).registeredTeamCount})</div>
-      <TournamentCapacitySummary tournament={tournament} />
-      {registrations.length === 0 ? (
-        <div className="small">No teams have signed up yet.</div>
-      ) : (
-        <div className="formStack" style={{ marginTop: 8 }}>
-          {registrations.map((registration) => {
-            const members = registration.teamMembers || []
-            const registeredCount = members.filter((member) => member.registered).length
-            return (
-              <div key={registration.id} className="card tournament-team-registration-card" style={{ padding: 12, background: '#fff' }}>
-                <div><strong>{registration.teamName || registration.name || 'Registered team'}</strong> · {formatRegisteredAt(registration.registeredAt)}</div>
-                <div className="small">Registrant: {registration.name || 'Registered golfer'} · {registration.email}</div>
-                <div className="small" style={{ marginTop: 4 }}>{registeredCount} of {members.length || 1} members have registered for this tournament.</div>
-                {members.length ? (
-                  <ul className="tournament-team-member-status-list" aria-label={`${registration.teamName || 'Team'} member registration statuses`}>
-                    {members.map((member) => (
-                      <li key={member.email || member.id || member.name}>
-                        <span className="tournament-team-member-name">{member.name || member.email || 'Team member'}</span>
-                        {member.email ? <span className="small tournament-team-member-email">{member.email}</span> : null}
-                        <span className={tournamentMemberStatusClass(member)}>{tournamentMemberStatus(member)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="small" style={{ marginTop: 6 }}>Team roster unavailable.</div>
-                )}
-              </div>
-            )
-          })}
+    <div className="card tournamentBuilderCollapsibleCard">
+      <button
+        type="button"
+        className="tournamentSectionToggleLink"
+        aria-expanded={open}
+        aria-controls={`organizer-teams-signed-up-${tournament.id}`}
+        onClick={toggleOpen}
+      >
+        Teams signed up ({tournamentStats(tournament).registeredTeamCount})
+      </button>
+      {open ? (
+        <div id={`organizer-teams-signed-up-${tournament.id}`} className="tournamentBuilderCollapsibleContent">
+          <TournamentCapacitySummary tournament={tournament} />
+          {registrations.length === 0 ? (
+            <div className="small">No teams have signed up yet.</div>
+          ) : (
+            <div className="formStack" style={{ marginTop: 8 }}>
+              {registrations.map((registration) => {
+                const members = registration.teamMembers || []
+                const registeredCount = members.filter((member) => member.registered).length
+                return (
+                  <div key={registration.id} className="card tournament-team-registration-card" style={{ padding: 12, background: '#fff' }}>
+                    <div><strong>{registration.teamName || registration.name || 'Registered team'}</strong> · {formatRegisteredAt(registration.registeredAt)}</div>
+                    <div className="small">Registrant: {registration.name || 'Registered golfer'} · {registration.email}</div>
+                    <div className="small" style={{ marginTop: 4 }}>{registeredCount} of {members.length || 1} members have registered for this tournament.</div>
+                    {members.length ? (
+                      <ul className="tournament-team-member-status-list" aria-label={`${registration.teamName || 'Team'} member registration statuses`}>
+                        {members.map((member) => (
+                          <li key={member.email || member.id || member.name}>
+                            <span className="tournament-team-member-name">{member.name || member.email || 'Team member'}</span>
+                            {member.email ? <span className="small tournament-team-member-email">{member.email}</span> : null}
+                            <span className={tournamentMemberStatusClass(member)}>{tournamentMemberStatus(member)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="small" style={{ marginTop: 6 }}>Team roster unavailable.</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -132,6 +151,7 @@ function toEditForm(tournament: Tournament): TournamentInput {
 export default function OrganizerTournaments() {
   const [summary, setSummary] = useState<OrganizerPortalSummary | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [tournamentInfoOpen, setTournamentInfoOpen] = useState(false)
   const [form, setForm] = useState<TournamentInput | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -207,6 +227,7 @@ export default function OrganizerTournaments() {
   function startEditing(tournament: Tournament) {
     setEditingId(tournament.id)
     setForm(toEditForm(tournament))
+    setTournamentInfoOpen(false)
     setError(null)
     setSuccess(null)
     logFrontendEvent({
@@ -278,6 +299,7 @@ export default function OrganizerTournaments() {
       setSummary((prev) => prev ? { ...prev, tournaments: prev.tournaments.map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : prev)
       setEditingId(null)
       setForm(null)
+      setTournamentInfoOpen(false)
       logFrontendEvent({ category: 'tournaments.organizer', message: 'tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || form.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((form.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((form.templateData as any)?.tournamentSummary || '').length } })
     } catch (err) {
       const message = getFriendlyTournamentError(err, 'save')
@@ -332,56 +354,77 @@ export default function OrganizerTournaments() {
               {editingId === tournament.id && form ? (
                 <form onSubmit={onSubmit} className="formStack">
                   <RegisteredGolfers tournament={tournament} />
-                  <div>
-                    <label className="label">Status</label>
-                    <select className="input" value={form.status || 'draft'} onChange={(e) => setForm((prev) => prev ? ({ ...prev, status: e.target.value }) : prev)}>
-                      <option value="draft">Draft</option>
-                      <option value="published">Published</option>
-                      <option value="completed">Completed</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
+                  <TournamentMessagingPanel tournament={tournament} actor="organizer" />
+                  <div className="card tournamentBuilderCollapsibleCard">
+                    <button
+                      type="button"
+                      className="tournamentSectionToggleLink"
+                      aria-expanded={tournamentInfoOpen}
+                      aria-controls={`organizer-tournament-info-${tournament.id}`}
+                      onClick={() => {
+                        const nextOpen = !tournamentInfoOpen
+                        setTournamentInfoOpen(nextOpen)
+                        logFrontendEvent({ category: 'tournaments.organizer', message: nextOpen ? 'tournament_info_opened' : 'tournament_info_closed', data: { tournamentId: tournament.id } })
+                      }}
+                    >
+                      Tournament Info
+                    </button>
+                    {tournamentInfoOpen ? (
+                      <div id={`organizer-tournament-info-${tournament.id}`} className="formStack tournamentBuilderCollapsibleContent">
+                                          <div>
+                                            <label className="label">Status</label>
+                                            <select className="input" value={form.status || 'draft'} onChange={(e) => setForm((prev) => prev ? ({ ...prev, status: e.target.value }) : prev)}>
+                                              <option value="draft">Draft</option>
+                                              <option value="published">Published</option>
+                                              <option value="completed">Completed</option>
+                                              <option value="cancelled">Cancelled</option>
+                                            </select>
+                                          </div>
+                                          {form.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
+                                          <div>
+                                            <label className="label">Tournament name</label>
+                                            <input className="input" value={form.name} onChange={(e) => setForm((prev) => prev ? ({ ...prev, name: e.target.value }) : prev)} />
+                                          </div>
+                                          <div>
+                                            <label className="label">Description</label>
+                                            <textarea className="input" rows={4} value={form.description || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, description: e.target.value }) : prev)} />
+                                          </div>
+                                          <div className="formRow formRow--split">
+                                            <div>
+                                              <label className="label">Tournament date</label>
+                                              <input className="input" type="date" value={form.startDate || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, startDate: e.target.value, endDate: null }) : prev)} />
+                                            </div>
+                                          </div>
+                                          <TournamentRegistrationDeadlineField value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                          <div>
+                                            <label className="label">Number of teams to play in the tournament</label>
+                                            <input className="input" type="number" min={1} step={1} value={form.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setForm((prev) => prev ? ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }) : prev)} />
+                                          </div>
+                                          <TournamentTemplateFields value={form} hideRegistrationDeadline onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                          <TournamentStartScheduleManager
+                                            tournamentId={tournament.id}
+                                            actor="organizer"
+                                            registrations={tournament.registrations || []}
+                                            assignments={tournament.startAssignments || []}
+                                            startType={String((form.templateData as any)?.startType || 'shotgun')}
+                                            firstStartTime={String((form.templateData as any)?.teeTime || DEFAULT_TOURNAMENT_TEE_TIME)}
+                                            intervalMinutes={Number((form.templateData as any)?.teeTimeIntervalMinutes || DEFAULT_TEE_TIME_INTERVAL_MINUTES)}
+                                            onAssignmentsChange={(startAssignments) => setSummary((previous) => previous ? {
+                                              ...previous,
+                                              tournaments: previous.tournaments.map((item) => item.id === tournament.id ? { ...item, startAssignments } : item),
+                                            } : previous)}
+                                          />
+                                          <TournamentSummaryField value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                      </div>
+                    ) : null}
                   </div>
-                  {form.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
-                  <div>
-                    <label className="label">Tournament name</label>
-                    <input className="input" value={form.name} onChange={(e) => setForm((prev) => prev ? ({ ...prev, name: e.target.value }) : prev)} />
-                  </div>
-                  <div>
-                    <label className="label">Description</label>
-                    <textarea className="input" rows={4} value={form.description || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, description: e.target.value }) : prev)} />
-                  </div>
-                  <div className="formRow formRow--split">
-                    <div>
-                      <label className="label">Tournament date</label>
-                      <input className="input" type="date" value={form.startDate || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, startDate: e.target.value, endDate: null }) : prev)} />
-                    </div>
-                  </div>
-                  <TournamentRegistrationDeadlineField value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
-                  <div>
-                    <label className="label">Number of teams to play in the tournament</label>
-                    <input className="input" type="number" min={1} step={1} value={form.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setForm((prev) => prev ? ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }) : prev)} />
-                  </div>
-                  <TournamentTemplateFields value={form} hideRegistrationDeadline onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
-                  <TournamentStartScheduleManager
-                    tournamentId={tournament.id}
-                    actor="organizer"
-                    registrations={tournament.registrations || []}
-                    assignments={tournament.startAssignments || []}
-                    startType={String((form.templateData as any)?.startType || 'shotgun')}
-                    firstStartTime={String((form.templateData as any)?.teeTime || DEFAULT_TOURNAMENT_TEE_TIME)}
-                    intervalMinutes={Number((form.templateData as any)?.teeTimeIntervalMinutes || DEFAULT_TEE_TIME_INTERVAL_MINUTES)}
-                    onAssignmentsChange={(startAssignments) => setSummary((previous) => previous ? {
-                      ...previous,
-                      tournaments: previous.tournaments.map((item) => item.id === tournament.id ? { ...item, startAssignments } : item),
-                    } : previous)}
-                  />
-                  <TournamentSummaryField value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button className="btn btnPrimary" disabled={saving}>{saving ? 'Saving…' : 'Save tournament changes'}</button>
                     <button type="button" className="btn" onClick={() => {
                       logFrontendEvent({ category: 'tournaments.organizer', message: 'tournament_edit_cancelled', data: { tournamentId: editingId } })
                       setEditingId(null)
                       setForm(null)
+                      setTournamentInfoOpen(false)
                       setError(null)
                     }}>Cancel</button>
                   </div>

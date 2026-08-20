@@ -190,6 +190,54 @@ export type Tournament = {
   startAssignments?: TournamentStartAssignment[]
 }
 
+
+export type TournamentMessageRecipient = {
+  userId?: string | null
+  email: string
+  name?: string | null
+  inboxThreadId?: string | null
+  createdAt?: string | null
+}
+
+export type TournamentMessageEntry = {
+  id: string
+  threadId: string
+  senderUserId?: string | null
+  senderEmail?: string | null
+  senderName?: string | null
+  senderRole: string
+  body: string
+  correlationId?: string | null
+  createdAt?: string | null
+}
+
+export type TournamentMessageThread = {
+  id: string
+  tournamentId: string
+  tournamentName: string
+  eventDate?: string | null
+  actionUrl?: string | null
+  createdByUserId?: string | null
+  createdByEmail?: string | null
+  createdByName?: string | null
+  createdByRole?: string | null
+  hostUserId?: string | null
+  hostEmail?: string | null
+  hostName?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  recipients: TournamentMessageRecipient[]
+  messages: TournamentMessageEntry[]
+}
+
+export type TournamentMessagesResponse = {
+  threads: TournamentMessageThread[]
+  unreadCount: number
+  totalThreads: number
+  totalMessages: number
+  lastReadAt?: string | null
+}
+
 export type AdminUser = {
   id: string
   authUserId: string
@@ -499,6 +547,50 @@ export function updateOrganizerTournamentRecord(tournamentId: string, input: Tou
 
 export function updateHostTournamentRecord(tournamentId: string, input: TournamentInput) {
   return api<Tournament>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}`, { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function sendHostTournamentMessage(tournamentId: string, input: { body: string; recipientEmails: string[] }) {
+  return api<{ ok: boolean; sentCount: number; threadId: string }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ ...input, recipientMode: 'selected' }),
+  })
+}
+
+export function fetchHostTournamentMessages(tournamentId: string) {
+  return api<TournamentMessagesResponse>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/messages`)
+}
+
+export function markHostTournamentMessagesRead(tournamentId: string) {
+  return api<{ ok: boolean; tournamentId: string; lastReadAt?: string | null }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/messages/read`, { method: 'PATCH' })
+}
+
+export function replyHostTournamentMessage(tournamentId: string, threadId: string, body: string) {
+  return api<{ ok: boolean; conversation: TournamentMessageThread }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/message-threads/${encodeURIComponent(threadId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  })
+}
+
+export function sendOrganizerTournamentMessage(tournamentId: string, input: { body: string; recipientEmails: string[] }) {
+  return api<{ ok: boolean; sentCount: number; threadId: string }>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ ...input, recipientMode: 'selected' }),
+  })
+}
+
+export function fetchOrganizerTournamentMessages(tournamentId: string) {
+  return api<TournamentMessagesResponse>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/messages`)
+}
+
+export function markOrganizerTournamentMessagesRead(tournamentId: string) {
+  return api<{ ok: boolean; tournamentId: string; lastReadAt?: string | null }>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/messages/read`, { method: 'PATCH' })
+}
+
+export function replyOrganizerTournamentMessage(tournamentId: string, threadId: string, body: string) {
+  return api<{ ok: boolean; conversation: TournamentMessageThread }>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/message-threads/${encodeURIComponent(threadId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  })
 }
 
 export function archiveHostTournamentRecord(tournamentId: string) {

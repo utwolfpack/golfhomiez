@@ -29,6 +29,7 @@ import { buildOrganizerInviteDetails, createHostManagedTournament, createTournam
 import { findTournamentDateConflict, formatTournamentScheduleDate, normalizeTournamentScheduleDate } from './lib/tournament-schedule-conflicts.js'
 import { requestUserTimeZone } from './lib/time-zone.js'
 import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles } from './lib/inbox-service.js'
+import { addMessageGroupMember, appendTournamentPortalMessage, createMessageGroup, createTournamentMessageThread, createTournamentNotification, getTournamentMessageConversationForUser, getUserNotificationSummary, listMessageGroups, listTournamentMessageThreads, loadUserNotificationPage, markTournamentMessagesRead, removeMessageGroupMember, sendMessageGroupMessage, setNotificationThreadState, startTournamentUserConversationFromNotification, validateNotificationMessageBody } from './lib/notification-service.js'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './lib/tee-colors.js'
 import { getExternalApiCallSummary } from './lib/external-api-metrics.js'
 import { getFeatureFlags, featureFlagDefinitionsForApi, isFeatureEnabled } from './lib/feature-flags.js'
@@ -1915,6 +1916,99 @@ async function getHostEditableTournament(pool, hostAccount, tournamentId) {
   return rows[0] || null
 }
 
+async function listRegisteredTournamentMessageRecipients(pool, tournamentId) {
+  const [rows] = await pool.execute(
+    `SELECT auth_user_id, email, name
+       FROM tournament_registrations
+      WHERE tournament_id = ?
+        AND status = 'registered'
+      ORDER BY created_at ASC`,
+    [tournamentId],
+  )
+  const recipients = new Map()
+  rows.forEach((row) => {
+    const email = normalizeEmail(row.email)
+    if (!email || recipients.has(email)) return
+    recipients.set(email, { id: row.auth_user_id || null, email, name: row.name || null })
+  })
+  return [...recipients.values()]
+}
+
+async function resolveTournamentHostRecipient(pool, tournamentOrId) {
+  let tournament = tournamentOrId && typeof tournamentOrId === 'object' ? tournamentOrId : null
+  const tournamentId = String(tournament?.id || tournamentOrId || '').trim()
+  let hostAccountId = tournament?.host_account_id || tournament?.hostAccountId || null
+  if (!hostAccountId && tournamentId) {
+    const [[row] = []] = await pool.execute('SELECT host_account_id FROM tournaments WHERE id = ? OR tournament_identifier = ? LIMIT 1', [tournamentId, tournamentId])
+    hostAccountId = row?.host_account_id || null
+  }
+  if (!hostAccountId) return null
+
+  const candidateRows = []
+  for (const tableName of ['host_role_accounts', 'host_accounts']) {
+    try {
+      const columns = await listTableColumns(pool, tableName)
+      if (!columns.size) continue
+      const [[row] = []] = await pool.execute(`SELECT * FROM ${tableName} WHERE id = ? LIMIT 1`, [hostAccountId])
+      if (row) candidateRows.push(row)
+    } catch {
+      // Continue to the compatibility table when an older environment lacks this table shape.
+    }
+  }
+
+  for (const row of candidateRows) {
+    let email = normalizeEmail(row.email)
+    let authUserId = row.auth_user_id || null
+    let name = row.contact_name || row.golf_course_name || row.account_name || row.course_name || row.name || null
+    if ((!email || !authUserId) && row.role_assignment_id) {
+      try {
+        const [[assignment] = []] = await pool.execute('SELECT * FROM user_role_assignments WHERE id = ? LIMIT 1', [row.role_assignment_id])
+        email = email || normalizeEmail(assignment?.email)
+        authUserId = authUserId || assignment?.auth_user_id || null
+        name = name || assignment?.name || assignment?.email || null
+      } catch {
+        // Some reconciled schemas store host identity directly on the host account.
+      }
+    }
+    if (email) return { id: authUserId || row.id || null, email, name: name || email }
+  }
+  return null
+}
+
+async function sendTournamentPortalNotifications({ pool, tournament, sender, senderRole, body, recipientMode, recipientEmails, req }) {
+  const normalizedBody = validateNotificationMessageBody(body)
+  const registeredRecipients = await listRegisteredTournamentMessageRecipients(pool, tournament.id)
+  const byEmail = new Map(registeredRecipients.map((recipient) => [normalizeEmail(recipient.email), recipient]))
+  const mode = String(recipientMode || 'selected').trim().toLowerCase()
+  const selectedEmails = mode === 'all'
+    ? registeredRecipients.map((recipient) => normalizeEmail(recipient.email)).filter(Boolean)
+    : [...new Set((Array.isArray(recipientEmails) ? recipientEmails : []).map((email) => normalizeEmail(email)).filter(Boolean))]
+  if (!selectedEmails.length) throw new Error('Select at least one registered golfer to receive the tournament message.')
+  const invalidEmail = selectedEmails.find((email) => !byEmail.has(email))
+  if (invalidEmail) throw new Error(`${invalidEmail} is not a registered golfer for this tournament.`)
+  const recipients = selectedEmails.map((email) => byEmail.get(email)).filter(Boolean)
+  if (!recipients.length) throw new Error('This tournament does not have any registered golfers to message.')
+
+  const actionUrl = tournamentPortalPath(tournament.tournament_identifier || tournament.tournamentIdentifier || tournament.id)
+  const tournamentDescriptor = {
+    id: tournament.id,
+    name: tournament.name || 'Tournament',
+    startDate: tournament.start_date || tournament.startDate || null,
+  }
+  const host = senderRole === 'host' ? sender : await resolveTournamentHostRecipient(pool, tournament)
+  if (!host?.email) throw new Error('The tournament host does not have an email address available for messages.')
+  return createTournamentMessageThread(pool, {
+    sender,
+    senderRole,
+    host,
+    recipients,
+    tournament: tournamentDescriptor,
+    body: normalizedBody,
+    actionUrl,
+    correlationId: req.correlationId || null,
+  })
+}
+
 async function updateHostOwnedTournament(pool, hostAccount, tournamentId, input, req = null) {
   const existing = await getHostEditableTournament(pool, hostAccount, tournamentId)
   if (!existing) return null
@@ -2973,6 +3067,92 @@ app.post('/api/host/tournaments/:id/archive', hostAuthMiddleware, async (req, re
 app.post('/api/host/tournaments/:id/restore', hostAuthMiddleware, async (req, res) => handleHostTournamentArchiveState(req, res, false))
 
 
+app.get('/api/host/tournaments/:id/messages', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getHostEditableTournament(db, req.hostAccount, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const host = normalizeHostPortalAccount(req.hostAccount)
+    const result = await listTournamentMessageThreads(db, tournament.id, { role: 'host', id: host.authUserId || host.id || null, email: host.email })
+    logApi('host_tournament_messages_loaded', { ...requestContext(req), tournamentId: tournament.id, threadCount: result.totalThreads, messageCount: result.totalMessages, unreadCount: result.unreadCount })
+    return res.json(result)
+  } catch (error) {
+    logRouteError('Host tournament messages load error', req, error)
+    return res.status(500).json({ message: 'Tournament messages could not be loaded.' })
+  }
+})
+
+app.patch('/api/host/tournaments/:id/messages/read', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getHostEditableTournament(db, req.hostAccount, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const host = normalizeHostPortalAccount(req.hostAccount)
+    const state = await markTournamentMessagesRead(db, tournament.id, { role: 'host', id: host.authUserId || host.id || null, email: host.email })
+    logApi('host_tournament_messages_marked_read', { ...requestContext(req), tournamentId: tournament.id })
+    return res.json({ ok: true, ...state })
+  } catch (error) {
+    logRouteError('Host tournament messages mark-read error', req, error)
+    return res.status(500).json({ message: 'Tournament message notifications could not be marked read.' })
+  }
+})
+
+app.post('/api/host/tournaments/:id/messages', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getHostEditableTournament(db, req.hostAccount, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const host = normalizeHostPortalAccount(req.hostAccount)
+    const result = await sendTournamentPortalNotifications({
+      pool: db,
+      tournament,
+      sender: { id: host.authUserId || host.id || null, email: host.email, name: host.contactName || host.golfCourseName || 'Tournament host' },
+      senderRole: 'host',
+      body: req.body?.body,
+      recipientMode: req.body?.recipientMode,
+      recipientEmails: req.body?.recipientEmails,
+      req,
+    })
+    logApi('host_tournament_messages_sent', { ...requestContext(req), tournamentId: tournament.id, threadId: result.threadId, sentCount: result.sentCount, recipientEmails: result.recipientEmails })
+    return res.status(201).json({ ok: true, sentCount: result.sentCount, threadId: result.threadId })
+  } catch (error) {
+    if (error instanceof Error && /required|characters|registered golfer|Select at least one|host does not have/i.test(error.message)) {
+      logApi('host_tournament_messages_validation_failed', { ...requestContext(req), tournamentId: req.params.id, validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host tournament messages send error', req, error)
+    return res.status(500).json({ message: 'Tournament messages could not be sent.' })
+  }
+})
+
+app.post('/api/host/tournaments/:id/message-threads/:threadId/messages', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getHostEditableTournament(db, req.hostAccount, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const host = normalizeHostPortalAccount(req.hostAccount)
+    const conversation = await appendTournamentPortalMessage(db, {
+      tournamentId: tournament.id,
+      threadId: req.params.threadId,
+      sender: { id: host.authUserId || host.id || null, email: host.email, name: host.contactName || host.golfCourseName || 'Tournament host' },
+      senderRole: 'host',
+      body: req.body?.body,
+      correlationId: req.correlationId || null,
+    })
+    if (!conversation) return res.status(404).json({ message: 'Tournament message thread not found.' })
+    logApi('host_tournament_message_reply_sent', { ...requestContext(req), tournamentId: tournament.id, threadId: conversation.id, recipientCount: conversation.recipients.length })
+    return res.status(201).json({ ok: true, conversation })
+  } catch (error) {
+    if (error instanceof Error && /required|characters/i.test(error.message)) return res.status(400).json({ message: error.message })
+    logRouteError('Host tournament message reply error', req, error)
+    return res.status(500).json({ message: 'The tournament message reply could not be sent.' })
+  }
+})
+
 app.post('/api/host/tournaments/:id/start-schedule/auto', hostAuthMiddleware, async (req, res) => {
   try {
     const tournamentId = String(req.params.id || '').trim()
@@ -3163,6 +3343,90 @@ app.put('/api/organizer/tournaments/:id', requireStorage, organizerAuthMiddlewar
 app.post('/api/organizer/tournaments/:id/archive', requireStorage, organizerAuthMiddleware, async (req, res) => handleOrganizerTournamentArchiveState(req, res, true))
 app.post('/api/organizer/tournaments/:id/restore', requireStorage, organizerAuthMiddleware, async (req, res) => handleOrganizerTournamentArchiveState(req, res, false))
 
+
+app.get('/api/organizer/tournaments/:id/messages', requireStorage, organizerAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getOrganizerEditableTournament(db, req.organizerUser, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this organizer invitation.' })
+    const result = await listTournamentMessageThreads(db, tournament.id, { role: 'organizer', id: req.organizerUser?.id || null, email: req.organizerUser?.email || '' })
+    logApi('organizer_tournament_messages_loaded', { ...requestContext(req), tournamentId: tournament.id, threadCount: result.totalThreads, messageCount: result.totalMessages, unreadCount: result.unreadCount })
+    return res.json(result)
+  } catch (error) {
+    logRouteError('Organizer tournament messages load error', req, error)
+    return res.status(500).json({ message: 'Tournament messages could not be loaded.' })
+  }
+})
+
+app.patch('/api/organizer/tournaments/:id/messages/read', requireStorage, organizerAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getOrganizerEditableTournament(db, req.organizerUser, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this organizer invitation.' })
+    const state = await markTournamentMessagesRead(db, tournament.id, { role: 'organizer', id: req.organizerUser?.id || null, email: req.organizerUser?.email || '' })
+    logApi('organizer_tournament_messages_marked_read', { ...requestContext(req), tournamentId: tournament.id })
+    return res.json({ ok: true, ...state })
+  } catch (error) {
+    logRouteError('Organizer tournament messages mark-read error', req, error)
+    return res.status(500).json({ message: 'Tournament message notifications could not be marked read.' })
+  }
+})
+
+app.post('/api/organizer/tournaments/:id/messages', requireStorage, organizerAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getOrganizerEditableTournament(db, req.organizerUser, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this organizer invitation.' })
+    const organizerName = req.organizerUser?.name || req.organizerUser?.organizationName || req.organizerUser?.contactName || 'Tournament organizer'
+    const result = await sendTournamentPortalNotifications({
+      pool: db,
+      tournament,
+      sender: { id: req.organizerUser?.id || null, email: req.organizerUser?.email || '', name: organizerName },
+      senderRole: 'organizer',
+      body: req.body?.body,
+      recipientMode: req.body?.recipientMode,
+      recipientEmails: req.body?.recipientEmails,
+      req,
+    })
+    logApi('organizer_tournament_messages_sent', { ...requestContext(req), tournamentId: tournament.id, threadId: result.threadId, sentCount: result.sentCount, recipientEmails: result.recipientEmails })
+    return res.status(201).json({ ok: true, sentCount: result.sentCount, threadId: result.threadId })
+  } catch (error) {
+    if (error instanceof Error && /required|characters|registered golfer|Select at least one|host does not have/i.test(error.message)) {
+      logApi('organizer_tournament_messages_validation_failed', { ...requestContext(req), tournamentId: req.params.id, validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Organizer tournament messages send error', req, error)
+    return res.status(500).json({ message: 'Tournament messages could not be sent.' })
+  }
+})
+
+app.post('/api/organizer/tournaments/:id/message-threads/:threadId/messages', requireStorage, organizerAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const db = getPool()
+    const tournament = await getOrganizerEditableTournament(db, req.organizerUser, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this organizer invitation.' })
+    const organizerName = req.organizerUser?.name || req.organizerUser?.organizationName || req.organizerUser?.contactName || 'Tournament organizer'
+    const conversation = await appendTournamentPortalMessage(db, {
+      tournamentId: tournament.id,
+      threadId: req.params.threadId,
+      sender: { id: req.organizerUser?.id || null, email: req.organizerUser?.email || '', name: organizerName },
+      senderRole: 'organizer',
+      body: req.body?.body,
+      correlationId: req.correlationId || null,
+    })
+    if (!conversation) return res.status(404).json({ message: 'Tournament message thread not found.' })
+    logApi('organizer_tournament_message_reply_sent', { ...requestContext(req), tournamentId: tournament.id, threadId: conversation.id, recipientCount: conversation.recipients.length })
+    return res.status(201).json({ ok: true, conversation })
+  } catch (error) {
+    if (error instanceof Error && /required|characters/i.test(error.message)) return res.status(400).json({ message: error.message })
+    logRouteError('Organizer tournament message reply error', req, error)
+    return res.status(500).json({ message: 'The tournament message reply could not be sent.' })
+  }
+})
 
 app.post('/api/organizer/tournaments/:id/start-schedule/auto', requireStorage, organizerAuthMiddleware, async (req, res) => {
   try {
@@ -3517,6 +3781,20 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
       [registrationId, resolvedTournamentId, req.user.id, normalizeEmail(req.user.email), req.user.name || null, registrationTeam.teamId, registrationTeam.teamName, serializeTeamMembers(registrationTeam.teamMembers), req.correlationId || null],
     )
     const registrationUrl = portal.tournament.portalUrl || tournamentPortalUrl(req, portal.tournament.tournamentIdentifier || resolvedTournamentId)
+    try {
+      await createTournamentNotification(pool, {
+        sender: { id: null, email: '', name: portal.tournament.hostGolfCourseName || portal.tournament.organizerName || 'GolfHomiez' },
+        recipient: { id: req.user.id, email: req.user.email, name: req.user.name || null },
+        tournament: { id: resolvedTournamentId, name: portal.tournament.name, startDate: portal.tournament.startDate || null },
+        body: `Registration confirmed for ${portal.tournament.name}.`,
+        actionUrl: tournamentPortalPath(portal.tournament.tournamentIdentifier || resolvedTournamentId),
+        correlationId: req.correlationId || null,
+        senderRole: 'system',
+      })
+      logApi('tournament_registration_notification_created', { ...requestContext(req), tournamentId: resolvedTournamentId, authUserId: req.user.id })
+    } catch (notificationError) {
+      logRouteError('Tournament registration notification error', req, notificationError, { tournamentId: resolvedTournamentId, authUserId: req.user.id })
+    }
     try {
       await sendMail({
         to: normalizeEmail(req.user.email),
@@ -4347,6 +4625,193 @@ async function resolveIndividualChallengeForReply(req, parentMessage) {
     },
   }
 }
+
+app.get('/api/notifications/tournament-messages/:messageId', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const notification = await storage.getInboxMessageForParticipant(req.params.messageId, req.user)
+    if (!notification || notification.messageType !== 'tournament_notification') return res.status(404).json({ message: 'Tournament message not found.' })
+    const db = getPool()
+    const host = await resolveTournamentHostRecipient(db, notification.tournamentId)
+    const conversation = notification.tournamentConversationId
+      ? await getTournamentMessageConversationForUser(db, notification.tournamentConversationId, req.user)
+      : null
+    logApi('golfer_tournament_conversation_loaded', { ...requestContext(req), tournamentId: notification.tournamentId, notificationId: notification.id, conversationId: conversation?.id || null, messageCount: conversation?.messages?.length || 0 })
+    return res.json({ conversation, canMessageHost: Boolean(host?.email), hostName: host?.name || 'Tournament host' })
+  } catch (error) {
+    logRouteError('Golfer tournament conversation load error', req, error)
+    return res.status(500).json({ message: 'Tournament conversation could not be loaded.' })
+  }
+})
+
+app.post('/api/notifications/tournament-messages/:messageId', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const notification = await storage.getInboxMessageForParticipant(req.params.messageId, req.user)
+    if (!notification || notification.messageType !== 'tournament_notification') return res.status(404).json({ message: 'Tournament message not found.' })
+    const db = getPool()
+    const host = await resolveTournamentHostRecipient(db, notification.tournamentId)
+    if (!host?.email) return res.status(409).json({ message: 'The tournament host does not have an email address available for messages.' })
+    const conversation = await startTournamentUserConversationFromNotification(db, {
+      notification,
+      user: req.user,
+      host,
+      body: req.body?.body,
+      correlationId: req.correlationId || null,
+    })
+    if (!conversation) return res.status(403).json({ message: 'You no longer have access to this tournament conversation.' })
+    logApi('golfer_tournament_message_sent_to_host', { ...requestContext(req), tournamentId: notification.tournamentId, notificationId: notification.id, conversationId: conversation.id, originalRecipientCount: conversation.recipients.length })
+    return res.status(201).json({ ok: true, conversation })
+  } catch (error) {
+    if (error instanceof Error && /required|characters|host does not have/i.test(error.message)) {
+      logApi('golfer_tournament_message_validation_failed', { ...requestContext(req), notificationId: req.params.messageId, validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Golfer tournament message send error', req, error)
+    return res.status(500).json({ message: 'Your tournament message could not be sent.' })
+  }
+})
+
+app.get('/api/notifications/summary', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const summary = await getUserNotificationSummary(getPool(), storage, req.user)
+    logApi('notifications_summary_loaded', { ...requestContext(req), unreadCount: summary.unreadCount, categoryCounts: summary.categoryCounts })
+    res.json(summary)
+  } catch (error) {
+    logRouteError('Notifications summary error', req, error)
+    res.status(500).json({ message: 'Could not load notification summary' })
+  }
+})
+
+app.get('/api/notifications', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const result = await loadUserNotificationPage(getPool(), storage, req.user, {
+      filter: req.query.filter,
+      deleted: String(req.query.deleted || '').toLowerCase() === 'true',
+      page: req.query.page,
+      pageSize: req.query.pageSize,
+    })
+    logApi('notifications_loaded', {
+      ...requestContext(req),
+      filter: String(req.query.filter || 'all'),
+      deleted: String(req.query.deleted || '').toLowerCase() === 'true',
+      page: result.page,
+      pageSize: result.pageSize,
+      notificationCount: result.notifications.length,
+      total: result.total,
+      unreadCount: result.unreadCount,
+    })
+    res.json(result)
+  } catch (error) {
+    logRouteError('Notifications load error', req, error)
+    res.status(500).json({ message: 'Could not load notifications' })
+  }
+})
+
+app.patch('/api/notifications/threads/:threadId/state', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const hasDeleted = Object.prototype.hasOwnProperty.call(req.body || {}, 'deleted')
+    const state = await setNotificationThreadState(getPool(), req.user, req.params.threadId, {
+      markRead: req.body?.markRead === true,
+      ...(hasDeleted ? { deleted: req.body?.deleted === true } : {}),
+    })
+    logApi('notification_thread_state_updated', {
+      ...requestContext(req),
+      threadId: req.params.threadId,
+      markRead: req.body?.markRead === true,
+      deleted: hasDeleted ? req.body?.deleted === true : null,
+      lastReadAt: state.lastReadAt,
+      deletedAt: state.deletedAt,
+    })
+    res.json(state)
+  } catch (error) {
+    if (error instanceof Error && /required/i.test(error.message)) return res.status(400).json({ message: error.message })
+    logRouteError('Notification thread state update error', req, error)
+    res.status(500).json({ message: 'Could not update notification state' })
+  }
+})
+
+app.get('/api/message-groups', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const groups = await listMessageGroups(getPool(), req.user)
+    logApi('message_groups_loaded', { ...requestContext(req), groupCount: groups.length })
+    res.json({ groups })
+  } catch (error) {
+    logRouteError('Message groups load error', req, error)
+    res.status(500).json({ message: 'Could not load message groups' })
+  }
+})
+
+app.post('/api/message-groups', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const rawEmails = Array.isArray(req.body?.memberEmails) ? req.body.memberEmails : []
+    const memberEmails = [...new Set(rawEmails.map((value) => normalizeEmail(value)).filter(Boolean))]
+    const members = []
+    for (const email of memberEmails) {
+      const member = await storage.findUserByEmail(email)
+      if (!member) {
+        logApi('message_group_member_not_found', { ...requestContext(req), email })
+        return res.status(404).json({ message: `No GolfHomiez user exists for ${email}.`, recipientEmail: email, inviteRequired: true })
+      }
+      members.push(member)
+    }
+    const groupId = await createMessageGroup(getPool(), req.user, { name: req.body?.name, members })
+    const groups = await listMessageGroups(getPool(), req.user)
+    const group = groups.find((item) => String(item.id) === String(groupId)) || null
+    logApi('message_group_created', { ...requestContext(req), groupId, memberCount: group?.members?.length || 0 })
+    res.status(201).json({ group })
+  } catch (error) {
+    if (error instanceof Error && /required|characters/i.test(error.message)) {
+      logApi('message_group_create_validation_failed', { ...requestContext(req), validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Message group create error', req, error)
+    res.status(500).json({ message: 'Could not create message group' })
+  }
+})
+
+app.post('/api/message-groups/:id/members', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email)
+    if (!email) return res.status(400).json({ message: 'Member email is required.' })
+    const member = await storage.findUserByEmail(email)
+    if (!member) return res.status(404).json({ message: `No GolfHomiez user exists for ${email}.`, recipientEmail: email, inviteRequired: true })
+    const group = await addMessageGroupMember(getPool(), req.params.id, req.user, member)
+    if (!group) return res.status(404).json({ message: 'Message group not found or you cannot manage it.' })
+    const groups = await listMessageGroups(getPool(), req.user)
+    logApi('message_group_member_added', { ...requestContext(req), groupId: req.params.id, memberEmail: email })
+    res.json({ group: groups.find((item) => String(item.id) === String(req.params.id)) || null })
+  } catch (error) {
+    if (error instanceof Error && /required|valid/i.test(error.message)) return res.status(400).json({ message: error.message })
+    logRouteError('Message group member add error', req, error)
+    res.status(500).json({ message: 'Could not add group member' })
+  }
+})
+
+app.delete('/api/message-groups/:id/members/:email', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const result = await removeMessageGroupMember(getPool(), req.params.id, req.user, req.params.email, req.correlationId || null)
+    if (!result) return res.status(404).json({ message: 'Message group not found or you cannot manage it.' })
+    const groups = await listMessageGroups(getPool(), req.user)
+    logApi('message_group_member_removed', { ...requestContext(req), groupId: req.params.id, memberEmail: normalizeEmail(req.params.email), removed: result.removed })
+    res.json({ removed: result.removed, group: groups.find((item) => String(item.id) === String(req.params.id)) || null })
+  } catch (error) {
+    if (error instanceof Error && /required|cannot be removed/i.test(error.message)) return res.status(400).json({ message: error.message })
+    logRouteError('Message group member remove error', req, error)
+    res.status(500).json({ message: 'Could not remove group member' })
+  }
+})
+
+app.post('/api/message-groups/:id/messages', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const result = await sendMessageGroupMessage(getPool(), req.params.id, req.user, req.body?.body, req.correlationId || null)
+    if (result.status !== 201) return res.status(result.status).json({ message: result.message })
+    logApi('message_group_message_sent', { ...requestContext(req), groupId: req.params.id, messageId: result.id, threadId: result.threadId })
+    res.status(201).json({ ok: true, messageId: result.id, threadId: result.threadId })
+  } catch (error) {
+    if (error instanceof Error && /required|characters/i.test(error.message)) return res.status(400).json({ message: error.message })
+    logRouteError('Message group send error', req, error)
+    res.status(500).json({ message: 'Could not send group message' })
+  }
+})
 
 app.get('/api/inbox/summary', requireStorage, authMiddleware, async (req, res) => {
   try {

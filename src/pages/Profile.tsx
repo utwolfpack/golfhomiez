@@ -286,7 +286,7 @@ function ProfileInner() {
                 {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/support">Support</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Support.">Support</span>}
                 {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/invite-homie">Invite Homie</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Invite Homie.">Invite Homie</span>}
                 {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/teams">Teams</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Teams.">Teams</span>}
-                {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/inbox">Messages</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Messages.">Messages</span>}
+                {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/inbox">Notifications</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Notifications.">Notifications</span>}
               </div>
               {!hasSavedPhoneNumber ? <div className="profileHeaderLinksHint">Save your phone number to unlock these profile actions.</div> : null}
             </div>

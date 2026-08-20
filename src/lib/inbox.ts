@@ -4,7 +4,7 @@ import { requestJson } from './request'
 import type { HoleScoreDetail, ScoreEntry } from '../types'
 import type { TeamChallengeScoringType } from './team-challenge-scoring'
 
-export type InboxMessageType = 'message' | 'challenge_request' | 'individual_challenge'
+export type InboxMessageType = 'message' | 'challenge_request' | 'individual_challenge' | 'group_message' | 'tournament_notification'
 export type TeamChallengeStatus = 'proposed' | 'accepted' | 'declined' | 'completed'
 
 export type IndividualChallengeParticipant = {
@@ -24,8 +24,17 @@ export type InboxMessage = {
   senderUserId?: string | null
   senderEmail: string
   senderName?: string | null
+  senderRole?: string | null
   recipientUserId?: string | null
   recipientEmail: string
+  groupId?: string | null
+  groupName?: string | null
+  tournamentId?: string | null
+  tournamentConversationId?: string | null
+  tournamentName?: string | null
+  eventDate?: string | null
+  actionUrl?: string | null
+  correlationId?: string | null
   proposerTeamId?: string | null
   proposerTeamName?: string | null
   challengedTeamId?: string | null

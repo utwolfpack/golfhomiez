@@ -1664,7 +1664,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -1721,7 +1721,7 @@ test('verification flow prepopulates email and shows registration completion gui
   assert.match(verifyPage, /Check your email to finish registration/)
 })
 
-test('navigation uses the styled dropdown menu items and moves user resource links to profile', () => {
+test('navigation uses styled dropdown items and exposes unread notifications from the top banner', () => {
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
   const profile = fs.readFileSync(new URL('../src/pages/Profile.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
@@ -1738,7 +1738,10 @@ test('navigation uses the styled dropdown menu items and moves user resource lin
   assert.match(nav, /Organizer profile/)
   assert.match(nav, /nav_brand_emblem_loaded/)
   assert.match(nav, /nav_brand_emblem_load_failed/)
-  assert.doesNotMatch(nav, /to="\/inbox"/)
+  assert.match(nav, /to="\/inbox"/)
+  assert.match(nav, /fetchNotificationSummary/)
+  assert.match(nav, /unreadNotificationCount/)
+  assert.match(nav, /navNotificationBell/)
   assert.doesNotMatch(nav, /to="\/teams"/)
   assert.doesNotMatch(nav, /to="\/directions"/)
   assert.doesNotMatch(nav, /to="\/support"/)
@@ -3856,7 +3859,7 @@ test('support page routes support messages for golf users, hosts, and organizers
   assert.match(server, /'\/support'/)
 })
 
-test('golf user inbox supports messages, Team Challenges, unread indicators, invite fallback, migrations, and logging', () => {
+test('golf user notifications preserve messages and Team Challenges while adding unified notification behavior', () => {
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
   const inboxPage = fs.readFileSync(new URL('../src/pages/Inbox.tsx', import.meta.url), 'utf8')
@@ -3884,8 +3887,10 @@ test('golf user inbox supports messages, Team Challenges, unread indicators, inv
   assert.match(app, /path="\/invite-homie" element=\{<ProtectedRoute><InviteHomie \/><\/ProtectedRoute>\}/)
   assert.doesNotMatch(nav, /fetchInboxSummary/)
   assert.doesNotMatch(nav, /inboxNavIndicator/)
-  assert.doesNotMatch(nav, /to="\/inbox"/)
-  assert.match(inboxPage, /title="Messages"/)
+  assert.match(nav, /to="\/inbox"/)
+  assert.match(nav, /fetchNotificationSummary/)
+  assert.match(nav, /unreadNotificationCount/)
+  assert.match(inboxPage, /title="Notifications"/)
   assert.match(nav, /label: 'Challenges'/)
   assert.doesNotMatch(nav, /to="\/challenges"[^>]*>Challenges<\/NavLink>/)
   assert.match(nav, /to: '\/challenges'/)
@@ -3993,10 +3998,10 @@ test('golf user inbox supports messages, Team Challenges, unread indicators, inv
   assert.doesNotMatch(inboxFeatureFiles, /Unread messages show an inbox indicator/)
   assert.doesNotMatch(inboxFeatureFiles, /Read messages and Team Challenges from other Golf Homiez users/)
   assert.match(inboxFeatureFiles, /buildInboxThreads/)
-  assert.match(inboxFeatureFiles, /receivedThreads/)
+  assert.match(inboxPage, /displayedNotifications/)
   assert.match(inboxFeatureFiles, /expandedThreadId/)
   assert.match(inboxFeatureFiles, /aria-expanded=\{isExpanded\}/)
-  assert.match(inboxFeatureFiles, /inboxMessagePreview/)
+  assert.match(inboxPage, /notificationLineMeta/)
   assert.match(inboxFeatureFiles, /inbox_thread_expanded/)
   assert.match(inboxFeatureFiles, /inbox_thread_collapsed/)
   assert.doesNotMatch(inboxFeatureFiles, /<h2 className="inboxSectionTitle">Sent messages<\/h2>/)
@@ -4039,7 +4044,7 @@ test('golf user inbox supports messages, Team Challenges, unread indicators, inv
   assert.match(challengesPage, /Completed · locked/)
   assert.match(challengesPage, /This challenge is complete, so scores are locked\./)
   assert.match(css, /\.challengeCompletedLabel/)
-  assert.match(inboxFeatureFiles, /messageOnlyMessages/)
+  assert.match(inboxPage, /value: 'messages'/)
   assert.match(inboxFeatureFiles, /teamChallengeMessages/)
   assert.match(inboxFeatureFiles, /teamChallengeThreads/)
   assert.match(inboxFeatureFiles, /renderThreadCard\(thread, 'team-challenges'\)/)
