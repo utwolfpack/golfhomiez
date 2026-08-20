@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useHostAuth } from '../context/HostAuthContext'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import { fetchNotificationSummary, NOTIFICATIONS_CHANGED_EVENT } from '../lib/notifications'
 import brandEmblem from '../assets/GolfHomiezEmblem.png'
 
 type NavIconProps = { className?: string }
@@ -41,6 +42,15 @@ function TournamentTrophyIcon({ className = '' }: NavIconProps) {
   )
 }
 
+function NotificationBellIcon({ className = '' }: NavIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M6.8 10.2c0-3.2 2-5.4 5.2-5.4s5.2 2.2 5.2 5.4v3.2l1.6 2.6H5.2l1.6-2.6v-3.2Z" />
+      <path d="M9.7 18.1c.5 1.1 1.2 1.7 2.3 1.7s1.8-.6 2.3-1.7" />
+    </svg>
+  )
+}
+
 function GolfHomiezUserIcon({ className = '' }: NavIconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -66,6 +76,7 @@ export default function NavBar() {
   const { organizerAccount, logoutOrganizer } = useOrganizerAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
   const restrictedRole = adminUser
@@ -90,6 +101,33 @@ export default function NavBar() {
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
+
+  useEffect(() => {
+    if (!user || restrictedSession) {
+      setUnreadNotificationCount(0)
+      return undefined
+    }
+
+    let active = true
+    async function refreshNotificationSummary() {
+      try {
+        const summary = await fetchNotificationSummary()
+        if (active) setUnreadNotificationCount(Number(summary.unreadCount || 0))
+      } catch (error) {
+        logFrontendEvent({ category: 'app.nav.notifications', level: 'error', message: 'notification_summary_load_failed', data: { error: error instanceof Error ? error.message : String(error), correlationId: getCorrelationId() } })
+      }
+    }
+
+    void refreshNotificationSummary()
+    const intervalId = window.setInterval(() => void refreshNotificationSummary(), 60000)
+    const onNotificationsChanged = () => void refreshNotificationSummary()
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged)
+    }
+  }, [restrictedSession, user?.id])
 
   function logMobileNavigation(message: string, destination: string) {
     logFrontendEvent({
@@ -153,6 +191,18 @@ export default function NavBar() {
         </Link>
 
         <div className="navActions">
+          {showMobileGolferLinks && unreadNotificationCount > 0 ? (
+            <Link
+              to="/inbox"
+              className="navNotificationBell"
+              aria-label={`${unreadNotificationCount} unread notification${unreadNotificationCount === 1 ? '' : 's'}`}
+              title="Notifications"
+              onClick={() => logFrontendEvent({ category: 'app.nav.notifications', message: 'notification_bell_selected', data: { unreadCount: unreadNotificationCount, destination: '/inbox', correlationId: getCorrelationId() } })}
+            >
+              <NotificationBellIcon className="navNotificationBellIcon" />
+              <span className="navNotificationBellCount">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>
+            </Link>
+          ) : null}
           {showMobileGolferLinks ? (
             <nav className="navMobileQuickLinks" aria-label="Golfer shortcuts">
               {mobileGolferLinks.map(({ to, label, event, Icon }) => (
@@ -243,6 +293,7 @@ export default function NavBar() {
                         <NavLink className="navDropdownItem" to="/challenges" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'challenges_selected', data: { destination: '/challenges', correlationId: getCorrelationId() } }) }}>Challenges</NavLink>
                         <NavLink className="navDropdownItem" to="/find-tournament" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'find_tournament_selected', data: { destination: '/find-tournament', correlationId: getCorrelationId() } }) }}>Find a Tournament</NavLink>
                         <NavLink className="navDropdownItem" to="/find-course" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'find_golf_course_selected', data: { destination: '/find-course', correlationId: getCorrelationId() } }) }}>Find a Golf Course</NavLink>
+                        <NavLink className="navDropdownItem" to="/inbox" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'notifications_selected', data: { destination: '/inbox', unreadCount: unreadNotificationCount, correlationId: getCorrelationId() } }) }}>Notifications</NavLink>
                         <NavLink className="navDropdownItem" to="/profile" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'profile_selected', data: { destination: '/profile', correlationId: getCorrelationId() } }) }}>Profile</NavLink>
                       </>
                     )}

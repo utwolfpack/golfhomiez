@@ -1,415 +1,595 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import PageHero from '../components/PageHero'
 import { useAuth } from '../context/AuthContext'
+import { RecipientNotFoundError, sendInboxMessage, type InboxMessage } from '../lib/inbox'
 import {
-  fetchInboxMessages,
-  fetchSentInboxMessages,
-  markInboxMessageRead,
-  RecipientNotFoundError,
-  replyToInboxMessage,
-  sendInboxMessage,
-  type InboxMessage,
-} from '../lib/inbox'
+  addMessageGroupMember,
+  createMessageGroup,
+  fetchMessageGroups,
+  fetchNotifications,
+  fetchTournamentConversation,
+  notifyNotificationsChanged,
+  removeMessageGroupMember,
+  sendMessageGroupMessage,
+  sendTournamentConversationMessage,
+  setNotificationThreadState,
+  type MessageGroup,
+  type NotificationFilter,
+  type NotificationThread,
+  type NotificationsResponse,
+  type TournamentConversation,
+} from '../lib/notifications'
 import { logFrontendEvent } from '../lib/frontend-logger'
 
-type InboxThread = {
-  threadId: string
-  displayMessage: InboxMessage
-  messages: InboxMessage[]
-  unreadMessages: InboxMessage[]
-  unreadCount: number
-}
+const PAGE_SIZE = 10
+const FILTERS: Array<{ value: NotificationFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'messages', label: 'Messages' },
+  { value: 'challenges', label: 'Challenges' },
+  { value: 'tournaments', label: 'Tournaments' },
+]
 
-function formatInboxTimestamp(value?: string | null) {
-  if (!value) return 'Unknown time'
+function formatTimestamp(value?: string | null, dateOnly = false) {
+  if (!value) return 'Date unavailable'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return date.toLocaleString(undefined, dateOnly ? { dateStyle: 'medium' } : { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function messageThreadId(message: InboxMessage) {
-  return message.threadId || message.id
+function notificationTypeLabel(thread: NotificationThread) {
+  if (thread.category === 'challenges') return thread.messageType === 'individual_challenge' ? 'Individual challenge' : 'Team challenge'
+  if (thread.category === 'tournaments') return 'Tournament'
+  if (thread.messageType === 'group_message') return thread.displayMessage.groupName ? `Group · ${thread.displayMessage.groupName}` : 'Group message'
+  return 'Message'
 }
 
-function sortThreadMessages(messages: InboxMessage[]) {
-  return [...messages].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+function notificationSender(message: { senderName?: string | null; senderEmail?: string | null; senderRole?: string | null }) {
+  return message.senderName || message.senderEmail || (message.senderRole ? `${message.senderRole} notification` : 'GolfHomiez')
 }
 
-function latestThreadMessage(messages: InboxMessage[]) {
-  const sorted = sortThreadMessages(messages)
-  return sorted[sorted.length - 1]
+function notificationDate(thread: NotificationThread) {
+  if (thread.category === 'challenges') return formatTimestamp(thread.displayMessage.challengeDate, true)
+  if (thread.category === 'tournaments') return formatTimestamp(thread.displayMessage.eventDate, true)
+  return formatTimestamp(thread.latestActivityAt || thread.displayMessage.createdAt)
 }
 
-function buildInboxThreads(messages: InboxMessage[]): InboxThread[] {
-  const grouped = new Map<string, InboxMessage[]>()
-  messages.forEach((message) => {
-    const threadId = messageThreadId(message)
-    grouped.set(threadId, [...(grouped.get(threadId) || []), message])
-  })
-
-  return Array.from(grouped.entries())
-    .map(([threadId, threadMessages]) => {
-      const sortedMessages = sortThreadMessages(threadMessages)
-      const unreadMessages = sortedMessages.filter((message) => !message.readAt)
-      return {
-        threadId,
-        displayMessage: unreadMessages[unreadMessages.length - 1] || sortedMessages[sortedMessages.length - 1],
-        messages: sortedMessages,
-        unreadMessages,
-        unreadCount: unreadMessages.length,
-      }
-    })
-    .sort((a, b) => String(b.displayMessage.createdAt || '').localeCompare(String(a.displayMessage.createdAt || '')))
-}
-
-function getMessagePreview(body?: string | null) {
-  const normalized = String(body || '').replace(/\s+/g, ' ').trim()
-  if (normalized.length <= 140) return normalized
-  return `${normalized.slice(0, 140)}…`
-}
-
-function uniqueInboxMessages(messages: InboxMessage[]) {
-  const byId = new Map<string, InboxMessage>()
-  messages.forEach((message) => {
-    if (message?.id) byId.set(String(message.id), message)
-  })
-  return Array.from(byId.values())
+function parseMemberEmails(value: string) {
+  return [...new Set(value.split(/[\n,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean))]
 }
 
 export default function Inbox() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const [messages, setMessages] = useState<InboxMessage[]>([])
-  const [sentMessages, setSentMessages] = useState<InboxMessage[]>([])
-  const [recipientEmail, setRecipientEmail] = useState('')
-  const [messageComposeOpen, setMessageComposeOpen] = useState(false)
-  const [body, setBody] = useState('')
-  const [replyingTo, setReplyingTo] = useState<InboxMessage | null>(null)
-  const [replyBody, setReplyBody] = useState('')
+  const [filter, setFilter] = useState<NotificationFilter>('all')
+  const [deletedView, setDeletedView] = useState(false)
+  const [page, setPage] = useState(1)
+  const [result, setResult] = useState<NotificationsResponse | null>(null)
+  const [groups, setGroups] = useState<MessageGroup[]>([])
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [sending, setSending] = useState(false)
-  const [replySending, setReplySending] = useState(false)
-  const [markingReadThreadId, setMarkingReadThreadId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
 
-  const currentUserEmail = useMemo(() => String(user?.email || '').trim().toLowerCase(), [user?.email])
-  const messageOnlyMessages = useMemo(() => messages.filter((message) => message.messageType === 'message'), [messages])
-  const unreadCount = useMemo(() => messageOnlyMessages.filter((message) => !message.readAt).length, [messageOnlyMessages])
-  const receivedThreads = useMemo(() => buildInboxThreads(messageOnlyMessages), [messageOnlyMessages])
-  const allConversationMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentMessages].filter((message) => message.messageType === 'message')), [messages, sentMessages])
-  const canSubmitMessage = Boolean(body.trim() && recipientEmail.trim())
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [recipientEmail, setRecipientEmail] = useState('')
+  const [composeBody, setComposeBody] = useState('')
+  const [sending, setSending] = useState(false)
+  const [replyBody, setReplyBody] = useState('')
+  const [replySending, setReplySending] = useState(false)
 
-  function getConversationFor(message: InboxMessage) {
-    const threadId = messageThreadId(message)
-    return sortThreadMessages(allConversationMessages.filter((item) => messageThreadId(item) === threadId))
-  }
+  const [groupName, setGroupName] = useState('')
+  const [groupMemberEmails, setGroupMemberEmails] = useState('')
+  const [groupSaving, setGroupSaving] = useState(false)
+  const [memberEmailByGroup, setMemberEmailByGroup] = useState<Record<string, string>>({})
+  const [messageBodyByGroup, setMessageBodyByGroup] = useState<Record<string, string>>({})
+  const [sendingGroupId, setSendingGroupId] = useState<string | null>(null)
+  const [groupsOpen, setGroupsOpen] = useState(false)
+  const groupsSectionRef = useRef<HTMLElement | null>(null)
+  const [tournamentConversation, setTournamentConversation] = useState<TournamentConversation | null>(null)
+  const [tournamentConversationLoading, setTournamentConversationLoading] = useState(false)
+  const [canMessageTournamentHost, setCanMessageTournamentHost] = useState(false)
+  const [tournamentHostName, setTournamentHostName] = useState('Tournament host')
 
-  function getLatestConversationMessage(message: InboxMessage) {
-    return latestThreadMessage(getConversationFor(message)) || message
-  }
+  const currentUserEmail = String(user?.email || '').trim().toLowerCase()
+  const expandedThread = useMemo(
+    () => result?.notifications.find((thread) => thread.threadId === expandedThreadId) || null,
+    [expandedThreadId, result?.notifications],
+  )
+  const displayedNotifications = expandedThread ? [expandedThread] : (result?.notifications || [])
 
-  function sentByCurrentUser(message: InboxMessage) {
-    return String(message.senderUserId || '') === String(user?.id || '') || String(message.senderEmail || '').trim().toLowerCase() === currentUserEmail
-  }
-
-  async function loadInbox() {
+  async function loadNotifications(nextPage = page, nextFilter = filter, nextDeleted = deletedView) {
     setLoading(true)
     setError(null)
     try {
-      const [inboxResult, sentResult] = await Promise.all([fetchInboxMessages(), fetchSentInboxMessages()])
-      setMessages(inboxResult.messages || [])
-      setSentMessages(sentResult.sentMessages || [])
+      const [notificationResult, groupResult] = await Promise.all([
+        fetchNotifications({ filter: nextFilter, deleted: nextDeleted, page: nextPage, pageSize: PAGE_SIZE }),
+        fetchMessageGroups(),
+      ])
+      setResult(notificationResult)
+      setGroups(groupResult.groups || [])
+      if (notificationResult.page !== nextPage) setPage(notificationResult.page)
       logFrontendEvent({
-        category: 'inbox.page',
-        message: 'inbox_messages_loaded',
+        category: 'notifications.page',
+        message: 'notifications_loaded',
         data: {
-          unreadCount: inboxResult.unreadCount,
-          messageCount: inboxResult.messages?.length || 0,
-          receivedThreadCount: buildInboxThreads((inboxResult.messages || []).filter((message) => message.messageType === 'message')).length,
-          sentMessageCount: sentResult.sentMessages?.length || 0,
+          filter: nextFilter,
+          deleted: nextDeleted,
+          page: notificationResult.page,
+          pageSize: notificationResult.pageSize,
+          total: notificationResult.total,
+          unreadCount: notificationResult.unreadCount,
+          groupCount: groupResult.groups?.length || 0,
         },
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not load messages.'
+      const message = err instanceof Error ? err.message : 'Could not load notifications.'
       setError(message)
-      logFrontendEvent({ category: 'inbox.page', level: 'error', message: 'inbox_messages_load_failed', data: { error: message } })
+      logFrontendEvent({ category: 'notifications.page', level: 'error', message: 'notifications_load_failed', data: { error: message, filter: nextFilter, deleted: nextDeleted, page: nextPage } })
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    void loadInbox()
-  }, [])
+    void loadNotifications(page, filter, deletedView)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filter, deletedView])
 
-  async function handleMessageSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const trimmedRecipient = recipientEmail.trim()
-    const trimmedBody = body.trim()
-    setSending(true)
-    setError(null)
-    setStatus(null)
+  useEffect(() => {
+    if (!groupsOpen) return
+    const frameId = window.requestAnimationFrame(() => {
+      groupsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      groupsSectionRef.current?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [groupsOpen])
 
-    try {
-      logFrontendEvent({ category: 'inbox.message', message: 'inbox_send_started', data: { recipientEmail: trimmedRecipient, messageType: 'message' } })
-      const result = await sendInboxMessage({ recipientEmail: trimmedRecipient, messageType: 'message', body: trimmedBody })
-      setStatus(result.notice || 'Your message was sent successfully.')
-      setRecipientEmail('')
-      setBody('')
-      setMessageComposeOpen(false)
-      logFrontendEvent({ category: 'inbox.message', message: 'inbox_send_succeeded', data: { recipientEmail: trimmedRecipient, messageId: result.message?.id, threadId: result.message?.threadId } })
-      await loadInbox()
-    } catch (err) {
-      if (err instanceof RecipientNotFoundError) {
-        const message = err.message || 'Recipient does not exist in Golf Homiez. Send them an invite to join.'
-        logFrontendEvent({ category: 'inbox.message', level: 'warn', message: 'inbox_recipient_not_found_redirecting_to_invite_homie', data: { recipientEmail: err.recipientEmail } })
-        navigate(`/invite-homie?email=${encodeURIComponent(err.recipientEmail)}&reason=recipient-not-found`, { state: { notice: message } })
-        return
+  function toggleGroups() {
+    const nextOpen = !groupsOpen
+    setGroupsOpen(nextOpen)
+    logFrontendEvent({ category: 'notifications.group', message: nextOpen ? 'groups_section_opened' : 'groups_section_hidden', data: { groupCount: groups.length } })
+  }
+
+  function applyFilter(nextFilter: NotificationFilter) {
+    setExpandedThreadId(null)
+    setReplyBody('')
+    setPage(1)
+    setFilter(nextFilter)
+    setDeletedView(false)
+    logFrontendEvent({ category: 'notifications.filter', message: 'notification_filter_selected', data: { filter: nextFilter } })
+  }
+
+  function applyDeletedView() {
+    setExpandedThreadId(null)
+    setReplyBody('')
+    setPage(1)
+    setDeletedView((current) => !current)
+    logFrontendEvent({ category: 'notifications.filter', message: 'notification_deleted_filter_toggled', data: { deleted: !deletedView } })
+  }
+
+  async function openThread(thread: NotificationThread) {
+    setExpandedThreadId(thread.threadId)
+    setReplyBody('')
+    setTournamentConversation(null)
+    setCanMessageTournamentHost(false)
+    setTournamentHostName('Tournament host')
+    logFrontendEvent({ category: 'notifications.thread', message: 'notification_thread_opened', data: { threadId: thread.threadId, category: thread.category, unreadCount: thread.unreadCount } })
+    if (thread.category === 'tournaments') {
+      setTournamentConversationLoading(true)
+      try {
+        const tournamentResult = await fetchTournamentConversation(thread.displayMessage.id)
+        setTournamentConversation(tournamentResult.conversation)
+        setCanMessageTournamentHost(tournamentResult.canMessageHost)
+        setTournamentHostName(tournamentResult.hostName || 'Tournament host')
+        logFrontendEvent({ category: 'notifications.tournament', message: 'tournament_conversation_loaded', data: { threadId: thread.threadId, conversationId: tournamentResult.conversation?.id || null, messageCount: tournamentResult.conversation?.messages?.length || 0 } })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not load the tournament conversation.'
+        setError(message)
+        logFrontendEvent({ category: 'notifications.tournament', level: 'error', message: 'tournament_conversation_load_failed', data: { threadId: thread.threadId, error: message } })
+      } finally {
+        setTournamentConversationLoading(false)
       }
-      const message = err instanceof Error ? err.message : 'Could not send message.'
-      setError(message)
-      logFrontendEvent({ category: 'inbox.message', level: 'error', message: 'inbox_send_failed', data: { recipientEmail: trimmedRecipient, error: message } })
-    } finally {
-      setSending(false)
+    }
+    if (thread.unreadCount > 0) {
+      try {
+        await setNotificationThreadState(thread.threadId, { markRead: true })
+        setResult((current) => current ? {
+          ...current,
+          unreadCount: Math.max(0, current.unreadCount - thread.unreadCount),
+          notifications: current.notifications.map((item) => item.threadId === thread.threadId ? { ...item, unreadCount: 0, lastReadAt: new Date().toISOString() } : item),
+        } : current)
+        logFrontendEvent({ category: 'notifications.thread', message: 'notification_thread_marked_read', data: { threadId: thread.threadId, category: thread.category } })
+        logFrontendEvent({ category: 'inbox.message', message: 'inbox_thread_marked_read', data: { threadId: thread.threadId, unreadCount: thread.unreadCount } })
+      } catch (err) {
+        logFrontendEvent({ category: 'notifications.thread', level: 'error', message: 'notification_mark_read_failed', data: { threadId: thread.threadId, error: err instanceof Error ? err.message : String(err) } })
+      }
     }
   }
 
-  async function handleReplySubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleDeleteOrRestore(thread: NotificationThread, deleted: boolean) {
+    setError(null)
+    setStatus(null)
+    try {
+      await setNotificationThreadState(thread.threadId, { deleted })
+      setExpandedThreadId(null)
+      setStatus(deleted ? 'Notification moved to Deleted.' : 'Notification restored.')
+      logFrontendEvent({ category: 'notifications.thread', message: deleted ? 'notification_thread_deleted' : 'notification_thread_restored', data: { threadId: thread.threadId, category: thread.category } })
+      await loadNotifications(1, filter, deletedView)
+      setPage(1)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not update the notification.'
+      setError(message)
+      logFrontendEvent({ category: 'notifications.thread', level: 'error', message: 'notification_delete_restore_failed', data: { threadId: thread.threadId, deleted, error: message } })
+    }
+  }
+
+  function directConversationRecipient(thread: NotificationThread) {
+    for (const message of thread.messages) {
+      const senderEmail = String(message.senderEmail || '').trim().toLowerCase()
+      const recipient = String(message.recipientEmail || '').trim().toLowerCase()
+      if (senderEmail && senderEmail !== currentUserEmail) return message.senderEmail
+      if (recipient && recipient !== currentUserEmail) return message.recipientEmail
+    }
+    return ''
+  }
+
+  async function handleReply(event: FormEvent<HTMLFormElement>, thread: NotificationThread) {
     event.preventDefault()
-    if (!replyingTo) return
-    const trimmedBody = replyBody.trim()
+    const body = replyBody.trim()
+    if (!body) return
     setReplySending(true)
     setError(null)
     setStatus(null)
-
     try {
-      logFrontendEvent({ category: 'inbox.reply', message: 'inbox_reply_started', data: { replyToMessageId: replyingTo.id, threadId: replyingTo.threadId || replyingTo.id, recipientEmail: replyingTo.senderEmail } })
-      const result = await replyToInboxMessage({ message: replyingTo, body: trimmedBody })
-      setStatus(result.notice || 'Your message was sent successfully.')
-      setReplyingTo(null)
+      if (thread.messageType === 'group_message' && thread.displayMessage.groupId) {
+        await sendMessageGroupMessage(thread.displayMessage.groupId, body)
+      } else if (thread.messageType === 'message') {
+        const recipient = directConversationRecipient(thread)
+        if (!recipient) throw new Error('Could not determine the golfer to reply to.')
+        await sendInboxMessage({ recipientEmail: recipient, messageType: 'message', body, replyToMessageId: thread.displayMessage.id })
+        notifyNotificationsChanged()
+      } else if (thread.messageType === 'tournament_notification') {
+        const response = await sendTournamentConversationMessage(thread.displayMessage.id, body)
+        setTournamentConversation(response.conversation)
+        setCanMessageTournamentHost(true)
+      } else {
+        throw new Error('Open this notification to continue the challenge activity.')
+      }
       setReplyBody('')
-      logFrontendEvent({ category: 'inbox.reply', message: 'inbox_reply_succeeded', data: { replyToMessageId: replyingTo.id, messageId: result.message?.id, threadId: result.message?.threadId } })
-      await loadInbox()
+      setStatus('Message sent.')
+      logFrontendEvent({ category: 'notifications.reply', message: 'notification_reply_sent', data: { threadId: thread.threadId, messageType: thread.messageType } })
+      await loadNotifications(page, filter, deletedView)
     } catch (err) {
       if (err instanceof RecipientNotFoundError) {
-        const message = err.message || 'Recipient does not exist in Golf Homiez. Send them an invite to join.'
-        logFrontendEvent({ category: 'inbox.reply', level: 'warn', message: 'inbox_reply_recipient_not_found_redirecting_to_invite_homie', data: { recipientEmail: err.recipientEmail, replyToMessageId: replyingTo.id } })
-        navigate(`/invite-homie?email=${encodeURIComponent(err.recipientEmail)}&reason=recipient-not-found`, { state: { notice: message } })
+        navigate(`/invite-homie?email=${encodeURIComponent(err.recipientEmail)}&reason=recipient-not-found`, { state: { notice: err.message } })
         return
       }
       const message = err instanceof Error ? err.message : 'Could not send reply.'
       setError(message)
-      logFrontendEvent({ category: 'inbox.reply', level: 'error', message: 'inbox_reply_failed', data: { replyToMessageId: replyingTo.id, error: message } })
+      logFrontendEvent({ category: 'notifications.reply', level: 'error', message: 'notification_reply_failed', data: { threadId: thread.threadId, error: message } })
     } finally {
       setReplySending(false)
     }
   }
 
-  function toggleThreadExpansion(thread: InboxThread) {
-    setExpandedThreadId((current) => {
-      const next = current === thread.threadId ? null : thread.threadId
-      if (next !== thread.threadId && replyingTo && messageThreadId(replyingTo) === thread.threadId) {
-        setReplyingTo(null)
-        setReplyBody('')
-      }
-      if (next === thread.threadId) {
-        setReplyingTo(null)
-        setReplyBody('')
-      }
-      logFrontendEvent({
-        category: 'inbox.message',
-        message: next === thread.threadId ? 'inbox_thread_expanded' : 'inbox_thread_collapsed',
-        data: { threadId: thread.threadId, displayMessageId: thread.displayMessage.id, threadMessageCount: thread.messages.length, unreadCount: thread.unreadCount, source: 'messages' },
-      })
-      return next
-    })
-  }
-
-  async function handleMarkThreadRead(thread: InboxThread) {
-    if (thread.unreadMessages.length === 0) return
-    setMarkingReadThreadId(thread.threadId)
+  async function handleDirectMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const email = recipientEmail.trim()
+    const body = composeBody.trim()
+    if (!email || !body) return
+    setSending(true)
+    setError(null)
+    setStatus(null)
     try {
-      const updatedMessages = await Promise.all(thread.unreadMessages.map((message) => markInboxMessageRead(message.id)))
-      setMessages((prev) => prev.map((item) => updatedMessages.find((updated) => updated.id === item.id) || item))
-      logFrontendEvent({ category: 'inbox.message', message: 'inbox_thread_marked_read', data: { threadId: thread.threadId, unreadCount: thread.unreadCount, messageIds: thread.unreadMessages.map((message) => message.id) } })
+      logFrontendEvent({ category: 'inbox.message', message: 'inbox_send_started', data: { recipientEmail: email, messageType: 'message' } })
+      const sendResult = await sendInboxMessage({ recipientEmail: email, messageType: 'message', body })
+      setRecipientEmail('')
+      setComposeBody('')
+      setComposeOpen(false)
+      setStatus('Your message was sent successfully.')
+      notifyNotificationsChanged()
+      logFrontendEvent({ category: 'notifications.compose', message: 'direct_message_sent', data: { recipientEmail: email } })
+      logFrontendEvent({ category: 'inbox.message', message: 'inbox_send_succeeded', data: { recipientEmail: email, messageId: sendResult.message?.id, threadId: sendResult.message?.threadId } })
+      await loadNotifications(1, filter, deletedView)
+      setPage(1)
     } catch (err) {
-      const messageText = err instanceof Error ? err.message : 'Could not mark thread as read.'
-      setError(messageText)
-      logFrontendEvent({ category: 'inbox.message', level: 'error', message: 'inbox_thread_mark_read_failed', data: { threadId: thread.threadId, error: messageText } })
+      if (err instanceof RecipientNotFoundError) {
+        navigate(`/invite-homie?email=${encodeURIComponent(err.recipientEmail)}&reason=recipient-not-found`, { state: { notice: err.message } })
+        return
+      }
+      const message = err instanceof Error ? err.message : 'Could not send message.'
+      setError(message)
+      logFrontendEvent({ category: 'notifications.compose', level: 'error', message: 'direct_message_send_failed', data: { recipientEmail: email, error: message } })
     } finally {
-      setMarkingReadThreadId(null)
+      setSending(false)
     }
   }
 
-  function renderConversation(message: InboxMessage) {
-    const conversation = getConversationFor(message)
-    if (conversation.length <= 1) return null
-
-    return (
-      <div className="inboxConversationThread">
-        <div className="small inboxConversationTitle">Conversation</div>
-        {conversation.map((item) => (
-          <div key={item.id} className={`inboxConversationItem ${sentByCurrentUser(item) ? 'inboxConversationItem--sent' : 'inboxConversationItem--received'}`}>
-            <div className="inboxConversationMeta">
-              <strong>{sentByCurrentUser(item) ? 'You' : (item.senderName || item.senderEmail)}</strong>
-              <span>{formatInboxTimestamp(item.createdAt)}</span>
-            </div>
-            <p>{item.body}</p>
-          </div>
-        ))}
-      </div>
-    )
+  async function handleCreateGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setGroupSaving(true)
+    setError(null)
+    setStatus(null)
+    try {
+      const memberEmails = parseMemberEmails(groupMemberEmails)
+      const response = await createMessageGroup({ name: groupName, memberEmails })
+      setGroupName('')
+      setGroupMemberEmails('')
+      setStatus(`Group ${response.group?.name || ''} created.`.trim())
+      logFrontendEvent({ category: 'notifications.group', message: 'message_group_created', data: { groupId: response.group?.id || null, memberCount: response.group?.members?.length || 0 } })
+      await loadNotifications(page, filter, deletedView)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not create group.'
+      setError(message)
+      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_create_failed', data: { error: message } })
+    } finally {
+      setGroupSaving(false)
+    }
   }
 
-  function renderReplyForm(message: InboxMessage) {
-    if (!replyingTo || messageThreadId(replyingTo) !== messageThreadId(message)) return null
-    return (
-      <form className="formStack inboxReplyForm" onSubmit={handleReplySubmit}>
-        <label className="label" htmlFor={`reply-${message.id}`}>Reply</label>
-        <textarea
-          id={`reply-${message.id}`}
-          className="input"
-          rows={4}
-          maxLength={2000}
-          required
-          value={replyBody}
-          onChange={(event) => setReplyBody(event.target.value)}
-          placeholder="Write your reply"
-        />
-        <div className="small">{replyBody.length}/2000 characters</div>
-        <div className="pageHeroActions inboxMessageActions">
-          <button className="btn btnPrimary btnSmall" type="submit" disabled={replySending || !replyBody.trim()}>{replySending ? 'Sending reply…' : 'Send Reply'}</button>
-          <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(null); setReplyBody('') }}>Cancel</button>
-        </div>
-      </form>
-    )
+  async function handleAddMember(group: MessageGroup) {
+    const email = String(memberEmailByGroup[group.id] || '').trim()
+    if (!email) return
+    setError(null)
+    setStatus(null)
+    try {
+      await addMessageGroupMember(group.id, email)
+      setMemberEmailByGroup((current) => ({ ...current, [group.id]: '' }))
+      setStatus(`${email} added to ${group.name}.`)
+      logFrontendEvent({ category: 'notifications.group', message: 'message_group_member_added', data: { groupId: group.id, memberEmail: email } })
+      await loadNotifications(page, filter, deletedView)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not add group member.'
+      setError(message)
+      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_member_add_failed', data: { groupId: group.id, memberEmail: email, error: message } })
+    }
   }
 
-  function renderThreadCard(thread: InboxThread) {
-    const message = thread.displayMessage
-    const isExpanded = expandedThreadId === thread.threadId
-    const latestMessage = getLatestConversationMessage(message)
-    const unreadText = thread.unreadCount === 1 ? '1 new' : `${thread.unreadCount} new`
+  async function handleRemoveMember(group: MessageGroup, email: string) {
+    setError(null)
+    setStatus(null)
+    try {
+      await removeMessageGroupMember(group.id, email)
+      setStatus(`${email} removed from ${group.name}.`)
+      logFrontendEvent({ category: 'notifications.group', message: 'message_group_member_removed', data: { groupId: group.id, memberEmail: email } })
+      await loadNotifications(page, filter, deletedView)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not remove group member.'
+      setError(message)
+      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_member_remove_failed', data: { groupId: group.id, memberEmail: email, error: message } })
+    }
+  }
 
-    return (
-      <article key={thread.threadId} className={`inboxMessageCard ${thread.unreadCount > 0 ? 'inboxMessageCard--unread' : 'inboxMessageCard--read'} ${isExpanded ? 'inboxMessageCard--expanded' : 'inboxMessageCard--collapsed'}`}>
-        <div className="inboxMessageTopline">
-          <span className="pill">Message</span>
-          {thread.unreadCount > 0 ? <span className="inboxUnreadIndicator">{unreadText}</span> : <span className="small">Latest {formatInboxTimestamp(latestMessage.createdAt)}</span>}
-        </div>
-        <div className="inboxMessageSender">From: {message.senderName || message.senderEmail}</div>
-        <div className="small">Latest activity {formatInboxTimestamp(latestMessage.createdAt)}</div>
-        {isExpanded ? (
-          <>
-            <p className="inboxMessageBody">{latestMessage.body}</p>
-            {renderConversation(message)}
-          </>
-        ) : (
-          <p className="inboxMessagePreview">{getMessagePreview(latestMessage.body)}</p>
-        )}
-        <div className="pageHeroActions inboxMessageActions">
-          <button type="button" className="btn btnSmall" aria-expanded={isExpanded} onClick={() => toggleThreadExpansion(thread)}>{isExpanded ? 'Collapse' : 'Expand'}</button>
-          {thread.unreadCount > 0 ? <button type="button" className="btn btnSmall" disabled={markingReadThreadId === thread.threadId} onClick={() => void handleMarkThreadRead(thread)}>{markingReadThreadId === thread.threadId ? 'Marking…' : 'Mark read'}</button> : null}
-          {isExpanded ? <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(getLatestConversationMessage(message)); setReplyBody('') }}>Reply</button> : null}
-        </div>
-        {isExpanded ? renderReplyForm(message) : null}
-      </article>
-    )
+  async function handleSendGroupMessage(group: MessageGroup) {
+    const body = String(messageBodyByGroup[group.id] || '').trim()
+    if (!body) return
+    setSendingGroupId(group.id)
+    setError(null)
+    setStatus(null)
+    try {
+      await sendMessageGroupMessage(group.id, body)
+      setMessageBodyByGroup((current) => ({ ...current, [group.id]: '' }))
+      setStatus(`Message sent to ${group.name}.`)
+      logFrontendEvent({ category: 'notifications.group', message: 'message_group_message_sent', data: { groupId: group.id } })
+      await loadNotifications(1, filter, deletedView)
+      setPage(1)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not send group message.'
+      setError(message)
+      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_message_send_failed', data: { groupId: group.id, error: message } })
+    } finally {
+      setSendingGroupId(null)
+    }
   }
 
   return (
-    <div className="container pageStack inboxPage">
+    <main className="page">
       <PageHero
-        eyebrow="Golf user messages"
-        title="Messages"
+        eyebrow="Golfer notifications"
+        title="Notifications"
+        subtitle="Messages, challenges, group conversations, and tournament updates in one inbox."
         actions={
           <Link
             className="btn btnLightGreen btnSmall"
             to="/profile"
-            onClick={() => logFrontendEvent({ category: 'inbox.navigation', message: 'return_to_profile_clicked', data: { unreadCount, receivedThreadCount: receivedThreads.length } })}
+            onClick={() => logFrontendEvent({ category: 'inbox.navigation', message: 'return_to_profile_clicked', data: { unreadCount: result?.unreadCount || 0, notificationCount: result?.total || 0 } })}
           >
             Return to Profile
           </Link>
         }
       />
 
-      <section className="card inboxListCard inboxMessagesListCard">
-        <div className="inboxSectionHeader inboxSectionHeader--withActions">
-          <div className="inboxSectionActions">
-            <span className={unreadCount > 0 ? 'inboxUnreadIndicator' : 'pill'}>{unreadCount > 0 ? `${unreadCount} unread` : 'No unread messages'}</span>
+      {error ? <div className="alert error" role="alert">{error}</div> : null}
+      {status ? <div className="alert success" role="status">{status}</div> : null}
+
+      <section className="card notificationToolbarCard" aria-label="Notification controls">
+        <div className="notificationToolbar">
+          <div className="notificationFilterRow" role="group" aria-label="Filter notifications">
+            {FILTERS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={`notificationFilterButton${!deletedView && filter === item.value ? ' active' : ''}`}
+                onClick={() => applyFilter(item.value)}
+              >
+                {item.label}
+                <span className="notificationFilterCount">{result?.categoryCounts?.[item.value] ?? 0}</span>
+              </button>
+            ))}
+            <button type="button" className={`notificationFilterButton${deletedView ? ' active' : ''}`} onClick={applyDeletedView}>
+              Deleted <span className="notificationFilterCount">{result?.categoryCounts?.deleted ?? 0}</span>
+            </button>
+          </div>
+          <div className="notificationToolbarActions">
+            <span className="notificationUnreadSummary">{result?.unreadCount || 0} unread</span>
             <button
               type="button"
-              className="btn btnPrimary btnSmall inboxSendMessageButton"
-              aria-expanded={messageComposeOpen}
+              className="notificationGroupsLink"
+              onClick={toggleGroups}
+            >
+              {groupsOpen ? 'Hide Groups' : 'Groups'}
+            </button>
+            <button
+              type="button"
+              className="button secondary small"
               onClick={() => {
-                setMessageComposeOpen(true)
-                logFrontendEvent({ category: 'inbox.messageCompose', message: 'send_message_button_opened' })
+                setComposeOpen((current) => !current)
+                if (!composeOpen) logFrontendEvent({ category: 'inbox.message', message: 'send_message_button_opened' })
               }}
             >
-              Send a Message
+              {composeOpen ? 'Close' : 'Send a Message'}
             </button>
           </div>
         </div>
+      </section>
 
-        {messageComposeOpen ? (
-          <form className="formStack inboxEmbeddedForm inboxMessageComposeForm" onSubmit={handleMessageSubmit}>
-            <div>
-              <label className="label" htmlFor="inboxRecipientEmail">Recipient email</label>
-              <input
-                id="inboxRecipientEmail"
-                className="input"
-                type="email"
-                required
-                value={recipientEmail}
-                onChange={(event) => setRecipientEmail(event.target.value)}
-                placeholder="golfer@example.com"
-              />
-            </div>
-
-            <div>
-              <label className="label" htmlFor="inboxMessageBody">Message</label>
-              <textarea
-                id="inboxMessageBody"
-                className="input"
-                rows={5}
-                required
-                maxLength={2000}
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                placeholder="Write your Golf Homiez message"
-              />
-              <div className="small">{body.length}/2000 characters</div>
-            </div>
-
-            {status ? <div className="inboxStatus inboxStatus--success">{status}</div> : null}
-            {error ? <div className="inboxStatus inboxStatus--error">{error}</div> : null}
-
-            <div className="pageHeroActions">
-              <button className="btn btnPrimary" type="submit" disabled={sending || !canSubmitMessage}>{sending ? 'Sending…' : 'Send Message'}</button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => {
-                  setMessageComposeOpen(false)
-                  logFrontendEvent({ category: 'inbox.messageCompose', message: 'send_message_form_cancelled' })
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+      {composeOpen ? (
+        <section className="card notificationComposeCard">
+          <h2>Send a golfer message</h2>
+          <form className="notificationComposeForm inboxMessageComposeForm" onSubmit={handleDirectMessage}>
+            <label>Golfer email<input type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} required /></label>
+            <label>Message<textarea rows={3} maxLength={2000} value={composeBody} onChange={(event) => setComposeBody(event.target.value)} required /></label>
+            <button className="button primary" type="submit" disabled={sending || !recipientEmail.trim() || !composeBody.trim()}>{sending ? 'Sending…' : 'Send message'}</button>
           </form>
-        ) : null}
+        </section>
+      ) : null}
 
-        {loading ? <div className="small">Loading messages…</div> : null}
-        {!loading && receivedThreads.length === 0 ? <div className="small">No inbox messages yet.</div> : null}
-        <div className="inboxMessageList">
-          {receivedThreads.map((thread) => renderThreadCard(thread))}
+      <section className="card notificationListCard">
+        <div className="notificationSectionHeader">
+          <div>
+            <h2>{deletedView ? 'Deleted notifications' : 'Recent notifications'}</h2>
+            <p>{expandedThread ? 'One conversation is open. Return to the list to view other notifications.' : `Showing up to ${PAGE_SIZE} conversations per page, newest activity first.`}</p>
+          </div>
+          {expandedThread ? <button type="button" className="button secondary small" onClick={() => { setExpandedThreadId(null); setReplyBody(''); setTournamentConversation(null); setCanMessageTournamentHost(false) }}>Back to notifications</button> : null}
+        </div>
+
+        {loading ? <p>Loading notifications…</p> : null}
+        {!loading && displayedNotifications.length === 0 ? <p className="emptyState">No notifications match this view.</p> : null}
+
+        <div className="notificationList">
+          {displayedNotifications.map((thread) => {
+            const expanded = expandedThreadId === thread.threadId
+            const message = thread.displayMessage
+            const groupState = message.groupId ? groups.find((group) => group.id === message.groupId) : null
+            const canReply = !deletedView && (thread.messageType === 'message' || (thread.messageType === 'group_message' && Boolean(message.groupId) && Boolean(groupState?.viewerActive)) || (thread.messageType === 'tournament_notification' && canMessageTournamentHost))
+            return (
+              <article key={thread.threadId} className={`notificationLineItem${thread.unreadCount > 0 ? ' unread' : ''}${expanded ? ' expanded' : ''}`}>
+                <button type="button" className="notificationLineItemButton" onClick={() => void openThread(thread)} aria-expanded={expanded}>
+                  <span className={`notificationTypeBadge notificationTypeBadge--${thread.category}`}>{notificationTypeLabel(thread)}</span>
+                  <span className="notificationLineMain">
+                    <span className="notificationLineTitle">
+                      {thread.unreadCount > 0 ? <span className="notificationUnreadDot" aria-label={`${thread.unreadCount} unread`} /> : null}
+                      <strong>{notificationSender(message)}</strong>
+                    </span>
+                  </span>
+                  <span className="notificationLineMeta"><span>{notificationDate(thread)}</span></span>
+                </button>
+
+                {expanded ? (
+                  <div className="notificationThreadPanel">
+                    <div className="notificationThreadActions">
+                      {thread.actionUrl ? <Link className="button primary small" to={thread.actionUrl}>{thread.category === 'challenges' ? 'View challenge' : 'View tournament'}</Link> : null}
+                      <button type="button" className="button secondary small" onClick={() => void handleDeleteOrRestore(thread, !deletedView)}>{deletedView ? 'Restore' : 'Delete'}</button>
+                    </div>
+
+                    {thread.messageType === 'tournament_notification' && (tournamentConversation?.recipients.length || 0) > 1 ? (
+                      <div className="notificationTournamentParticipantCount" role="status" aria-label={`${(tournamentConversation?.recipients.length || 0) + 1} people in this tournament message`}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3"/><circle cx="16.5" cy="9" r="2.5"/><path d="M3.5 19c.5-3.4 2.5-5.2 5.5-5.2s5 1.8 5.5 5.2"/><path d="M14.2 14.4c2.8-.7 5.5.8 6.3 3.8"/></svg>
+                        <span>{(tournamentConversation?.recipients.length || 0) + 1} people in this message</span>
+                      </div>
+                    ) : null}
+
+                    <div className="notificationConversation" aria-label="Conversation thread">
+                      {thread.messageType === 'tournament_notification' && tournamentConversationLoading ? <p className="small">Loading tournament dialogue…</p> : null}
+                      {(thread.messageType === 'tournament_notification'
+                        ? (tournamentConversation?.messages || thread.messages.slice(0, 1))
+                        : thread.messages
+                      ).map((threadMessage) => {
+                        const fromMe = String(threadMessage.senderUserId || '') === String(user?.id || '') || String(threadMessage.senderEmail || '').trim().toLowerCase() === currentUserEmail
+                        return (
+                          <div key={threadMessage.id} className={`notificationConversationMessage${fromMe ? ' fromMe' : ''}`}>
+                            <div className="notificationConversationMeta">
+                              <strong>{fromMe ? 'You' : notificationSender(threadMessage)}</strong>
+                              <span>{formatTimestamp(threadMessage.createdAt)}</span>
+                            </div>
+                            <p>{threadMessage.body}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {canReply ? (
+                      <form className="notificationReplyForm" onSubmit={(event) => void handleReply(event, thread)}>
+                        <label>
+                          {thread.messageType === 'tournament_notification'
+                            ? (tournamentConversation ? `Reply to ${tournamentHostName}` : `Send a message to ${tournamentHostName}`)
+                            : 'Add to this conversation'}
+                          <textarea rows={2} maxLength={2000} value={replyBody} onChange={(event) => setReplyBody(event.target.value)} required />
+                        </label>
+                        <button className="button primary small" type="submit" disabled={replySending || !replyBody.trim()}>{replySending ? 'Sending…' : 'Send'}</button>
+                      </form>
+                    ) : null}
+                    {thread.messageType === 'tournament_notification' && !tournamentConversationLoading && !canMessageTournamentHost ? <p className="notificationReadOnlyNotice">The tournament host is not currently available for inbox messages.</p> : null}
+                    {thread.messageType === 'group_message' && !groupState?.viewerActive ? <p className="notificationReadOnlyNotice">You were removed from this group. This conversation is preserved through your removal date, but you can no longer contribute.</p> : null}
+                  </div>
+                ) : null}
+              </article>
+            )
+          })}
+        </div>
+
+        {!expandedThread && result && result.totalPages > 1 ? (
+          <div className="notificationPagination" aria-label="Notification pages">
+            <button type="button" className="button secondary small" disabled={result.page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button>
+            <span>Page {result.page} of {result.totalPages}</span>
+            <button type="button" className="button secondary small" disabled={result.page >= result.totalPages} onClick={() => setPage((current) => current + 1)}>Next</button>
+          </div>
+        ) : null}
+      </section>
+
+      {groupsOpen ? (
+      <section ref={groupsSectionRef} id="message-groups" tabIndex={-1} className="card notificationGroupsCard">
+        <div className="notificationSectionHeader">
+          <div><h2>Message groups</h2><p>Create a group once, then keep one continuous conversation for that group.</p></div>
+        </div>
+        <form className="messageGroupCreateForm" onSubmit={handleCreateGroup}>
+          <label>Group name<input value={groupName} maxLength={120} onChange={(event) => setGroupName(event.target.value)} required /></label>
+          <label>Member emails<textarea rows={2} value={groupMemberEmails} onChange={(event) => setGroupMemberEmails(event.target.value)} placeholder="golfer1@example.com, golfer2@example.com" /></label>
+          <button className="button primary" type="submit" disabled={groupSaving || !groupName.trim()}>{groupSaving ? 'Creating…' : 'Create group'}</button>
+        </form>
+
+        <div className="messageGroupList">
+          {groups.length === 0 ? <p className="emptyState">You do not have any message groups yet.</p> : null}
+          {groups.map((group) => (
+            <div className="messageGroupItem" key={group.id}>
+              <div className="messageGroupHeader"><strong>{group.name}</strong><span>{group.members.filter((member) => member.active).length} active members</span></div>
+              <div className="messageGroupMembers">
+                {group.members.map((member) => (
+                  <span className={`messageGroupMember${member.active ? '' : ' removed'}`} key={`${group.id}:${member.email}`}>
+                    {member.name || member.email}{!member.active ? ' · removed' : ''}
+                    {group.canManage && member.active && member.email.toLowerCase() !== group.createdByEmail.toLowerCase() ? <button type="button" onClick={() => void handleRemoveMember(group, member.email)}>Remove</button> : null}
+                  </span>
+                ))}
+              </div>
+              {group.canManage ? (
+                <div className="messageGroupAddMember">
+                  <input type="email" aria-label={`Add member to ${group.name}`} placeholder="golfer@example.com" value={memberEmailByGroup[group.id] || ''} onChange={(event) => setMemberEmailByGroup((current) => ({ ...current, [group.id]: event.target.value }))} />
+                  <button type="button" className="button secondary small" onClick={() => void handleAddMember(group)} disabled={!String(memberEmailByGroup[group.id] || '').trim()}>Add member</button>
+                </div>
+              ) : null}
+              {group.viewerActive ? (
+                <div className="messageGroupSendMessage">
+                  <textarea rows={2} maxLength={2000} aria-label={`Message ${group.name}`} placeholder={`Message ${group.name}`} value={messageBodyByGroup[group.id] || ''} onChange={(event) => setMessageBodyByGroup((current) => ({ ...current, [group.id]: event.target.value }))} />
+                  <button type="button" className="button primary small" onClick={() => void handleSendGroupMessage(group)} disabled={sendingGroupId === group.id || !String(messageBodyByGroup[group.id] || '').trim()}>{sendingGroupId === group.id ? 'Sending…' : 'Send to group'}</button>
+                </div>
+              ) : <div className="small">Conversation access ended when you were removed from this group.</div>}
+            </div>
+          ))}
         </div>
       </section>
-    </div>
+      ) : null}
+    </main>
   )
 }

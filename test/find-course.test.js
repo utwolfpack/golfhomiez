@@ -188,7 +188,7 @@ test('Find a Golf Course frontend route, profile-state default, navigation order
   const menuStart = nav.indexOf('{restrictedSession ? null : (')
   const menuEnd = nav.indexOf('<button type="button" className="navDropdownItem" onClick={() => void handleLogout()}>Logout</button>', menuStart)
   const golferMenu = nav.slice(menuStart, menuEnd)
-  const orderedLabels = ['My Scores', 'My Tournaments', 'Challenges', 'Find a Tournament', 'Find a Golf Course', 'Profile']
+  const orderedLabels = ['My Scores', 'My Tournaments', 'Challenges', 'Find a Tournament', 'Find a Golf Course', 'Notifications', 'Profile']
   let previousIndex = -1
   for (const label of orderedLabels) {
     const index = golferMenu.indexOf(`>${label}</NavLink>`)
@@ -198,6 +198,7 @@ test('Find a Golf Course frontend route, profile-state default, navigation order
   assert.match(nav, /challenges_selected/)
   assert.match(nav, /find_tournament_selected/)
   assert.match(nav, /find_golf_course_selected/)
+  assert.match(nav, /notifications_selected/)
 
   assert.match(hostPortal, /Golf-course host accounts/)
   assert.match(hostPortal, /Add host account/)

@@ -7036,3 +7036,231 @@ button.navDropdownItem{font:inherit;}
     text-align:center;
   }
 }
+
+/* Unified notifications, groups, and tournament registered-player messaging */
+.navNotificationBell{
+  position:relative;
+  width:42px;
+  height:42px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  color:inherit;
+  text-decoration:none;
+  border:1px solid rgba(255,255,255,.28);
+}
+.navNotificationBell:hover,
+.navNotificationBell:focus-visible{background:rgba(255,255,255,.12)}
+.navNotificationBellIcon{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.navNotificationBellCount{
+  position:absolute;
+  top:-6px;
+  right:-8px;
+  min-width:22px;
+  height:22px;
+  padding:0 5px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:#b91c1c;
+  color:#fff;
+  border:2px solid #fff;
+  font-size:11px;
+  font-weight:800;
+  line-height:1;
+}
+
+.notificationToolbarCard,.notificationComposeCard,.notificationListCard,.notificationGroupsCard{margin-top:16px}
+.notificationToolbar,.notificationSectionHeader,.messageGroupHeader,.tournamentMessagingHeader,.tournamentMessagingRecipientTools,.tournamentMessagingActions{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.notificationFilterRow{display:flex;gap:8px;flex-wrap:wrap}
+.notificationFilterButton{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  min-height:36px;
+  border:1px solid #cbd5e1;
+  border-radius:999px;
+  background:#fff;
+  color:#334155;
+  padding:7px 12px;
+  font:inherit;
+  font-weight:700;
+  cursor:pointer;
+}
+.notificationFilterButton.active{background:#0b3d1d;color:#fff;border-color:#0b3d1d}
+.notificationFilterCount{min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(148,163,184,.2);font-size:11px}
+.notificationToolbarActions{display:flex;align-items:center;gap:10px}
+.notificationUnreadSummary{font-weight:800;color:#0b3d1d}
+.notificationComposeForm,.messageGroupCreateForm{display:grid;gap:12px}
+.notificationComposeForm label,.messageGroupCreateForm label,.notificationReplyForm label,.tournamentMessagingBody{display:grid;gap:6px;font-weight:700}
+.notificationComposeForm input,.notificationComposeForm textarea,.messageGroupCreateForm input,.messageGroupCreateForm textarea,.notificationReplyForm textarea,.messageGroupAddMember input,.tournamentMessagingBody textarea{width:100%;border:1px solid #cbd5e1;border-radius:9px;padding:10px 12px;font:inherit;background:#fff;color:#0f172a}
+.notificationSectionHeader h2{margin:0}
+.notificationSectionHeader p{margin:4px 0 0;color:#64748b}
+.notificationList{display:grid;gap:8px;margin-top:14px}
+.notificationLineItem{border:1px solid #dbe3ea;border-radius:12px;background:#fff;overflow:hidden}
+.notificationLineItem.unread{border-left:5px solid #0b3d1d}
+.notificationLineItemButton{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;text-align:left;border:0;background:transparent;padding:12px;cursor:pointer;color:inherit;font:inherit}
+.notificationLineItemButton:hover,.notificationLineItemButton:focus-visible{background:#f8fafc}
+.notificationTypeBadge{display:inline-flex;align-items:center;justify-content:center;min-width:96px;padding:5px 8px;border-radius:999px;background:#eef2f7;color:#334155;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.notificationTypeBadge--challenges{background:#fff7ed;color:#9a3412}
+.notificationTypeBadge--tournaments{background:#ecfdf5;color:#166534}
+.notificationLineMain{min-width:0;display:grid;gap:3px}
+.notificationLineTitle{display:flex;align-items:center;gap:7px;min-width:0}
+.notificationLineTitle strong,.notificationPreview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notificationPreview{color:#475569;font-size:14px}
+.notificationUnreadDot{width:9px;height:9px;border-radius:999px;background:#16a34a;flex:0 0 auto}
+.notificationLineMeta{display:grid;gap:2px;text-align:right;color:#64748b;font-size:12px;white-space:nowrap}
+.notificationThreadPanel{border-top:1px solid #e2e8f0;padding:12px;background:#f8fafc}
+.notificationThreadActions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.notificationConversation{display:grid;gap:8px}
+.notificationConversationMessage{max-width:82%;padding:9px 11px;border:1px solid #dbe3ea;border-radius:10px;background:#fff}
+.notificationConversationMessage.fromMe{margin-left:auto;background:#edf7ef;border-color:#c8e0cf}
+.notificationConversationMeta{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#64748b}
+.notificationConversationMessage p{margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.notificationReplyForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;margin-top:12px}
+.notificationReadOnlyNotice{margin:12px 0 0;padding:10px;border-radius:9px;background:#f1f5f9;color:#475569}
+.notificationPagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:16px}
+.messageGroupList{display:grid;gap:10px;margin-top:14px}
+.messageGroupItem{border:1px solid #dbe3ea;border-radius:12px;padding:12px;background:#f8fafc}
+.messageGroupHeader span{color:#64748b;font-size:12px}
+.messageGroupMembers{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+.messageGroupMember{display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd5e1;border-radius:999px;padding:5px 9px;background:#fff;font-size:12px}
+.messageGroupMember.removed{opacity:.62}
+.messageGroupMember button{border:0;background:transparent;color:#b91c1c;font:inherit;font-weight:700;cursor:pointer;padding:0}
+.messageGroupAddMember{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:10px}
+
+.tournamentMessagingPanel{padding:12px;background:#f8fafc}
+.tournamentMessagingRecipients{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:10px 0;max-height:220px;overflow:auto}
+.tournamentMessagingRecipient{display:flex;align-items:flex-start;gap:8px;border:1px solid #dbe3ea;border-radius:9px;padding:8px;background:#fff;cursor:pointer}
+.tournamentMessagingRecipient input{margin-top:3px}
+.tournamentMessagingRecipient span{display:grid;min-width:0}
+.tournamentMessagingRecipient small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b}
+.tournamentMessagingBody{margin-top:10px}
+.tournamentMessagingActions{justify-content:flex-start;margin-top:10px}
+
+@media (max-width:760px){
+  .navNotificationBell{width:38px;height:38px}
+  .navNotificationBellIcon{width:21px;height:21px}
+  .notificationToolbar{align-items:stretch}
+  .notificationToolbarActions{width:100%;justify-content:space-between}
+  .notificationFilterRow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .notificationFilterButton{justify-content:space-between;width:100%;border-radius:10px}
+  .notificationLineItemButton{grid-template-columns:auto minmax(0,1fr);gap:8px;padding:10px}
+  .notificationTypeBadge{min-width:0;align-self:start}
+  .notificationLineMeta{grid-column:2;text-align:left;display:flex;gap:8px;flex-wrap:wrap}
+  .notificationConversationMessage{max-width:94%}
+  .notificationReplyForm,.messageGroupAddMember{grid-template-columns:1fr}
+  .tournamentMessagingRecipients{grid-template-columns:1fr}
+  .tournamentMessagingActions .button{width:100%}
+}
+.messageGroupSendMessage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin-top:10px}
+.messageGroupSendMessage textarea{width:100%;border:1px solid #cbd5e1;border-radius:9px;padding:10px 12px;font:inherit;background:#fff;color:#0f172a;resize:vertical}
+@media (max-width:760px){.messageGroupSendMessage{grid-template-columns:1fr}}
+
+.notificationGroupsLink{
+  border:0;
+  background:transparent;
+  color:#0b3d1d;
+  padding:6px 2px;
+  font:inherit;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+.notificationGroupsLink:hover,.notificationGroupsLink:focus-visible{color:#166534}
+.notificationGroupsCard:focus{outline:2px solid rgba(22,163,74,.35);outline-offset:3px}
+.notificationTournamentParticipantCount{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  width:max-content;
+  max-width:100%;
+  margin:0 0 10px;
+  padding:6px 10px;
+  border:1px solid #cfe0d3;
+  border-radius:999px;
+  background:#edf7ef;
+  color:#31563d;
+  font-size:12px;
+  font-weight:800;
+}
+.notificationTournamentParticipantCount svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+
+.tournamentBuilderCollapsibleCard{padding:12px;background:#f8fafc}
+.tournamentBuilderCollapsibleContent,.tournamentMessagingCompose{margin-top:12px;padding-top:12px;border-top:1px solid #dbe3ea}
+.tournamentSectionToggleLink{
+  border:0;
+  background:transparent;
+  color:#0b3d1d;
+  padding:2px 0;
+  font:inherit;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+.tournamentSectionToggleLink:hover,.tournamentSectionToggleLink:focus-visible{color:#166534}
+.tournamentSectionToggleLink::after{content:' ▾';display:inline-block;text-decoration:none;transition:transform .16s ease}
+.tournamentSectionToggleLink[aria-expanded="true"]::after{transform:rotate(180deg)}
+
+.tournamentMessagingHeaderMeta{display:grid;justify-items:end;gap:5px;margin-left:auto;text-align:right}
+.tournamentMessagesLink{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border:0;
+  background:transparent;
+  padding:2px 0;
+  color:#0b3d1d;
+  font:inherit;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+.tournamentMessagesLink:hover,.tournamentMessagesLink:focus-visible{color:#166534}
+.tournamentMessagesNotification{display:inline-flex;align-items:center;gap:3px;text-decoration:none;font-size:12px}
+.tournamentMessagesBellIcon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.tournamentMessagingActionsSingle{justify-content:flex-end}
+.tournamentMessageSendButton{border-radius:999px;padding-inline:22px;min-height:42px;font-weight:800}
+
+.tournamentMessagesModalOverlay{z-index:1200}
+.tournamentMessagesModal{width:min(920px,calc(100vw - 32px));max-height:min(84vh,900px);overflow:auto;padding:20px}
+.tournamentMessagesModal:focus{outline:2px solid rgba(22,163,74,.35);outline-offset:2px}
+.tournamentMessagesModalHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid #e2e8f0;padding-bottom:12px;margin-bottom:14px}
+.tournamentMessagesModalHeader h2{margin:0}
+.tournamentMessagesModalHeader p{margin:4px 0 0;color:#64748b}
+.tournamentMessageThreadList{display:grid;gap:14px}
+.tournamentMessageThread{border:1px solid #dbe3ea;border-radius:14px;background:#f8fafc;padding:14px}
+.tournamentMessageThreadHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:10px;color:#475569;font-size:12px}
+.tournamentMessageThreadHeader>div{display:grid;gap:3px;min-width:0}
+.tournamentMessageThreadHeader strong{color:#0f172a;font-size:14px}
+.tournamentMessageThreadHeader>div>span{overflow-wrap:anywhere}
+.tournamentMessageDialogue{display:grid;gap:8px}
+.tournamentMessageDialogueEntry{max-width:86%;border:1px solid #dbe3ea;border-radius:12px;padding:9px 11px;background:#fff}
+.tournamentMessageDialogueEntry--host,.tournamentMessageDialogueEntry--organizer{margin-left:auto;background:#edf7ef;border-color:#c8e0cf}
+.tournamentMessageDialogueMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#64748b;font-size:12px}
+.tournamentMessageDialogueEntry p{margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.tournamentMessageReplyBox{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:end;margin-top:12px}
+.tournamentMessageReplyBox textarea{width:100%;border:1px solid #cbd5e1;border-radius:11px;padding:10px 12px;font:inherit;background:#fff;color:#0f172a;resize:vertical}
+.tournamentMessageReplyButton{border-radius:999px;min-width:88px}
+
+@media (max-width:760px){
+  .tournamentMessagingHeaderMeta{width:100%;justify-items:start;text-align:left}
+  .tournamentMessagingActionsSingle{justify-content:stretch}
+  .tournamentMessageSendButton{width:100%}
+  .tournamentMessagesModal{width:min(96vw,920px);padding:14px}
+  .tournamentMessagesModalHeader,.tournamentMessageThreadHeader{align-items:stretch;flex-direction:column}
+  .tournamentMessageDialogueEntry{max-width:95%}
+  .tournamentMessageReplyBox{grid-template-columns:1fr}
+  .tournamentMessageReplyButton{width:100%}
+}

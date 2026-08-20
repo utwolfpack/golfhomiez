@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import HoleByHoleScorecard, { type PendingHoleScoreSaveHandler } from '../components/HoleByHoleScorecard'
 import TeeColorSelector from '../components/TeeColorSelector'
 import GolfCourseInput from '../components/GolfCourseInput'
@@ -183,6 +183,7 @@ function isChallengeMessage(message: InboxMessage) {
 
 export default function Challenges() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const [messages, setMessages] = useState<InboxMessage[]>([])
   const [sentMessages, setSentMessages] = useState<InboxMessage[]>([])
@@ -224,6 +225,7 @@ export default function Challenges() {
   const [scorecardResumeHoles, setScorecardResumeHoles] = useState<Record<string, number>>({})
   const [refreshingLeaderboard, setRefreshingLeaderboard] = useState(false)
   const autoMarkedReadThreadIds = useRef(new Set<string>())
+  const deepLinkedThreadRef = useRef<string | null>(null)
   const teamChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const individualChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const [completingChallengeThreadId, setCompletingChallengeThreadId] = useState<string | null>(null)
@@ -256,6 +258,17 @@ export default function Challenges() {
     const selectedThreads = visibleChallengeThreads.filter((thread) => thread.threadId === expandedThreadId)
     return selectedThreads.length > 0 ? selectedThreads : visibleChallengeThreads
   }, [visibleChallengeThreads, expandedThreadId])
+  useEffect(() => {
+    const threadId = new URLSearchParams(location.search).get('thread')
+    if (!threadId || deepLinkedThreadRef.current === threadId) return
+    const thread = teamChallengeThreads.find((item) => item.threadId === threadId)
+    if (!thread) return
+    const challenge = getInitialChallengeMessage(thread)
+    deepLinkedThreadRef.current = threadId
+    setChallengeView(challenge.challengeDeletedAt ? 'deleted' : (isChallengeCompleted(challenge) ? 'completed' : 'active'))
+    setExpandedThreadId(threadId)
+    logFrontendEvent({ category: 'inbox.challenge.navigation', message: 'challenge_notification_deep_link_opened', data: { threadId, deleted: Boolean(challenge.challengeDeletedAt), completed: isChallengeCompleted(challenge) } })
+  }, [location.search, teamChallengeThreads])
   const allConversationMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentMessages, ...sentChallenges]), [messages, sentMessages, sentChallenges])
 
   function rememberScorecardResumeHole(key: string, holeNumber: number | null | undefined) {

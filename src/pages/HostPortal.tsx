@@ -8,6 +8,7 @@ import { formatFriendlyDateTime } from '../lib/time-format'
 import TournamentTemplateFields, { TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
+import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
 import { createAdditionalHostAccount as createAdditionalHostLogin, deleteHostAccount as deleteHostLogin, fetchHostPortal, transferHostAdmin } from '../lib/host-auth'
 import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_CHECK_IN_TIME, DEFAULT_TOURNAMENT_TEE_TIME, emptyTournamentTemplateData } from '../lib/tournament-templates'
 import { getFriendlyTournamentError, validateTournamentForSave } from '../lib/tournament-errors'
@@ -149,6 +150,7 @@ function tournamentMemberStatusClass(member: { registered?: boolean; verified?: 
 
 function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   const registrations = tournament.registrations || []
+  const [open, setOpen] = useState(false)
   const [selectedRegistration, setSelectedRegistration] = useState<(typeof registrations)[number] | null>(null)
   const openRegistration = (registration: (typeof registrations)[number]) => {
     setSelectedRegistration(registration)
@@ -159,29 +161,47 @@ function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
     event.preventDefault()
     openRegistration(registration)
   }
+  const toggleOpen = () => {
+    const nextOpen = !open
+    setOpen(nextOpen)
+    if (!nextOpen) setSelectedRegistration(null)
+    logFrontendEvent({ category: 'host.portal', message: nextOpen ? 'host_tournament_teams_section_opened' : 'host_tournament_teams_section_closed', data: { tournamentId: tournament.id, registeredTeamCount: tournamentStats(tournament).registeredTeamCount } })
+  }
   return (
-    <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
-      <div style={{ fontWeight: 700 }}>Teams signed up ({tournamentStats(tournament).registeredTeamCount})</div>
-      <TournamentCapacitySummary tournament={tournament} />
-      {registrations.length === 0 ? (
-        <div className="small">No teams have signed up yet.</div>
-      ) : (
-        <div className="tournament-team-registration-lines" style={{ marginTop: 8 }}>
-          {registrations.map((registration) => (
-            <button
-              key={registration.id}
-              type="button"
-              className="tournament-team-registration-line"
-              onClick={() => openRegistration(registration)}
-              onKeyDown={(event) => onRegistrationKeyDown(event, registration)}
-            >
-              <span><span>Team name</span><strong>{registration.teamName || registration.name || 'Registered team'}</strong></span>
-              <span><span>Date registered</span><strong>{formatRegisteredAt(registration.registeredAt)}</strong></span>
-              <span><span>Registrant</span><strong>{registration.name || 'Registered golfer'}</strong><small>{registration.email}</small></span>
-            </button>
-          ))}
+    <div className="card tournamentBuilderCollapsibleCard">
+      <button
+        type="button"
+        className="tournamentSectionToggleLink"
+        aria-expanded={open}
+        aria-controls={`host-teams-signed-up-${tournament.id}`}
+        onClick={toggleOpen}
+      >
+        Teams signed up ({tournamentStats(tournament).registeredTeamCount})
+      </button>
+      {open ? (
+        <div id={`host-teams-signed-up-${tournament.id}`} className="tournamentBuilderCollapsibleContent">
+          <TournamentCapacitySummary tournament={tournament} />
+          {registrations.length === 0 ? (
+            <div className="small">No teams have signed up yet.</div>
+          ) : (
+            <div className="tournament-team-registration-lines" style={{ marginTop: 8 }}>
+              {registrations.map((registration) => (
+                <button
+                  key={registration.id}
+                  type="button"
+                  className="tournament-team-registration-line"
+                  onClick={() => openRegistration(registration)}
+                  onKeyDown={(event) => onRegistrationKeyDown(event, registration)}
+                >
+                  <span><span>Team name</span><strong>{registration.teamName || registration.name || 'Registered team'}</strong></span>
+                  <span><span>Date registered</span><strong>{formatRegisteredAt(registration.registeredAt)}</strong></span>
+                  <span><span>Registrant</span><strong>{registration.name || 'Registered golfer'}</strong><small>{registration.email}</small></span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      ) : null}
       {selectedRegistration ? (
         <div className="modalOverlay" role="dialog" aria-modal="true" aria-label={`${selectedRegistration.teamName || 'Team'} registration details`} onClick={() => setSelectedRegistration(null)}>
           <div className="modalCard tournament-registration-modal" onClick={(event) => event.stopPropagation()}>
@@ -240,6 +260,7 @@ export default function HostPortal() {
   const [form, setForm] = useState<TournamentInput>(() => createEmptyTournamentForm())
   const [editForm, setEditForm] = useState<TournamentInput | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [tournamentInfoOpen, setTournamentInfoOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
@@ -389,6 +410,7 @@ export default function HostPortal() {
     setCreateAdditionalFieldsOpen(false)
     setEditingId(tournament.id)
     setEditForm(toEditForm(tournament))
+    setTournamentInfoOpen(false)
     setError(null)
     setSuccess(null)
     logFrontendEvent({
@@ -505,6 +527,7 @@ export default function HostPortal() {
       setSuccess(['published', 'completed'].includes(String(saved.status || '').toLowerCase()) && (saved.registrationUrl || saved.portalUrl) ? `Tournament updated. ${saved.status === 'completed' ? 'Tournament page URL' : 'Registration URL'}: ${saved.registrationUrl || saved.portalUrl}` : 'Tournament updated.')
       setEditingId(null)
       setEditForm(null)
+      setTournamentInfoOpen(false)
       logFrontendEvent({ category: 'host.portal', message: 'host_tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || editForm.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((editForm.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((editForm.templateData as any)?.tournamentSummary || '').length, requestedStartDate: editForm.startDate || null, storedStartDate: saved.startDate || null, userTimeZone: getUserTimeZone() } })
     } catch (err) {
       const message = getFriendlyTournamentError(err, 'save')
@@ -822,12 +845,12 @@ export default function HostPortal() {
 
             {!createTournamentOpen ? (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div>
-                    <strong>{showArchivedTournaments ? 'Archived tournaments' : 'Tournaments hosted here'}</strong>
-                    {showArchivedTournaments ? <div className="small">Archived tournaments remain stored and can be restored to the active list.</div> : null}
-                  </div>
-                  {!editingId ? (
+                {!editingId ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div>
+                      <strong>{showArchivedTournaments ? 'Archived tournaments' : 'Tournaments hosted here'}</strong>
+                      {showArchivedTournaments ? <div className="small">Archived tournaments remain stored and can be restored to the active list.</div> : null}
+                    </div>
                     <button
                       className="btn"
                       type="button"
@@ -843,8 +866,8 @@ export default function HostPortal() {
                     >
                       {showArchivedTournaments ? `View active tournaments (${activeHostedTournaments.length})` : `View archived tournaments (${archivedHostedTournaments.length})`}
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
                 {!editingId ? (
                   <div className="golfCourseTournamentControls hostTournamentYearControls" aria-label="Host tournament year filters">
                     <div className="golfCourseTournamentYearTabs">
@@ -883,76 +906,96 @@ export default function HostPortal() {
                     {editingId === tournament.id && editForm ? (
                       <form onSubmit={onSaveTournament} className="formStack" onClick={(e) => e.stopPropagation()}>
                         <RegisteredGolfers tournament={tournament} />
-                        <div>
-                          <label className="label">Status</label>
-                          <select className="input" value={editForm.status || 'draft'} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, status: e.target.value }) : prev)}>
-                            <option value="draft">Draft</option>
-                            <option value="published">Published</option>
-                            <option value="completed">Completed</option>
-                            <option value="cancelled">Cancelled</option>
-                          </select>
-                        </div>
-                        {editForm.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
-                        <div>
-                          <label className="label">Tournament name</label>
-                          <input className="input" value={editForm.name} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, name: e.target.value }) : prev)} />
-                        </div>
-                        <div>
-                          <label className="label">Description</label>
-                          <textarea className="input" rows={4} value={editForm.description || ''} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, description: e.target.value }) : prev)} />
-                        </div>
-                        <div className="formRow formRow--split">
-                          <div>
-                            <label className="label">Tournament date</label>
-                            <input className="input" type="date" value={editForm.startDate || ''} onChange={(e) => { setEditForm((prev) => prev ? ({ ...prev, startDate: e.target.value, endDate: null }) : prev); setError(null) }} />
-                          </div>
-                        </div>
-                        <TournamentRegistrationDeadlineField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
-                        <div>
-                          <label className="label">Number of teams to play in the tournament</label>
-                          <input className="input" type="number" min={1} step={1} value={editForm.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }) : prev)} />
-                        </div>
-                        <TournamentTemplateFields value={editForm} hideRegistrationDeadline onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
-                        <TournamentStartScheduleManager
-                          tournamentId={tournament.id}
-                          actor="host"
-                          registrations={tournament.registrations || []}
-                          assignments={tournament.startAssignments || []}
-                          startType={String((editForm.templateData as any)?.startType || 'shotgun')}
-                          firstStartTime={String((editForm.templateData as any)?.teeTime || DEFAULT_TOURNAMENT_TEE_TIME)}
-                          intervalMinutes={Number((editForm.templateData as any)?.teeTimeIntervalMinutes || DEFAULT_TEE_TIME_INTERVAL_MINUTES)}
-                          onAssignmentsChange={(startAssignments) => setPortalData((previous) => previous ? {
-                            ...previous,
-                            tournaments: (previous.tournaments || []).map((item) => item.id === tournament.id ? { ...item, startAssignments } : item),
-                          } : previous)}
-                        />
-                        <TournamentSummaryField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
-                        <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
-                          <div style={{ fontWeight: 700 }}>Organizer</div>
-                          {tournament.organizerEmail ? (
-                            <>
-                              <div className="small" style={{ marginTop: 4 }}>{tournament.organizerName || tournament.organizerEmail}</div>
-                              {tournament.inviteUrl ? <div className="small">Organizer link: <a href={tournament.inviteUrl}>{tournament.inviteUrl}</a></div> : null}
-                              <button className="btn" style={{ marginTop: 8 }} type="button" onClick={() => { void onSendInvite(tournament.id, tournament.organizerEmail || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Resend organizer invite'}</button>
-                            </>
-                          ) : (
-                            <>
-                              <label className="label" htmlFor={`organizer-email-${tournament.id}`}>Organizer email (optional)</label>
-                              <div style={{ display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
-                                <input
-                                  id={`organizer-email-${tournament.id}`}
-                                  className="input"
-                                  type="email"
-                                  style={{ flex: '1 1 260px' }}
-                                  value={inviteEmailByTournament[tournament.id] || ''}
-                                  onChange={(e) => setInviteEmailByTournament((current) => ({ ...current, [tournament.id]: e.target.value }))}
-                                  placeholder="organizer@example.com"
-                                />
-                                <button className="btn" type="button" onClick={() => { void onSendInvite(tournament.id, inviteEmailByTournament[tournament.id] || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Invite organizer'}</button>
-                              </div>
-                              <div className="small" style={{ marginTop: 4 }}>The tournament can remain host-managed without an organizer.</div>
-                            </>
-                          )}
+                        <TournamentMessagingPanel tournament={tournament} actor="host" />
+                        <div className="card tournamentBuilderCollapsibleCard">
+                          <button
+                            type="button"
+                            className="tournamentSectionToggleLink"
+                            aria-expanded={tournamentInfoOpen}
+                            aria-controls={`host-tournament-info-${tournament.id}`}
+                            onClick={() => {
+                              const nextOpen = !tournamentInfoOpen
+                              setTournamentInfoOpen(nextOpen)
+                              logFrontendEvent({ category: 'host.portal', message: nextOpen ? 'host_tournament_info_opened' : 'host_tournament_info_closed', data: { tournamentId: tournament.id } })
+                            }}
+                          >
+                            Tournament Info
+                          </button>
+                          {tournamentInfoOpen ? (
+                            <div id={`host-tournament-info-${tournament.id}`} className="formStack tournamentBuilderCollapsibleContent">
+                                                      <div>
+                                                        <label className="label">Status</label>
+                                                        <select className="input" value={editForm.status || 'draft'} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, status: e.target.value }) : prev)}>
+                                                          <option value="draft">Draft</option>
+                                                          <option value="published">Published</option>
+                                                          <option value="completed">Completed</option>
+                                                          <option value="cancelled">Cancelled</option>
+                                                        </select>
+                                                      </div>
+                                                      {editForm.status === 'cancelled' ? <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>This tournament is scheduled to be deleted because it is cancelled</div> : null}
+                                                      <div>
+                                                        <label className="label">Tournament name</label>
+                                                        <input className="input" value={editForm.name} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, name: e.target.value }) : prev)} />
+                                                      </div>
+                                                      <div>
+                                                        <label className="label">Description</label>
+                                                        <textarea className="input" rows={4} value={editForm.description || ''} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, description: e.target.value }) : prev)} />
+                                                      </div>
+                                                      <div className="formRow formRow--split">
+                                                        <div>
+                                                          <label className="label">Tournament date</label>
+                                                          <input className="input" type="date" value={editForm.startDate || ''} onChange={(e) => { setEditForm((prev) => prev ? ({ ...prev, startDate: e.target.value, endDate: null }) : prev); setError(null) }} />
+                                                        </div>
+                                                      </div>
+                                                      <TournamentRegistrationDeadlineField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                                      <div>
+                                                        <label className="label">Number of teams to play in the tournament</label>
+                                                        <input className="input" type="number" min={1} step={1} value={editForm.teamSlotLimit ?? DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, teamSlotLimit: readTeamSlotLimit(Number(e.target.value)) }) : prev)} />
+                                                      </div>
+                                                      <TournamentTemplateFields value={editForm} hideRegistrationDeadline onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                                      <TournamentStartScheduleManager
+                                                        tournamentId={tournament.id}
+                                                        actor="host"
+                                                        registrations={tournament.registrations || []}
+                                                        assignments={tournament.startAssignments || []}
+                                                        startType={String((editForm.templateData as any)?.startType || 'shotgun')}
+                                                        firstStartTime={String((editForm.templateData as any)?.teeTime || DEFAULT_TOURNAMENT_TEE_TIME)}
+                                                        intervalMinutes={Number((editForm.templateData as any)?.teeTimeIntervalMinutes || DEFAULT_TEE_TIME_INTERVAL_MINUTES)}
+                                                        onAssignmentsChange={(startAssignments) => setPortalData((previous) => previous ? {
+                                                          ...previous,
+                                                          tournaments: (previous.tournaments || []).map((item) => item.id === tournament.id ? { ...item, startAssignments } : item),
+                                                        } : previous)}
+                                                      />
+                                                      <TournamentSummaryField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                                      <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
+                                                        <div style={{ fontWeight: 700 }}>Organizer</div>
+                                                        {tournament.organizerEmail ? (
+                                                          <>
+                                                            <div className="small" style={{ marginTop: 4 }}>{tournament.organizerName || tournament.organizerEmail}</div>
+                                                            {tournament.inviteUrl ? <div className="small">Organizer link: <a href={tournament.inviteUrl}>{tournament.inviteUrl}</a></div> : null}
+                                                            <button className="btn" style={{ marginTop: 8 }} type="button" onClick={() => { void onSendInvite(tournament.id, tournament.organizerEmail || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Resend organizer invite'}</button>
+                                                          </>
+                                                        ) : (
+                                                          <>
+                                                            <label className="label" htmlFor={`organizer-email-${tournament.id}`}>Organizer email (optional)</label>
+                                                            <div style={{ display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
+                                                              <input
+                                                                id={`organizer-email-${tournament.id}`}
+                                                                className="input"
+                                                                type="email"
+                                                                style={{ flex: '1 1 260px' }}
+                                                                value={inviteEmailByTournament[tournament.id] || ''}
+                                                                onChange={(e) => setInviteEmailByTournament((current) => ({ ...current, [tournament.id]: e.target.value }))}
+                                                                placeholder="organizer@example.com"
+                                                              />
+                                                              <button className="btn" type="button" onClick={() => { void onSendInvite(tournament.id, inviteEmailByTournament[tournament.id] || '') }} disabled={sendingInviteId === tournament.id}>{sendingInviteId === tournament.id ? 'Sending…' : 'Invite organizer'}</button>
+                                                            </div>
+                                                            <div className="small" style={{ marginTop: 4 }}>The tournament can remain host-managed without an organizer.</div>
+                                                          </>
+                                                        )}
+                                                      </div>
+                            </div>
+                          ) : null}
                         </div>
                         {error ? (
                           <HostPortalErrorMessage
@@ -967,6 +1010,7 @@ export default function HostPortal() {
                             logFrontendEvent({ category: 'host.portal', message: 'host_tournament_edit_cancelled', data: { tournamentId: editingId } })
                             setEditingId(null)
                             setEditForm(null)
+                            setTournamentInfoOpen(false)
                             setError(null)
                           }}>Cancel</button>
                         </div>
