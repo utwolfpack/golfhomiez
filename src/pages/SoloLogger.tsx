@@ -13,6 +13,7 @@ import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import type { HoleScoreDetail, SoloScoreEntry } from '../types'
 import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from '../lib/tee-colors'
+import { fetchProfile } from '../lib/profile'
 
 type ExistingSoloRoundResponse = {
   score: SoloScoreEntry | null
@@ -38,6 +39,14 @@ function getProvidedHoleScoreTotal(holes: HoleScoreDetail[]) {
   return providedHoleScoreTotal(holes)
 }
 
+function resolveProfileStateCode(primaryState: string, options: Array<{ abbr: string; name: string }>) {
+  const normalized = String(primaryState || '').trim()
+  if (!normalized) return ''
+  if (/^[A-Za-z]{2}$/.test(normalized)) return normalized.toUpperCase()
+  const match = options.find((option) => option.name.toLowerCase() === normalized.toLowerCase() || option.abbr.toLowerCase() === normalized.toLowerCase())
+  return match?.abbr || ''
+}
+
 function buildSoloRoundMissingFields({ date, today, state, course, scoreValue, requireManualRoundScore }: { date: string; today: string; state: string; course: string; scoreValue: unknown; requireManualRoundScore: boolean }) {
   const missing: string[] = []
   const scoreNum = Number(scoreValue)
@@ -57,14 +66,14 @@ export default function SoloLogger() {
   const today = getUserTodayISO()
 
   const [date, setDate] = useState(() => getUserTodayISO())
-  const [state, setState] = useState('UT')
+  const [state, setState] = useState('')
   const [course, setCourse] = useState('')
   const [courseId, setCourseId] = useState('')
   const [courseSearch, setCourseSearch] = useState('')
   const [teeColor, setTeeColor] = useState<TeeColorSelection>('')
   const [roundScore, setRoundScore] = useState<string>('')
   const [useHoles, setUseHoles] = useState(true)
-  const [holes, setHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('UT', '', DEFAULT_TEE_COLOR))
+  const [holes, setHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('', '', DEFAULT_TEE_COLOR))
   const [persistedSoloScoreId, setPersistedSoloScoreId] = useState<string | null>(null)
   const [persistedSoloHoles, setPersistedSoloHoles] = useState<HoleScoreDetail[] | null>(null)
 
@@ -73,6 +82,8 @@ export default function SoloLogger() {
   const [closing, setClosing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showValidation, setShowValidation] = useState(false)
+  const [profilePrimaryState, setProfilePrimaryState] = useState('')
+  const [profileStateLoaded, setProfileStateLoaded] = useState(false)
 
   const pendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
 
@@ -90,13 +101,48 @@ export default function SoloLogger() {
   }, [useHoles, currentHoleScoreTotal])
 
   useEffect(() => {
-    if (stateOptions.length && !stateOptions.some(option => option.abbr === state)) {
-      setState(stateOptions[0].abbr)
-      setCourse('')
-      setCourseId('')
-      setCourseSearch('')
+    let active = true
+    if (!user?.id) {
+      setProfilePrimaryState('')
+      setProfileStateLoaded(false)
+      return () => { active = false }
     }
-  }, [stateOptions, state])
+
+    setProfileStateLoaded(false)
+    fetchProfile()
+      .then((profile) => {
+        if (!active) return
+        const primaryState = String(profile.primaryState || '').trim()
+        setProfilePrimaryState(primaryState)
+        setProfileStateLoaded(true)
+        logFrontendEvent({ category: 'solo.profile', message: 'solo_profile_state_loaded', data: { correlationId: getCorrelationId(), hasPrimaryState: Boolean(primaryState), primaryState: primaryState || null } })
+      })
+      .catch((err) => {
+        if (!active) return
+        setProfilePrimaryState('')
+        setProfileStateLoaded(true)
+        logFrontendEvent({ category: 'solo.profile', level: 'warn', message: 'solo_profile_state_load_failed', data: { correlationId: getCorrelationId(), error: err instanceof Error ? err.message : String(err) } })
+      })
+
+    return () => { active = false }
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!profileStateLoaded || !stateOptions.length) return
+    if (state && stateOptions.some((option) => option.abbr === state)) return
+
+    const profileStateCode = resolveProfileStateCode(profilePrimaryState, stateOptions)
+    const nextState = profileStateCode || stateOptions[0].abbr
+    setState(nextState)
+    setCourse('')
+    setCourseId('')
+    setCourseSearch('')
+    logFrontendEvent({
+      category: 'solo.location',
+      message: profileStateCode ? 'solo_state_defaulted_from_profile' : 'solo_state_defaulted_to_available_fallback',
+      data: { correlationId: getCorrelationId(), profilePrimaryState: profilePrimaryState || null, stateCode: nextState },
+    })
+  }, [profilePrimaryState, profileStateLoaded, stateOptions, state])
 
   useEffect(() => {
     if (!user || !date || !state || !course) {
@@ -328,8 +374,6 @@ export default function SoloLogger() {
                   placeholder="Search courses in the selected state"
                   helperText="Search checks every available course for the selected state."
                   inputId="soloRoundCourseSearch"
-                  enableNearestDefault
-                  onStateChange={setState}
                   disabled={roundContextLocked}
                   required
                 />

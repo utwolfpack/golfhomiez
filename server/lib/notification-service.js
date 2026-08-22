@@ -90,6 +90,7 @@ function mapNotificationRow(row) {
     challengedTeamName: row.challenged_team_name || null,
     challengeStatus: row.challenge_status || null,
     challengeDate: toIso(row.challenge_date)?.slice(0, 10) || null,
+    challengeEndDate: toIso(row.challenge_end_date)?.slice(0, 10) || null,
     challengeState: row.challenge_state || null,
     challengeCourse: row.challenge_course || null,
     challengeTeeColor: row.challenge_tee_color || 'white',

@@ -1,0 +1,159 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import test from 'node:test'
+import { fileURLToPath } from 'node:url'
+import {
+  mapInboxMessageRow,
+  normalizeInboxMessagePayload,
+  validateIndividualChallengeDateRange,
+} from '../server/lib/inbox-service.js'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const read = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), 'utf8')
+
+test('individual challenge accepts an optional location and a date range up to one month', () => {
+  const payload = normalizeInboxMessagePayload({
+    messageType: 'individual_challenge',
+    body: 'Play anytime during the challenge window.',
+    individualParticipantEmails: ['golfer@example.com'],
+    challengeDate: '2026-08-22',
+    challengeEndDate: '2026-09-22',
+    challengeState: '',
+    challengeCourse: '',
+    challengeTeeColor: 'blue',
+  })
+
+  assert.equal(payload.challengeDate, '2026-08-22')
+  assert.equal(payload.challengeEndDate, '2026-09-22')
+  assert.equal(payload.challengeState, null)
+  assert.equal(payload.challengeCourse, null)
+  assert.deepEqual(payload.individualParticipantEmails, ['golfer@example.com'])
+})
+
+test('individual challenge rejects date ranges longer than one month', () => {
+  assert.throws(
+    () => validateIndividualChallengeDateRange('2026-08-22', '2026-09-23'),
+    /cannot exceed one month/i,
+  )
+})
+
+test('individual challenge end date maps from database rows', () => {
+  const mapped = mapInboxMessageRow({
+    id: 'message-1',
+    thread_id: 'thread-1',
+    message_type: 'individual_challenge',
+    sender_email: 'creator@example.com',
+    recipient_email: 'golfer@example.com',
+    challenge_date: '2026-08-22',
+    challenge_end_date: '2026-09-10',
+    message_body: 'Challenge',
+  })
+  assert.equal(mapped.challengeEndDate, '2026-09-10')
+})
+
+test('challenge UI implements profile state defaults, optional individual location, validated members, active editing, and participant-only leaderboard', () => {
+  const source = read('src/pages/Challenges.tsx')
+  assert.match(source, /fetchProfile\(\)/)
+  assert.match(source, /challenge_state_defaulted_from_profile/)
+  assert.match(source, /Use a specific golf course \(optional\)/)
+  assert.match(source, /InviteHomieModal/)
+  assert.match(source, /lookupUserByEmail/)
+  assert.match(source, /Send GolfHomiez invite/)
+  assert.match(source, /Invited golfers/)
+  assert.match(source, /Save challenge settings/)
+  assert.match(source, /Team challenge game/)
+  assert.match(source, /Points per hole/)
+  assert.match(source, /\.filter\(\(row\) => row\.thru > 0\)/)
+  assert.match(source, /!challengesComposeOpen \? \(/)
+})
+
+test('challenge backend exposes active settings and individual participant APIs with correlated transaction logging', () => {
+  const server = read('server/index.js')
+  assert.match(server, /app\.patch\('\/api\/inbox\/messages\/:id\/challenge-settings'/)
+  assert.match(server, /app\.post\('\/api\/inbox\/messages\/:id\/individual-participants'/)
+  assert.match(server, /challenge_settings_update_started/)
+  assert.match(server, /challenge_settings_update_succeeded/)
+  assert.match(server, /individual_challenge_member_add_started/)
+  assert.match(server, /individual_challenge_member_add_succeeded/)
+  assert.match(server, /requestContext\(req\)/)
+})
+
+
+
+test('individual challenge participant status is refreshed when selected and registered golfers replace pending status', () => {
+  const source = read('src/pages/Challenges.tsx')
+  const inboxClient = read('src/lib/inbox.ts')
+  const server = read('server/index.js')
+  const mysqlStorage = read('server/storage/mysql.js')
+  const sqliteStorage = read('server/storage/sqlite.js')
+  const jsonStorage = read('server/storage/json.js')
+
+  assert.match(source, /refreshIndividualChallengeParticipantStatuses\(initialChallenge, 'challenge_selected'\)/)
+  assert.match(source, /refreshIndividualChallengeParticipants\(message\.id\)/)
+  assert.match(source, /individual_challenge_participant_status_refresh_started/)
+  assert.match(source, /individual_challenge_participant_status_refresh_succeeded/)
+  assert.doesNotMatch(source, /GolfHomiez golfer/)
+  assert.match(source, /!participant\.userId \? <span className="challengeInviteStatus challengeInviteStatus--pending">Invitation pending<\/span> : null/)
+  assert.match(inboxClient, /individual-participants\/refresh/)
+  assert.match(server, /app\.patch\('\/api\/inbox\/messages\/:id\/individual-participants\/refresh'/)
+  assert.match(server, /splitName\(found\.name, found\.email\)/)
+  assert.match(server, /transitionedToRegisteredCount/)
+  assert.match(server, /individual_challenge_participant_refresh_succeeded/)
+  assert.match(mysqlStorage, /updateInboxIndividualChallengeParticipants/)
+  assert.match(sqliteStorage, /updateInboxIndividualChallengeParticipants/)
+  assert.match(jsonStorage, /updateInboxIndividualChallengeParticipants/)
+})
+
+test('individual challenge golfer count opens participant list and leaderboard requires at least one saved hole', () => {
+  const source = read('src/pages/Challenges.tsx')
+  const css = read('src/index.css')
+
+  assert.match(source, /individualChallengeParticipantCountButton/)
+  assert.match(source, /openIndividualChallengeParticipants\(challengeMessage\)/)
+  assert.match(source, /Individual Challenge golfers/)
+  assert.match(source, /\.filter\(\(row\) => row\.thru > 0\)/)
+  assert.doesNotMatch(source, /\.filter\(\(row\) => row\.score != null \|\| row\.thru > 0\)/)
+  assert.match(source, /No golfers have entered a score yet\./)
+  assert.match(css, /\.individualChallengeParticipantCountButton/)
+})
+
+test('challenge date migration is registered, idempotent, and remains part of npm install migrations', () => {
+  const migration = read('migration_scripts/20260822_077_individual_challenge_date_range.sql')
+  const registry = read('server/migrations/index.js')
+  const pkg = JSON.parse(read('package.json'))
+  assert.match(migration, /information_schema\.COLUMNS/i)
+  assert.match(migration, /challenge_end_date DATE NULL/i)
+  assert.match(registry, /version: '20260822_077'/)
+  assert.match(registry, /columnExists\(db, 'inbox_messages', 'challenge_end_date'\)/)
+  assert.match(pkg.scripts.postinstall, /db:migrate/)
+})
+
+test('individual challenge presentation removes membership activity labels and uses the simplified actions', () => {
+  const source = read('src/pages/Challenges.tsx')
+  const css = read('src/index.css')
+
+  assert.match(source, /isIndividualChallengeInviteActivityMessage/)
+  assert.match(source, /was invited to the Individual Challenge/)
+  assert.match(source, /getConversationFor\(message\)\.filter\(\(item\) => !isIndividualChallengeInviteActivityMessage\(item\)\)/)
+  assert.doesNotMatch(source, /<div className="small inboxConversationTitle">Individual Challenge Score<\/div>/)
+  assert.match(source, /inboxScoreSectionHeader inboxScoreSectionHeader--actionsOnly/)
+  assert.match(css, /\.inboxScoreSectionHeader--actionsOnly\{[\s\S]*justify-content:flex-end/)
+  assert.match(source, /\{isTeamChallengeMessage \? <strong>\{challengeTitle\}<\/strong> : null\}/)
+  assert.match(source, /\{isIndividualChallengeMessage \? 'Say Something' : 'Reply'\}/)
+})
+
+test('solo logger defaults state from the logged-in profile and does not use nearest-device location', () => {
+  const soloLogger = read('src/pages/SoloLogger.tsx')
+
+  assert.match(soloLogger, /import \{ fetchProfile \} from '\.\.\/lib\/profile'/)
+  assert.match(soloLogger, /const \[state, setState\] = useState\(''\)/)
+  assert.match(soloLogger, /fetchProfile\(\)/)
+  assert.match(soloLogger, /resolveProfileStateCode\(profilePrimaryState, stateOptions\)/)
+  assert.match(soloLogger, /solo_profile_state_loaded/)
+  assert.match(soloLogger, /solo_state_defaulted_from_profile/)
+  assert.doesNotMatch(soloLogger, /enableNearestDefault/)
+  assert.doesNotMatch(soloLogger, /onStateChange=\{setState\}/)
+  assert.doesNotMatch(soloLogger, /Checking your device location for the closest golf course/)
+})
+

@@ -480,6 +480,19 @@ export async function updateInboxChallengeStatus(messageId, user, status) {
   return row ? mapInboxMessageRow(row) : null
 }
 
+export async function updateInboxIndividualChallengeParticipants(messageId, user, participants = []) {
+  const db = getSqliteDb()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const row = db.prepare('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1').get(String(messageId || ''), 'individual_challenge')
+  const existing = row ? mapInboxMessageRow(row) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  const nextParticipants = Array.isArray(participants) ? participants : []
+  db.prepare('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?').run(JSON.stringify(nextParticipants), existing.threadId || existing.id, 'individual_challenge')
+  const updated = db.prepare('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1').get(String(messageId || ''))
+  return updated ? mapInboxMessageRow(updated) : null
+}
+
 export async function updateInboxChallengeScore(messageId, user, side, score, holes = []) {
   const db = getSqliteDb()
   const normalizedEmail = normalizeEmail(user?.email)

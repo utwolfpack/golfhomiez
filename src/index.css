@@ -3173,6 +3173,10 @@ button.navDropdownItem{font:inherit;}
   flex-wrap:wrap;
 }
 
+.inboxScoreSectionHeader--actionsOnly{
+  justify-content:flex-end;
+}
+
 .inboxLeaderboardButton{
   border-color:#c99728;
   color:#0b3d1d;
@@ -5642,12 +5646,8 @@ button.navDropdownItem{font:inherit;}
 }
 
 .tournamentSearchResult{
-  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-columns:minmax(0,1fr);
   cursor:default;
-}
-
-.tournamentSearchResultAction{
-  min-width:150px;
 }
 
 .tournamentSearchEmpty{
@@ -5694,17 +5694,6 @@ button.navDropdownItem{font:inherit;}
     white-space:normal;
   }
 
-  .tournamentSearchResultAction{
-    min-width:0;
-    width:100%;
-    justify-items:stretch;
-    text-align:left;
-  }
-
-  .tournamentSearchResultAction .btn{
-    width:100%;
-    text-align:center;
-  }
 }
 
 /* Dedicated tournament finder result emphasis. */
@@ -6745,10 +6734,6 @@ button.navDropdownItem{font:inherit;}
   outline:none;
 }
 
-.tournamentSearchCoursePageAction{
-  white-space:nowrap;
-}
-
 .tournament-management-line__url-row{
   display:flex;
   align-items:center;
@@ -7263,4 +7248,78 @@ button.navDropdownItem{font:inherit;}
   .tournamentMessageDialogueEntry{max-width:95%}
   .tournamentMessageReplyBox{grid-template-columns:1fr}
   .tournamentMessageReplyButton{width:100%}
+}
+
+/* Challenge member/date/settings enhancements */
+.challengeMemberBuilder,.individualChallengeInviteSection,.challengeSettingsEditor{display:grid;gap:10px}
+.challengeMemberCard{display:grid;gap:9px;padding:12px;border:1px solid #d9e5dc;border-radius:16px;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.05)}
+.challengeMemberCard--current{background:#f7fbf8}
+.challengeMemberCard--current strong{font-size:15px;color:#123f24}
+.challengeMemberEmailRow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:end}
+.challengeValidatedMemberFields{margin-top:2px}
+.challengeAddMemberButton{justify-self:start;border-radius:999px}
+.challengeOptionalLocationToggle{display:flex;align-items:center;gap:8px;font-weight:800;color:#173d26;cursor:pointer}
+.challengeOptionalLocationToggle input{width:17px;height:17px;accent-color:#169447}
+.individualChallengeInviteList{display:grid;gap:7px}
+.individualChallengeInviteRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 10px;border:1px solid #e0e7e2;border-radius:12px;background:#fafcfb}
+.individualChallengeInviteRow>div{display:grid;min-width:0}
+.individualChallengeInviteRow .small{overflow-wrap:anywhere}
+.challengeInviteStatus{display:inline-flex;align-items:center;white-space:nowrap;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800}
+.challengeInviteStatus--member{background:#eaf7ed;color:#166534}
+.challengeInviteStatus--pending{background:#fff7e6;color:#8a5a00}
+.challengeSettingsEditor,.individualChallengeInviteSection{margin-top:10px;padding:12px;border:1px solid #dbe5de;border-radius:14px;background:#f9fbfa}
+.inboxLeaderboardEmpty{padding:26px 14px;text-align:center;color:#64748b;background:#fff;border-bottom:1px solid #e2e8f0}
+
+@media (max-width:760px){
+  .challengeMemberEmailRow{grid-template-columns:minmax(0,1fr) auto}
+  .challengeMemberEmailRow .input{grid-column:1/-1}
+  .challengeMemberEmailRow .btn{width:100%}
+  .individualChallengeInviteRow{align-items:flex-start;flex-direction:column}
+  .challengeInviteStatus{white-space:normal}
+}
+
+/* Individual Challenge participant status / participant list access */
+.individualChallengeParticipantCountBar{
+  display:flex;
+  justify-content:flex-start;
+  padding:0 14px 10px;
+}
+
+.individualChallengeParticipantCountButton{
+  appearance:none;
+  border:0;
+  padding:0;
+  background:transparent;
+  color:#166534;
+  font:inherit;
+  font-size:13px;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+
+.individualChallengeParticipantCountButton:hover,
+.individualChallengeParticipantCountButton:focus-visible{
+  color:#0b3d1d;
+  outline:2px solid rgba(22,101,52,.24);
+  outline-offset:4px;
+  border-radius:4px;
+}
+
+.individualChallengeParticipantCountButton:disabled{
+  cursor:progress;
+  opacity:.7;
+}
+
+.individualChallengeParticipantsModalCard{
+  width:min(560px,calc(100vw - 24px));
+  max-height:min(78vh,720px);
+  overflow:auto;
+}
+
+@media (max-width:700px){
+  .individualChallengeParticipantCountBar{
+    padding:0 12px 10px;
+  }
 }

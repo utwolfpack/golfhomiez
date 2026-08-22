@@ -6,32 +6,46 @@ import {
   normalizeGolfCourseSearchFilters,
   searchGolfHomiezCourses,
 } from '../server/lib/golf-course-search.js'
+import { normalizeUsPhoneForDisplay } from '../server/lib/us-phone.js'
+
+
+test('golf course phone display only accepts structurally valid in-service U.S. geographic numbers', () => {
+  assert.equal(normalizeUsPhoneForDisplay('801 555 0101'), '801 555 0101')
+  assert.equal(normalizeUsPhoneForDisplay('(801) 555-0101'), '801 555 0101')
+  assert.equal(normalizeUsPhoneForDisplay('+1 801-555-0101'), '801 555 0101')
+  assert.equal(normalizeUsPhoneForDisplay('416 555 0101'), null, 'Canadian area codes must not display')
+  assert.equal(normalizeUsPhoneForDisplay('242 555 0101'), null, 'Caribbean NANP area codes must not display')
+  assert.equal(normalizeUsPhoneForDisplay('340 555 0101'), null, 'U.S. territory area codes are outside the requested 50-state/DC display rule')
+  assert.equal(normalizeUsPhoneForDisplay('801 155 0101'), null, 'invalid NANP exchange must not display')
+  assert.equal(normalizeUsPhoneForDisplay('801--555--0101'), null, 'malformed phone formatting must not display')
+  assert.equal(normalizeUsPhoneForDisplay('+44 20 7946 0958'), null, 'non-U.S. international numbers must not display')
+})
 
 function searchRows() {
   return [
     {
       page_id: 'page-1', golf_course_id: 'course-1', slug: 'murrayparkwayut', golf_course_name: 'Murray Parkway Golf Course',
-      city: 'Murray', state_code: 'UT', postal_code: '84123', website_url: 'https://murray.example', latitude: 40.66, longitude: -111.89,
+      city: 'Murray', state_code: 'UT', postal_code: '84123', phone: '801 555 0101', website_url: 'https://murray.example', latitude: 40.66, longitude: -111.89,
       hosted_tournament_count: 2,
     },
     {
       page_id: 'page-2', golf_course_id: 'course-2', slug: 'lakeviewut', golf_course_name: 'Lake View Golf Course',
-      city: 'Brigham City', state_code: 'UT', postal_code: '84302', website_url: 'https://lakeview.example', latitude: 41.5, longitude: -111.9,
+      city: 'Brigham City', state_code: 'UT', postal_code: '84302', phone: '801 555 0102', website_url: 'https://lakeview.example', latitude: 41.5, longitude: -111.9,
       hosted_tournament_count: 1,
     },
     {
       page_id: 'page-3', golf_course_id: 'course-3', slug: 'farawayut', golf_course_name: 'Far Away Golf Course',
-      city: 'Logan', state_code: 'UT', postal_code: '84341', website_url: 'https://far.example', latitude: 43.0, longitude: -111.9,
+      city: 'Logan', state_code: 'UT', postal_code: '84341', phone: '801 555 0103', website_url: 'https://far.example', latitude: 43.0, longitude: -111.9,
       hosted_tournament_count: 3,
     },
     {
       page_id: null, golf_course_id: 'course-4', slug: null, golf_course_name: 'Nearby Public Golf Course',
-      city: 'Sandy', state_code: 'UT', postal_code: '84124', website_url: 'https://nearby.example', latitude: 40.7, longitude: -111.9,
+      city: 'Sandy', state_code: 'UT', postal_code: '84124', phone: '801 555 0104', website_url: 'https://nearby.example', latitude: 40.7, longitude: -111.9,
       hosted_tournament_count: 0,
     },
     {
       page_id: null, golf_course_id: 'course-5', slug: null, golf_course_name: 'Sixty Mile Golf Course',
-      city: 'North City', state_code: 'UT', postal_code: '84001', website_url: 'https://sixty.example', latitude: 41.75, longitude: -111.9,
+      city: 'North City', state_code: 'UT', postal_code: '84001', phone: null, website_url: 'https://sixty.example', latitude: 41.75, longitude: -111.9,
       hosted_tournament_count: 0,
     },
   ]
@@ -45,6 +59,7 @@ function createSearchDb(rows = searchRows()) {
     city: row.city,
     state_code: row.state_code,
     postal_code: row.postal_code,
+    phone: row.phone,
     golf_course_website: row.website_url,
     catalog_website: row.website_url,
     latitude: row.latitude,
@@ -58,6 +73,7 @@ function createSearchDb(rows = searchRows()) {
     city: row.city,
     state_code: row.state_code,
     postal_code: row.postal_code,
+    contact_phone: row.phone,
     website_url: row.website_url,
   }))
   const hostRows = [
@@ -124,6 +140,7 @@ test('Find a Golf Course searches the full golf_courses catalog, prioritizes Gol
   assert.ok(allResult.courses.slice(0, 3).every((course) => course.hostedTournamentCount > 0))
   assert.ok(allResult.courses.slice(3).every((course) => course.hostedTournamentCount === 0))
   assert.ok(allResult.courses.some((course) => course.golfCourseId === 'course-4' && course.golfCoursePagePath === null))
+  assert.equal(allResult.courses.find((course) => course.golfCourseId === 'course-1')?.phone, '801 555 0101')
 
   const result = await searchGolfHomiezCourses(db, { state: 'UT', zipCode: '84123' }, { fetchImpl: zipBoundsFetch })
   assert.equal(result.pagination.totalResults, 3)
@@ -168,6 +185,8 @@ test('Find a Golf Course frontend route, profile-state default, navigation order
   assert.match(server, /user_golf_course_search_started/)
   assert.match(server, /user_golf_course_search_completed/)
   assert.match(server, /golfHomiezHostedResultsOnPage/)
+  assert.match(server, /golfHomiezPublicPageResultsOnPage/)
+  assert.match(server, /phoneResultsOnPage/)
   assert.match(server, /searchStrategy: result\.diagnostics\?\.strategy/)
   assert.match(server, /user_golf_course_search_failed/)
   assert.match(server, /searchStage: error\?\.golfCourseSearchStage/)
@@ -181,6 +200,15 @@ test('Find a Golf Course frontend route, profile-state default, navigation order
   assert.match(findCourse, /zipSearch\.radiusMiles}-mile ZIP radius/)
   assert.match(findCourse, /golf_course_search_started/)
   assert.match(findCourse, /golf_course_search_completed/)
+  assert.match(findCourse, /<strong>Phone:<\/strong>/)
+  assert.match(findCourse, /formatValidUsPhoneForDisplay\(course\.phone\)/)
+  assert.match(findCourse, /displayPhone \? <span><strong>Phone:/)
+  assert.doesNotMatch(findCourse, /course\.phone \|\| 'Not listed'/)
+  assert.match(findCourse, /absoluteCourseWebsiteUrl/)
+  assert.match(findCourse, /window\.location\.origin/)
+  assert.match(findCourse, /<strong>Website:<\/strong>/)
+  assert.doesNotMatch(findCourse, /GolfHomiez tournaments:/)
+  assert.doesNotMatch(findCourse, /Course Info & Tournaments/)
 
   assert.match(findTournament, />Find a Tournament<\/h2>/)
   assert.match(findTournament, /searching \? 'Searching…' : 'Find a Tournament'/)

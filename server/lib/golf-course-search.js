@@ -1,5 +1,6 @@
 import { fuzzyTextMatch, GOLF_HOMIEZ_TOURNAMENT_SOURCE } from './tournament-discovery.js'
 import { normalizeStateCode } from './us-states.js'
+import { normalizeUsPhoneForDisplay } from './us-phone.js'
 
 export const GOLF_COURSE_SEARCH_PAGE_SIZE = 20
 export const GOLF_COURSE_ZIP_RADIUS_MILES = 50
@@ -151,6 +152,7 @@ function normalizeCourseResult(row) {
     city: cleanText(row.city, 128) || null,
     state: normalizeStateCode(row.state_code),
     zipCode: cleanText(row.postal_code, 32) || null,
+    phone: normalizeUsPhoneForDisplay(row.phone || row.contact_phone),
     websiteUrl: cleanText(row.website_url || row.catalog_website, 1024) || null,
     golfCoursePagePath: row.slug ? `/${cleanText(row.slug, 191)}` : null,
     latitude: toFiniteNumber(row.latitude),
@@ -209,14 +211,14 @@ async function loadGolfCourseSearchCatalog(db) {
     db,
     'catalog_courses',
     `SELECT id AS golf_course_id, name AS golf_course_name, city, state_code, postal_code,
-            golf_course_website, website AS catalog_website, latitude, longitude
+            phone, golf_course_website, website AS catalog_website, latitude, longitude
        FROM golf_courses
       ORDER BY state_code ASC, name ASC`,
   )
   const [pageRows] = await executeCatalogQuery(
     db,
     'public_pages',
-    `SELECT id AS page_id, golf_course_id, slug, golf_course_name, city, state_code, postal_code, website_url
+    `SELECT id AS page_id, golf_course_id, slug, golf_course_name, city, state_code, postal_code, contact_phone, website_url
        FROM golf_course_public_pages
       WHERE is_published = 1`,
   )
@@ -292,6 +294,7 @@ async function loadGolfCourseSearchCatalog(db) {
       city: cleanText(course.city || page?.city, 128),
       state_code: stateCode,
       postal_code: cleanText(course.postal_code || page?.postal_code, 32),
+      phone: normalizeUsPhoneForDisplay(page?.contact_phone || course.phone),
       website_url: cleanText(page?.website_url || course.golf_course_website || course.catalog_website, 1024),
       hosted_tournament_count: Math.max(directCount, indexedCount),
     }

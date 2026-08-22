@@ -42,6 +42,7 @@ export type InboxMessage = {
   challengeStatus?: TeamChallengeStatus | null
   challengeDeletedAt?: string | null
   challengeDate?: string | null
+  challengeEndDate?: string | null
   challengeState?: string | null
   challengeCourse?: string | null
   challengeTeeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
@@ -84,6 +85,7 @@ export type SendInboxMessageInput = {
   proposerTeamId?: string | null
   challengedTeamIdentifier?: number | string | null
   challengeDate?: string | null
+  challengeEndDate?: string | null
   challengeState?: string | null
   challengeCourse?: string | null
   challengeTeeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
@@ -192,6 +194,34 @@ export async function setInboxChallengeDeleted(messageId: string, deleted: boole
 
 export async function completeInboxChallenge(messageId: string): Promise<InboxMessage> {
   return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/complete`, { method: 'PATCH' })
+}
+
+export async function updateInboxChallengeSettings(messageId: string, input: {
+  challengeTeeColor?: string | null
+  challengeScoringType?: TeamChallengeScoringType | string | null
+  challengePointsPerHole?: number | string | null
+  challengeDate?: string | null
+  challengeEndDate?: string | null
+  challengeState?: string | null
+  challengeCourse?: string | null
+}): Promise<InboxMessage> {
+  return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/challenge-settings`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function addIndividualChallengeParticipant(messageId: string, email: string): Promise<{ message: InboxMessage; participants: IndividualChallengeParticipant[]; golfHomiezUserFound: boolean }> {
+  return api(`/api/inbox/messages/${encodeURIComponent(messageId)}/individual-participants`, {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export async function refreshIndividualChallengeParticipants(messageId: string): Promise<{ message: InboxMessage; participants: IndividualChallengeParticipant[]; transitionedToRegisteredCount: number; registeredCount: number; pendingCount: number }> {
+  return api(`/api/inbox/messages/${encodeURIComponent(messageId)}/individual-participants/refresh`, {
+    method: 'PATCH',
+  })
 }
 
 export async function updateTeamChallengeScore(messageId: string, score: number | null, holes?: HoleScoreDetail[]): Promise<InboxMessage> {
