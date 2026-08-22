@@ -100,6 +100,36 @@ export function validateTeamChallengeDate(value) {
   return date
 }
 
+export function validateOptionalIndividualChallengeDate(value) {
+  const date = String(value || '').trim()
+  if (!date) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Individual Challenge date is invalid.')
+  return date
+}
+
+function parseIsoDateAtUtcMidnight(value) {
+  const normalized = String(value || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null
+  const date = new Date(`${normalized}T00:00:00.000Z`)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+export function validateIndividualChallengeDateRange(startValue, endValue) {
+  const startDate = validateOptionalIndividualChallengeDate(startValue)
+  const endDate = validateOptionalIndividualChallengeDate(endValue)
+  if (!startDate && !endDate) return { challengeDate: null, challengeEndDate: null }
+  if (!startDate && endDate) throw new Error('Individual Challenge start date is required when an end date is selected.')
+  const effectiveEndDate = endDate || startDate
+  const start = parseIsoDateAtUtcMidnight(startDate)
+  const end = parseIsoDateAtUtcMidnight(effectiveEndDate)
+  if (!start || !end) throw new Error('Individual Challenge date range is invalid.')
+  if (end.getTime() < start.getTime()) throw new Error('Individual Challenge end date cannot be before the start date.')
+  const max = new Date(start.getTime())
+  max.setUTCMonth(max.getUTCMonth() + 1)
+  if (end.getTime() > max.getTime()) throw new Error('Individual Challenge date range cannot exceed one month.')
+  return { challengeDate: startDate, challengeEndDate: effectiveEndDate }
+}
+
 export function validateTeamChallengeState(value) {
   const state = String(value || '').trim().toUpperCase()
   if (!state) throw new Error('Team Challenge state is required.')
@@ -107,10 +137,24 @@ export function validateTeamChallengeState(value) {
   return state
 }
 
+export function validateOptionalChallengeState(value) {
+  const state = String(value || '').trim().toUpperCase()
+  if (!state) return null
+  if (state.length > 64) throw new Error('Challenge state is invalid.')
+  return state
+}
+
 export function validateTeamChallengeCourse(value) {
   const course = String(value || '').trim()
   if (!course) throw new Error('Team Challenge course is required.')
   if (course.length > MAX_CHALLENGE_COURSE_LENGTH) throw new Error(`Team Challenge course must be ${MAX_CHALLENGE_COURSE_LENGTH} characters or less.`)
+  return course
+}
+
+export function validateOptionalChallengeCourse(value) {
+  const course = String(value || '').trim()
+  if (!course) return null
+  if (course.length > MAX_CHALLENGE_COURSE_LENGTH) throw new Error(`Challenge course must be ${MAX_CHALLENGE_COURSE_LENGTH} characters or less.`)
   return course
 }
 
@@ -238,6 +282,7 @@ export function normalizeInboxMessagePayload(payload = {}) {
   }
 
   if (messageType === 'individual_challenge') {
+    const dateRange = validateIndividualChallengeDateRange(payload.challengeDate || payload.date, payload.challengeEndDate || payload.endDate)
     return {
       recipientEmail: '',
       body,
@@ -245,9 +290,10 @@ export function normalizeInboxMessagePayload(payload = {}) {
       replyToMessageId,
       proposerTeamId: null,
       challengedTeamIdentifier: null,
-      challengeDate: validateTeamChallengeDate(payload.challengeDate || payload.date),
-      challengeState: validateTeamChallengeState(payload.challengeState || payload.state || payload.stateCode),
-      challengeCourse: validateTeamChallengeCourse(payload.challengeCourse || payload.course),
+      challengeDate: dateRange.challengeDate,
+      challengeEndDate: dateRange.challengeEndDate,
+      challengeState: validateOptionalChallengeState(payload.challengeState || payload.state || payload.stateCode),
+      challengeCourse: validateOptionalChallengeCourse(payload.challengeCourse || payload.course),
       challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
       challengeScoringType: DEFAULT_TEAM_CHALLENGE_SCORING_TYPE,
       challengePointsPerHole: null,
@@ -287,6 +333,7 @@ export function mapInboxMessageRow(row = {}) {
     challengedTeamName: row.challenged_team_name || row.challengedTeamName || null,
     challengeStatus: row.challenge_status || row.challengeStatus || null,
     challengeDate: row.challenge_date || row.challengeDate || null,
+    challengeEndDate: row.challenge_end_date || row.challengeEndDate || null,
     challengeState: row.challenge_state || row.challengeState || null,
     challengeCourse: row.challenge_course || row.challengeCourse || null,
     challengeTeeColor: normalizeTeeColor(row.challenge_tee_color || row.challengeTeeColor || DEFAULT_TEE_COLOR),

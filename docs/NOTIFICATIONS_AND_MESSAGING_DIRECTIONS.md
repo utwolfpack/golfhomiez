@@ -98,7 +98,7 @@ Adds shared tournament dialogue support:
 - `tournament_message_portal_state`;
 - indexes for conversation, participant, chronological-message, and correlation-ID lookups.
 
-Both migrations are registered in `server/migrations/index.js` and are designed to be safe when deployed into an environment where the migration has already been satisfied.
+Migrations `20260820_075`, `20260820_076`, and challenge migration `20260822_077` are registered in `server/migrations/index.js` and are designed to be safe when deployed into an environment where the migration has already been satisfied.
 
 ## Deployment and migration execution
 
@@ -106,7 +106,7 @@ No production-only schema step is required during the normal dependency installa
 
 `npm run cleanup:project-files && npm run db:migrate && npm run build`
 
-from `postinstall`, so migrations `20260820_075` and `20260820_076` run in development, stage, and production environments before the application build.
+from `postinstall`, so migrations `20260820_075`, `20260820_076`, and `20260822_077` run in development, stage, and production environments before the application build.
 
 For an explicit migration-only deployment step, run:
 
@@ -130,3 +130,46 @@ Searching the same correlation ID across those files reconstructs the request li
 ## Security and dependency notes
 
 No new npm dependency was added for these notification/tournament-message features. Existing dependency-security tests verify the patched `brace-expansion` and `nanoid` lockfile versions and dependency constraints intended to prevent reintroducing the known high-severity versions.
+
+## Challenge enhancements — 2026-08-22
+
+`src/pages/Challenges.tsx` now treats challenge location independently from any device/location setting. When the create form opens, the State field defaults from the signed-in golfer's profile `primaryState`. For Team Challenges a course remains required. For Individual Challenges a course is optional; leaving **Use a specific golf course (optional)** unchecked allows each invited golfer to participate without being tied to the creator's course.
+
+Individual Challenge creation now follows the validated-member flow used by Create Team. The creator is shown first, each additional golfer has an email field plus **Validate** and **Remove**, validated GolfHomiez users display their name, and **+ Add member** adds another entry. When validation does not find a GolfHomiez account, `InviteHomieModal` opens so the creator can send a GolfHomiez registration invitation. The invited email is still retained as an Individual Challenge participant.
+
+After an Individual Challenge is created, its creator can see the invited-golfer list and continue validating/adding golfers until the challenge is completed. Existing GolfHomiez users added to the challenge receive challenge inbox activity through the shared Individual Challenge thread. Pending invitees are represented by email so they can participate after registering with the same address.
+
+Individual Challenges use a start and end date with a maximum one-month range. The challenge creator can edit the date range and tee selection until completion. Team Challenge creators can edit tee selection, Team Challenge game, and points per hole until completion. Completion locks these settings and the add-golfer flow.
+
+Opening **Create Challenge** hides all other challenge line items until the create form is closed. Opening an existing challenge continues to isolate that challenge. Individual Challenge leaderboards exclude invited golfers who have not entered any score/hole data; a no-participation message is shown until at least one golfer participates.
+
+### Challenge API and persistence
+
+- `PATCH /api/inbox/messages/:id/challenge-settings` updates active challenge settings for the challenge creator.
+- `POST /api/inbox/messages/:id/individual-participants` adds a golfer to an active Individual Challenge for the creator and adds challenge inbox activity to the thread.
+- `inbox_messages.challenge_end_date` persists the Individual Challenge end date.
+- `individual_participants_json` remains the source for invited golfers and their score participation state.
+
+Migration `migration_scripts/20260822_077_individual_challenge_date_range.sql` adds `challenge_end_date`. The SQL file checks `information_schema` before altering the table, and migration `20260822_077` in `server/migrations/index.js` independently checks for the column before returning SQL. This makes the schema change safe to apply through the normal migration runner in development, stage, and production.
+
+Challenge create/member validation, profile-state defaulting, optional-location changes, settings updates, invite actions, and add-participant transactions use the existing front-end/API correlation logging. Server events include `challenge_settings_update_started`, `challenge_settings_update_succeeded`, `individual_challenge_member_add_started`, and `individual_challenge_member_add_succeeded`; request context carries the correlation ID into the existing access/API/error logging lifecycle.
+
+## 2026-08-22 Individual Challenge participant follow-up
+
+Individual Challenge participant information is refreshed against the current GolfHomiez user directory whenever an Individual Challenge is selected and again before its leaderboard opens. If an invited email address has since registered, the stored participant record is updated with the registered user ID and current display name. The UI then removes the `Invitation pending` badge and uses the registered golfer name in the invited-golfer list and leaderboard. Registered golfers no longer display a separate `GolfHomiez golfer` badge.
+
+The Individual Challenge count beneath each challenge line item is a button. Selecting it opens the challenge golfer list and refreshes registration state before presenting the participants. Pending invitees retain the `Invitation pending` badge; registered golfers display their current name and email without an extra status badge.
+
+Individual Challenge leaderboard rows now require at least one saved hole (`thru > 0`). A participant with no saved hole is omitted even if an older aggregate score value exists. This keeps the leaderboard limited to golfers who have actually started the challenge round.
+
+No database schema change is required for this follow-up. The existing `individual_participants_json` payload stores the refreshed user ID and display name, and the existing npm-install migration sequence remains unchanged.
+
+Participant-directory refreshes are logged on both the frontend and API with the existing correlation ID. Search for `individual_challenge_participant_status_refresh_*` in `frontend.log` and `individual_challenge_participant_refresh_*` in `api.log`/`error.log` to trace the request lifecycle.
+
+## 2026-08-22 Challenge and Solo Logger display follow-up
+
+- Individual Challenge activity rows that only state that a golfer "was invited to the Individual Challenge" are treated as system membership activity and are not rendered in the Challenges conversation. The participant remains part of the challenge and keeps normal inbox/challenge access.
+- Individual Challenge line items no longer repeat the generic "Individual Challenge" title above the date/course metadata. The score area no longer displays the "Individual Challenge Score" heading above the Leaderboard action.
+- The active Individual Challenge action label is "Say Something" instead of "Reply".
+- Solo Logger no longer enables nearest-course/device-location defaults. It loads `/api/profile` and resolves the golfer's `primaryState` against the available golf-course states, then defaults the State selector to that profile state. If a profile state is unavailable or cannot be resolved, the first available course state is used without geolocation.
+- Frontend diagnostics include `solo_profile_state_loaded`, `solo_profile_state_load_failed`, `solo_state_defaulted_from_profile`, and `solo_state_defaulted_to_available_fallback`, all using the existing correlation ID logger. No schema change or new migration is required for this follow-up.

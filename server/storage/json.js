@@ -496,6 +496,25 @@ export async function updateInboxChallengeStatus(messageId, user, status) {
   return hydrateInboxMessage(nextMessages[idx])
 }
 
+export async function updateInboxIndividualChallengeParticipants(messageId, user, participants = []) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const messages = readJson(inboxMessagesPath, [])
+  const hydratedMessages = messages.map(hydrateInboxMessage)
+  const target = hydratedMessages.find((message) => String(message.id) === String(messageId || '') && message.messageType === 'individual_challenge')
+  if (!target || !canParticipateInInboxMessage(target, user, normalizedEmail, userTeamIds)) return null
+  const threadId = target.threadId || target.id
+  const nextParticipants = Array.isArray(participants) ? participants : []
+  const nextMessages = messages.map((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    if (hydrated.messageType !== 'individual_challenge' || String(hydrated.threadId || hydrated.id) !== String(threadId)) return message
+    return { ...message, individualChallengeParticipants: nextParticipants }
+  })
+  writeJson(inboxMessagesPath, nextMessages)
+  return hydrateInboxMessage(nextMessages.find((message) => String(message.id) === String(messageId || '')))
+}
+
 export async function updateInboxChallengeScore(messageId, user, side, score, holes = []) {
   ensureInboxMessagesFile()
   const normalizedEmail = normalizeEmail(user?.email)

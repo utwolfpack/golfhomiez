@@ -338,6 +338,7 @@ export type GolfCourseTournamentSearchResult = {
   tournamentDate: string
   tournamentWebsite?: string | null
   golfCoursePagePath?: string | null
+  golfCoursePhone?: string | null
   golfCourseWebsiteUrl?: string | null
   sourceUrl?: string | null
   sourceType?: 'external' | 'golfhomiez' | string
@@ -376,6 +377,7 @@ export type GolfHomiezCourseSearchResult = {
   city?: string | null
   state: string
   zipCode?: string | null
+  phone?: string | null
   websiteUrl?: string | null
   golfCoursePagePath?: string | null
   latitude?: number | null

@@ -9,6 +9,7 @@ import {
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { fetchProfile } from '../lib/profile'
 import { US_STATES } from '../data/usStates'
+import { formatValidUsPhoneForDisplay } from '../lib/phone-validation'
 
 const SEARCH_PAGE_SIZE = 20
 const FALLBACK_STATE = 'UT'
@@ -42,6 +43,12 @@ function profileStateCode(value?: string | null) {
 
 function formatCourseLocation(course: GolfHomiezCourseSearchResult) {
   return [course.city, course.state, course.zipCode].filter(Boolean).join(', ') || course.state
+}
+
+function absoluteCourseWebsiteUrl(path?: string | null, fallbackUrl?: string | null) {
+  if (!path) return fallbackUrl || 'Website unavailable'
+  if (typeof window === 'undefined' || !window.location?.origin) return path
+  return new URL(path, window.location.origin).href
 }
 
 function visiblePageNumbers(currentPage: number, totalPages: number) {
@@ -208,9 +215,11 @@ export default function FindCourse() {
               <div className="compactLineItemList tournamentSearchResults" aria-live="polite">
                 {searchResults.map((course) => {
                   const target = course.golfCoursePagePath || course.websiteUrl || ''
+                  const websiteLabel = absoluteCourseWebsiteUrl(course.golfCoursePagePath, course.websiteUrl)
+                  const displayPhone = formatValidUsPhoneForDisplay(course.phone)
                   const openCourse = () => {
                     if (!target) return
-                    logFrontendEvent({ category: 'user.golfCourses.search', message: 'golf_course_search_result_opened', data: { route: '/find-course', golfCourseId: course.golfCourseId || course.id, golfCourseName: course.golfCourseName, target, distanceMiles: course.distanceMiles ?? null } })
+                    logFrontendEvent({ category: 'user.golfCourses.search', message: 'golf_course_search_result_opened', data: { route: '/find-course', golfCourseId: course.golfCourseId || course.id, golfCourseName: course.golfCourseName, target, displayedWebsite: websiteLabel, hasPhone: Boolean(displayPhone), isGolfHomiezWebsite: Boolean(course.golfCoursePagePath), distanceMiles: course.distanceMiles ?? null } })
                     if (target.startsWith('/')) navigate(target)
                     else window.open(target, '_blank', 'noopener,noreferrer')
                   }
@@ -233,24 +242,10 @@ export default function FindCourse() {
                         <strong className="tournamentSearchCourseName">{course.golfCourseName}</strong>
                         <span className="tournamentSearchMidline">
                           <span><strong>Location:</strong> {formatCourseLocation(course)}</span>
+                          {displayPhone ? <span><strong>Phone:</strong> {displayPhone}</span> : null}
                           {course.distanceMiles != null && searchFilters.zipCode ? <span><strong>ZIP distance:</strong> {course.distanceMiles.toFixed(1)} miles</span> : null}
-                          <span><strong>GolfHomiez tournaments:</strong> {course.hostedTournamentCount}</span>
                         </span>
-                        <span className="tournamentSearchTournamentName">{course.websiteUrl || (course.golfCoursePagePath ? 'GolfHomiez course page' : 'Website unavailable')}</span>
-                      </span>
-                      <span className="compactLineItemSummary tournamentSearchResultAction">
-                        {course.golfCoursePagePath ? (
-                          <Link
-                            className="btn btnSmall tournamentSearchCoursePageAction"
-                            to={course.golfCoursePagePath}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              logFrontendEvent({ category: 'user.golfCourses.search', message: 'golf_course_page_opened_from_course_search', data: { route: '/find-course', golfCourseId: course.golfCourseId || course.id, golfCourseName: course.golfCourseName, golfCoursePagePath: course.golfCoursePagePath } })
-                            }}
-                          >
-                            Course Info & Tournaments
-                          </Link>
-                        ) : null}
+                        <span className="tournamentSearchTournamentName"><strong>Website:</strong> {websiteLabel}</span>
                       </span>
                     </div>
                   )

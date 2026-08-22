@@ -2951,6 +2951,21 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
   },
 
 
+
+  {
+    version: '20260822_077',
+    name: 'individual_challenge_date_range',
+    filename: '20260822_077_individual_challenge_date_range.sql',
+    async isSatisfied(db) {
+      return await columnExists(db, 'inbox_messages', 'challenge_end_date')
+    },
+    async getSql(db) {
+      if (await columnExists(db, 'inbox_messages', 'challenge_end_date')) return '-- Individual Challenge date range schema already exists'
+      return 'ALTER TABLE inbox_messages ADD COLUMN challenge_end_date DATE NULL AFTER challenge_date'
+    },
+  },
+
+
 ]
 
 export function sortMigrations(migrations) {

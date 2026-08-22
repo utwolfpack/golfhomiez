@@ -147,6 +147,7 @@ test('tournament search enforces today through six months, fixes SQL filtering, 
     zip_code: index === 24 ? '84199-1234' : '84101',
     tournament_date: '2026-08-22',
     tournament_website: 'https://course.example/tournament',
+    golf_course_phone: '801 555 0140',
     golf_course_website: 'https://course.example',
     source_url: 'https://course.example/tournament',
     first_seen_at: null,
@@ -170,10 +171,13 @@ test('tournament search enforces today through six months, fixes SQL filtering, 
   assert.match(capturedQueries[0].sql, /BINARY tr\.tournament_id = BINARY gct\.golfhomiez_tournament_id/i)
   assert.match(capturedQueries[0].sql, /LEFT JOIN tournaments t ON BINARY t\.id = BINARY gct\.golfhomiez_tournament_id/i)
   assert.match(capturedQueries[0].sql, /LEFT JOIN golf_courses gc_search/i)
+  assert.match(capturedQueries[0].sql, /gcpp_search\.contact_phone/i)
+  assert.match(capturedQueries[0].sql, /gc_search\.phone/i)
   assert.match(capturedQueries[0].sql, /gc_search\.website/i)
   assert.deepEqual(result.pagination, { page: 2, pageSize: 20, totalResults: 25, totalPages: 2 })
   assert.equal(result.tournaments.length, 5)
   assert.equal(result.tournaments[0].tournamentDate, '2026-08-22')
+  assert.equal(result.tournaments[0].golfCoursePhone, '801 555 0140')
   assert.equal(result.tournaments[0].golfCourseWebsiteUrl, 'https://course.example')
 })
 
@@ -229,9 +233,16 @@ test('tournament discovery migration and dedicated Find Tournament UI/API wiring
   assert.match(findTournament, /Registered/)
   assert.match(findTournament, /tournamentSearchResultClickable/)
   assert.match(findTournament, /golfCoursePagePath/)
+  assert.match(findTournament, /golfCoursePhone/)
   assert.match(findTournament, /golfCourseWebsiteUrl/)
+  assert.match(findTournament, /absoluteCourseWebsiteUrl/)
+  assert.match(findTournament, /window\.location\.origin/)
+  assert.match(findTournament, /Phone:/)
+  assert.match(findTournament, /formatValidUsPhoneForDisplay\(tournament\.golfCoursePhone\)/)
+  assert.match(findTournament, /displayPhone \? <span><strong>Phone:/)
+  assert.doesNotMatch(findTournament, /golfCoursePhone \|\| 'Not listed'/)
   assert.match(findTournament, /Website:/)
-  assert.match(findTournament, /Course Info & Tournaments/)
+  assert.doesNotMatch(findTournament, /Course Info & Tournaments/)
   assert.doesNotMatch(findTournament, /Source:/)
   assert.doesNotMatch(findTournament, /Select row/)
   assert.doesNotMatch(findTournament, /GolfHomiez hosted/)

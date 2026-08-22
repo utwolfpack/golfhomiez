@@ -463,6 +463,7 @@ function mapInboxMessage(row) {
     challengedTeamName: row.challenged_team_name || null,
     challengeStatus: row.challenge_status || null,
     challengeDate: toIso(row.challenge_date)?.slice(0, 10) || null,
+    challengeEndDate: hasColumn(row, 'challenge_end_date') ? (toIso(row.challenge_end_date)?.slice(0, 10) || null) : null,
     challengeState: row.challenge_state || null,
     challengeCourse: row.challenge_course || null,
     challengeTeeColor: hasColumn(row, 'challenge_tee_color') ? (row.challenge_tee_color || 'white') : 'white',
@@ -579,8 +580,8 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
   const resolvedThreadId = threadId || id
   await db.execute(
     `INSERT INTO inbox_messages
-      (id, thread_id, parent_message_id, message_type, sender_user_id, sender_email, sender_name, recipient_user_id, recipient_email, proposer_team_id, proposer_team_name, challenged_team_id, challenged_team_name, challenge_status, challenge_date, challenge_state, challenge_course, challenge_tee_color, challenge_scoring_type, challenge_points_per_hole, proposer_team_score, challenged_team_score, proposer_team_holes_json, challenged_team_holes_json, individual_participants_json, message_body, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      (id, thread_id, parent_message_id, message_type, sender_user_id, sender_email, sender_name, recipient_user_id, recipient_email, proposer_team_id, proposer_team_name, challenged_team_id, challenged_team_name, challenge_status, challenge_date, challenge_end_date, challenge_state, challenge_course, challenge_tee_color, challenge_scoring_type, challenge_points_per_hole, proposer_team_score, challenged_team_score, proposer_team_holes_json, challenged_team_holes_json, individual_participants_json, message_body, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
       id,
       resolvedThreadId,
@@ -597,6 +598,7 @@ export async function createInboxMessage({ sender, recipient, messageType, body,
       teamContext?.challengedTeamName || null,
       teamContext?.challengeStatus || null,
       teamContext?.challengeDate || null,
+      teamContext?.challengeEndDate || null,
       teamContext?.challengeState || null,
       teamContext?.challengeCourse || null,
       teamContext?.challengeTeeColor || 'white',
@@ -639,6 +641,80 @@ export async function updateInboxChallengeStatus(messageId, user, status) {
   const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
   if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
   await db.execute("UPDATE inbox_messages SET challenge_status = ? WHERE thread_id = ? AND message_type IN ('challenge_request', 'individual_challenge')", [status, existing.threadId || existing.id])
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
+
+export async function updateInboxChallengeSettings(messageId, user, settings = {}) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute("SELECT * FROM inbox_messages WHERE id = ? AND message_type IN ('challenge_request', 'individual_challenge') LIMIT 1", [String(messageId || '')])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
+
+  const assignments = []
+  const values = []
+  const append = (column, value) => {
+    assignments.push(`${column} = ?`)
+    values.push(value)
+  }
+  if (Object.prototype.hasOwnProperty.call(settings, 'challengeTeeColor')) append('challenge_tee_color', settings.challengeTeeColor || 'white')
+  if (Object.prototype.hasOwnProperty.call(settings, 'challengeScoringType')) append('challenge_scoring_type', settings.challengeScoringType || 'stroke_play')
+  if (Object.prototype.hasOwnProperty.call(settings, 'challengePointsPerHole')) append('challenge_points_per_hole', settings.challengePointsPerHole ?? null)
+  if (Object.prototype.hasOwnProperty.call(settings, 'challengeDate')) append('challenge_date', settings.challengeDate || null)
+  if (Object.prototype.hasOwnProperty.call(settings, 'challengeEndDate')) append('challenge_end_date', settings.challengeEndDate || null)
+  if (Object.prototype.hasOwnProperty.call(settings, 'challengeState')) append('challenge_state', settings.challengeState || null)
+  if (Object.prototype.hasOwnProperty.call(settings, 'challengeCourse')) append('challenge_course', settings.challengeCourse || null)
+  if (assignments.length === 0) return existing
+
+  values.push(existing.threadId || existing.id, existing.messageType)
+  await db.execute(`UPDATE inbox_messages SET ${assignments.join(', ')} WHERE thread_id = ? AND message_type = ?`, values)
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
+export async function addInboxIndividualChallengeParticipant(messageId, user, participant) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'individual_challenge'])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
+
+  const participantEmail = normalizeEmail(participant?.email)
+  if (!participantEmail) throw new Error('Individual Challenge golfer email is required.')
+  const currentParticipants = existing.individualChallengeParticipants || []
+  if (currentParticipants.some((item) => normalizeEmail(item.email) === participantEmail)) {
+    return { message: existing, added: false, participants: currentParticipants }
+  }
+  if (currentParticipants.length >= 25) throw new Error('Individual Challenge supports up to 25 golfers.')
+  const participants = [...currentParticipants, {
+    userId: participant?.id || participant?.userId || null,
+    email: participantEmail,
+    name: participant?.name || null,
+    score: null,
+    holes: [],
+    soloScoreId: null,
+  }]
+  await db.execute('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?', [JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge'])
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  const message = rows[0] ? mapInboxMessage(rows[0]) : null
+  return { message, added: true, participants }
+}
+
+export async function updateInboxIndividualChallengeParticipants(messageId, user, participants = []) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'individual_challenge'])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  const nextParticipants = Array.isArray(participants) ? participants : []
+  await db.execute('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?', [JSON.stringify(nextParticipants), existing.threadId || existing.id, 'individual_challenge'])
   const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
   return rows[0] ? mapInboxMessage(rows[0]) : null
 }

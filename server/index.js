@@ -28,7 +28,7 @@ import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionC
 import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload, sanitizeTournamentTemplateData } from './lib/rbac.js'
 import { findTournamentDateConflict, formatTournamentScheduleDate, normalizeTournamentScheduleDate } from './lib/tournament-schedule-conflicts.js'
 import { requestUserTimeZone } from './lib/time-zone.js'
-import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles } from './lib/inbox-service.js'
+import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles, normalizeIndividualChallengeParticipantEmails, normalizeTeamChallengeScoringType, normalizeTeamChallengePointsPerHole, validateIndividualChallengeDateRange, validateOptionalChallengeState, validateOptionalChallengeCourse } from './lib/inbox-service.js'
 import { addMessageGroupMember, appendTournamentPortalMessage, createMessageGroup, createTournamentMessageThread, createTournamentNotification, getTournamentMessageConversationForUser, getUserNotificationSummary, listMessageGroups, listTournamentMessageThreads, loadUserNotificationPage, markTournamentMessagesRead, removeMessageGroupMember, sendMessageGroupMessage, setNotificationThreadState, startTournamentUserConversationFromNotification, validateNotificationMessageBody } from './lib/notification-service.js'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './lib/tee-colors.js'
 import { getExternalApiCallSummary } from './lib/external-api-metrics.js'
@@ -3867,6 +3867,8 @@ app.get('/api/users/golf-course-search', requireStorage, authMiddleware, async (
       resultCount: result.courses.length,
       totalResults: result.pagination.totalResults,
       golfHomiezHostedResultsOnPage: result.courses.filter((course) => Number(course.hostedTournamentCount) > 0).length,
+      golfHomiezPublicPageResultsOnPage: result.courses.filter((course) => Boolean(course.golfCoursePagePath)).length,
+      phoneResultsOnPage: result.courses.filter((course) => Boolean(course.phone)).length,
       zipRadiusMiles: result.zipSearch.radiusMiles,
       zipRadiusResolved: result.zipSearch.radiusResolved,
       zipRadiusSource: result.zipSearch.source,
@@ -3928,6 +3930,8 @@ app.get('/api/users/tournament-search', requireStorage, authMiddleware, async (r
       totalResults: result.pagination.totalResults,
       golfHomiezResultCount: result.tournaments.filter((tournament) => tournament.isGolfHomiezTournament).length,
       registeredGolfHomiezResultCount: result.tournaments.filter((tournament) => tournament.isGolfHomiezTournament && tournament.isRegistered).length,
+      golfHomiezPublicPageResultsOnPage: result.tournaments.filter((tournament) => Boolean(tournament.golfCoursePagePath)).length,
+      phoneResultsOnPage: result.tournaments.filter((tournament) => Boolean(tournament.golfCoursePhone)).length,
     })
     res.json(result)
   } catch (error) {
@@ -4419,6 +4423,7 @@ async function resolveTeamChallengeForReply(req, parentMessage) {
       challengedTeamName: parentMessage.challengedTeamName || challengedTeam?.name || null,
       challengeStatus: parentMessage.challengeStatus || 'proposed',
       challengeDate: parentMessage.challengeDate || null,
+      challengeEndDate: parentMessage.challengeEndDate || parentMessage.challengeDate || null,
       challengeState: parentMessage.challengeState || null,
       challengeCourse: parentMessage.challengeCourse || null,
       challengeTeeColor: normalizeTeeColor(parentMessage.challengeTeeColor || DEFAULT_TEE_COLOR),
@@ -4455,7 +4460,7 @@ function sortInboxMessagesByCreatedAt(messages = []) {
   return [...messages].sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')) || String(a?.id || '').localeCompare(String(b?.id || '')))
 }
 
-async function resolveChallengeCompletionForUser(messageId, user) {
+async function resolveChallengeCompletionForUser(messageId, user, action = 'complete it') {
   const [receivedMessages, sentMessages] = await Promise.all([
     storage.listInboxMessagesForUser(user),
     storage.listSentInboxMessagesForUser(user),
@@ -4470,7 +4475,7 @@ async function resolveChallengeCompletionForUser(messageId, user) {
   const threadMessages = Array.from(byId.values()).filter((message) => inboxChallengeMessageType(message) && String(message.threadId || message.id) === threadId)
   const initialMessage = sortInboxMessagesByCreatedAt(threadMessages).find((message) => !message.parentMessageId) || sortInboxMessagesByCreatedAt(threadMessages)[0] || selected
   if (!inboxMessageCreatedByUser(initialMessage, user)) {
-    return { status: 403, body: { message: 'Only the golfer who created the challenge can complete it.' } }
+    return { status: 403, body: { message: `Only the golfer who created the challenge can ${action}.` } }
   }
   if (String(initialMessage.challengeStatus || '').toLowerCase() === 'completed') {
     return { status: 409, body: { message: 'Challenge is already completed.' } }
@@ -4497,32 +4502,37 @@ function buildIndividualChallengeParticipants(sender, users) {
 }
 
 async function resolveIndividualChallengeForNewMessage(req, payload) {
-  const resolvedUsers = []
+  const resolvedParticipants = []
+  let existingGolfHomiezCount = 0
   for (const email of payload.individualParticipantEmails || []) {
     const user = await storage.findUserByEmail(email)
-    if (!user) {
-      logApi('individual_challenge_recipient_not_found', { ...requestContext(req), recipientEmail: email, inviteRequired: true })
-      return { status: 404, body: { message: 'Recipient does not exist in Golf Homiez. Send them an invite to join.', recipientEmail: email, inviteRequired: true } }
+    if (user) {
+      resolvedParticipants.push(user)
+      existingGolfHomiezCount += 1
+    } else {
+      resolvedParticipants.push({ id: null, email, name: null })
     }
-    resolvedUsers.push(user)
   }
-  const participants = buildIndividualChallengeParticipants(req.user, resolvedUsers)
+  const participants = buildIndividualChallengeParticipants(req.user, resolvedParticipants)
   if (participants.length > 25) {
     logApi('individual_challenge_too_many_golfers', { ...requestContext(req), participantCount: participants.length })
     return { status: 400, body: { message: 'Individual Challenge supports up to 25 golfers.' } }
   }
-  const recipient = resolvedUsers.find((item) => normalizeEmail(item.email) !== normalizeEmail(req.user?.email)) || resolvedUsers[0] || req.user
+  const recipient = resolvedParticipants.find((item) => item?.id && normalizeEmail(item.email) !== normalizeEmail(req.user?.email)) || req.user
   return {
     status: 200,
     recipient,
     teamContext: {
       challengeStatus: 'proposed',
       challengeDate: payload.challengeDate,
-      challengeState: payload.challengeState,
-      challengeCourse: payload.challengeCourse,
+      challengeEndDate: payload.challengeEndDate || payload.challengeDate || null,
+      challengeState: payload.challengeState || null,
+      challengeCourse: payload.challengeCourse || null,
       challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || DEFAULT_TEE_COLOR),
       individualChallengeParticipants: participants,
     },
+    existingGolfHomiezCount,
+    pendingInviteCount: Math.max(0, resolvedParticipants.length - existingGolfHomiezCount),
   }
 }
 
@@ -4618,6 +4628,7 @@ async function resolveIndividualChallengeForReply(req, parentMessage) {
     teamContext: {
       challengeStatus: parentMessage.challengeStatus || 'proposed',
       challengeDate: parentMessage.challengeDate || null,
+      challengeEndDate: parentMessage.challengeEndDate || parentMessage.challengeDate || null,
       challengeState: parentMessage.challengeState || null,
       challengeCourse: parentMessage.challengeCourse || null,
       challengeTeeColor: normalizeTeeColor(parentMessage.challengeTeeColor || DEFAULT_TEE_COLOR),
@@ -4986,7 +4997,10 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
         ...requestContext(req),
         participantCount: teamContext?.individualChallengeParticipants?.length || 0,
         participantEmails: (teamContext?.individualChallengeParticipants || []).map((participant) => participant.email),
+        existingGolfHomiezCount: resolvedChallenge.existingGolfHomiezCount ?? null,
+        pendingInviteCount: resolvedChallenge.pendingInviteCount ?? null,
         challengeDate: teamContext?.challengeDate || null,
+        challengeEndDate: teamContext?.challengeEndDate || null,
         challengeState: teamContext?.challengeState || null,
         challengeCourse: teamContext?.challengeCourse || null,
         challengeTeeColor: teamContext?.challengeTeeColor || DEFAULT_TEE_COLOR,
@@ -5030,6 +5044,7 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
       challengedTeamId: message?.challengedTeamId || teamContext?.challengedTeamId || null,
       challengeStatus: message?.challengeStatus || teamContext?.challengeStatus || null,
       challengeDate: message?.challengeDate || teamContext?.challengeDate || null,
+      challengeEndDate: message?.challengeEndDate || teamContext?.challengeEndDate || null,
       challengeState: message?.challengeState || teamContext?.challengeState || null,
       challengeCourse: message?.challengeCourse || teamContext?.challengeCourse || null,
       challengeScoringType: message?.challengeScoringType || teamContext?.challengeScoringType || 'stroke_play',
@@ -5044,6 +5059,182 @@ app.post('/api/inbox/messages', requireStorage, authMiddleware, async (req, res)
     }
     logRouteError('Inbox message send error', req, error)
     res.status(500).json({ message: 'Could not send inbox message' })
+  }
+})
+
+
+app.patch('/api/inbox/messages/:id/challenge-settings', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const completion = await resolveChallengeCompletionForUser(req.params.id, req.user, 'update its settings')
+    if (completion.status !== 200) {
+      logApi('challenge_settings_update_denied', { ...requestContext(req), messageId: req.params.id, status: completion.status, reason: completion.body?.message || null })
+      return res.status(completion.status).json(completion.body)
+    }
+    const initialMessage = completion.message
+    const challengeTeeColor = normalizeTeeColor(req.body?.challengeTeeColor || req.body?.teeColor || initialMessage.challengeTeeColor || DEFAULT_TEE_COLOR)
+    const settings = { challengeTeeColor }
+
+    if (initialMessage.messageType === 'challenge_request') {
+      const challengeScoringType = normalizeTeamChallengeScoringType(req.body?.challengeScoringType ?? initialMessage.challengeScoringType)
+      const challengePointsPerHole = normalizeTeamChallengePointsPerHole(req.body?.challengePointsPerHole ?? initialMessage.challengePointsPerHole, challengeScoringType)
+      settings.challengeScoringType = challengeScoringType
+      settings.challengePointsPerHole = challengePointsPerHole
+    } else if (initialMessage.messageType === 'individual_challenge') {
+      const dateRange = validateIndividualChallengeDateRange(
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'challengeDate') ? req.body.challengeDate : initialMessage.challengeDate,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'challengeEndDate') ? req.body.challengeEndDate : (initialMessage.challengeEndDate || initialMessage.challengeDate),
+      )
+      settings.challengeDate = dateRange.challengeDate
+      settings.challengeEndDate = dateRange.challengeEndDate
+      settings.challengeState = validateOptionalChallengeState(Object.prototype.hasOwnProperty.call(req.body || {}, 'challengeState') ? req.body.challengeState : initialMessage.challengeState)
+      settings.challengeCourse = validateOptionalChallengeCourse(Object.prototype.hasOwnProperty.call(req.body || {}, 'challengeCourse') ? req.body.challengeCourse : initialMessage.challengeCourse)
+    }
+
+    logApi('challenge_settings_update_started', {
+      ...requestContext(req),
+      messageId: initialMessage.id,
+      threadId: initialMessage.threadId || initialMessage.id,
+      messageType: initialMessage.messageType,
+      challengeTeeColor: settings.challengeTeeColor,
+      challengeScoringType: settings.challengeScoringType || null,
+      challengePointsPerHole: settings.challengePointsPerHole ?? null,
+      challengeDate: settings.challengeDate ?? initialMessage.challengeDate ?? null,
+      challengeEndDate: settings.challengeEndDate ?? initialMessage.challengeEndDate ?? null,
+      challengeState: settings.challengeState ?? initialMessage.challengeState ?? null,
+      challengeCourse: settings.challengeCourse ?? initialMessage.challengeCourse ?? null,
+    })
+    const message = await storage.updateInboxChallengeSettings(initialMessage.id, req.user, settings)
+    if (!message) return res.status(409).json({ message: 'This challenge is complete, so its settings are locked.' })
+    logApi('challenge_settings_update_succeeded', { ...requestContext(req), messageId: message.id, threadId: message.threadId || message.id, messageType: message.messageType, challengeTeeColor: message.challengeTeeColor, challengeScoringType: message.challengeScoringType || null, challengePointsPerHole: message.challengePointsPerHole ?? null, challengeDate: message.challengeDate || null, challengeEndDate: message.challengeEndDate || null })
+    res.json(message)
+  } catch (error) {
+    if (error instanceof Error && /challenge|date|state|course|points|tee/i.test(error.message)) {
+      logApi('challenge_settings_update_validation_failed', { ...requestContext(req), messageId: req.params.id, validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Challenge settings update error', req, error)
+    res.status(500).json({ message: 'Could not update challenge settings' })
+  }
+})
+
+app.patch('/api/inbox/messages/:id/individual-participants/refresh', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const message = await storage.getInboxMessageForParticipant(req.params.id, req.user)
+    if (!message || message.messageType !== 'individual_challenge') {
+      logApi('individual_challenge_participant_refresh_not_found', { ...requestContext(req), messageId: req.params.id })
+      return res.status(404).json({ message: 'Individual Challenge not found' })
+    }
+
+    const currentParticipants = Array.isArray(message.individualChallengeParticipants) ? message.individualChallengeParticipants : []
+    let transitionedToRegisteredCount = 0
+    let registeredCount = 0
+    let changedCount = 0
+    const refreshedParticipants = []
+
+    logApi('individual_challenge_participant_refresh_started', {
+      ...requestContext(req),
+      messageId: message.id,
+      threadId: message.threadId || message.id,
+      participantCount: currentParticipants.length,
+    })
+
+    for (const participant of currentParticipants) {
+      const email = normalizeEmail(participant?.email)
+      const found = email ? await storage.findUserByEmail(email) : null
+      if (!found) {
+        refreshedParticipants.push(participant)
+        continue
+      }
+
+      const parts = splitName(found.name, found.email)
+      const registeredName = `${parts.firstName} ${parts.lastName}`.replace(/\s+/g, ' ').trim() || normalizeEmail(found.email).split('@')[0]
+      const nextParticipant = {
+        ...participant,
+        userId: found.id || participant?.userId || null,
+        email: normalizeEmail(found.email || email),
+        name: registeredName,
+      }
+      registeredCount += 1
+      if (!participant?.userId && nextParticipant.userId) transitionedToRegisteredCount += 1
+      if (String(participant?.userId || '') !== String(nextParticipant.userId || '') || String(participant?.name || '') !== String(nextParticipant.name || '') || normalizeEmail(participant?.email) !== nextParticipant.email) changedCount += 1
+      refreshedParticipants.push(nextParticipant)
+    }
+
+    const updatedMessage = changedCount > 0
+      ? await storage.updateInboxIndividualChallengeParticipants(message.id, req.user, refreshedParticipants)
+      : message
+    if (!updatedMessage) return res.status(404).json({ message: 'Individual Challenge not found' })
+
+    const pendingCount = Math.max(0, refreshedParticipants.length - registeredCount)
+    logApi('individual_challenge_participant_refresh_succeeded', {
+      ...requestContext(req),
+      messageId: updatedMessage.id,
+      threadId: updatedMessage.threadId || updatedMessage.id,
+      participantCount: refreshedParticipants.length,
+      registeredCount,
+      pendingCount,
+      transitionedToRegisteredCount,
+      changedCount,
+    })
+    res.json({
+      message: updatedMessage,
+      participants: updatedMessage.individualChallengeParticipants || refreshedParticipants,
+      registeredCount,
+      pendingCount,
+      transitionedToRegisteredCount,
+    })
+  } catch (error) {
+    logRouteError('Individual Challenge participant refresh error', req, error)
+    res.status(500).json({ message: 'Could not refresh Individual Challenge golfers' })
+  }
+})
+
+app.post('/api/inbox/messages/:id/individual-participants', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const completion = await resolveChallengeCompletionForUser(req.params.id, req.user, 'add golfers')
+    if (completion.status !== 200) {
+      logApi('individual_challenge_member_add_denied', { ...requestContext(req), messageId: req.params.id, status: completion.status, reason: completion.body?.message || null })
+      return res.status(completion.status).json(completion.body)
+    }
+    const initialMessage = completion.message
+    if (initialMessage.messageType !== 'individual_challenge') return res.status(400).json({ message: 'Golfers can only be added to an Individual Challenge.' })
+    const [email] = normalizeIndividualChallengeParticipantEmails([req.body?.email])
+    if ((initialMessage.individualChallengeParticipants || []).some((participant) => normalizeEmail(participant.email) === email)) {
+      return res.status(409).json({ message: 'That golfer is already invited to this Individual Challenge.' })
+    }
+    const user = await storage.findUserByEmail(email)
+    const participant = user || { id: null, email, name: null }
+    logApi('individual_challenge_member_add_started', { ...requestContext(req), messageId: initialMessage.id, threadId: initialMessage.threadId || initialMessage.id, participantEmail: email, golfHomiezUserFound: Boolean(user) })
+    const result = await storage.addInboxIndividualChallengeParticipant(initialMessage.id, req.user, participant)
+    if (!result?.message) return res.status(409).json({ message: 'This challenge is complete, so golfers can no longer be added.' })
+    if (!result.added) return res.status(409).json({ message: 'That golfer is already invited to this Individual Challenge.' })
+
+    const addedMessage = await storage.createInboxMessage({
+      sender: req.user,
+      recipient: participant,
+      messageType: 'individual_challenge',
+      body: `${participant.name || email} was invited to the Individual Challenge.`,
+      threadId: result.message.threadId || result.message.id,
+      parentMessageId: result.message.id,
+      teamContext: {
+        challengeStatus: result.message.challengeStatus || 'proposed',
+        challengeDate: result.message.challengeDate || null,
+        challengeEndDate: result.message.challengeEndDate || result.message.challengeDate || null,
+        challengeState: result.message.challengeState || null,
+        challengeCourse: result.message.challengeCourse || null,
+        challengeTeeColor: normalizeTeeColor(result.message.challengeTeeColor || DEFAULT_TEE_COLOR),
+        individualChallengeParticipants: result.participants,
+      },
+    })
+    logApi('individual_challenge_member_add_succeeded', { ...requestContext(req), messageId: initialMessage.id, threadId: result.message.threadId || result.message.id, notificationMessageId: addedMessage?.id || null, participantEmail: email, participantCount: result.participants.length, golfHomiezUserFound: Boolean(user) })
+    res.status(201).json({ message: addedMessage || result.message, participants: result.participants, golfHomiezUserFound: Boolean(user) })
+  } catch (error) {
+    if (error instanceof Error && /email|golfers|Individual Challenge/i.test(error.message)) {
+      logApi('individual_challenge_member_add_validation_failed', { ...requestContext(req), messageId: req.params.id, validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Individual Challenge member add error', req, error)
+    res.status(500).json({ message: 'Could not add golfer to Individual Challenge' })
   }
 })
 

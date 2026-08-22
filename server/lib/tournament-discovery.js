@@ -4,6 +4,7 @@ import net from 'node:net'
 import process from 'node:process'
 import { getMountainTimeParts, mountainLocalTimeToUtc } from './cancelled-tournament-cleanup.js'
 import { normalizeStateCode } from './us-states.js'
+import { normalizeUsPhoneForDisplay } from './us-phone.js'
 
 export const GET_TOURNAMENTS_TIME_ZONE = 'America/Denver'
 export const GET_TOURNAMENTS_HOUR = 2
@@ -1338,6 +1339,7 @@ export async function searchGolfCourseTournaments(db, filters = {}, {
             COALESCE(NULLIF(TRIM(gct.source_type), ''), '${EXTERNAL_TOURNAMENT_SOURCE}') AS source_type,
             gct.golfhomiez_tournament_id,
             gcpp_search.slug AS golf_course_public_page_slug,
+            COALESCE(NULLIF(TRIM(gcpp_search.contact_phone), ''), NULLIF(TRIM(gc_search.phone), '')) AS golf_course_phone,
             COALESCE(NULLIF(TRIM(gc_search.website), ''), NULLIF(TRIM(gct.source_url), '')) AS golf_course_website,
             COALESCE(NULLIF(TRIM(t.tournament_identifier), ''), gct.golfhomiez_tournament_id) AS golfhomiez_tournament_identifier,
             CASE
@@ -1398,6 +1400,7 @@ export async function searchGolfCourseTournaments(db, filters = {}, {
       tournamentDate: typeof row.tournament_date === 'string' ? row.tournament_date.slice(0, 10) : isoDate(new Date(row.tournament_date)),
       tournamentWebsite: row.tournament_website || row.source_url || null,
       golfCoursePagePath: row.golf_course_public_page_slug ? `/${row.golf_course_public_page_slug}` : null,
+      golfCoursePhone: normalizeUsPhoneForDisplay(row.golf_course_phone),
       golfCourseWebsiteUrl: row.golf_course_website || null,
       sourceUrl: row.source_url || null,
       sourceType: row.source_type || EXTERNAL_TOURNAMENT_SOURCE,

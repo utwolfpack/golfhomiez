@@ -7,6 +7,7 @@ import {
   type GolfCourseTournamentSearchResult,
 } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { formatValidUsPhoneForDisplay } from '../lib/phone-validation'
 import { fetchProfile } from '../lib/profile'
 import { US_STATES } from '../data/usStates'
 
@@ -75,6 +76,12 @@ function profileStateCode(value?: string | null) {
 
 function formatSearchResultLocation(tournament: GolfCourseTournamentSearchResult) {
   return [tournament.city, tournament.state, tournament.zipCode].filter(Boolean).join(', ') || tournament.state
+}
+
+function absoluteCourseWebsiteUrl(path?: string | null, fallbackUrl?: string | null) {
+  if (!path) return fallbackUrl || 'Website not listed'
+  if (typeof window === 'undefined' || !window.location?.origin) return path
+  return new URL(path, window.location.origin).href
 }
 
 function visiblePageNumbers(currentPage: number, totalPages: number) {
@@ -247,13 +254,14 @@ export default function FindTournament() {
                   const golfCourseTarget = tournament.golfCoursePagePath || ''
                   const websiteTarget = tournament.golfCourseWebsiteUrl || golfCourseTarget || tournament.tournamentWebsite || tournament.sourceUrl || ''
                   const tournamentTarget = isGolfHomiezTournament ? (tournament.tournamentPath || '') : websiteTarget
-                  const websiteLabel = websiteTarget || 'Website not listed'
+                  const websiteLabel = absoluteCourseWebsiteUrl(tournament.golfCoursePagePath, tournament.golfCourseWebsiteUrl || tournament.tournamentWebsite || tournament.sourceUrl)
+                  const displayPhone = formatValidUsPhoneForDisplay(tournament.golfCoursePhone)
                   const openTournament = () => {
                     if (!tournamentTarget) return
                     logFrontendEvent({
                       category: 'user.tournaments.search',
                       message: isGolfHomiezTournament ? 'golfhomiez_tournament_line_item_opened' : 'golf_course_website_line_item_opened',
-                      data: { route: '/find-tournament', tournamentId: tournament.golfHomiezTournamentId || tournament.id, golfCourseName: tournament.golfCourseName, target: tournamentTarget, registered: Boolean(tournament.isRegistered) },
+                      data: { route: '/find-tournament', tournamentId: tournament.golfHomiezTournamentId || tournament.id, golfCourseName: tournament.golfCourseName, target: tournamentTarget, displayedWebsite: websiteLabel, hasPhone: Boolean(displayPhone), isGolfHomiezWebsite: Boolean(tournament.golfCoursePagePath), registered: Boolean(tournament.isRegistered) },
                     })
                     if (tournamentTarget.startsWith('/')) navigate(tournamentTarget)
                     else window.open(tournamentTarget, '_blank', 'noopener,noreferrer')
@@ -280,26 +288,13 @@ export default function FindTournament() {
                         <span className="tournamentSearchMidline">
                           <span><strong>Date:</strong> {formatDate(tournament.tournamentDate)}</span>
                           <span><strong>Location:</strong> {formatSearchResultLocation(tournament)}</span>
+                          {displayPhone ? <span><strong>Phone:</strong> {displayPhone}</span> : null}
                           <span><strong>Website:</strong> {websiteLabel}</span>
                         </span>
                         <span className="tournamentSearchTournamentName">
                           {tournament.tournamentName || 'Golf tournament'}
                           {isGolfHomiezTournament && tournament.isRegistered ? <span className="tournamentSearchRegistrationStatus">Registered</span> : null}
                         </span>
-                      </span>
-                      <span className="compactLineItemSummary tournamentSearchResultAction">
-                        {golfCourseTarget ? (
-                          <Link
-                            className="btn btnSmall tournamentSearchCoursePageAction"
-                            to={golfCourseTarget}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              logFrontendEvent({ category: 'user.tournaments.search', message: 'golf_course_page_opened_from_search', data: { route: '/find-tournament', tournamentId: tournament.id, golfCourseName: tournament.golfCourseName, golfCoursePagePath: golfCourseTarget } })
-                            }}
-                          >
-                            Course Info & Tournaments
-                          </Link>
-                        ) : null}
                       </span>
                     </div>
                   )
