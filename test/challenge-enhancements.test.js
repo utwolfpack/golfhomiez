@@ -31,6 +31,31 @@ test('individual challenge accepts an optional location and a date range up to o
   assert.deepEqual(payload.individualParticipantEmails, ['golfer@example.com'])
 })
 
+
+
+test('individual challenge creation allows an empty optional message while replies still require message text', () => {
+  const payload = normalizeInboxMessagePayload({
+    messageType: 'individual_challenge',
+    body: '   ',
+    individualParticipantEmails: ['golfer@example.com'],
+    challengeDate: '2026-08-22',
+    challengeEndDate: '2026-08-30',
+    challengeState: '',
+    challengeCourse: '',
+  })
+
+  assert.equal(payload.body, '')
+  assert.deepEqual(payload.individualParticipantEmails, ['golfer@example.com'])
+  assert.throws(
+    () => normalizeInboxMessagePayload({
+      messageType: 'individual_challenge',
+      body: '',
+      replyToMessageId: 'message-1',
+    }),
+    /Message is required/i,
+  )
+})
+
 test('individual challenge rejects date ranges longer than one month', () => {
   assert.throws(
     () => validateIndividualChallengeDateRange('2026-08-22', '2026-09-23'),
@@ -66,6 +91,10 @@ test('challenge UI implements profile state defaults, optional individual locati
   assert.match(source, /Points per hole/)
   assert.match(source, /\.filter\(\(row\) => row\.thru > 0\)/)
   assert.match(source, /!challengesComposeOpen \? \(/)
+  assert.match(source, /Challenge Message \(optional\)/)
+  assert.match(source, /Optional: write your Individual Challenge details/)
+  assert.match(source, /: Boolean\(individualChallengeDateRangeValid && individualChallengeLocationValid && parsedIndividualParticipantEmails\.length > 0/)
+  assert.doesNotMatch(source, /: Boolean\(challengeBody\.trim\(\) && individualChallengeDateRangeValid/)
 })
 
 test('challenge backend exposes active settings and individual participant APIs with correlated transaction logging', () => {
@@ -157,3 +186,34 @@ test('solo logger defaults state from the logged-in profile and does not use nea
   assert.doesNotMatch(soloLogger, /Checking your device location for the closest golf course/)
 })
 
+
+test('individual challenge golfers choose their own course when the creator leaves course optional and leaderboard shows it', () => {
+  const source = read('src/pages/Challenges.tsx')
+  const client = read('src/lib/inbox.ts')
+  const server = read('server/index.js')
+  const mysqlStorage = read('server/storage/mysql.js')
+  const jsonStorage = read('server/storage/json.js')
+  const sqliteStorage = read('server/storage/sqlite.js')
+  const css = read('src/index.css')
+
+  assert.match(source, /Choose course to enter score/)
+  assert.match(source, /Choose golf course/)
+  assert.match(source, /Continue to scorecard/)
+  assert.match(source, /updateIndividualChallengeCourse/)
+  assert.match(source, /PLAYER \/ COURSE/)
+  assert.match(source, /inboxLeaderboardCourseName/)
+  assert.match(client, /courseId\?: string \| null/)
+  assert.match(client, /courseState\?: string \| null/)
+  assert.match(client, /courseName\?: string \| null/)
+  assert.match(client, /individual-course/)
+  assert.match(server, /app\.patch\('\/api\/inbox\/messages\/:id\/individual-course'/)
+  assert.match(server, /individual_challenge_course_update_started/)
+  assert.match(server, /individual_challenge_course_update_succeeded/)
+  assert.match(server, /resolveGolfCourseForState\(state, courseName, courseId\)/)
+  assert.match(server, /participant\?\.courseState/)
+  assert.match(server, /participant\?\.courseName/)
+  assert.match(mysqlStorage, /updateInboxIndividualChallengeCourse/)
+  assert.match(jsonStorage, /updateInboxIndividualChallengeCourse/)
+  assert.match(sqliteStorage, /updateInboxIndividualChallengeCourse/)
+  assert.match(css, /\.inboxLeaderboardCourseName/)
+})

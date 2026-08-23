@@ -1664,7 +1664,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -4556,7 +4556,7 @@ test('team challenge skins score entry supports optional messages, partial saves
   assert.match(challengesPage, /placeholder=\{isTeamChallenge \? 'Optional: write your Team Challenge details'/)
   assert.doesNotMatch(challengesPage, /id="challengeMessageBody"[\s\S]{0,160}required/)
   assert.match(inboxService, /normalizeOptionalInboxMessageBody/)
-  assert.match(inboxService, /messageType === 'challenge_request' && !replyToMessageId/)
+  assert.match(inboxService, /\(messageType === 'challenge_request' \|\| messageType === 'individual_challenge'\) && !replyToMessageId/)
 
   assert.match(challengesPage, /const showPointsColumn = isSkinsTeamChallenge\(pointSummary\.scoringType\)/)
   assert.match(challengesPage, /showPointsColumn \? <span>PTS<\/span> : null/)
@@ -5040,7 +5040,7 @@ test('completed scorecards reopen on hole 1 and challenge selection isolates the
   assert.match(challenges, /displayedChallengeThreads\.map/)
 })
 
-test('My Tournaments starts on the first null score from holes 1 through 18 and profile email is a read-only label above phone', () => {
+test('My Tournaments starts on the first null score from holes 1 through 18 and profile names are editable above the read-only email', () => {
   const tournamentScoreModal = fs.readFileSync(new URL('../src/components/TournamentTeamScoreModal.tsx', import.meta.url), 'utf8')
   const profile = fs.readFileSync(new URL('../src/pages/Profile.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
@@ -5060,10 +5060,19 @@ test('My Tournaments starts on the first null score from holes 1 through 18 and 
   assert.match(tournamentScoreModal, /savedHoleValueCount: defaultSelection\.savedHoleCount/)
   assert.match(tournamentScoreModal, /message: defaultSelection\.allHolesSaved \? 'completed_scorecard_defaulted_to_hole_one' : 'scorecard_default_hole_selected'/)
 
+  const firstNamePosition = profile.indexOf('id="profileFirstName"')
+  const lastNamePosition = profile.indexOf('id="profileLastName"')
   const emailPosition = profile.indexOf('id="profileEmail"')
   const phonePosition = profile.indexOf('<label className="label">Phone</label>')
-  assert.ok(emailPosition >= 0, 'profile email label should be present')
+  assert.ok(firstNamePosition >= 0, 'profile first-name field should be present')
+  assert.ok(lastNamePosition > firstNamePosition, 'profile last-name field should follow first name')
+  assert.ok(emailPosition > lastNamePosition, 'editable first and last name should appear above email')
   assert.ok(phonePosition > emailPosition, 'profile email label should appear above the phone field')
+  const nameBlock = profile.slice(firstNamePosition, emailPosition)
+  assert.match(nameBlock, /value=\{form\.firstName\}/)
+  assert.match(nameBlock, /patch\('firstName', e\.target\.value\)/)
+  assert.match(nameBlock, /value=\{form\.lastName\}/)
+  assert.match(nameBlock, /patch\('lastName', e\.target\.value\)/)
   const emailBlock = profile.slice(Math.max(0, emailPosition - 180), phonePosition)
   assert.match(emailBlock, /id="profileEmail"/)
   assert.match(emailBlock, /className="profileReadOnlyValue"/)
@@ -5073,6 +5082,18 @@ test('My Tournaments starts on the first null score from holes 1 through 18 and 
   assert.doesNotMatch(emailBlock, /onChange=/)
   assert.match(css, /\.profileReadOnlyValue\{[\s\S]{0,500}user-select:text/)
   assert.match(profile, /profile_email_displayed_read_only/)
+  assert.match(profile, /profile_invalid_name/)
+
+  const profileClient = fs.readFileSync(new URL('../src/lib/profile.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(profileClient, /firstName: string/)
+  assert.match(profileClient, /lastName: string/)
+  assert.match(server, /const names = splitName\(row\.name, row\.email\)/)
+  assert.match(server, /firstName: names\.firstName/)
+  assert.match(server, /lastName: names\.lastName/)
+  assert.match(server, /await auth\.api\.updateUser\(\{ headers: fromNodeHeaders\(req\.headers\), body: \{ name: profileName \} \}\)/)
+  assert.match(server, /profile_auth_name_updated/)
+  assert.match(server, /normalizeEmail\(req\.user\.email\),\s*profileName,\s*profile\.phone/)
 })
 
 test('hole-by-hole initialization cannot enter a resume-hole feedback loop and uses stored score values as the progression source', () => {

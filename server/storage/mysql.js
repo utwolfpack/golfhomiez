@@ -719,6 +719,32 @@ export async function updateInboxIndividualChallengeParticipants(messageId, user
   return rows[0] ? mapInboxMessage(rows[0]) : null
 }
 
+export async function updateInboxIndividualChallengeCourse(messageId, user, course = {}) {
+  const db = getPool()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const [existingRows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? AND message_type = ? LIMIT 1', [String(messageId || ''), 'individual_challenge'])
+  const existing = existingRows[0] ? mapInboxMessage(existingRows[0]) : null
+  if (!existing || !canParticipateInInboxMessage(existing, user, normalizedEmail, userTeamIds)) return null
+  if (String(existing.challengeStatus || '').toLowerCase() === 'completed') return null
+  let userCanEditOwnCourse = false
+  const participants = (existing.individualChallengeParticipants || []).map((participant) => {
+    const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail
+    if (!isCurrentParticipant) return participant
+    userCanEditOwnCourse = true
+    return {
+      ...participant,
+      courseId: course?.courseId || null,
+      courseState: course?.courseState || null,
+      courseName: course?.courseName || null,
+    }
+  })
+  if (!userCanEditOwnCourse) return null
+  await db.execute('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?', [JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge'])
+  const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
+  return rows[0] ? mapInboxMessage(rows[0]) : null
+}
+
 export async function updateInboxChallengeScore(messageId, user, side, score, holes = []) {
   const db = getPool()
   const normalizedEmail = normalizeEmail(user?.email)

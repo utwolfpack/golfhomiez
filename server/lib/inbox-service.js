@@ -242,7 +242,7 @@ export function normalizeIndividualChallengeScore(value) {
 export function normalizeInboxMessagePayload(payload = {}) {
   const messageType = normalizeInboxMessageType(payload.messageType || payload.type)
   const replyToMessageId = normalizeInboxMessageId(payload.replyToMessageId || payload.parentMessageId)
-  const body = messageType === 'challenge_request' && !replyToMessageId
+  const body = (messageType === 'challenge_request' || messageType === 'individual_challenge') && !replyToMessageId
     ? normalizeOptionalInboxMessageBody(payload.body || payload.message)
     : validateInboxMessageBody(payload.body || payload.message)
 

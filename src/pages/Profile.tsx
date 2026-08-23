@@ -22,6 +22,8 @@ type ChoiceCardProps = {
 }
 
 const EMPTY_FORM: ProfileInput = {
+  firstName: '',
+  lastName: '',
   phone: '',
   primaryCity: '',
   primaryState: '',
@@ -58,7 +60,7 @@ function ProfileInner() {
   const cityBlurTimer = useRef<number | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, hasRole, refreshProfileStatus } = useAuth()
+  const { user, hasRole, refreshProfileStatus, refreshSession } = useAuth()
 
   const isGuidedEnrichment = useMemo(() => new URLSearchParams(location.search).get('enrich') === '1', [location.search])
   const isPreferenceRestricted = hasRole('admin') || hasRole('host') || hasRole('organizer')
@@ -76,6 +78,8 @@ function ProfileInner() {
         const profile = await fetchProfile()
         if (!active) return
         setForm({
+          firstName: profile.firstName || '',
+          lastName: profile.lastName || '',
           phone: sanitizePhoneInput(profile.phone || ''),
           primaryCity: profile.primaryCity || '',
           primaryState: profile.primaryState || '',
@@ -225,6 +229,13 @@ function ProfileInner() {
     cityBlurTimer.current = window.setTimeout(() => setCitySuggestionsOpen(false), 120)
   }
 
+  function getNameValidationError() {
+    if (!form.firstName.trim()) return 'First name is required.'
+    if (!form.lastName.trim()) return 'Last name is required.'
+    if (form.firstName.trim().length > 100 || form.lastName.trim().length > 100) return 'First and last name must each be 100 characters or less.'
+    return null
+  }
+
   function getLocationValidationError() {
     if (!form.primaryCity.trim() || !form.primaryState.trim() || !form.primaryZipCode.trim()) {
       return 'City, state, and zip code are required.'
@@ -237,6 +248,11 @@ function ProfileInner() {
     setError(null)
     setStatus(null)
     try {
+      const nameValidationError = getNameValidationError()
+      if (nameValidationError) {
+        logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_invalid_name', data: { hasFirstName: Boolean(form.firstName.trim()), hasLastName: Boolean(form.lastName.trim()) } })
+        throw new Error(nameValidationError)
+      }
       const phoneValidationError = validateRequiredPhoneNumber(form.phone)
       if (phoneValidationError) {
         logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_invalid_phone', data: { hasPhone: Boolean(form.phone && form.phone.trim()) } })
@@ -247,15 +263,19 @@ function ProfileInner() {
         logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_invalid_location', data: { hasCity: Boolean(form.primaryCity.trim()), hasState: Boolean(form.primaryState.trim()), hasZipCode: Boolean(form.primaryZipCode.trim()) } })
         throw new Error(locationValidationError)
       }
-      const payload = !socialPreferencesEnabled || isPreferenceRestricted ? { ...form, alcoholPreference: '', cannabisPreference: '', sobrietyPreference: '' } : form
+      const normalizedForm = { ...form, firstName: form.firstName.trim(), lastName: form.lastName.trim() }
+      const payload = !socialPreferencesEnabled || isPreferenceRestricted ? { ...normalizedForm, alcoholPreference: '', cannabisPreference: '', sobrietyPreference: '' } : normalizedForm
       const saved = await saveProfile(payload)
+      setForm((current) => ({ ...current, firstName: saved.firstName || normalizedForm.firstName, lastName: saved.lastName || normalizedForm.lastName }))
       setHasSavedPhoneNumber(Boolean(sanitizePhoneInput(saved.phone || '').trim()))
       setNeedsEnrichment(Boolean(saved.needsEnrichment))
       setProfileSummary(saved.summary || null)
       setFeatureFlags(saved.featureFlags || {})
       setStatus('Profile saved.')
-      logFrontendEvent({ category: 'profile.save', message: 'profile_saved', data: { needsEnrichment: saved.needsEnrichment, hasLocation: Boolean(saved.primaryCity && saved.primaryState && saved.primaryZipCode), socialPreferencesEnabled: Boolean(saved.featureFlags?.profileSocialPreferences), roundsGolfed: saved.summary?.roundsGolfed || 0 } })
+      logFrontendEvent({ category: 'profile.save', message: 'profile_saved', data: { needsEnrichment: saved.needsEnrichment, hasName: Boolean(saved.firstName && saved.lastName), hasLocation: Boolean(saved.primaryCity && saved.primaryState && saved.primaryZipCode), socialPreferencesEnabled: Boolean(saved.featureFlags?.profileSocialPreferences), roundsGolfed: saved.summary?.roundsGolfed || 0 } })
       await refreshProfileStatus()
+      await refreshSession()
+      logFrontendEvent({ category: 'profile.save', message: 'profile_session_name_refreshed', data: { hasName: Boolean(saved.firstName && saved.lastName) } })
       if (isGuidedEnrichment) {
         navigate('/?profileEnriched=1', { replace: true })
       } else {
@@ -294,6 +314,17 @@ function ProfileInner() {
         />
 
         <div className="formStack" style={{ maxWidth: 860 }}>
+          <div className="formRow formRow--split">
+            <div>
+              <label className="label" htmlFor="profileFirstName">First Name</label>
+              <input id="profileFirstName" className="input" required maxLength={100} value={form.firstName} onChange={(e) => patch('firstName', e.target.value)} autoComplete="given-name" />
+            </div>
+            <div>
+              <label className="label" htmlFor="profileLastName">Last Name</label>
+              <input id="profileLastName" className="input" required maxLength={100} value={form.lastName} onChange={(e) => patch('lastName', e.target.value)} autoComplete="family-name" />
+            </div>
+          </div>
+
           <div>
             <div className="label" id="profileEmailLabel">Email</div>
             <div
