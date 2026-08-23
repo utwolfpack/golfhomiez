@@ -209,18 +209,18 @@ export default function AdminScheduledJobs() {
             <h2 style={{ margin: 0 }}>All scheduled jobs</h2>
             <span className="pill">{sortedJobs.length} total</span>
           </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table">
+          <div className="scheduledJobsTableWrap">
+            <table className="table scheduledJobsTable">
               <thead>
                 <tr>
                   <th>Scheduled job</th>
+                  <th>Actions</th>
                   <th>Description</th>
                   <th>Created</th>
                   <th>Completed</th>
                   <th>Next scheduled run</th>
                   <th>Last run</th>
                   <th>Last output/status</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -232,7 +232,7 @@ export default function AdminScheduledJobs() {
                   const isRunning = runningJobId === job.id || Boolean(job.canCancel) || isCanceling
                   return (
                     <tr key={job.id}>
-                      <td>
+                      <td data-label="Scheduled job" className="scheduledJobsNameCell">
                         <strong>{job.name}</strong>
                         <div className="small">{job.scheduleLabel || 'Manual'}{job.scheduleTimeZone ? ` · ${job.scheduleTimeZone}` : ''}</div>
                         {job.id === 'scrubTournaments' ? <div className="small">{job.jobConfig?.matchValues?.length || 0} scrub value(s)</div> : null}
@@ -243,29 +243,8 @@ export default function AdminScheduledJobs() {
                           </>
                         ) : null}
                       </td>
-                      <td style={{ minWidth: 260 }}>{job.description || '—'}</td>
-                      <td>{formatDate(job.createdAt)}</td>
-                      <td style={{ minWidth: 150 }}>
-                        <div>{formatDate(lastRun?.completedAt)}</div>
-                        {lastRun?.completedAt ? <div className="small">Ran for {formatDuration(lastRun.durationMs)}</div> : null}
-                      </td>
-                      <td>{job.schedule?.type === 'manual' ? 'Manual' : formatDate(job.nextRunAt)}</td>
-                      <td>
-                        {lastRun ? (
-                          <div>
-                            <div>{formatDate(lastRun.startedAt)}</div>
-                            <div className="small">Triggered by {lastRun.triggeredBy || '—'}{lastRun.adminUserEmail ? ` · ${lastRun.adminUserEmail}` : ''}</div>
-                            <div className="small">Correlation ID: {lastRun.correlationId || '—'}</div>
-                          </div>
-                        ) : '—'}
-                      </td>
-                      <td style={{ minWidth: 300 }}>
-                        <div className={statusClass(lastRun?.status)} style={{ margin: 0 }}>{lastRun?.status || 'Never run'}</div>
-                        {lastRun?.error ? <div className="small" style={{ color: '#b91c1c', marginTop: 6 }}>{lastRun.error}</div> : null}
-                        <pre className="small" style={{ whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', margin: '8px 0 0' }}>{formatRunOutput(lastRun?.output)}</pre>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <td data-label="Actions" className="scheduledJobsActionsCell">
+                        <div className="scheduledJobsActions">
                           {isRunning ? (
                             <button className="btnDanger" type="button" onClick={() => void onCancelJob(job)} disabled={isCanceling}>
                               {isCanceling ? 'Cancelling…' : 'Cancel job'}
@@ -277,6 +256,27 @@ export default function AdminScheduledJobs() {
                           )}
                           <button className="btn" type="button" onClick={() => openSchedule(job)}>Schedule</button>
                         </div>
+                      </td>
+                      <td data-label="Description">{job.description || '—'}</td>
+                      <td data-label="Created">{formatDate(job.createdAt)}</td>
+                      <td data-label="Completed">
+                        <div>{formatDate(lastRun?.completedAt)}</div>
+                        {lastRun?.completedAt ? <div className="small">Ran for {formatDuration(lastRun.durationMs)}</div> : null}
+                      </td>
+                      <td data-label="Next scheduled run">{job.schedule?.type === 'manual' ? 'Manual' : formatDate(job.nextRunAt)}</td>
+                      <td data-label="Last run">
+                        {lastRun ? (
+                          <div>
+                            <div>{formatDate(lastRun.startedAt)}</div>
+                            <div className="small">Triggered by {lastRun.triggeredBy || '—'}{lastRun.adminUserEmail ? ` · ${lastRun.adminUserEmail}` : ''}</div>
+                            <div className="small">Correlation ID: {lastRun.correlationId || '—'}</div>
+                          </div>
+                        ) : '—'}
+                      </td>
+                      <td data-label="Last output/status" className="scheduledJobsOutputCell">
+                        <div className={statusClass(lastRun?.status)} style={{ margin: 0 }}>{lastRun?.status || 'Never run'}</div>
+                        {lastRun?.error ? <div className="small" style={{ color: '#b91c1c', marginTop: 6 }}>{lastRun.error}</div> : null}
+                        <pre className="small scheduledJobsOutput">{formatRunOutput(lastRun?.output)}</pre>
                       </td>
                     </tr>
                   )

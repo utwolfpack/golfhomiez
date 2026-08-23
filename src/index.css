@@ -5744,6 +5744,147 @@ button.navDropdownItem{font:inherit;}
   letter-spacing:.01em;
 }
 
+
+/* Scheduled-jobs table stays within the viewport and becomes stacked cards on narrow devices. */
+.scheduledJobsTableWrap{
+  width:100%;
+  min-width:0;
+  overflow-x:hidden;
+}
+
+.scheduledJobsTable{
+  width:100%;
+  min-width:0;
+  table-layout:fixed;
+}
+
+.scheduledJobsTable th,
+.scheduledJobsTable td{
+  min-width:0;
+  vertical-align:top;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+
+.scheduledJobsTable th:nth-child(1){width:15%;}
+.scheduledJobsTable th:nth-child(2){width:12%;}
+.scheduledJobsTable th:nth-child(3){width:18%;}
+.scheduledJobsTable th:nth-child(4){width:9%;}
+.scheduledJobsTable th:nth-child(5){width:10%;}
+.scheduledJobsTable th:nth-child(6){width:10%;}
+.scheduledJobsTable th:nth-child(7){width:13%;}
+.scheduledJobsTable th:nth-child(8){width:13%;}
+
+.scheduledJobsActions{
+  display:grid;
+  gap:8px;
+  align-content:start;
+}
+
+.scheduledJobsActions .btn,
+.scheduledJobsActions .btnPrimary,
+.scheduledJobsActions .btnDanger{
+  width:100%;
+  min-width:0;
+  white-space:normal;
+}
+
+.scheduledJobsOutput{
+  margin:8px 0 0;
+  max-height:160px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+
+@media (max-width:1000px){
+  .scheduledJobsTable thead{
+    display:none;
+  }
+
+  .scheduledJobsTable,
+  .scheduledJobsTable tbody,
+  .scheduledJobsTable tr,
+  .scheduledJobsTable td{
+    display:block;
+    width:100%;
+  }
+
+  .scheduledJobsTable tr{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    gap:0;
+    margin-bottom:14px;
+    border:1px solid rgba(11,61,29,.14);
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+  }
+
+  .scheduledJobsTable tbody tr:last-child{
+    margin-bottom:0;
+  }
+
+  .scheduledJobsTable td{
+    display:grid;
+    grid-template-columns:minmax(118px,30%) minmax(0,1fr);
+    gap:12px;
+    padding:10px 12px;
+    border:0;
+    border-bottom:1px solid rgba(11,61,29,.08);
+  }
+
+  .scheduledJobsTable td:last-child{
+    border-bottom:0;
+  }
+
+  .scheduledJobsTable td::before{
+    content:attr(data-label);
+    font-size:12px;
+    line-height:1.35;
+    font-weight:800;
+    color:#466152;
+  }
+
+  .scheduledJobsNameCell,
+  .scheduledJobsActionsCell{
+    grid-template-columns:1fr !important;
+  }
+
+  .scheduledJobsNameCell::before,
+  .scheduledJobsActionsCell::before{
+    display:none;
+  }
+
+  .scheduledJobsNameCell{
+    padding-bottom:7px !important;
+    background:#f8fbf9;
+  }
+
+  .scheduledJobsActionsCell{
+    padding-top:7px !important;
+    background:#f8fbf9;
+  }
+
+  .scheduledJobsActions{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media (max-width:560px){
+  .scheduledJobsTable td{
+    grid-template-columns:1fr;
+    gap:5px;
+  }
+
+  .scheduledJobsActions{
+    grid-template-columns:1fr 1fr;
+  }
+}
+
 /* Admin scheduled-job configuration modal. */
 .scheduledJobScheduleModal{
   width:min(720px,100%);
@@ -7321,5 +7462,33 @@ button.navDropdownItem{font:inherit;}
 @media (max-width:700px){
   .individualChallengeParticipantCountBar{
     padding:0 12px 10px;
+  }
+}
+
+/* Individual Challenge participant-selected course and leaderboard course label. */
+.individualChallengeCoursePickerModal{
+  width:min(640px,calc(100vw - 24px));
+  max-height:min(84vh,760px);
+  overflow:auto;
+  display:grid;
+  gap:16px;
+}
+
+.inboxLeaderboardCourseName{
+  margin-top:2px;
+  color:#166534 !important;
+  font-size:.74rem !important;
+  font-weight:800;
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  overflow-wrap:anywhere;
+}
+
+@media (max-width:680px){
+  .inboxLeaderboardPlayer .inboxLeaderboardCourseName{
+    display:block;
+    font-size:.66rem !important;
+    line-height:1.15;
   }
 }

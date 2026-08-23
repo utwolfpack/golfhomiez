@@ -646,6 +646,8 @@ function normalizeProfileValue(value) {
 }
 
 function sanitizeProfilePayload(body = {}, options = {}) {
+  const firstName = String(body.firstName || '').trim().replace(/\s+/g, ' ')
+  const lastName = String(body.lastName || '').trim().replace(/\s+/g, ' ')
   const phone = sanitizeProfilePhone(body.phone, 64)
   const primaryCity = normalizeProfileValue(body.primaryCity)
   const primaryState = normalizeProfileValue(body.primaryState)
@@ -655,6 +657,9 @@ function sanitizeProfilePayload(body = {}, options = {}) {
   const cannabisPreference = socialPreferencesEnabled ? (normalizeProfileValue(body.cannabisPreference) || '') : ''
   const sobrietyPreference = socialPreferencesEnabled ? (normalizeProfileValue(body.sobrietyPreference) || '') : ''
 
+  if (!firstName) throw new Error('First name is required.')
+  if (!lastName) throw new Error('Last name is required.')
+  if (firstName.length > 100 || lastName.length > 100) throw new Error('First and last name must each be 100 characters or less.')
   if (!phone) throw new Error('Phone number is required.')
   if (!primaryCity || !primaryState || !primaryZipCode) {
     throw new Error('City, state, and zip code are required.')
@@ -669,6 +674,8 @@ function sanitizeProfilePayload(body = {}, options = {}) {
   }
 
   return {
+    firstName,
+    lastName,
     phone,
     primaryCity,
     primaryState,
@@ -707,10 +714,13 @@ async function ensureAppUserProfileRow(user) {
 function mapProfileRow(row, options = {}) {
   if (!row) return null
   const socialPreferencesEnabled = isFeatureEnabled(options.featureFlags, 'profileSocialPreferences')
+  const names = splitName(row.name, row.email)
   return {
     id: row.id,
     email: row.email,
     name: row.name,
+    firstName: names.firstName,
+    lastName: names.lastName,
     phone: row.phone || '',
     primaryCity: row.primary_city || '',
     primaryState: row.primary_state || '',
@@ -4195,8 +4205,12 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
     const featureFlags = await getFeatureFlags(pool)
     const socialPreferencesEnabled = isFeatureEnabled(featureFlags, 'profileSocialPreferences')
     const profile = sanitizeProfilePayload(req.body || {}, { socialPreferencesEnabled })
-    logApi('profile_save_started', { ...requestContext(req), hasPhone: Boolean(profile.phone), hasLocation: Boolean(profile.primaryCity && profile.primaryState && profile.primaryZipCode), socialPreferencesEnabled, profile })
+    const profileName = `${profile.firstName} ${profile.lastName}`.replace(/\s+/g, ' ').trim()
+    logApi('profile_save_started', { ...requestContext(req), hasName: Boolean(profile.firstName && profile.lastName), hasPhone: Boolean(profile.phone), hasLocation: Boolean(profile.primaryCity && profile.primaryState && profile.primaryZipCode), socialPreferencesEnabled })
     const existingRow = await ensureAppUserProfileRow(req.user)
+    await auth.api.updateUser({ headers: fromNodeHeaders(req.headers), body: { name: profileName } })
+    logApi('profile_auth_name_updated', { ...requestContext(req), userId: req.user.id, hasName: Boolean(profileName) })
+    const updatedUser = { ...req.user, name: profileName }
     await pool.execute(
       `UPDATE app_users
           SET email = ?,
@@ -4212,7 +4226,7 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
         WHERE auth_user_id = ?`,
       [
         normalizeEmail(req.user.email),
-        req.user.name || null,
+        profileName,
         profile.phone,
         profile.primaryCity,
         profile.primaryState,
@@ -4224,10 +4238,10 @@ app.put('/api/profile', requireStorage, authMiddleware, async (req, res) => {
       ],
     )
     const [row, summary] = await Promise.all([
-      ensureAppUserProfileRow(req.user),
-      loadProfileSummary(pool, req.user),
+      ensureAppUserProfileRow(updatedUser),
+      loadProfileSummary(pool, updatedUser),
     ])
-    logApi('profile_save_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone || !row?.primary_city || !row?.primary_state || !row?.primary_zip_code, hasPhone: Boolean(row?.phone), hasLocation: Boolean(row?.primary_city && row?.primary_state && row?.primary_zip_code), socialPreferencesEnabled, roundsGolfed: summary?.roundsGolfed || 0, profile: mapProfileRow(row, { featureFlags, summary }) })
+    logApi('profile_save_completed', { ...requestContext(req), needsEnrichment: !row?.profile_enriched_at || !row?.phone || !row?.primary_city || !row?.primary_state || !row?.primary_zip_code, hasName: Boolean(profile.firstName && profile.lastName), hasPhone: Boolean(row?.phone), hasLocation: Boolean(row?.primary_city && row?.primary_state && row?.primary_zip_code), socialPreferencesEnabled, roundsGolfed: summary?.roundsGolfed || 0 })
     res.json(mapProfileRow(row, { featureFlags, summary }))
   } catch (error) {
     if (error instanceof Error && /required|invalid|Select|Sober golf/.test(error.message)) {
@@ -4563,9 +4577,15 @@ async function createOrUpdateIndividualChallengeSoloScore(message, user, score, 
     return null
   }
 
-  const scoreState = String(message?.challengeState || '').trim().toUpperCase()
-  const scoreCourse = String(message?.challengeCourse || '').trim() || 'Individual Challenge'
-  const courseMetadata = resolveScoreCourseMetadata(scoreState, { name: scoreCourse })
+  const creatorAssignedCourse = String(message?.challengeCourse || '').trim()
+  const scoreState = String(creatorAssignedCourse ? message?.challengeState : participant?.courseState || '').trim().toUpperCase()
+  const requestedCourse = String(creatorAssignedCourse || participant?.courseName || '').trim()
+  const requestedCourseId = creatorAssignedCourse ? '' : String(participant?.courseId || '').trim()
+  if (!scoreState || !requestedCourse) throw new Error('Choose a golf course before entering an Individual Challenge score.')
+  const matchedCourse = await resolveGolfCourseForState(scoreState, requestedCourse, requestedCourseId)
+  if (!matchedCourse) throw new Error('Select a golf course from the database catalog before entering an Individual Challenge score.')
+  const scoreCourse = matchedCourse.name || requestedCourse
+  const courseMetadata = resolveScoreCourseMetadata(scoreState, matchedCourse)
   const scoreEntry = {
     mode: 'solo',
     date: teamChallengeRecordDate(message),
@@ -4596,6 +4616,9 @@ async function createOrUpdateIndividualChallengeSoloScore(message, user, score, 
         scoreId: updatedScore?.id || existingSoloScoreId,
         roundScore: score,
         holeCount: normalizedHoles?.length || 0,
+        courseState: scoreState,
+        courseName: scoreCourse,
+        golfCourseId: courseMetadata.golfCourseId || null,
       })
       return updatedScore || { id: existingSoloScoreId }
     }
@@ -4610,6 +4633,9 @@ async function createOrUpdateIndividualChallengeSoloScore(message, user, score, 
     scoreId: createdScore?.id || null,
     roundScore: score,
     holeCount: normalizedHoles?.length || 0,
+    courseState: scoreState,
+    courseName: scoreCourse,
+    golfCourseId: courseMetadata.golfCourseId || null,
   })
   return createdScore
 }
@@ -5189,6 +5215,73 @@ app.patch('/api/inbox/messages/:id/individual-participants/refresh', requireStor
   }
 })
 
+app.patch('/api/inbox/messages/:id/individual-course', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const message = await storage.getInboxMessageForParticipant(req.params.id, req.user)
+    if (!message || message.messageType !== 'individual_challenge') {
+      logApi('individual_challenge_course_not_found', { ...requestContext(req), messageId: req.params.id })
+      return res.status(404).json({ message: 'Individual Challenge not found' })
+    }
+    if (String(message.challengeStatus || '').toLowerCase() === 'completed') {
+      logApi('individual_challenge_course_update_locked', { ...requestContext(req), messageId: message.id, threadId: message.threadId || message.id })
+      return res.status(409).json({ message: 'This challenge is complete, so the golf course is locked.' })
+    }
+    if (String(message.challengeCourse || '').trim()) {
+      logApi('individual_challenge_course_update_creator_assigned', { ...requestContext(req), messageId: message.id, threadId: message.threadId || message.id, challengeCourse: message.challengeCourse })
+      return res.status(409).json({ message: 'The challenge creator selected the golf course for this Individual Challenge.' })
+    }
+    const participant = individualChallengeParticipantForUser(message, req.user)
+    if (!participant) {
+      logApi('individual_challenge_course_update_forbidden', { ...requestContext(req), messageId: message.id })
+      return res.status(403).json({ message: 'Only golfers in this Individual Challenge can choose their round course.' })
+    }
+
+    const state = validateOptionalChallengeState(req.body?.state)
+    const courseName = validateOptionalChallengeCourse(req.body?.course)
+    const courseId = String(req.body?.courseId || '').trim().slice(0, 191)
+    if (!state || !courseName) return res.status(400).json({ message: 'Select a state and golf course before logging your Individual Challenge round.' })
+
+    logApi('individual_challenge_course_update_started', {
+      ...requestContext(req),
+      messageId: message.id,
+      threadId: message.threadId || message.id,
+      participantEmail: normalizeEmail(participant.email),
+      requestedState: state,
+      requestedCourse: courseName,
+      requestedCourseId: courseId || null,
+    })
+    const matchedCourse = await resolveGolfCourseForState(state, courseName, courseId)
+    if (!matchedCourse) {
+      logApi('individual_challenge_course_update_invalid_course', { ...requestContext(req), messageId: message.id, requestedState: state, requestedCourse: courseName, requestedCourseId: courseId || null })
+      return res.status(400).json({ message: 'Select a golf course from the database catalog for the selected state.' })
+    }
+    const updated = await storage.updateInboxIndividualChallengeCourse(message.id, req.user, {
+      courseId: matchedCourse.id || null,
+      courseState: matchedCourse.state || state,
+      courseName: matchedCourse.name || courseName,
+    })
+    if (!updated) return res.status(409).json({ message: 'The Individual Challenge golf course could not be updated.' })
+    logApi('individual_challenge_course_update_succeeded', {
+      ...requestContext(req),
+      messageId: updated.id,
+      threadId: updated.threadId || updated.id,
+      participantEmail: normalizeEmail(participant.email),
+      courseId: matchedCourse.id || null,
+      courseState: matchedCourse.state || state,
+      courseName: matchedCourse.name || courseName,
+    })
+    res.json(updated)
+  } catch (error) {
+    if (error instanceof Error && /challenge|state|course/i.test(error.message)) {
+      logApi('individual_challenge_course_update_validation_failed', { ...requestContext(req), messageId: req.params.id, validationError: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Individual Challenge course update error', req, error)
+    res.status(500).json({ message: 'Could not update Individual Challenge golf course' })
+  }
+})
+
+
 app.post('/api/inbox/messages/:id/individual-participants', requireStorage, authMiddleware, async (req, res) => {
   try {
     const completion = await resolveChallengeCompletionForUser(req.params.id, req.user, 'add golfers')
@@ -5403,7 +5496,7 @@ app.patch('/api/inbox/messages/:id/individual-score', requireStorage, authMiddle
     })
     res.json(message)
   } catch (error) {
-    if (error instanceof Error && /score|number|zero|holes|hole/i.test(error.message)) {
+    if (error instanceof Error && /score|number|zero|holes|hole|course|state/i.test(error.message)) {
       logApi('individual_challenge_score_validation_failed', { ...requestContext(req), validationError: error.message })
       return res.status(400).json({ message: error.message })
     }

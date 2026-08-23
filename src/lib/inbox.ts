@@ -14,6 +14,9 @@ export type IndividualChallengeParticipant = {
   score?: number | null
   holes?: HoleScoreDetail[] | null
   soloScoreId?: string | null
+  courseId?: string | null
+  courseState?: string | null
+  courseName?: string | null
 }
 
 export type InboxMessage = {
@@ -221,6 +224,13 @@ export async function addIndividualChallengeParticipant(messageId: string, email
 export async function refreshIndividualChallengeParticipants(messageId: string): Promise<{ message: InboxMessage; participants: IndividualChallengeParticipant[]; transitionedToRegisteredCount: number; registeredCount: number; pendingCount: number }> {
   return api(`/api/inbox/messages/${encodeURIComponent(messageId)}/individual-participants/refresh`, {
     method: 'PATCH',
+  })
+}
+
+export async function updateIndividualChallengeCourse(messageId: string, input: { state: string; course: string; courseId?: string | null }): Promise<InboxMessage> {
+  return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/individual-course`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
   })
 }
 

@@ -515,6 +515,33 @@ export async function updateInboxIndividualChallengeParticipants(messageId, user
   return hydrateInboxMessage(nextMessages.find((message) => String(message.id) === String(messageId || '')))
 }
 
+export async function updateInboxIndividualChallengeCourse(messageId, user, course = {}) {
+  ensureInboxMessagesFile()
+  const normalizedEmail = normalizeEmail(user?.email)
+  const userTeamIds = await getInboxUserTeamIds(user)
+  const messages = readJson(inboxMessagesPath, [])
+  const hydratedMessages = messages.map(hydrateInboxMessage)
+  const target = hydratedMessages.find((message) => String(message.id) === String(messageId || '') && message.messageType === 'individual_challenge')
+  if (!target || !canParticipateInInboxMessage(target, user, normalizedEmail, userTeamIds)) return null
+  if (String(target.challengeStatus || '').toLowerCase() === 'completed') return null
+  const threadId = target.threadId || target.id
+  let userCanEditOwnCourse = false
+  const nextMessages = messages.map((message) => {
+    const hydrated = hydrateInboxMessage(message)
+    if (hydrated.messageType !== 'individual_challenge' || String(hydrated.threadId || hydrated.id) !== String(threadId)) return message
+    const participants = (hydrated.individualChallengeParticipants || []).map((participant) => {
+      const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail
+      if (!isCurrentParticipant) return participant
+      userCanEditOwnCourse = true
+      return { ...participant, courseId: course?.courseId || null, courseState: course?.courseState || null, courseName: course?.courseName || null }
+    })
+    return { ...message, individualChallengeParticipants: participants }
+  })
+  if (!userCanEditOwnCourse) return null
+  writeJson(inboxMessagesPath, nextMessages)
+  return hydrateInboxMessage(nextMessages.find((message) => String(message.id) === String(messageId || '')))
+}
+
 export async function updateInboxChallengeScore(messageId, user, side, score, holes = []) {
   ensureInboxMessagesFile()
   const normalizedEmail = normalizeEmail(user?.email)

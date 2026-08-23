@@ -11,6 +11,7 @@ import {
   runRetryFailedTournamentWebsites,
 } from './tournament-discovery.js'
 import { normalizeTournamentScrubValues, runScrubTournaments } from './tournament-scrub.js'
+import { runScrubGolfHomiezTournaments } from './golfhomiez-tournament-scrub.js'
 import { normalizeGolfCourseDataJobConfig, runGetGolfCourseData } from './golf-course-data-import.js'
 import { nextRunForSchedule, normalizeScheduleConfig, scheduleLabel } from './scheduled-job-schedule.js'
 import {
@@ -138,6 +139,27 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal, jobConfig }) {
       return runScrubTournaments(pool, {
         matchValues: jobConfig?.matchValues || [],
+        correlationId,
+        triggeredBy,
+        logApi,
+        logError,
+        logScheduledJob,
+        signal,
+      })
+    },
+  },
+  {
+    id: 'scrubGolfHomiezTournaments',
+    name: 'Scrub Golf Homiez Tournaments',
+    description: "Removes golf_course_tournaments rows whose golfhomiez_tournament_id does not exist in this environment's tournaments table, preventing GolfHomiez tournament records imported from another database from appearing as local tournaments.",
+    scheduleLabel: 'Manual',
+    defaultScheduleLabel: 'Manual',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: {},
+    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal }) {
+      return runScrubGolfHomiezTournaments(pool, {
         correlationId,
         triggeredBy,
         logApi,
