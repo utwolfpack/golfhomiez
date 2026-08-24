@@ -298,6 +298,7 @@ export type TournamentFinalLeaderboardRow = {
   relativeToPar?: number | null
   roundLabel: string
   holesCompleted: number
+  holes?: Array<{ hole: number; par?: number | null; score?: number | null; scoreProvided?: boolean }>
   thru?: number | null
   updatedAt?: string | null
 }
@@ -357,6 +358,7 @@ export type GolfCourseTournamentSearchFilters = {
   golfCourseName?: string
   fromDate?: string
   toDate?: string
+  timeZone?: string
 }
 
 export type GolfCourseTournamentSearchResponse = {
@@ -645,6 +647,7 @@ export function searchGolfCourseTournaments(filters: GolfCourseTournamentSearchF
   if (filters.golfCourseName) params.set('golfCourseName', filters.golfCourseName)
   if (filters.fromDate) params.set('fromDate', filters.fromDate)
   if (filters.toDate) params.set('toDate', filters.toDate)
+  if (filters.timeZone) params.set('timeZone', filters.timeZone)
   params.set('page', String(Math.max(1, Math.trunc(page) || 1)))
   const query = params.toString()
   return api<GolfCourseTournamentSearchResponse>(`/api/users/tournament-search?${query}`)

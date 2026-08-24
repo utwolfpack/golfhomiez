@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import HoleByHoleScorecard, { type PendingHoleScoreSaveHandler } from '../components/HoleByHoleScorecard'
+import HoleStrokeScore from '../components/HoleStrokeScore'
 import TeeColorSelector from '../components/TeeColorSelector'
 import GolfCourseInput from '../components/GolfCourseInput'
 import InviteHomieModal from '../components/InviteHomieModal'
@@ -38,6 +39,7 @@ import { fetchProfile } from '../lib/profile'
 import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType, teamChallengeScoringTypeLabel, type TeamChallengeScoringType } from '../lib/team-challenge-scoring'
 
 type TeamChallengeLeaderboardSide = 'proposer' | 'challenged'
+type ChallengeDetailSection = 'settings' | 'score' | 'discussion'
 
 type TeamChallengeScorecardTarget = {
   message: InboxMessage
@@ -276,6 +278,8 @@ export default function Challenges() {
   const [individualAddMemberThreadId, setIndividualAddMemberThreadId] = useState<string | null>(null)
   const [addingIndividualParticipant, setAddingIndividualParticipant] = useState(false)
   const [challengeSettingsDraft, setChallengeSettingsDraft] = useState<ChallengeSettingsDraft | null>(null)
+  const [expandedChallengeSections, setExpandedChallengeSections] = useState<Record<string, boolean>>({})
+  const [teamChallengeMembersModal, setTeamChallengeMembersModal] = useState<InboxMessage | null>(null)
   const [updatingChallengeSettings, setUpdatingChallengeSettings] = useState(false)
   const [challengeBody, setChallengeBody] = useState('')
   const [replyingTo, setReplyingTo] = useState<InboxMessage | null>(null)
@@ -428,6 +432,46 @@ export default function Challenges() {
     return teamId && !teamExists(teamId) ? `${teamName} (team deleted)` : teamName
   }
 
+  function challengeSectionKey(message: InboxMessage, section: ChallengeDetailSection) {
+    return `${messageThreadId(message)}:${section}`
+  }
+
+  function isChallengeSectionExpanded(message: InboxMessage, section: ChallengeDetailSection) {
+    return Boolean(expandedChallengeSections[challengeSectionKey(message, section)])
+  }
+
+  function toggleChallengeSection(message: InboxMessage, section: ChallengeDetailSection) {
+    const key = challengeSectionKey(message, section)
+    const nextExpanded = !expandedChallengeSections[key]
+    const prefix = `${messageThreadId(message)}:`
+    setExpandedChallengeSections((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([currentKey]) => !currentKey.startsWith(prefix)))
+      if (!current[key]) next[key] = true
+      return next
+    })
+    logFrontendEvent({
+      category: 'inbox.challenge.section',
+      message: nextExpanded ? 'challenge_section_expanded' : 'challenge_section_collapsed',
+      data: { threadId: messageThreadId(message), messageId: message.id, messageType: message.messageType, section, siblingSectionLinksHidden: nextExpanded },
+    })
+  }
+
+  function resetChallengeSections(threadId: string) {
+    const prefix = `${threadId}:`
+    setExpandedChallengeSections((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(prefix))))
+  }
+
+  function getTeamForChallengeSide(message: InboxMessage, side: 'proposer' | 'challenged') {
+    const teamId = side === 'proposer' ? message.proposerTeamId : message.challengedTeamId
+    return teams.find((team) => String(team.id) === String(teamId || '')) || null
+  }
+
+  function teamMemberDisplayName(member: { name?: string | null; email?: string | null }) {
+    const name = String(member.name || '').replace(/\s+/g, ' ').trim()
+    const email = String(member.email || '').trim()
+    return name && name.toLowerCase() !== email.toLowerCase() ? name : (email || 'Golfer')
+  }
+
   function currentUserCanViewChallenge(message: InboxMessage) {
     if (message.messageType === 'individual_challenge') {
       return sentByCurrentUser(message) || receivedByCurrentUser(message) || getIndividualChallengeParticipants(message).some((participant) => currentUserCanEditIndividualParticipant(participant))
@@ -517,12 +561,6 @@ export default function Challenges() {
   function getTeamChallengeSummaryWinnerLabel(message: InboxMessage, winner: 'proposer' | 'challenged' | 'tie' | 'pending') {
     if (winner === 'pending' || winner === 'tie') return '—'
     return getTeamChallengeSideInitial(message, winner)
-  }
-
-  function getTeamChallengeSummaryScoreClass(winner: 'proposer' | 'challenged' | 'tie' | 'pending', side: 'proposer' | 'challenged') {
-    if (winner === side) return 'inboxTeamChallengeSummaryScore--winner'
-    if (winner === 'tie' || winner === 'pending') return 'inboxTeamChallengeSummaryScore--push'
-    return 'inboxTeamChallengeSummaryScore--loss'
   }
 
   function getTeamChallengeTotalScoreClass(proposerScore: number | null, challengedScore: number | null, side: 'proposer' | 'challenged') {
@@ -668,7 +706,7 @@ export default function Challenges() {
 
   function openTeamLeaderboardRoundSummary(message: InboxMessage, side: TeamChallengeLeaderboardSide) {
     setActiveTeamLeaderboardSide(side)
-    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), side, teamName: getTeamChallengeDisplayName(message, side), course: getTeamChallengeCourseName(message), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'] } })
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), side, teamName: getTeamChallengeDisplayName(message, side), course: getTeamChallengeCourseName(message), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'], holeScoreDisplayFormat: 'golf_score_symbols_v1' } })
   }
 
   function returnFromTeamRoundSummary(message: InboxMessage) {
@@ -707,13 +745,14 @@ export default function Challenges() {
   async function openTeamChallengeLeaderboard(message: InboxMessage, returnTarget: TeamChallengeScorecardTarget | null = null) {
     const currentMessage = await fetchCurrentChallengeForLeaderboard(message, 'challenge_request', 'open')
     if (!currentMessage) return null
-    const rows = getTeamChallengeLeaderboardRows(currentMessage)
     const pointSummary = getTeamChallengePointSummary(currentMessage)
-    const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
+    const showPushColumn = pointSummary.scoringType === 'skins_push'
+    const pointsScoringActive = isSkinsTeamChallenge(pointSummary.scoringType)
+    const displayOrder = ['Hole', 'Par', getTeamChallengeDisplayName(currentMessage, 'proposer'), getTeamChallengeDisplayName(currentMessage, 'challenged'), 'Winner', ...(showPushColumn ? ['Push'] : []), 'Points']
     setTeamChallengeLeaderboardReturnTarget(returnTarget)
     setActiveTeamLeaderboardSide(null)
     setActiveTeamChallengeLeaderboard(currentMessage)
-    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: currentMessage.threadId || currentMessage.id, proposerTeamId: currentMessage.proposerTeamId, challengedTeamId: currentMessage.challengedTeamId, displayOrder: showPointsColumn ? ['Round', 'Points', 'Thru', 'Total'] : ['Round', 'Thru', 'Total'], totalDisplayMode: showPointsColumn ? 'entered_strokes_and_points' : 'entered_strokes', pointsDisplayMode: showPointsColumn ? 'opponent_adjusted_net_points' : 'not_applicable', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length, showPointsColumn, summaryViewVisible: true, summaryViewMode: 'compact_line_item', opponentReadOnlyScoreTileRemoved: true, pushColumnVisible: true, scoreColorLegend: ['win', 'loss', 'push'], skinsPushDifferentialHoleCount: pointSummary.holeResults.filter((hole) => hole.strokeDifferentialBonus > 0).length, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: currentMessage.threadId || currentMessage.id, proposerTeamId: currentMessage.proposerTeamId, challengedTeamId: currentMessage.challengedTeamId, displayOrder, totalDisplayMode: 'hole_by_hole_team_comparison', pointsDisplayMode: pointsScoringActive ? 'running_team_point_lead' : 'not_applicable', rowCount: pointSummary.holeResults.length, completedCount: pointSummary.completedHoles, pointsColumnVisible: true, pointsScoringActive, summaryViewVisible: true, summaryViewMode: 'team_leaderboard_hole_grid', opponentReadOnlyScoreTileRemoved: true, pushColumnVisible: showPushColumn, holeScoreDisplayFormat: 'golf_score_symbols_v1', skinsPushDifferentialHoleCount: pointSummary.holeResults.filter((hole) => hole.strokeDifferentialBonus > 0).length, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
     return currentMessage
   }
 
@@ -911,6 +950,33 @@ export default function Challenges() {
       .map((row, index) => ({ ...row, position: index + 1 }))
   }
 
+  function getCompletedChallengeResultLabel(message: InboxMessage) {
+    if (!isChallengeCompleted(message)) return ''
+    if (message.messageType === 'individual_challenge') {
+      const winner = getIndividualChallengeLeaderboardRows(message)[0]
+      return winner ? `1st place: ${participantDisplayName(winner.participant)}` : '1st place: No score recorded'
+    }
+
+    const rows = getTeamChallengeLeaderboardRows(message)
+    const proposer = rows.find((row) => row.side === 'proposer')
+    const challenged = rows.find((row) => row.side === 'challenged')
+    if (!proposer || !challenged) return 'Result unavailable'
+    const scoringType = getTeamChallengeScoringType(message)
+    if (isSkinsTeamChallenge(scoringType)) {
+      const proposerPoints = Number(proposer.ownPoints || 0)
+      const challengedPoints = Number(challenged.ownPoints || 0)
+      if (proposerPoints === challengedPoints) return `Result: ${proposer.teamName} ${formatPointNumber(proposerPoints)} pts — ${challenged.teamName} ${formatPointNumber(challengedPoints)} pts · Tie`
+      const winner = proposerPoints > challengedPoints ? proposer : challenged
+      return `Result: ${proposer.teamName} ${formatPointNumber(proposerPoints)} pts — ${challenged.teamName} ${formatPointNumber(challengedPoints)} pts · ${winner.teamName} wins`
+    }
+    if (proposer.score == null || challenged.score == null) return 'Result unavailable'
+    if (proposer.score === challenged.score) return `Result: ${proposer.teamName} ${proposer.score} — ${challenged.teamName} ${challenged.score} · Tie`
+    const winner = proposer.relativeScore != null && challenged.relativeScore != null
+      ? (proposer.relativeScore < challenged.relativeScore ? proposer : challenged)
+      : (proposer.score < challenged.score ? proposer : challenged)
+    return `Result: ${proposer.teamName} ${proposer.score} — ${challenged.teamName} ${challenged.score} · ${winner.teamName} wins`
+  }
+
   async function openIndividualChallengeLeaderboard(message: InboxMessage, returnTarget: IndividualChallengeScorecardTarget | null = null) {
     const directoryRefreshedMessage = await refreshIndividualChallengeParticipantStatuses(message, 'leaderboard_open')
     const currentMessage = await fetchCurrentChallengeForLeaderboard(directoryRefreshedMessage, 'individual_challenge', 'open')
@@ -948,7 +1014,7 @@ export default function Challenges() {
 
   function openIndividualLeaderboardRoundSummary(message: InboxMessage, participant: IndividualChallengeParticipant) {
     setActiveIndividualLeaderboardParticipant(participant)
-    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), course: getIndividualChallengeParticipantCourseName(message, participant), editable: currentUserCanEditIndividualParticipant(participant), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'] } })
+    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_round_summary_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), course: getIndividualChallengeParticipantCourseName(message, participant), editable: currentUserCanEditIndividualParticipant(participant), summaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'], holeScoreDisplayFormat: 'golf_score_symbols_v1' } })
   }
 
   function returnFromIndividualChallengeLeaderboard(source: 'back' | 'close' | 'overlay') {
@@ -1659,6 +1725,7 @@ export default function Challenges() {
 
   function toggleThreadExpansion(thread: InboxThread, source: 'messages' | 'team-challenges') {
     const openingThread = expandedThreadId !== thread.threadId
+    if (source === 'team-challenges') resetChallengeSections(thread.threadId)
     if (openingThread && source === 'team-challenges') {
       const initialChallenge = getInitialChallengeMessage(thread)
       if (initialChallenge.messageType === 'individual_challenge') void refreshIndividualChallengeParticipantStatuses(initialChallenge, 'challenge_selected')
@@ -1801,7 +1868,7 @@ export default function Challenges() {
 
     return (
       <form className="formStack inboxReplyForm" onSubmit={handleReplySubmit}>
-        <label className="label" htmlFor={`reply-${messageThreadId(message)}`}>Reply to {isTeamChallengeMessage ? (getTeamChallengeDisplayName(message, 'proposer') || getTeamChallengeDisplayName(message, 'challenged') || 'Team Challenge') : (isIndividualChallengeMessage ? 'Individual Challenge' : (latestMessage.senderName || latestMessage.senderEmail))}</label>
+        <label className="label" htmlFor={`reply-${messageThreadId(message)}`}>{isIndividualChallengeMessage ? 'Say something to your challenge group' : `Reply to ${isTeamChallengeMessage ? (getTeamChallengeDisplayName(message, 'proposer') || getTeamChallengeDisplayName(message, 'challenged') || 'Team Challenge') : (latestMessage.senderName || latestMessage.senderEmail)}`}</label>
         <textarea
           id={`reply-${messageThreadId(message)}`}
           className="input"
@@ -1810,11 +1877,11 @@ export default function Challenges() {
           maxLength={2000}
           value={replyBody}
           onChange={(event) => setReplyBody(event.target.value)}
-          placeholder={isTeamChallengeMessage ? 'Write your Team Challenge reply' : (isIndividualChallengeMessage ? 'Write your Individual Challenge reply' : 'Write your reply')}
+          placeholder={isTeamChallengeMessage ? 'Write your Team Challenge reply' : (isIndividualChallengeMessage ? 'Smack talk your homiez' : 'Write your reply')}
         />
-        <div className="small">{replyBody.length}/2000 characters</div>
+        {!isIndividualChallengeMessage ? <div className="small">{replyBody.length}/2000 characters</div> : null}
         <div className="pageHeroActions inboxMessageActions">
-          <button className="btn btnPrimary btnSmall" type="submit" disabled={replySending || !replyBody.trim()}>{replySending ? 'Sending reply…' : 'Send Reply'}</button>
+          <button className="btn btnPrimary btnSmall" type="submit" disabled={replySending || !replyBody.trim()}>{replySending ? 'Sending…' : (isIndividualChallengeMessage ? 'Send' : 'Send Reply')}</button>
           <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(null); setReplyBody('') }}>Cancel</button>
         </div>
       </form>
@@ -2063,7 +2130,14 @@ export default function Challenges() {
     return renderReadonlyRoundHoleLineItems(holes, 'Read-only Individual Challenge hole scores')
   }
 
-  function renderTeamChallengeSummaryView(message: InboxMessage) {
+  function renderTeamChallengeSummaryView(
+    message: InboxMessage,
+    options: {
+      showScorebar?: boolean
+      leaderboardMode?: boolean
+      onTeamSelect?: (side: TeamChallengeLeaderboardSide) => void
+    } = {},
+  ) {
     const proposerTeamName = getTeamChallengeTeamName(message, 'proposer')
     const challengedTeamName = getTeamChallengeTeamName(message, 'challenged')
     const proposerHoles = getTeamChallengeHoles(message, 'proposer', false)
@@ -2073,6 +2147,8 @@ export default function Challenges() {
     const proposerScore = getTeamChallengeScore(message, 'proposer', false)
     const challengedScore = getTeamChallengeScore(message, 'challenged', false)
     const pointSummary = getTeamChallengePointSummary(message)
+    const showPushColumn = pointSummary.scoringType === 'skins_push'
+    const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
     const resultsByHole = new Map(pointSummary.holeResults.map((result) => [result.hole, result]))
     const holeNumbers = Array.from(new Set([
       ...pointSummary.holeResults.map((result) => result.hole),
@@ -2107,59 +2183,75 @@ export default function Challenges() {
       }
     })
     const finalLeadLabel = formatTeamChallengePointLeadLabel(message, pointSummary.proposerPoints, pointSummary.challengedPoints)
+    const showScorebar = options.showScorebar !== false
+    const leaderboardMode = options.leaderboardMode === true
+    const tableClassName = `inboxTeamChallengeSummaryTable${showPushColumn ? '' : ' inboxTeamChallengeSummaryTable--noPush'}${showPointsColumn ? '' : ' inboxTeamChallengeSummaryTable--noPoints'}${leaderboardMode ? ' inboxTeamChallengeSummaryTable--leaderboard' : ''}`
+    const renderTeamHeader = (side: TeamChallengeLeaderboardSide, teamName: string) => options.onTeamSelect ? (
+      <button
+        type="button"
+        className="inboxTeamChallengeSummaryTeamHeaderButton"
+        title={`View ${teamName} round summary`}
+        aria-label={`View ${teamName} round summary`}
+        onClick={() => options.onTeamSelect?.(side)}
+      >
+        {teamName}
+      </button>
+    ) : <span title={teamName}>{teamName}</span>
 
     return (
-      <div className="inboxTeamChallengeSummaryView" aria-label="Team Challenge scoring summary">
-        <div className="inboxTeamChallengeSummaryScorebar" aria-label="Team Challenge total scores">
-          <div className={`inboxTeamChallengeSummaryTeamTotal ${getTeamChallengeTotalScoreClass(proposerScore, challengedScore, 'proposer')}`}>
-            <strong>{proposerTeamName}</strong>
-            <span>{proposerScore == null ? 'Pending' : proposerScore}</span>
-            <small>Total score</small>
+      <div className={`inboxTeamChallengeSummaryView${leaderboardMode ? ' inboxTeamChallengeSummaryView--leaderboard' : ''}`} aria-label="Team Challenge scoring summary">
+        {showScorebar ? (
+          <div className="inboxTeamChallengeSummaryScorebar" aria-label="Team Challenge total scores">
+            <div className={`inboxTeamChallengeSummaryTeamTotal ${getTeamChallengeTotalScoreClass(proposerScore, challengedScore, 'proposer')}`}>
+              <strong>{proposerTeamName}</strong>
+              <span>{proposerScore == null ? 'Pending' : proposerScore}</span>
+              <small>Total score</small>
+            </div>
+            <div className="inboxTeamChallengeSummaryVs" aria-hidden="true">VS</div>
+            <div className={`inboxTeamChallengeSummaryTeamTotal ${getTeamChallengeTotalScoreClass(proposerScore, challengedScore, 'challenged')}`}>
+              <strong>{challengedTeamName}</strong>
+              <span>{challengedScore == null ? 'Pending' : challengedScore}</span>
+              <small>Total score</small>
+            </div>
           </div>
-          <div className="inboxTeamChallengeSummaryVs" aria-hidden="true">VS</div>
-          <div className={`inboxTeamChallengeSummaryTeamTotal ${getTeamChallengeTotalScoreClass(proposerScore, challengedScore, 'challenged')}`}>
-            <strong>{challengedTeamName}</strong>
-            <span>{challengedScore == null ? 'Pending' : challengedScore}</span>
-            <small>Total score</small>
-          </div>
-        </div>
+        ) : null}
 
-        <div className="inboxTeamChallengeSummaryTable" role="table" aria-label="Hole-by-hole Team Challenge summary">
+        <div className={tableClassName} role="table" aria-label="Hole-by-hole Team Challenge summary">
           <div className="inboxTeamChallengeSummaryHeader" role="row">
             <span>Hole</span>
             <span>Par</span>
-            <span title={proposerTeamName}>{proposerTeamName}</span>
-            <span title={challengedTeamName}>{challengedTeamName}</span>
+            {renderTeamHeader('proposer', proposerTeamName)}
+            {renderTeamHeader('challenged', challengedTeamName)}
             <span>Winner</span>
-            <span>Push</span>
-            <span>Points</span>
+            {showPushColumn ? <span>Push</span> : null}
+            {showPointsColumn ? <span>Points</span> : null}
           </div>
           {rows.map((row) => (
             <div key={row.holeNumber} className="inboxTeamChallengeSummaryRow" role="row">
               <strong>{row.holeNumber}</strong>
               <span>{row.par == null ? '—' : row.par}</span>
-              <span className={`inboxTeamChallengeSummaryScore ${getTeamChallengeSummaryScoreClass(row.result.winner, 'proposer')}`}>{formatHoleReviewScore(row.proposerHole)}</span>
-              <span className={`inboxTeamChallengeSummaryScore ${getTeamChallengeSummaryScoreClass(row.result.winner, 'challenged')}`}>{formatHoleReviewScore(row.challengedHole)}</span>
+              <span className="inboxTeamChallengeSummaryScore"><HoleStrokeScore score={row.proposerHole?.scoreProvided ? row.proposerHole.score : null} par={row.par} compact /></span>
+              <span className="inboxTeamChallengeSummaryScore"><HoleStrokeScore score={row.challengedHole?.scoreProvided ? row.challengedHole.score : null} par={row.par} compact /></span>
               <span className={`inboxTeamChallengeSummaryWinner inboxTeamChallengeSummaryWinner--${row.result.winner}`}>{getTeamChallengeSummaryWinnerLabel(message, row.result.winner)}</span>
-              <span>{row.pushedPoints > 0 ? formatPointNumber(row.pushedPoints) : '—'}</span>
-              <strong className="inboxTeamChallengeSummaryPoints">{row.pointLeadLabel}</strong>
+              {showPushColumn ? <span>{row.pushedPoints > 0 ? formatPointNumber(row.pushedPoints) : '—'}</span> : null}
+              {showPointsColumn ? <strong className="inboxTeamChallengeSummaryPoints">{row.pointLeadLabel}</strong> : null}
             </div>
           ))}
           <div className="inboxTeamChallengeSummaryRow inboxTeamChallengeSummaryRow--total" role="row">
             <strong>Total</strong>
             <span>{rows.reduce((sum, row) => sum + (row.par || 0), 0)}</span>
-            <span className={getTeamChallengeTotalScoreClass(proposerScore, challengedScore, 'proposer')}>{proposerScore == null ? '—' : proposerScore}</span>
-            <span className={getTeamChallengeTotalScoreClass(proposerScore, challengedScore, 'challenged')}>{challengedScore == null ? '—' : challengedScore}</span>
+            <span>{proposerScore == null ? '—' : proposerScore}</span>
+            <span>{challengedScore == null ? '—' : challengedScore}</span>
             <span>—</span>
-            <span>{pushedPointsTotal > 0 ? formatPointNumber(pushedPointsTotal) : '—'}</span>
-            <strong className="inboxTeamChallengeSummaryPoints">{finalLeadLabel}</strong>
+            {showPushColumn ? <span>{pushedPointsTotal > 0 ? formatPointNumber(pushedPointsTotal) : '—'}</span> : null}
+            {showPointsColumn ? <strong className="inboxTeamChallengeSummaryPoints">{finalLeadLabel}</strong> : null}
           </div>
         </div>
-        <div className="inboxTeamChallengeSummaryLegend" aria-label="Score color legend">
-          <span><i className="inboxTeamChallengeSummaryLegendDot inboxTeamChallengeSummaryLegendDot--win" /> Win</span>
-          <span><i className="inboxTeamChallengeSummaryLegendDot inboxTeamChallengeSummaryLegendDot--loss" /> Loss</span>
-          <span><i className="inboxTeamChallengeSummaryLegendDot" /> Push / tie</span>
-        </div>
+        {leaderboardMode ? (
+          <div className="inboxLeaderboardUpdated">
+            {pointSummary.completedHoles} of 18 holes have scores from both teams • Select a team name for its round summary
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -2329,10 +2421,6 @@ export default function Challenges() {
   function renderTeamChallengeLeaderboardModal() {
     if (!activeTeamChallengeLeaderboard) return null
     const message = activeTeamChallengeLeaderboard
-    const rows = getTeamChallengeLeaderboardRows(message)
-    const completedCount = rows.filter((row) => row.score != null).length
-    const pointSummary = getTeamChallengePointSummary(message)
-    const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
     const selectedSide = activeTeamLeaderboardSide
     const selectedTeamName = selectedSide ? getTeamChallengeDisplayName(message, selectedSide) : ''
     const selectedSummaryRows = selectedSide ? getTeamRoundSummaryRows(message, selectedSide) : []
@@ -2390,7 +2478,7 @@ export default function Challenges() {
                   <div className="inboxIndividualRoundSummaryRow" role="row" key={row.hole}>
                     <strong>{row.hole}</strong>
                     <span>{row.par ?? '—'}</span>
-                    <span>{row.score ?? '—'}</span>
+                    <span><HoleStrokeScore score={row.score} par={row.par} compact /></span>
                     <strong>{row.relativeLabel}</strong>
                     <strong>{row.totalLabel}</strong>
                   </div>
@@ -2399,46 +2487,13 @@ export default function Challenges() {
               <div className="inboxIndividualRoundSummaryLegend">Round is the current cumulative score over or under par. Total is the current cumulative stroke score.</div>
             </div>
           ) : (
-            <>
-              <div className="inboxLeaderboardBoard">
-                <div className={`inboxLeaderboardHeaderRow inboxLeaderboardHeaderRow--team ${showPointsColumn ? '' : 'inboxLeaderboardHeaderRow--teamNoPoints'}`}>
-                  <span>POS</span>
-                  <span>TEAM</span>
-                  <span>ROUND</span>
-                  {showPointsColumn ? <span>PTS</span> : null}
-                  <span>THRU</span>
-                  <span>TOTAL</span>
-                </div>
-                {rows.map((row) => {
-                  const initials = row.teamName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'GH'
-                  const positionClass = row.position <= 3 ? `inboxLeaderboardRow--top${row.position}` : ''
-                  return (
-                    <button type="button" key={row.side} className={`inboxLeaderboardRow inboxLeaderboardRow--team inboxLeaderboardRow--clickable ${showPointsColumn ? '' : 'inboxLeaderboardRow--teamNoPoints'} ${positionClass}`} onClick={() => openTeamLeaderboardRoundSummary(message, row.side)} aria-label={`View ${row.teamName} round summary`}>
-                      <div className="inboxLeaderboardPosition"><span>{row.position}</span></div>
-                      <div className="inboxLeaderboardPlayer">
-                        <div className="inboxLeaderboardAvatar" aria-hidden="true">{initials}</div>
-                        <div>
-                          <strong>{row.teamName}</strong>
-                          <span>{row.side === 'proposer' ? 'Proposing team' : 'Challenged team'}</span>
-                        </div>
-                      </div>
-                      <span>{row.roundLabel}</span>
-                      {showPointsColumn ? (
-                        <div className="inboxLeaderboardPoints">
-                          <strong>{row.pointsLabel}</strong>
-                          <span>{row.pointsRelativeLabel}</span>
-                        </div>
-                      ) : null}
-                      <span>{row.thru || '—'}</span>
-                      <strong className="inboxLeaderboardScore">{row.totalLabel}</strong>
-                    </button>
-                  )
-                })}
-                <div className="inboxLeaderboardUpdated">{completedCount} of {rows.length} team scores entered live{isSkinsTeamChallenge(pointSummary.scoringType) && pointSummary.carryoverPoints ? ` • ${formatPointNumber(pointSummary.carryoverPoints)} carryover points pending` : ''} • Select a team for the hole-by-hole round summary</div>
-              </div>
-
-              {renderTeamChallengeSummaryView(message)}
-            </>
+            <div className="inboxLeaderboardBoard inboxTeamChallengeHoleLeaderboardBoard">
+              {renderTeamChallengeSummaryView(message, {
+                showScorebar: false,
+                leaderboardMode: true,
+                onTeamSelect: (side) => openTeamLeaderboardRoundSummary(message, side),
+              })}
+            </div>
           )}
         </div>
       </div>
@@ -2511,7 +2566,7 @@ export default function Challenges() {
                   <div className="inboxIndividualRoundSummaryRow" role="row" key={row.hole}>
                     <strong>{row.hole}</strong>
                     <span>{row.par ?? '—'}</span>
-                    <span>{row.score ?? '—'}</span>
+                    <span><HoleStrokeScore score={row.score} par={row.par} compact /></span>
                     <strong>{row.relativeLabel}</strong>
                     <strong>{row.totalLabel}</strong>
                   </div>
@@ -2649,6 +2704,39 @@ export default function Challenges() {
     )
   }
 
+  function renderTeamChallengeMembersModal() {
+    const message = teamChallengeMembersModal
+    if (!message) return null
+    const proposerTeam = getTeamForChallengeSide(message, 'proposer')
+    const challengedTeam = getTeamForChallengeSide(message, 'challenged')
+    const sides = [
+      { side: 'proposer' as const, team: proposerTeam, label: getTeamChallengeDisplayName(message, 'proposer') },
+      { side: 'challenged' as const, team: challengedTeam, label: getTeamChallengeDisplayName(message, 'challenged') },
+    ]
+    return (
+      <div className="modalOverlay" role="presentation" onClick={() => setTeamChallengeMembersModal(null)}>
+        <div className="modalCard teamChallengeMembersModal" role="dialog" aria-modal="true" aria-label="Team Challenge golfers" onClick={(event) => event.stopPropagation()}>
+          <div className="modalHeader">
+            <div><h2>Team Challenge golfers</h2><div className="small">{getTeamChallengeDisplayName(message, 'proposer')} vs {getTeamChallengeDisplayName(message, 'challenged')}</div></div>
+            <button type="button" className="btn btnSmall" onClick={() => setTeamChallengeMembersModal(null)}>Close</button>
+          </div>
+          <div className="teamChallengeMembersGrid">
+            {sides.map(({ side, team, label }) => (
+              <section className="teamChallengeMembersTeam" key={side}>
+                <h3>{label}</h3>
+                {team?.members?.length ? (
+                  <div className="teamChallengeMembersList">
+                    {team.members.map((member) => <div className="teamChallengeMemberRow" key={member.id || member.email}><strong>{teamMemberDisplayName(member)}</strong></div>)}
+                  </div>
+                ) : <div className="small">Team member information is not available.</div>}
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   function renderThreadCard(thread: InboxThread, source: 'messages' | 'team-challenges') {
     const message = thread.displayMessage
     const challengeMessage = source === 'team-challenges' ? getInitialChallengeMessage(thread) : message
@@ -2666,6 +2754,12 @@ export default function Challenges() {
       : 'Individual Challenge'
     const individualParticipantCount = isIndividualChallengeMessage ? getIndividualChallengeParticipants(challengeMessage).length : 0
     const challengeMetadata = [challengeDateLabel(challengeMessage), challengeMessage.challengeState, challengeMessage.challengeCourse].filter(Boolean).join(' • ')
+    const settingsExpanded = source === 'team-challenges' && isChallengeSectionExpanded(challengeMessage, 'settings')
+    const scoreExpanded = source === 'team-challenges' && isChallengeSectionExpanded(challengeMessage, 'score')
+    const discussionExpanded = source === 'team-challenges' && isChallengeSectionExpanded(challengeMessage, 'discussion')
+    const activeChallengeSection: ChallengeDetailSection | null = settingsExpanded ? 'settings' : (scoreExpanded ? 'score' : (discussionExpanded ? 'discussion' : null))
+    const completedResult = source === 'team-challenges' && challengeCompleted ? getCompletedChallengeResultLabel(challengeMessage) : ''
+    const visibleConversation = getConversationFor(challengeMessage).filter((item) => !isIndividualChallengeInviteActivityMessage(item) && Boolean(String(item.body || '').trim()))
 
     return (
       <article key={thread.threadId} className={`inboxChallengeLineItem ${thread.unreadCount > 0 ? 'inboxChallengeLineItem--unread' : 'inboxChallengeLineItem--read'} ${isExpanded ? 'inboxChallengeLineItem--expanded' : ''}`}>
@@ -2678,13 +2772,26 @@ export default function Challenges() {
         >
           <span className="inboxChallengeLineItemType">{messageTypeLabel(challengeMessage.messageType)}</span>
           <span className="inboxChallengeLineItemMain">
-            {isTeamChallengeMessage ? <strong>{challengeTitle}</strong> : null}
             <span>{challengeMetadata || getMessagePreview(latestMessage.body)}</span>
           </span>
           {thread.unreadCount > 0 ? <span className="inboxChallengeLineItemActivity"><strong>{unreadText}</strong></span> : null}
           <span className={`inboxChallengeLineItemStatus inboxChallengeLineItemStatus--${challengeStatusClass}`}>{challengeStatusLabel}</span>
           <span className="inboxChallengeLineItemChevron" aria-hidden="true">{isExpanded ? '⌃' : '›'}</span>
         </button>
+        {isTeamChallengeMessage ? (
+          <div className="teamChallengeMembersLinkBar">
+            <button
+              type="button"
+              className="teamChallengeMembersLink"
+              onClick={() => {
+                setTeamChallengeMembersModal(challengeMessage)
+                logFrontendEvent({ category: 'inbox.teamChallenge.members', message: 'team_challenge_members_modal_opened', data: { messageId: challengeMessage.id, threadId: messageThreadId(challengeMessage), proposerTeamId: challengeMessage.proposerTeamId || null, challengedTeamId: challengeMessage.challengedTeamId || null } })
+              }}
+            >
+              {challengeTitle}
+            </button>
+          </div>
+        ) : null}
         {isIndividualChallengeMessage ? (
           <div className="individualChallengeParticipantCountBar">
             <button
@@ -2697,30 +2804,87 @@ export default function Challenges() {
             </button>
           </div>
         ) : null}
+        {completedResult ? <div className="challengeCompletedResultLine">{completedResult}</div> : null}
 
         {isExpanded ? (
           <div id={`challenge-details-${thread.threadId}`} className="inboxChallengeLineItemDetails">
-            {latestMessage.body ? <p className="inboxMessageBody">{latestMessage.body}</p> : null}
-            {source === 'team-challenges' ? renderChallengeSettingsEditor(challengeMessage, currentUserCreatedInitialChallenge(thread)) : null}
-            {source === 'team-challenges' && isIndividualChallengeMessage ? renderIndividualChallengeInvites(challengeMessage, currentUserCreatedInitialChallenge(thread)) : null}
-            {source === 'team-challenges' && isTeamChallengeMessage ? renderTeamChallengeScores(challengeMessage) : null}
-            {source === 'team-challenges' && isIndividualChallengeMessage ? renderIndividualChallengeScores(challengeMessage) : null}
-            {renderConversation(challengeMessage)}
-            <div className="pageHeroActions inboxMessageActions">
-              {!challengeCompleted ? <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(getLatestConversationMessage(challengeMessage)); setReplyBody('') }}>{isIndividualChallengeMessage ? 'Say Something' : 'Reply'}</button> : null}
-              {canCompleteChallenge ? (
-                <button type="button" className="btn btnPrimary btnSmall" disabled={completingChallengeThreadId === messageThreadId(challengeMessage)} onClick={() => void handleCompleteChallenge(thread)}>
-                  {completingChallengeThreadId === messageThreadId(challengeMessage) ? 'Completing…' : 'Complete Challenge'}
-                </button>
+            {source === 'team-challenges' ? (
+              <div className="challengeDetailSections">
+                {activeChallengeSection === null || activeChallengeSection === 'settings' ? <section className="challengeDetailSection">
+                  <button type="button" className="challengeDetailSectionLink" aria-expanded={settingsExpanded} onClick={() => toggleChallengeSection(challengeMessage, 'settings')}>
+                    <span>Challenge Settings</span><span aria-hidden="true">{settingsExpanded ? '−' : '+'}</span>
+                  </button>
+                  {settingsExpanded ? (
+                    <div className="challengeDetailSectionContent">
+                      {renderTeamChallengeContext(challengeMessage)}
+                      {renderChallengeSettingsEditor(challengeMessage, currentUserCreatedInitialChallenge(thread))}
+                      {isIndividualChallengeMessage ? renderIndividualChallengeInvites(challengeMessage, currentUserCreatedInitialChallenge(thread)) : null}
+                    </div>
+                  ) : null}
+                </section> : null}
+
+                {activeChallengeSection === null || activeChallengeSection === 'score' ? <section className="challengeDetailSection">
+                  <button type="button" className="challengeDetailSectionLink" aria-expanded={scoreExpanded} onClick={() => toggleChallengeSection(challengeMessage, 'score')}>
+                    <span>Challenge Score</span><span aria-hidden="true">{scoreExpanded ? '−' : '+'}</span>
+                  </button>
+                  {scoreExpanded ? (
+                    <div className="challengeDetailSectionContent">
+                      {isTeamChallengeMessage ? renderTeamChallengeScores(challengeMessage) : null}
+                      {isIndividualChallengeMessage ? renderIndividualChallengeScores(challengeMessage) : null}
+                    </div>
+                  ) : null}
+                </section> : null}
+
+                {activeChallengeSection === null || activeChallengeSection === 'discussion' ? <section className="challengeDetailSection">
+                  <button type="button" className="challengeDetailSectionLink" aria-expanded={discussionExpanded} onClick={() => toggleChallengeSection(challengeMessage, 'discussion')}>
+                    <span>Challenge Discussion</span><span aria-hidden="true">{discussionExpanded ? '−' : '+'}</span>
+                  </button>
+                  {discussionExpanded ? (
+                    <div className="challengeDetailSectionContent challengeDiscussionContent">
+                      {visibleConversation.length <= 1 && latestMessage.body ? <p className="inboxMessageBody">{latestMessage.body}</p> : null}
+                      {renderConversation(challengeMessage)}
+                      {!challengeCompleted ? (
+                        <div className="pageHeroActions inboxMessageActions">
+                          <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(getLatestConversationMessage(challengeMessage)); setReplyBody('') }}>{isIndividualChallengeMessage ? 'Say Something' : 'Reply'}</button>
+                        </div>
+                      ) : null}
+                      {renderReplyForm(challengeMessage)}
+                    </div>
+                  ) : null}
+                </section> : null}
+              </div>
+            ) : (
+              <>
+                {latestMessage.body ? <p className="inboxMessageBody">{latestMessage.body}</p> : null}
+                {renderConversation(challengeMessage)}
+                {renderReplyForm(challengeMessage)}
+              </>
+            )}
+            <div className="challengeExitActions">
+              {source !== 'team-challenges' && !challengeCompleted ? <button type="button" className="btn btnSmall" onClick={() => { setReplyingTo(getLatestConversationMessage(challengeMessage)); setReplyBody('') }}>Reply</button> : null}
+              <button
+                type="button"
+                className="btn btnSmall challengeExitChallengeButton"
+                onClick={() => {
+                  logFrontendEvent({ category: 'inbox.challenge.navigation', message: 'exit_challenge_clicked', data: { threadId: thread.threadId, messageId: challengeMessage.id, messageType: challengeMessage.messageType, activeSection: activeChallengeSection } })
+                  toggleThreadExpansion(thread, source)
+                }}
+              >
+                Exit Challenge
+              </button>
+              {source === 'team-challenges' && !activeChallengeSection ? (
+                <div className="challengeManagementActions">
+                  {canCompleteChallenge ? (
+                    <button type="button" className="btn btnPrimary btnSmall" disabled={completingChallengeThreadId === messageThreadId(challengeMessage)} onClick={() => void handleCompleteChallenge(thread)}>
+                      {completingChallengeThreadId === messageThreadId(challengeMessage) ? 'Completing…' : 'Complete Challenge'}
+                    </button>
+                  ) : null}
+                  <button type="button" className="btn btnSmall" disabled={updatingChallengeDeleteThreadId === messageThreadId(challengeMessage)} onClick={() => void handleChallengeDeletedState(thread, challengeView !== 'deleted')}>
+                    {updatingChallengeDeleteThreadId === messageThreadId(challengeMessage) ? 'Updating…' : (challengeView === 'deleted' ? 'Restore Challenge' : 'Delete Challenge')}
+                  </button>
+                </div>
               ) : null}
-              {source === 'team-challenges' ? (
-                <button type="button" className="btn btnSmall" disabled={updatingChallengeDeleteThreadId === messageThreadId(challengeMessage)} onClick={() => void handleChallengeDeletedState(thread, challengeView !== 'deleted')}>
-                  {updatingChallengeDeleteThreadId === messageThreadId(challengeMessage) ? 'Updating…' : (challengeView === 'deleted' ? 'Restore Challenge' : 'Delete Challenge')}
-                </button>
-              ) : null}
-              <button type="button" className="btn btnSmall" onClick={() => toggleThreadExpansion(thread, source)}>Close details</button>
             </div>
-            {renderReplyForm(challengeMessage)}
           </div>
         ) : null}
       </article>
@@ -3090,6 +3254,7 @@ export default function Challenges() {
       </section>
 
       {renderTeamChallengeScorecardModal()}
+      {renderTeamChallengeMembersModal()}
       {renderIndividualChallengeCoursePickerModal()}
       {renderIndividualChallengeScorecardModal()}
       {renderTeamChallengeLeaderboardModal()}

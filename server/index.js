@@ -3917,7 +3917,7 @@ app.get('/api/users/golf-course-search', requireStorage, authMiddleware, async (
 
 app.get('/api/users/tournament-search', requireStorage, authMiddleware, async (req, res) => {
   try {
-    logApi('user_tournament_search_started', { ...requestContext(req), authUserId: req.user.id })
+    logApi('user_tournament_search_started', { ...requestContext(req), authUserId: req.user.id, timeZone: String(req.query.timeZone || '').trim() || null })
     const result = await searchGolfCourseTournaments(getPool(), {
       state: req.query.state,
       city: req.query.city,
@@ -3925,6 +3925,7 @@ app.get('/api/users/tournament-search', requireStorage, authMiddleware, async (r
       golfCourseName: req.query.golfCourseName,
       fromDate: req.query.fromDate,
       toDate: req.query.toDate,
+      timeZone: req.query.timeZone,
     }, {
       page: req.query.page,
       viewerUserId: req.user.id,

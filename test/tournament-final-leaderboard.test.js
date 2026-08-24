@@ -19,6 +19,9 @@ test('final tournament leaderboard ranks registered teams by relative score then
   assert.equal(rows[0].position, 1)
   assert.equal(rows[0].roundLabel, '-4')
   assert.equal(rows[0].holesCompleted, 18)
+  assert.equal(rows[0].holes.length, 18)
+  assert.deepEqual(rows[0].holes[0], { hole: 1, par: 4, score: 4, scoreProvided: true })
+  assert.deepEqual(rows[0].holes[16], { hole: 17, par: 4, score: 3, scoreProvided: true })
   assert.equal(rows[1].teamName, 'Alpha Team')
   assert.equal(rows[1].roundLabel, '-2')
   assert.equal(rows[2].teamName, 'Gamma Team')
@@ -39,5 +42,9 @@ test('final tournament leaderboard supports name-keyed registrations and partial
   assert.equal(rows[0].totalScore, 8)
   assert.equal(rows[0].roundLabel, '-1')
   assert.equal(rows[0].holesCompleted, 2)
+  assert.deepEqual(rows[0].holes, [
+    { hole: 1, par: 4, score: 4, scoreProvided: true },
+    { hole: 2, par: 5, score: 4, scoreProvided: true },
+  ])
   assert.equal(rows[0].thru, 2)
 })

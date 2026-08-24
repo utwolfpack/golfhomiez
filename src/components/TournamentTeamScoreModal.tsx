@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import HoleByHoleScorecard, { type PendingHoleScoreSaveHandler } from './HoleByHoleScorecard'
+import HoleStrokeScore from './HoleStrokeScore'
 import {
   fetchTournamentTeamScore,
   updateTournamentTeamScore,
@@ -344,7 +345,7 @@ export default function TournamentTeamScoreModal({ tournament, onClose, onScoreU
   function openRoundSummary(team: TournamentTeamScoreTeam) {
     setSelectedTeamKey(team.teamKey)
     setView('summary')
-    logFrontendEvent({ category: 'tournament.teamScore.leaderboard', message: 'round_summary_opened', data: { tournamentId: tournament.id, teamKey: team.teamKey, canEdit: team.canEdit } })
+    logFrontendEvent({ category: 'tournament.teamScore.leaderboard', message: 'round_summary_opened', data: { tournamentId: tournament.id, teamKey: team.teamKey, canEdit: team.canEdit, holeScoreDisplayFormat: 'golf_score_symbols_v1' } })
   }
 
   function editSelectedScore() {
@@ -444,7 +445,7 @@ export default function TournamentTeamScoreModal({ tournament, onClose, onScoreU
                 </div>
                 {summaryRows.map((row) => (
                   <div className="inboxIndividualRoundSummaryRow" role="row" key={row.hole}>
-                    <strong>{row.hole}</strong><span>{row.par ?? '—'}</span><span>{row.score ?? '—'}</span><strong>{row.relativeLabel}</strong><strong>{row.totalLabel}</strong>
+                    <strong>{row.hole}</strong><span>{row.par ?? '—'}</span><span><HoleStrokeScore score={row.score} par={row.par} compact /></span><strong>{row.relativeLabel}</strong><strong>{row.totalLabel}</strong>
                   </div>
                 ))}
               </div>

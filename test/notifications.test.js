@@ -200,3 +200,20 @@ test('existing logging keeps separate access, api, frontend and error files with
   assert.match(logger, /error\.log/)
   assert.match(logger, /correlationId/)
 })
+
+test('challenge notifications support direct mobile-friendly replies without leaving Notifications', () => {
+  const inbox = read('src/pages/Inbox.tsx')
+  const css = read('src/index.css')
+
+  assert.match(inbox, /challengeNotificationIsCompleted/)
+  assert.match(inbox, /thread\.messageType === 'challenge_request' \|\| thread\.messageType === 'individual_challenge'/)
+  assert.match(inbox, /replyToMessageId: thread\.displayMessage\.id/)
+  assert.match(inbox, /notification_challenge_reply_started/)
+  assert.match(inbox, /notification_challenge_reply_succeeded/)
+  assert.match(inbox, /Say something to your challenge group/)
+  assert.match(inbox, /Reply to your Team Challenge/)
+  assert.match(inbox, /Smack talk your homiez/)
+  assert.match(inbox, /notificationChallengeReplyForm/)
+  assert.match(css, /\.notificationChallengeReplyForm\{/)
+  assert.match(css, /\.notificationChallengeReplyForm \.button\{[\s\S]*width:100%/)
+})

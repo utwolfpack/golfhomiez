@@ -276,11 +276,7 @@ function ProfileInner() {
       await refreshProfileStatus()
       await refreshSession()
       logFrontendEvent({ category: 'profile.save', message: 'profile_session_name_refreshed', data: { hasName: Boolean(saved.firstName && saved.lastName) } })
-      if (isGuidedEnrichment) {
-        navigate('/?profileEnriched=1', { replace: true })
-      } else {
-        navigate('/', { replace: true })
-      }
+      navigate('/profile', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save profile.')
       logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_save_failed', data: { error: err instanceof Error ? err.message : String(err) } })

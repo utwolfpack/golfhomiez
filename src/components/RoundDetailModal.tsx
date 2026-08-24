@@ -10,6 +10,7 @@ import { getIncompleteRoundStatus } from '../lib/round-status'
 import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType } from '../lib/team-challenge-scoring'
 import { api } from '../lib/api'
 import HoleByHoleScorecard from './HoleByHoleScorecard'
+import HoleStrokeScore from './HoleStrokeScore'
 import type { PendingHoleScoreSaveHandler } from './HoleByHoleScorecard'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 
@@ -214,7 +215,7 @@ function renderHoleDetails(holes: DisplayHoleScore[]) {
             <strong>{hole.hole}</strong>
             <span>{hole.par == null ? '—' : hole.par}</span>
             <span className={`roundHoleLineItemScore ${outcome.outcomeClass}`}>
-              <strong>{hole.score == null ? '—' : hole.score}</strong>
+              <HoleStrokeScore score={hole.score} par={hole.par} />
               <small>{outcome.outcome}</small>
             </span>
             <span>{formatHoleDistance(hole)}</span>
@@ -240,12 +241,6 @@ function getTeamChallengeRoundWinnerLabel(winner: 'proposer' | 'challenged' | 't
     : getTeamChallengeRoundSideInitial(opponentLabel, 'O')
 }
 
-function getTeamChallengeRoundSummaryScoreClass(winner: 'proposer' | 'challenged' | 'tie' | 'pending', side: 'proposer' | 'challenged') {
-  if (winner === side) return 'inboxTeamChallengeSummaryScore--winner'
-  if (winner === 'tie' || winner === 'pending') return 'inboxTeamChallengeSummaryScore--push'
-  return 'inboxTeamChallengeSummaryScore--loss'
-}
-
 function getTeamChallengeRoundPushPoints(result: { winner: 'proposer' | 'challenged' | 'tie' | 'pending'; pointsAwarded: number; carryoverAfterHole: number; strokeDifferentialBonus: number }, pointSummary: ReturnType<typeof calculateTeamChallengePoints>) {
   if (pointSummary.scoringType !== 'skins_push') return 0
   if (result.winner === 'tie' || result.winner === 'pending') return Math.max(0, result.carryoverAfterHole)
@@ -267,6 +262,8 @@ function renderTeamHoleComparison(teamHoles: DisplayHoleScore[], opponentHoles: 
   const scoringType = normalizeTeamChallengeScoringType((round as any).challengeScoringType)
   const pointsPerHole = normalizeTeamChallengePointsPerHole((round as any).challengePointsPerHole)
   const pointSummary = calculateTeamChallengePoints(teamHoles as unknown as HoleScoreDetail[], opponentHoles as unknown as HoleScoreDetail[], scoringType, pointsPerHole)
+  const showPushColumn = pointSummary.scoringType === 'skins_push'
+  const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
   const resultsByHole = new Map(pointSummary.holeResults.map((result) => [result.hole, result]))
   const holeNumbers = Array.from(new Set([
     ...pointSummary.holeResults.map((result) => result.hole),
@@ -301,25 +298,25 @@ function renderTeamHoleComparison(teamHoles: DisplayHoleScore[], opponentHoles: 
 
   return (
     <div className="roundTeamChallengeSummaryView" aria-label="Round Team Challenge line-item comparison" style={{ marginTop: 10 }}>
-      <div className="inboxTeamChallengeSummaryTable roundTeamChallengeSummaryTable" role="table" aria-label="Hole-by-hole Team Challenge round review summary">
+      <div className={`inboxTeamChallengeSummaryTable roundTeamChallengeSummaryTable${showPushColumn ? '' : ' inboxTeamChallengeSummaryTable--noPush'}${showPointsColumn ? '' : ' inboxTeamChallengeSummaryTable--noPoints'}`} role="table" aria-label="Hole-by-hole Team Challenge round review summary">
         <div className="inboxTeamChallengeSummaryHeader" role="row">
           <span>Hole</span>
           <span>Par</span>
           <span title={teamLabel}>{teamLabel}</span>
           <span title={opponentLabel}>{opponentLabel}</span>
           <span>Winner</span>
-          <span>Push</span>
-          <span>Points</span>
+          {showPushColumn ? <span>Push</span> : null}
+          {showPointsColumn ? <span>Points</span> : null}
         </div>
         {rows.map((row) => (
           <div key={row.holeNumber} className="inboxTeamChallengeSummaryRow" role="row">
             <strong>{row.holeNumber}</strong>
             <span>{row.par == null ? '—' : row.par}</span>
-            <span className={`inboxTeamChallengeSummaryScore ${getTeamChallengeRoundSummaryScoreClass(row.result.winner, 'proposer')}`}>{row.teamHole?.score == null ? '—' : row.teamHole.score}</span>
-            <span className={`inboxTeamChallengeSummaryScore ${getTeamChallengeRoundSummaryScoreClass(row.result.winner, 'challenged')}`}>{row.opponentHole?.score == null ? '—' : row.opponentHole.score}</span>
+            <span className="inboxTeamChallengeSummaryScore"><HoleStrokeScore score={row.teamHole?.score ?? null} par={row.par} compact /></span>
+            <span className="inboxTeamChallengeSummaryScore"><HoleStrokeScore score={row.opponentHole?.score ?? null} par={row.par} compact /></span>
             <span className={`inboxTeamChallengeSummaryWinner inboxTeamChallengeSummaryWinner--${row.result.winner}`}>{getTeamChallengeRoundWinnerLabel(row.result.winner, teamLabel, opponentLabel)}</span>
-            <span>{isSkinsTeamChallenge(scoringType) && row.pushedPoints > 0 ? formatPointNumber(row.pushedPoints) : '—'}</span>
-            <strong className="inboxTeamChallengeSummaryPoints">{row.pointLeadLabel}</strong>
+            {showPushColumn ? <span>{row.pushedPoints > 0 ? formatPointNumber(row.pushedPoints) : '—'}</span> : null}
+            {showPointsColumn ? <strong className="inboxTeamChallengeSummaryPoints">{row.pointLeadLabel}</strong> : null}
           </div>
         ))}
         <div className="inboxTeamChallengeSummaryRow inboxTeamChallengeSummaryRow--total" role="row">
@@ -328,8 +325,8 @@ function renderTeamHoleComparison(teamHoles: DisplayHoleScore[], opponentHoles: 
           <span>{teamHoles.reduce((sum, hole) => sum + (hole.score || 0), 0)}</span>
           <span>{opponentHoles.reduce((sum, hole) => sum + (hole.score || 0), 0)}</span>
           <span>—</span>
-          <span>{isSkinsTeamChallenge(scoringType) && pushedPointsTotal > 0 ? formatPointNumber(pushedPointsTotal) : '—'}</span>
-          <strong className="inboxTeamChallengeSummaryPoints">{finalLeadLabel}</strong>
+          {showPushColumn ? <span>{pushedPointsTotal > 0 ? formatPointNumber(pushedPointsTotal) : '—'}</span> : null}
+          {showPointsColumn ? <strong className="inboxTeamChallengeSummaryPoints">{finalLeadLabel}</strong> : null}
         </div>
       </div>
     </div>
@@ -440,7 +437,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
         detailView,
         lineItemReviewView: true,
         reviewColumns: ['Hole', 'Par', 'Score', 'Distance'],
-        teamComparisonColumns: getDisplayRoundMode(round) === 'team' ? ['Hole', 'Par', displayName((round as any).team, 'Team'), displayName((round as any).opponentTeam, 'Opponent Team'), 'Winner', 'Push', 'Points'] : null,
+        teamComparisonColumns: getDisplayRoundMode(round) === 'team' ? ['Hole', 'Par', displayName((round as any).team, 'Team'), displayName((round as any).opponentTeam, 'Opponent Team'), 'Winner', ...(normalizeTeamChallengeScoringType((round as any).challengeScoringType) === 'skins_push' ? ['Push'] : []), ...(isSkinsTeamChallenge((round as any).challengeScoringType) ? ['Points'] : [])] : null,
         primaryHoleCount: primaryHoles.length,
         opponentHoleCount: secondaryHoles.length,
         primaryHoleReviewVisible: primaryHoles.length > 0,

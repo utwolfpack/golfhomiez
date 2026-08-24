@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type SyntheticEvent } from 'react'
+import { Fragment, useEffect, useMemo, useState, type CSSProperties, type SyntheticEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useAuth } from '../context/AuthContext'
 import { fetchMyTeams, fetchTournamentPortal, registerForTournament, type TournamentFinalLeaderboardRow, type TournamentPortal as TournamentPortalData, type TournamentStartAssignment } from '../lib/accounts'
@@ -8,6 +8,7 @@ import { DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DE
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import { getTournamentQrCodeUrl } from '../lib/tournament-qr'
 import golfHomiezEmblemUrl from '../assets/GolfHomiezEmblem.png'
+import HoleStrokeScore from '../components/HoleStrokeScore'
 
 function lines(value?: string | null) {
   return String(value || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
@@ -513,13 +514,25 @@ function TournamentFinalLeaderboard({ rows }: { rows: TournamentFinalLeaderboard
           <span>Pos</span><span>Team</span><span>Round</span><span>Total</span><span>Status</span>
         </div>
         {rows.map((row) => (
-          <div className={`tournament-final-leaderboard-row ${row.position <= 3 ? `tournament-final-leaderboard-row--top${row.position}` : ''}`} role="row" key={row.teamKey}>
-            <strong className="tournament-final-leaderboard-position">{row.position}</strong>
-            <strong className="tournament-final-leaderboard-team">{row.teamName}</strong>
-            <span>{row.roundLabel || '—'}</span>
-            <strong>{row.totalScore == null ? '—' : row.totalScore}</strong>
-            <span className="small">{row.holesCompleted >= 18 ? 'Final' : row.holesCompleted > 0 ? `${row.holesCompleted} holes` : 'No score'}</span>
-          </div>
+          <Fragment key={row.teamKey}>
+            <div className={`tournament-final-leaderboard-row ${row.position <= 3 ? `tournament-final-leaderboard-row--top${row.position}` : ''}`} role="row">
+              <strong className="tournament-final-leaderboard-position">{row.position}</strong>
+              <strong className="tournament-final-leaderboard-team">{row.teamName}</strong>
+              <span>{row.roundLabel || '—'}</span>
+              <strong>{row.totalScore == null ? '—' : row.totalScore}</strong>
+              <span className="small">{row.holesCompleted >= 18 ? 'Final' : row.holesCompleted > 0 ? `${row.holesCompleted} holes` : 'No score'}</span>
+            </div>
+            {row.holes?.length ? (
+              <div className="tournament-final-leaderboard-hole-strip" role="row" aria-label={`${row.teamName} hole-by-hole final score`}>
+                {row.holes.map((hole) => (
+                  <span className="tournament-final-leaderboard-hole" key={`${row.teamKey}-${hole.hole}`}>
+                    <small>H{hole.hole}</small>
+                    <HoleStrokeScore score={hole.score ?? null} par={hole.par ?? null} compact />
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </Fragment>
         ))}
       </div>
     </section>
@@ -689,7 +702,7 @@ export default function TournamentPortal() {
         const completed = String(result.tournament?.status || '').toLowerCase() === 'completed'
         logFrontendEvent({ category: 'tournament.portal', message: 'portal_loaded', data: { tournamentId: id, tournamentStatus: result.tournament?.status || null, teamSlotLimit: result.teamSlotLimit, openTeamSlotCount: result.openTeamSlotCount, isViewerRegistered: Boolean(result.isViewerRegistered), finalLeaderboardTeamCount: completed ? Number(result.finalLeaderboard?.length || 0) : 0, templateKey: result.tournament?.templateKey || 'classic-flyer' } })
         if (completed) {
-          logFrontendEvent({ category: 'tournament.portal', message: 'completed_tournament_final_leaderboard_render_ready', data: { tournamentId: id, teamCount: Number(result.finalLeaderboard?.length || 0) } })
+          logFrontendEvent({ category: 'tournament.portal', message: 'completed_tournament_final_leaderboard_render_ready', data: { tournamentId: id, teamCount: Number(result.finalLeaderboard?.length || 0), holeScoreDisplayFormat: 'golf_score_symbols_v1' } })
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not load tournament portal.'
