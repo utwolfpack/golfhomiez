@@ -56,6 +56,12 @@ function normalizeScoreRow(row = {}) {
     relativeToPar,
     roundLabel: relativeLabel(relativeToPar),
     holesCompleted: entered.length,
+    holes: entered.map((hole, index) => ({
+      hole: Number(hole?.hole) || index + 1,
+      par: Number.isFinite(Number(hole?.par)) ? Number(hole.par) : null,
+      score: Number.isFinite(Number(hole?.score)) ? Number(hole.score) : null,
+      scoreProvided: true,
+    })),
     thru,
     updatedAt: row.updated_at ?? row.updatedAt ?? null,
   }
@@ -81,6 +87,7 @@ export function buildTournamentFinalLeaderboardRows(registrations = [], scoreRow
       relativeToPar: score?.relativeToPar ?? null,
       roundLabel: score?.roundLabel || '—',
       holesCompleted: score?.holesCompleted ?? 0,
+      holes: score?.holes || [],
       thru: score?.thru ?? null,
       updatedAt: score?.updatedAt || null,
     }

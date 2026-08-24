@@ -38,6 +38,14 @@ function dateInputValue(date: Date) {
   return date.toISOString().slice(0, 10)
 }
 
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  } catch {
+    return ''
+  }
+}
+
 function addUtcMonths(date: Date, months: number) {
   const result = new Date(date.getTime())
   const originalDay = result.getUTCDate()
@@ -93,6 +101,7 @@ function visiblePageNumbers(currentPage: number, totalPages: number) {
 export default function FindTournament() {
   const navigate = useNavigate()
   const dateBounds = useMemo(tournamentSearchDateBounds, [])
+  const userTimeZone = useMemo(browserTimeZone, [])
   const [defaultState, setDefaultState] = useState('')
   const [searchFilters, setSearchFilters] = useState<GolfCourseTournamentSearchFilters>({
     state: '',
@@ -101,6 +110,7 @@ export default function FindTournament() {
     golfCourseName: '',
     fromDate: dateBounds.min,
     toDate: dateBounds.defaultTo,
+    timeZone: userTimeZone,
   })
   const [searchResults, setSearchResults] = useState<GolfCourseTournamentSearchResult[]>([])
   const [submittedFilters, setSubmittedFilters] = useState<GolfCourseTournamentSearchFilters | null>(null)
@@ -118,14 +128,14 @@ export default function FindTournament() {
         if (!state) return
         setDefaultState(state)
         setSearchFilters((current) => current.state ? current : { ...current, state })
-        logFrontendEvent({ category: 'user.tournaments.search', message: 'tournament_search_defaults_loaded', data: { route: '/find-tournament', state, fromDate: dateBounds.min, toDate: dateBounds.defaultTo } })
+        logFrontendEvent({ category: 'user.tournaments.search', message: 'tournament_search_defaults_loaded', data: { route: '/find-tournament', state, fromDate: dateBounds.min, toDate: dateBounds.defaultTo, timeZone: userTimeZone || null } })
       })
       .catch((err) => {
         if (!active) return
         logFrontendEvent({ category: 'user.tournaments.search', level: 'warn', message: 'tournament_search_profile_default_failed', data: { route: '/find-tournament', error: err instanceof Error ? err.message : String(err) } })
       })
     return () => { active = false }
-  }, [dateBounds.defaultTo, dateBounds.min])
+  }, [dateBounds.defaultTo, dateBounds.min, userTimeZone])
 
   async function executeSearch(filters: GolfCourseTournamentSearchFilters, page: number) {
     setSearching(true)
@@ -173,13 +183,13 @@ export default function FindTournament() {
   }
 
   function clearSearch() {
-    setSearchFilters({ state: defaultState, city: '', zipCode: '', golfCourseName: '', fromDate: dateBounds.min, toDate: dateBounds.defaultTo })
+    setSearchFilters({ state: defaultState, city: '', zipCode: '', golfCourseName: '', fromDate: dateBounds.min, toDate: dateBounds.defaultTo, timeZone: userTimeZone })
     setSearchResults([])
     setSubmittedFilters(null)
     setPagination(EMPTY_PAGINATION)
     setSearchError(null)
     setHasSearched(false)
-    logFrontendEvent({ category: 'user.tournaments.search', message: 'tournament_search_cleared', data: { route: '/find-tournament', state: defaultState, fromDate: dateBounds.min, toDate: dateBounds.defaultTo } })
+    logFrontendEvent({ category: 'user.tournaments.search', message: 'tournament_search_cleared', data: { route: '/find-tournament', state: defaultState, fromDate: dateBounds.min, toDate: dateBounds.defaultTo, timeZone: userTimeZone || null } })
   }
 
   const pageNumbers = visiblePageNumbers(pagination.page, pagination.totalPages)

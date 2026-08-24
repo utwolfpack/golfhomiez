@@ -4655,6 +4655,53 @@ button.navDropdownItem{font:inherit;}
   gap:6px;
 }
 
+.inboxTeamChallengeSummaryTable--noPush .inboxTeamChallengeSummaryHeader,
+.inboxTeamChallengeSummaryTable--noPush .inboxTeamChallengeSummaryRow{
+  grid-template-columns:44px 40px minmax(72px,1fr) minmax(72px,1fr) 58px 74px;
+}
+
+.inboxTeamChallengeSummaryTable--noPoints .inboxTeamChallengeSummaryHeader,
+.inboxTeamChallengeSummaryTable--noPoints .inboxTeamChallengeSummaryRow{
+  grid-template-columns:44px 40px minmax(72px,1fr) minmax(72px,1fr) 58px;
+}
+
+.inboxTeamChallengeSummaryTeamHeaderButton{
+  width:100%;
+  min-width:0;
+  padding:2px 1px;
+  border:0;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  font-weight:950;
+  text-transform:inherit;
+  letter-spacing:inherit;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  cursor:pointer;
+}
+
+.inboxTeamChallengeSummaryTeamHeaderButton:hover,
+.inboxTeamChallengeSummaryTeamHeaderButton:focus-visible{
+  text-decoration:underline;
+  text-underline-offset:2px;
+  outline:none;
+}
+
+.inboxTeamChallengeSummaryView--leaderboard{
+  margin:0;
+  padding:0;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  background:transparent;
+}
+
+.inboxTeamChallengeHoleLeaderboardBoard{
+  padding:14px;
+}
+
 .inboxTeamChallengeSummaryHeader{
   padding:8px 10px;
   background:#0b3d1d;
@@ -4751,7 +4798,7 @@ button.navDropdownItem{font:inherit;}
 }
 
 .inboxTeamChallengeSummaryWinner--challenged{
-  background:#c1121f;
+  background:#16a34a;
   color:#fff;
 }
 
@@ -4808,6 +4855,16 @@ button.navDropdownItem{font:inherit;}
     border-radius:20px;
   }
 
+  .inboxTeamChallengeSummaryView--leaderboard{
+    margin:0;
+    padding:0;
+    border-radius:0;
+  }
+
+  .inboxTeamChallengeHoleLeaderboardBoard{
+    padding:8px;
+  }
+
   .inboxTeamChallengeSummaryScorebar{
     grid-template-columns:minmax(0,1fr) 42px minmax(0,1fr);
     padding:8px;
@@ -4822,6 +4879,16 @@ button.navDropdownItem{font:inherit;}
   .inboxTeamChallengeSummaryRow{
     grid-template-columns:32px 30px minmax(42px,.9fr) minmax(42px,.9fr) 38px 34px 48px;
     gap:3px;
+  }
+
+  .inboxTeamChallengeSummaryTable--noPush .inboxTeamChallengeSummaryHeader,
+  .inboxTeamChallengeSummaryTable--noPush .inboxTeamChallengeSummaryRow{
+    grid-template-columns:32px 30px minmax(42px,.9fr) minmax(42px,.9fr) 38px 48px;
+  }
+
+  .inboxTeamChallengeSummaryTable--noPoints .inboxTeamChallengeSummaryHeader,
+  .inboxTeamChallengeSummaryTable--noPoints .inboxTeamChallengeSummaryRow{
+    grid-template-columns:32px 30px minmax(42px,.9fr) minmax(42px,.9fr) 38px;
   }
 
   .inboxTeamChallengeSummaryHeader{
@@ -4848,10 +4915,22 @@ button.navDropdownItem{font:inherit;}
 }
 
 @media (max-width:420px){
+  .inboxTeamChallengeHoleLeaderboardBoard{padding:5px;}
+
   .inboxTeamChallengeSummaryHeader,
   .inboxTeamChallengeSummaryRow{
     grid-template-columns:28px 26px minmax(36px,.9fr) minmax(36px,.9fr) 32px 30px 42px;
     gap:2px;
+  }
+
+  .inboxTeamChallengeSummaryTable--noPush .inboxTeamChallengeSummaryHeader,
+  .inboxTeamChallengeSummaryTable--noPush .inboxTeamChallengeSummaryRow{
+    grid-template-columns:28px 26px minmax(36px,.9fr) minmax(36px,.9fr) 32px 42px;
+  }
+
+  .inboxTeamChallengeSummaryTable--noPoints .inboxTeamChallengeSummaryHeader,
+  .inboxTeamChallengeSummaryTable--noPoints .inboxTeamChallengeSummaryRow{
+    grid-template-columns:28px 26px minmax(36px,.9fr) minmax(36px,.9fr) 32px;
   }
 
   .inboxTeamChallengeSummaryHeader{font-size:.5rem;}
@@ -7490,5 +7569,368 @@ button.navDropdownItem{font:inherit;}
     display:block;
     font-size:.66rem !important;
     line-height:1.15;
+  }
+}
+
+/* Challenge detail sibling disclosures, completion result, and Team Challenge member modal */
+.challengeDetailSections{
+  display:grid;
+  gap:10px;
+}
+
+.challengeDetailSection{
+  overflow:hidden;
+  border:1px solid #dbe5de;
+  border-radius:14px;
+  background:#fff;
+}
+
+.challengeDetailSectionLink{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 13px;
+  border:0;
+  background:#f7fbf8;
+  color:#166534;
+  font:inherit;
+  font-weight:900;
+  text-align:left;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+
+.challengeDetailSectionLink:hover,
+.challengeDetailSectionLink:focus-visible{
+  background:#eef8f1;
+  color:#0b3d1d;
+  outline:2px solid rgba(22,101,52,.22);
+  outline-offset:-2px;
+}
+
+.challengeDetailSectionLink > span:last-child{
+  flex:0 0 auto;
+  font-size:20px;
+  line-height:1;
+  text-decoration:none;
+}
+
+.challengeDetailSectionContent{
+  display:grid;
+  gap:12px;
+  padding:12px;
+  border-top:1px solid #e3ebe5;
+}
+
+.challengeDetailSectionContent .challengeSettingsEditor,
+.challengeDetailSectionContent .individualChallengeInviteSection{
+  margin-top:0;
+}
+
+.challengeDiscussionContent .inboxConversationThread{
+  margin-top:0;
+}
+
+.teamChallengeMembersLinkBar,
+.challengeCompletedResultLine{
+  display:flex;
+  align-items:center;
+  padding:0 14px 10px;
+}
+
+.teamChallengeMembersLink{
+  appearance:none;
+  border:0;
+  padding:0;
+  background:transparent;
+  color:#166534;
+  font:inherit;
+  font-size:13px;
+  font-weight:900;
+  text-align:left;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  cursor:pointer;
+}
+
+.teamChallengeMembersLink:hover,
+.teamChallengeMembersLink:focus-visible{
+  color:#0b3d1d;
+  outline:none;
+}
+
+.challengeCompletedResultLine{
+  color:#1e3a2a;
+  font-size:13px;
+  font-weight:900;
+}
+
+.teamChallengeMembersModal{
+  width:min(94vw,760px);
+}
+
+.teamChallengeMembersGrid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+
+.teamChallengeMembersTeam{
+  display:grid;
+  gap:9px;
+  padding:12px;
+  border:1px solid #dbe5de;
+  border-radius:14px;
+  background:#f9fbfa;
+}
+
+.teamChallengeMembersTeam h3{
+  margin:0;
+  color:#0b3d1d;
+}
+
+.teamChallengeMembersList{
+  display:grid;
+  gap:7px;
+}
+
+.teamChallengeMemberRow{
+  padding:9px 10px;
+  border:1px solid #e1e8e3;
+  border-radius:10px;
+  background:#fff;
+  overflow-wrap:anywhere;
+}
+
+@media (max-width:700px){
+  .teamChallengeMembersGrid{
+    grid-template-columns:1fr;
+  }
+  .teamChallengeMembersLinkBar,
+  .challengeCompletedResultLine{
+    padding-left:12px;
+    padding-right:12px;
+  }
+}
+
+/* Challenge exit/actions and direct notification reply improvements */
+.challengeExitActions{
+  display:grid;
+  gap:8px;
+  justify-items:start;
+  margin-top:12px;
+}
+
+.challengeExitChallengeButton{
+  background:#fff1f2;
+  border-color:#fecdd3;
+  color:#9f1239;
+}
+
+.challengeExitChallengeButton:hover,
+.challengeExitChallengeButton:focus-visible{
+  background:#ffe4e6;
+  border-color:#fda4af;
+  color:#881337;
+}
+
+.challengeManagementActions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.notificationChallengeReplyForm{
+  padding:12px;
+  border:1px solid #dbe3ea;
+  border-radius:12px;
+  background:#fff;
+}
+
+.notificationChallengeReplyForm textarea{
+  min-height:88px;
+  resize:vertical;
+}
+
+@media (max-width:760px){
+  .challengeExitActions,
+  .challengeManagementActions{
+    width:100%;
+  }
+
+  .challengeExitChallengeButton,
+  .challengeManagementActions .btn{
+    width:100%;
+    justify-content:center;
+  }
+
+  .notificationChallengeReplyForm{
+    padding:10px;
+  }
+
+  .notificationChallengeReplyForm .button{
+    width:100%;
+    min-height:44px;
+  }
+}
+
+/* Golf score symbols used anywhere a per-hole stroke count appears in a leaderboard or round summary. */
+.holeStrokeScore{
+  --hole-stroke-score-color:#475569;
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:32px;
+  height:32px;
+  min-width:32px;
+  color:var(--hole-stroke-score-color) !important;
+  font-weight:950;
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+  vertical-align:middle;
+  isolation:isolate;
+}
+
+.holeStrokeScoreValue{
+  position:relative;
+  z-index:2;
+  display:inline-grid;
+  place-items:center;
+  width:100%;
+  height:100%;
+  color:inherit !important;
+}
+
+.holeStrokeScore--compact{
+  width:28px;
+  height:28px;
+  min-width:28px;
+  font-size:.82rem;
+}
+
+.holeStrokeScore--par,
+.holeStrokeScore--birdie,
+.holeStrokeScore--eagle{
+  --hole-stroke-score-color:#4f9368;
+}
+
+.holeStrokeScore--albatross,
+.holeStrokeScore--bogey,
+.holeStrokeScore--double-bogey,
+.holeStrokeScore--max{
+  --hole-stroke-score-color:#c65d5d;
+}
+
+.holeStrokeScore--birdie,
+.holeStrokeScore--eagle,
+.holeStrokeScore--bogey,
+.holeStrokeScore--double-bogey{
+  border:2px solid currentColor;
+}
+
+.holeStrokeScore--birdie,
+.holeStrokeScore--eagle{
+  border-radius:999px;
+}
+
+.holeStrokeScore--bogey,
+.holeStrokeScore--double-bogey{
+  border-radius:2px;
+}
+
+.holeStrokeScore--eagle::after,
+.holeStrokeScore--double-bogey::after{
+  content:"";
+  position:absolute;
+  inset:3px;
+  border:1.5px solid currentColor;
+  border-radius:inherit;
+  pointer-events:none;
+  z-index:1;
+}
+
+.holeStrokeScoreShape{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  overflow:visible;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.65;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  z-index:1;
+  pointer-events:none;
+}
+
+.holeStrokeScore--albatross .holeStrokeScoreShape{
+  inset:-1px;
+  width:calc(100% + 2px);
+  height:calc(100% + 2px);
+}
+
+.holeStrokeScore--max .holeStrokeScoreShape{
+  stroke-width:1.45;
+}
+
+.roundHoleLineItemScore .holeStrokeScore,
+.inboxTeamChallengeSummaryScore .holeStrokeScore,
+.inboxIndividualRoundSummaryRow .holeStrokeScore{
+  margin-inline:auto;
+}
+
+.roundHoleLineItemScore > .holeStrokeScore + small{
+  margin-top:2px;
+}
+
+.tournament-final-leaderboard-hole-strip{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  align-items:center;
+  padding:7px 16px 10px 88px;
+  border-bottom:1px solid #e6ece6;
+  background:#fbfdfb;
+}
+
+.tournament-final-leaderboard-hole{
+  display:inline-grid;
+  grid-template-columns:auto auto;
+  align-items:center;
+  gap:3px;
+  min-width:48px;
+}
+
+.tournament-final-leaderboard-hole > small{
+  color:#64748b;
+  font-size:.62rem;
+  font-weight:850;
+  letter-spacing:.02em;
+}
+
+@media (max-width:620px){
+  .holeStrokeScore{
+    width:29px;
+    height:29px;
+    min-width:29px;
+    font-size:.82rem;
+  }
+  .holeStrokeScore--compact{
+    width:25px;
+    height:25px;
+    min-width:25px;
+    font-size:.74rem;
+  }
+  .tournament-final-leaderboard-hole-strip{
+    padding:7px 10px 10px 54px;
+    gap:5px;
+  }
+  .tournament-final-leaderboard-hole{
+    min-width:43px;
   }
 }

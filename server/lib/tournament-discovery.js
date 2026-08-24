@@ -161,6 +161,23 @@ function todayUtc(now = new Date()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0))
 }
 
+function todayInTimeZoneUtc(now = new Date(), timeZone = '') {
+  const zone = cleanText(timeZone, 100)
+  if (!zone) return todayUtc(now)
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(now)
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+    return dateOnlyUtc(Number(values.year), Number(values.month), Number(values.day)) || todayUtc(now)
+  } catch {
+    return todayUtc(now)
+  }
+}
+
 export function nextGetTournamentsRun(now = new Date(), timeZone = GET_TOURNAMENTS_TIME_ZONE) {
   const local = getMountainTimeParts(now, timeZone)
   const alreadyPassed = local.hour > GET_TOURNAMENTS_HOUR ||
@@ -1283,7 +1300,7 @@ function parseIsoDate(value, fieldName) {
 }
 
 export function normalizeTournamentSearchFilters(filters = {}, now = new Date()) {
-  const today = todayUtc(now)
+  const today = todayInTimeZoneUtc(now, filters.timeZone)
   const maxDate = addUtcMonths(today, TOURNAMENT_DISCOVERY_MONTHS_AHEAD)
   const fromDate = parseIsoDate(filters.fromDate, 'From date') || today
   const toDate = parseIsoDate(filters.toDate, 'To date') || maxDate

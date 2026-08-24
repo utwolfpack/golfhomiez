@@ -55,6 +55,11 @@ function notificationDate(thread: NotificationThread) {
   return formatTimestamp(thread.latestActivityAt || thread.displayMessage.createdAt)
 }
 
+function challengeNotificationIsCompleted(thread: NotificationThread) {
+  if (thread.category !== 'challenges') return false
+  return thread.messages.some((message) => String(message.challengeStatus || '').trim().toLowerCase() === 'completed')
+}
+
 function parseMemberEmails(value: string) {
   return [...new Set(value.split(/[\n,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean))]
 }
@@ -239,10 +244,14 @@ export default function Inbox() {
     event.preventDefault()
     const body = replyBody.trim()
     if (!body) return
+    const isChallengeReply = thread.messageType === 'challenge_request' || thread.messageType === 'individual_challenge'
     setReplySending(true)
     setError(null)
     setStatus(null)
     try {
+      if (isChallengeReply) {
+        logFrontendEvent({ category: 'notifications.challenge.reply', message: 'notification_challenge_reply_started', data: { threadId: thread.threadId, messageType: thread.messageType, replyToMessageId: thread.displayMessage.id, directFromNotification: true } })
+      }
       if (thread.messageType === 'group_message' && thread.displayMessage.groupId) {
         await sendMessageGroupMessage(thread.displayMessage.groupId, body)
       } else if (thread.messageType === 'message') {
@@ -254,12 +263,23 @@ export default function Inbox() {
         const response = await sendTournamentConversationMessage(thread.displayMessage.id, body)
         setTournamentConversation(response.conversation)
         setCanMessageTournamentHost(true)
+      } else if (isChallengeReply) {
+        await sendInboxMessage({
+          recipientEmail: thread.displayMessage.senderEmail || '',
+          messageType: thread.messageType,
+          body,
+          replyToMessageId: thread.displayMessage.id,
+        })
+        notifyNotificationsChanged()
       } else {
         throw new Error('Open this notification to continue the challenge activity.')
       }
       setReplyBody('')
-      setStatus('Message sent.')
+      setStatus(isChallengeReply ? 'Challenge message sent.' : 'Message sent.')
       logFrontendEvent({ category: 'notifications.reply', message: 'notification_reply_sent', data: { threadId: thread.threadId, messageType: thread.messageType } })
+      if (isChallengeReply) {
+        logFrontendEvent({ category: 'notifications.challenge.reply', message: 'notification_challenge_reply_succeeded', data: { threadId: thread.threadId, messageType: thread.messageType, directFromNotification: true } })
+      }
       await loadNotifications(page, filter, deletedView)
     } catch (err) {
       if (err instanceof RecipientNotFoundError) {
@@ -269,6 +289,9 @@ export default function Inbox() {
       const message = err instanceof Error ? err.message : 'Could not send reply.'
       setError(message)
       logFrontendEvent({ category: 'notifications.reply', level: 'error', message: 'notification_reply_failed', data: { threadId: thread.threadId, error: message } })
+      if (isChallengeReply) {
+        logFrontendEvent({ category: 'notifications.challenge.reply', level: 'error', message: 'notification_challenge_reply_failed', data: { threadId: thread.threadId, messageType: thread.messageType, directFromNotification: true, error: message } })
+      }
     } finally {
       setReplySending(false)
     }
@@ -473,7 +496,13 @@ export default function Inbox() {
             const expanded = expandedThreadId === thread.threadId
             const message = thread.displayMessage
             const groupState = message.groupId ? groups.find((group) => group.id === message.groupId) : null
-            const canReply = !deletedView && (thread.messageType === 'message' || (thread.messageType === 'group_message' && Boolean(message.groupId) && Boolean(groupState?.viewerActive)) || (thread.messageType === 'tournament_notification' && canMessageTournamentHost))
+            const isChallengeThread = thread.messageType === 'challenge_request' || thread.messageType === 'individual_challenge'
+            const canReply = !deletedView && (
+              thread.messageType === 'message' ||
+              (thread.messageType === 'group_message' && Boolean(message.groupId) && Boolean(groupState?.viewerActive)) ||
+              (thread.messageType === 'tournament_notification' && canMessageTournamentHost) ||
+              (isChallengeThread && !challengeNotificationIsCompleted(thread))
+            )
             return (
               <article key={thread.threadId} className={`notificationLineItem${thread.unreadCount > 0 ? ' unread' : ''}${expanded ? ' expanded' : ''}`}>
                 <button type="button" className="notificationLineItemButton" onClick={() => void openThread(thread)} aria-expanded={expanded}>
@@ -521,12 +550,21 @@ export default function Inbox() {
                     </div>
 
                     {canReply ? (
-                      <form className="notificationReplyForm" onSubmit={(event) => void handleReply(event, thread)}>
+                      <form className={`notificationReplyForm${isChallengeThread ? ' notificationChallengeReplyForm' : ''}`} onSubmit={(event) => void handleReply(event, thread)}>
                         <label>
                           {thread.messageType === 'tournament_notification'
                             ? (tournamentConversation ? `Reply to ${tournamentHostName}` : `Send a message to ${tournamentHostName}`)
-                            : 'Add to this conversation'}
-                          <textarea rows={2} maxLength={2000} value={replyBody} onChange={(event) => setReplyBody(event.target.value)} required />
+                            : (thread.messageType === 'individual_challenge'
+                              ? 'Say something to your challenge group'
+                              : (thread.messageType === 'challenge_request' ? 'Reply to your Team Challenge' : 'Add to this conversation'))}
+                          <textarea
+                            rows={isChallengeThread ? 3 : 2}
+                            maxLength={2000}
+                            value={replyBody}
+                            onChange={(event) => setReplyBody(event.target.value)}
+                            placeholder={thread.messageType === 'individual_challenge' ? 'Smack talk your homiez' : (thread.messageType === 'challenge_request' ? 'Message your Team Challenge' : undefined)}
+                            required
+                          />
                         </label>
                         <button className="button primary small" type="submit" disabled={replySending || !replyBody.trim()}>{replySending ? 'Sending…' : 'Send'}</button>
                       </form>
