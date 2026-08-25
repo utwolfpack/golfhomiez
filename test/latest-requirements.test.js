@@ -59,12 +59,13 @@ test('challenge notifications identify sender and timestamp in the shared discus
   assert.match(inbox, /formatTimestamp\(threadMessage\.createdAt\)/)
 })
 
-test('home and my golf scores hide Clear filters until a score filter is active', () => {
-  for (const path of ['src/pages/Home.tsx', 'src/pages/MyGolfScores.tsx']) {
-    const source = read(path)
-    assert.match(source, /const hasActiveScoreFilters = stateFilter !== 'all' \|\| courseFilter !== 'all' \|\| teamFilter !== 'all'/)
-    assert.match(source, /\{hasActiveScoreFilters \? <button type="button" className="scoreFiltersClear"/)
-  }
+test('my golf scores hides Clear filters until a score filter is active while home omits score filters', () => {
+  const home = read('src/pages/Home.tsx')
+  const scores = read('src/pages/MyGolfScores.tsx')
+
+  assert.doesNotMatch(home, /scoreFiltersClear|hasActiveScoreFilters|scoreFilterToolbar/)
+  assert.match(scores, /const hasActiveScoreFilters = stateFilter !== 'all' \|\| courseFilter !== 'all' \|\| teamFilter !== 'all'/)
+  assert.match(scores, /\{hasActiveScoreFilters \? <button type="button" className="scoreFiltersClear"/)
 })
 
 test('tournament round summary respects a persisted nine-hole scorecard', () => {

@@ -1,0 +1,101 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+
+import { extractYouTubeVideoId, validateYouTubeUrl } from '../server/lib/marketing-settings.js'
+import { APP_MIGRATIONS } from '../server/migrations/index.js'
+
+test('home presents only the mission and two responsive YouTube commercial sections', async () => {
+  const home = await readFile(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+  const css = await readFile(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(home, /GolfHomiez Mission/)
+  assert.match(home, /Built by golfers, for golfers\./)
+  assert.match(home, /GolfHomiez makes golf simple, social, and fun\./)
+  assert.doesNotMatch(home, /Fairways, Friends & Scorecards/)
+  assert.match(home, /title="Golf Homiez"/)
+  assert.match(home, /title="Golf Homiez Courses"/)
+  const missionPosition = home.indexOf('className="bannerCard homeMissionBanner"')
+  const golferVideoPosition = home.indexOf('title="Golf Homiez"')
+  const courseVideoPosition = home.indexOf('title="Golf Homiez Courses"')
+  assert.ok(missionPosition >= 0 && missionPosition < golferVideoPosition)
+  assert.ok(golferVideoPosition < courseVideoPosition)
+  assert.doesNotMatch(home, /homeScoreDashboardCard|FilteredGolfProfileSummary|Most Recent 10 Logged Events/)
+  assert.match(home, /className="homeMissionEmblem"/)
+  assert.match(home, /src=\{bannerImg\}/)
+  assert.doesNotMatch(home, /backgroundImage:/)
+  assert.match(home, /fetchHomeMarketingSettings/)
+  assert.match(home, /home_marketing_settings_load_failed_using_defaults/)
+  assert.match(home, /<iframe/)
+  assert.match(css, /\.homeMissionBanner\{[\s\S]*background-color:#c0ddc6/)
+  assert.match(css, /\.homeMissionBanner\{[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(150px,28%\)/)
+  assert.match(css, /\.homeMissionContent\{[\s\S]*min-width:0/)
+  assert.match(css, /\.homeMissionContent p\{[\s\S]*overflow-wrap:anywhere/)
+  assert.match(css, /\.homeMissionEmblemWrap\{[\s\S]*justify-content:flex-end/)
+  assert.match(css, /\.homeMissionEmblem\{[\s\S]*max-width:240px/)
+  assert.match(css, /\.homeVideoFrameWrap\{[\s\S]*aspect-ratio:16 \/ 9/)
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*\.homeMissionBanner\{[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(92px,30%\)/)
+})
+
+test('marketing admin page manages both home YouTube URLs through authenticated APIs and correlated logging', async () => {
+  const adminPortal = await readFile(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8')
+  const marketingClient = await readFile(new URL('../src/lib/marketing.ts', import.meta.url), 'utf8')
+  const server = await readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  const logger = await readFile(new URL('../server/lib/logger.js', import.meta.url), 'utf8')
+
+  assert.match(adminPortal, /label: 'Marketing'/)
+  assert.match(adminPortal, /data-admin-page="marketing"/)
+  assert.match(adminPortal, /Golf Homiez YouTube URL/)
+  assert.match(adminPortal, /Golf Homiez Courses YouTube URL/)
+  assert.match(adminPortal, /home_marketing_settings_save_started/)
+  assert.match(marketingClient, /\/api\/marketing\/home/)
+  assert.match(marketingClient, /\/api\/admin\/marketing\/home/)
+  assert.match(server, /app\.get\('\/api\/marketing\/home'/)
+  assert.match(server, /app\.get\('\/api\/admin\/marketing\/home', adminMiddleware/)
+  assert.match(server, /app\.put\('\/api\/admin\/marketing\/home', adminMiddleware/)
+  assert.match(server, /correlationId: req\.correlationId \|\| null/)
+  assert.match(logger, /ACCESS_LOG_PATH/)
+  assert.match(logger, /ERROR_LOG_PATH/)
+  assert.match(logger, /FRONTEND_LOG_PATH/)
+  assert.match(logger, /API_LOG_PATH/)
+})
+
+test('marketing YouTube validation accepts requested default URL formats and rejects non-YouTube URLs', () => {
+  assert.equal(extractYouTubeVideoId('https://youtu.be/F9CrUZWAZJA'), 'F9CrUZWAZJA')
+  assert.equal(extractYouTubeVideoId('https://www.youtube.com/watch?v=F9CrUZWAZJA'), 'F9CrUZWAZJA')
+  assert.equal(extractYouTubeVideoId('https://www.youtube.com/embed/F9CrUZWAZJA'), 'F9CrUZWAZJA')
+  assert.equal(extractYouTubeVideoId('https://example.com/watch?v=F9CrUZWAZJA'), null)
+  assert.throws(() => validateYouTubeUrl('https://example.com/video'), /valid YouTube video URL/)
+})
+
+test('home marketing database migration is registered and seeds both default video settings', async () => {
+  const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260825_079')
+  const sql = await readFile(new URL('../migration_scripts/20260825_079_home_marketing_settings.sql', import.meta.url), 'utf8')
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+
+  assert.ok(migration)
+  assert.equal(migration.name, 'home_marketing_settings')
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS marketing_settings/)
+  assert.match(sql, /home\.golf_homiez_video_url/)
+  assert.match(sql, /home\.golf_homiez_courses_video_url/)
+  assert.match(sql, /F9CrUZWAZJA/)
+  assert.match(sql, /correlation_id VARCHAR\(191\)/)
+  assert.match(packageJson.scripts.postinstall, /npm run db:migrate/)
+})
+
+test('homepage demo statistics assets and seeded records are retired through migration', async () => {
+  const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260825_080')
+  const sql = await readFile(new URL('../migration_scripts/20260825_080_remove_homepage_demo_data.sql', import.meta.url), 'utf8')
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+
+  assert.ok(migration)
+  assert.equal(migration.name, 'remove_homepage_demo_data')
+  assert.match(sql, /DELETE FROM scores/)
+  assert.match(sql, /thegolfhomie@example\.com/)
+  assert.match(sql, /Homie Hustlers/)
+  assert.match(sql, /DELETE FROM `user`/)
+  assert.equal(packageJson.scripts['seed:homepage-demo'], undefined)
+  assert.equal(existsSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url)), false)
+  assert.equal(existsSync(new URL('../src/lib/dashboardSample.ts', import.meta.url)), false)
+})

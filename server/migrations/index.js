@@ -2989,6 +2989,123 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
   },
 
 
+  {
+    version: '20260825_079',
+    name: 'home_marketing_settings',
+    filename: '20260825_079_home_marketing_settings.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'marketing_settings') &&
+        await columnExists(db, 'marketing_settings', 'setting_key') &&
+        await columnExists(db, 'marketing_settings', 'setting_value') &&
+        await columnExists(db, 'marketing_settings', 'updated_by_admin_user_id') &&
+        await columnExists(db, 'marketing_settings', 'correlation_id') &&
+        await columnExists(db, 'marketing_settings', 'created_at') &&
+        await columnExists(db, 'marketing_settings', 'updated_at') &&
+        await indexExists(db, 'marketing_settings', 'idx_marketing_settings_updated_at') &&
+        await indexExists(db, 'marketing_settings', 'idx_marketing_settings_correlation')
+      )
+    },
+    async getSql(db) {
+      if (!(await tableExists(db, 'marketing_settings'))) {
+        return loadMigrationSql('20260825_079_home_marketing_settings.sql')
+      }
+
+      const statements = []
+      if (!(await columnExists(db, 'marketing_settings', 'setting_key'))) {
+        statements.push('ALTER TABLE marketing_settings ADD COLUMN setting_key VARCHAR(128) NOT NULL PRIMARY KEY FIRST')
+      }
+      if (!(await columnExists(db, 'marketing_settings', 'setting_value'))) {
+        statements.push('ALTER TABLE marketing_settings ADD COLUMN setting_value TEXT NOT NULL AFTER setting_key')
+      }
+      if (!(await columnExists(db, 'marketing_settings', 'updated_by_admin_user_id'))) {
+        statements.push('ALTER TABLE marketing_settings ADD COLUMN updated_by_admin_user_id VARCHAR(191) NULL AFTER setting_value')
+      }
+      if (!(await columnExists(db, 'marketing_settings', 'correlation_id'))) {
+        statements.push('ALTER TABLE marketing_settings ADD COLUMN correlation_id VARCHAR(191) NULL AFTER updated_by_admin_user_id')
+      }
+      if (!(await columnExists(db, 'marketing_settings', 'created_at'))) {
+        statements.push('ALTER TABLE marketing_settings ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP')
+      }
+      if (!(await columnExists(db, 'marketing_settings', 'updated_at'))) {
+        statements.push('ALTER TABLE marketing_settings ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')
+      }
+      if (!(await indexExists(db, 'marketing_settings', 'idx_marketing_settings_updated_at'))) {
+        statements.push('CREATE INDEX idx_marketing_settings_updated_at ON marketing_settings (updated_at)')
+      }
+      if (!(await indexExists(db, 'marketing_settings', 'idx_marketing_settings_correlation'))) {
+        statements.push('CREATE INDEX idx_marketing_settings_correlation ON marketing_settings (correlation_id)')
+      }
+      statements.push(`INSERT INTO marketing_settings (setting_key, setting_value)
+        VALUES
+          ('home.golf_homiez_video_url', 'https://youtu.be/F9CrUZWAZJA'),
+          ('home.golf_homiez_courses_video_url', 'https://youtu.be/F9CrUZWAZJA')
+        ON DUPLICATE KEY UPDATE setting_key = VALUES(setting_key)`)
+      return statements.join(';\n')
+    },
+  },
+  {
+    version: '20260825_080',
+    name: 'remove_homepage_demo_data',
+    filename: '20260825_080_remove_homepage_demo_data.sql',
+    async isSatisfied(db) {
+      let remaining = 0
+
+      if (await tableExists(db, 'scores') && await columnExists(db, 'scores', 'created_by_email')) {
+        const [[row = {}] = []] = await db.execute(
+          `SELECT COUNT(*) AS count FROM scores WHERE LOWER(created_by_email) = ?`,
+          ['thegolfhomie@example.com'],
+        )
+        remaining += Number(row.count || 0)
+      }
+
+      if (await tableExists(db, 'team_members') && await tableExists(db, 'teams') && await columnExists(db, 'team_members', 'email')) {
+        const [[row = {}] = []] = await db.execute(
+          `SELECT COUNT(*) AS count
+             FROM team_members tm
+             INNER JOIN teams t ON t.id = tm.team_id
+            WHERE LOWER(tm.email) = ?
+              AND t.name = ?`,
+          ['thegolfhomie@example.com', 'Homie Hustlers'],
+        )
+        remaining += Number(row.count || 0)
+
+        const [[orphanTeam = {}] = []] = await db.execute(
+          `SELECT COUNT(*) AS count
+             FROM teams t
+            WHERE t.name = ?
+              AND NOT EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.id)`,
+          ['Homie Hustlers'],
+        )
+        remaining += Number(orphanTeam.count || 0)
+      }
+
+      if (await tableExists(db, 'user') && await columnExists(db, 'user', 'email')) {
+        const [[row = {}] = []] = await db.execute(
+          `SELECT COUNT(*) AS count FROM \`user\` WHERE LOWER(email) = ?`,
+          ['thegolfhomie@example.com'],
+        )
+        remaining += Number(row.count || 0)
+      }
+
+      return remaining === 0
+    },
+    async getSql(db) {
+      const statements = []
+      if (await tableExists(db, 'scores') && await columnExists(db, 'scores', 'created_by_email')) {
+        statements.push(`DELETE FROM scores WHERE LOWER(created_by_email) = 'thegolfhomie@example.com'`)
+      }
+      if (await tableExists(db, 'team_members') && await tableExists(db, 'teams') && await columnExists(db, 'team_members', 'email')) {
+        statements.push(`DELETE tm FROM team_members tm INNER JOIN teams t ON t.id = tm.team_id WHERE LOWER(tm.email) = 'thegolfhomie@example.com' AND t.name = 'Homie Hustlers'`)
+        statements.push(`DELETE FROM teams WHERE name = 'Homie Hustlers' AND NOT EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = teams.id)`)
+      }
+      if (await tableExists(db, 'user') && await columnExists(db, 'user', 'email')) {
+        statements.push(`DELETE FROM \`user\` WHERE LOWER(email) = 'thegolfhomie@example.com'`)
+      }
+      return statements.join(';\n')
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {

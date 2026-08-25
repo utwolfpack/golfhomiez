@@ -961,7 +961,6 @@ test('finished round hole details use score words and requested scoring backgrou
 
 test('round detail modal keeps solo holes single-sided and uses line-item team comparison review', () => {
   const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const myScores = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
 
   assert.match(modal, /const displayMode = getDisplayRoundMode\(round\)/)
@@ -978,11 +977,6 @@ test('round detail modal keeps solo holes single-sided and uses line-item team c
   assert.match(modal, /<HoleStrokeScore score=\{row\.opponentHole\?\.score \?\? null\} par=\{row\.par\} compact \/>/)
   assert.doesNotMatch(modal, /renderHoleDetails\(opponentHoles, opponentLabel\)/)
   assert.match(modal, /renderHoleDetails\(opponentHoles\)/)
-  assert.match(home, /function normalizeScoreEntry/)
-  assert.match(home, /raw\?\.roundScore != null && !hasTeamFields \? 'solo'/)
-  assert.match(home, /readScoreHoles/)
-  assert.match(home, /opponent_holes_json/)
-  assert.doesNotMatch(home, /mode: s\.mode \|\| 'team'/)
   assert.match(myScores, /function normalizeScoreEntry/)
   assert.match(myScores, /raw\?\.roundScore != null && !hasTeamFields \? 'solo'/)
   assert.match(myScores, /readScoreHoles/)
@@ -994,7 +988,6 @@ test('round detail modal keeps solo holes single-sided and uses line-item team c
 
 test('round detail modal exposes opponent score links plus edit and delete actions', () => {
   const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const mysqlStorage = fs.readFileSync(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
@@ -1025,8 +1018,6 @@ test('round detail modal exposes opponent score links plus edit and delete actio
   assert.match(modal, /loadScorecardOnMount=\{!\(activeEditScorecardSide === 'solo'/)
   assert.match(modal, /opponentHoles: teamEditUsesHoles \? nextOpponentHoles : undefined/)
   assert.match(modal, /onHoleSaved=\{handleEditHoleSaved\}/)
-  assert.match(home, /onRoundUpdated=\{handleRoundUpdated\}/)
-  assert.match(home, /onRoundDeleted=\{handleRoundDeleted\}/)
   assert.match(scoresPage, /onRoundUpdated=\{handleRoundUpdated\}/)
   assert.match(scoresPage, /onRoundDeleted=\{handleRoundDeleted\}/)
   assert.match(server, /app\.patch\('\/api\/scores\/:id'/)
@@ -1130,16 +1121,8 @@ test('scorecard draft helpers normalize context and hole payloads for per-hole p
   assert.throws(() => normalizeDraftHole({ hole: 19, score: 4 }), /hole must be between 1 and 18/)
 })
 
-test('logged event rows remain clickable compact line items for round detail access', () => {
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
+test('score history logged event rows remain clickable compact line items for round detail access', () => {
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
-
-  assert.match(home, /function RoundRow\({ round, onClick }/)
-  assert.match(home, /function roundLineItemClass\(round: ScoreEntry\)/)
-  assert.match(home, /<button type="button" className=\{roundLineItemClass\(round\)\} onClick=\{onClick\}/)
-  assert.match(home, /compactLineItem loggedRoundLineItem homeLoggedRoundLineItem/)
-  assert.doesNotMatch(home, /Tap for details/)
-  assert.match(home, /logged_round_line_item_selected/)
 
   assert.match(scoresPage, /function ScoreButton\({ round, onClick }/)
   assert.match(scoresPage, /function scoreLineItemClass\(round: ScoreEntry\)/)
@@ -1150,17 +1133,13 @@ test('logged event rows remain clickable compact line items for round detail acc
 })
 
 test('handicap UI is clickable only when available, filter-relative, and shows a breakdown modal', () => {
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
   const profileSummary = fs.readFileSync(new URL('../src/components/FilteredGolfProfileSummary.tsx', import.meta.url), 'utf8')
   const modal = fs.readFileSync(new URL('../src/components/HandicapBreakdownModal.tsx', import.meta.url), 'utf8')
   const handicapLib = fs.readFileSync(new URL('../src/lib/handicap.ts', import.meta.url), 'utf8')
 
-  assert.match(home, /calculateHandicapFromScores\(filteredScores\)/)
   assert.match(scoresPage, /calculateHandicapFromScores\(filteredScores\)/)
-  assert.match(home, /<FilteredGolfProfileSummary/)
   assert.match(scoresPage, /<FilteredGolfProfileSummary/)
-  assert.match(home, /onHandicapClick=\{openHandicapDetails\}/)
   assert.match(scoresPage, /onHandicapClick=\{openHandicapDetails\}/)
   assert.match(profileSummary, /const hasHandicap = handicapStats\.handicap != null/)
   assert.match(profileSummary, /hasHandicap \? \(/)
@@ -1203,7 +1182,6 @@ test('validation warnings stay hidden until save is attempted', () => {
 })
 
 test('logged round views show incomplete hole-by-hole indicators', () => {
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
   const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
   const roundStatus = fs.readFileSync(new URL('../src/lib/round-status.ts', import.meta.url), 'utf8')
@@ -1212,8 +1190,6 @@ test('logged round views show incomplete hole-by-hole indicators', () => {
 
   assert.match(roundStatus, /getIncompleteRoundStatus/)
   assert.match(roundStatus, /scoreProvided/)
-  assert.match(home, /getIncompleteRoundStatus/)
-  assert.match(home, /roundIncompleteBadge/)
   assert.match(scoresPage, /getIncompleteRoundStatus/)
   assert.match(scoresPage, /roundIncompleteBadge/)
   assert.match(modal, /getIncompleteRoundStatus/)
@@ -1233,34 +1209,29 @@ test('money tracking UI and active score calculation paths are removed', () => {
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
   const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
   const types = fs.readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8')
-  const sample = fs.readFileSync(new URL('../src/lib/dashboardSample.ts', import.meta.url), 'utf8')
   const scoreService = fs.readFileSync(new URL('../server/lib/score-service.js', import.meta.url), 'utf8')
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const mysqlStorage = fs.readFileSync(new URL('../server/storage/mysql.js', import.meta.url), 'utf8')
   const sqliteStorage = fs.readFileSync(new URL('../server/storage/sqlite.js', import.meta.url), 'utf8')
-  const demoSeed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
 
   assert.doesNotMatch(home, /formatMoney|title="Money"|round\.money|teamStats\.money/)
   assert.doesNotMatch(scoresPage, /formatMoney|title="Money"|round\.money|teamStats\.money/)
   assert.doesNotMatch(modal, /formatMoney|<strong>Money:<\/strong>/)
   assert.doesNotMatch(types, /money:/)
-  assert.doesNotMatch(sample, /money:/)
   assert.doesNotMatch(scoreService, /\bmoney\b|const diff/)
   assert.doesNotMatch(server, /money/)
   assert.doesNotMatch(mysqlStorage, /money/)
   assert.doesNotMatch(sqliteStorage, /money/)
-  assert.doesNotMatch(demoSeed, /money/)
 })
 
-test('homepage shows guest sample scores when no user is logged in', () => {
+test('homepage no longer renders the demo statistics dashboard or guest sample-score UI', () => {
   const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
-  const sample = fs.readFileSync(new URL('../src/lib/dashboardSample.ts', import.meta.url), 'utf8')
 
-  assert.match(home, /setScores\(GUEST_HOME_SCORES\)/)
-  assert.match(home, /user\?\.email \|\| GUEST_HOME_EMAIL/)
-  assert.match(home, /Showing homepage demo data\./)
-  assert.match(sample, /Bonneville Golf Course/)
-  assert.match(sample, /Homie Hustlers/)
+  assert.doesNotMatch(home, /homeScoreDashboardCard/)
+  assert.doesNotMatch(home, /Showing homepage demo data/)
+  assert.doesNotMatch(home, /GUEST_HOME_SCORES|GUEST_HOME_EMAIL/)
+  assert.doesNotMatch(home, /FilteredGolfProfileSummary|RoundDetailModal|HandicapBreakdownModal/)
+  assert.doesNotMatch(home, /api<ScoreEntry\[]>\('\/api\/scores'\)|fetchTeamChallengeScoreRecords/)
 })
 
 test('logging writes to root access and error log files with request middleware support', () => {
@@ -1324,15 +1295,12 @@ test('profile server schema and migration remove primary_state_code and reject c
   assert.match(migrationSql, /DROP COLUMN primary_state_code/)
   assert.doesNotMatch(initialSql, /primary_state_code/)
 })
-test('homepage demo seeder can populate the sample rounds locally', () => {
+test('retired homepage demo seed code and npm command are removed', () => {
   const pkg = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-  const seed = fs.readFileSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url), 'utf8')
 
-  assert.match(pkg, /"seed:homepage-demo"/)
-  assert.match(seed, /const DEMO_EMAIL = 'thegolfhomie@example\.com'/)
-  assert.match(seed, /Bonneville Golf Course/)
-  assert.match(seed, /Homie Hustlers/)
-  assert.match(seed, /Seeded homepage demo data/)
+  assert.doesNotMatch(pkg, /seed:homepage-demo/)
+  assert.equal(fs.existsSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url)), false)
+  assert.equal(fs.existsSync(new URL('../src/lib/dashboardSample.ts', import.meta.url)), false)
 })
 
 test('safe mobile diagnostics use pixel beacons instead of recursive preboot network logging', () => {
@@ -1664,7 +1632,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/latest-requirements.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -2137,7 +2105,7 @@ test('admin portal adds compact review dashboard, tournament metadata, account m
 
 
 
-test('golfadmin portal is organized into Golf, Tournaments, API Usage, and Admin pages with Golf as the default', () => {
+test('golfadmin portal is organized into Golf, Tournaments, API Usage, Marketing, and Admin pages with Golf as the default', () => {
   const adminPortal = fs.readFileSync(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8')
   const adminClient = fs.readFileSync(new URL('../src/lib/admin.ts', import.meta.url), 'utf8')
   const adminLib = fs.readFileSync(new URL('../server/lib/admin-portal.js', import.meta.url), 'utf8')
@@ -2146,15 +2114,17 @@ test('golfadmin portal is organized into Golf, Tournaments, API Usage, and Admin
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
   const docs = fs.readFileSync(new URL('../docs/GOLFADMIN_PORTAL_ORGANIZATION_DIRECTIONS.md', import.meta.url), 'utf8')
 
-  assert.match(adminPortal, /type AdminPortalPage = 'golf' \| 'tournaments' \| 'api' \| 'admin'/)
+  assert.match(adminPortal, /type AdminPortalPage = 'golf' \| 'tournaments' \| 'api' \| 'marketing' \| 'admin'/)
   assert.match(adminPortal, /useState<AdminPortalPage>\('golf'\)/)
   assert.match(adminPortal, /label: 'Golf'/)
   assert.match(adminPortal, /label: 'Tournaments'/)
   assert.match(adminPortal, /label: 'API Usage'/)
+  assert.match(adminPortal, /label: 'Marketing'/)
   assert.match(adminPortal, /label: 'Admin'/)
   assert.match(adminPortal, /data-admin-page="golf"/)
   assert.match(adminPortal, /data-admin-page="tournaments"/)
   assert.match(adminPortal, /data-admin-page="api"/)
+  assert.match(adminPortal, /data-admin-page="marketing"/)
   assert.match(adminPortal, /data-admin-page="admin"/)
   assert.match(adminPortal, /admin_portal_page_selected/)
 
@@ -4294,7 +4264,7 @@ test('golf user notifications preserve messages and Team Challenges while adding
 })
 
 
-test('home and my golf scores use Team Challenges from inbox score records instead of Team Logger records for score filters', () => {
+test('my golf scores uses Team Challenges from inbox score records while home omits the retired score dashboard', () => {
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
   const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
@@ -4306,12 +4276,8 @@ test('home and my golf scores use Team Challenges from inbox score records inste
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
 
-  assert.match(home, /Team Challenges/)
-  assert.doesNotMatch(home, /Team Scrambles/)
-  assert.match(home, /fetchTeamChallengeScoreRecords\(\)/)
-  assert.match(home, /isTeamChallengeScore\(s\)/)
-  assert.match(home, /home\.teamChallengeScores/)
-  assert.match(home, /to="\/challenges">Open Team Challenges/)
+
+  assert.doesNotMatch(home, /fetchTeamChallengeScoreRecords|scoreFilterToolbar|homeScoreDashboardCard/)
 
   assert.match(scoresPage, /Team Challenges/)
   assert.doesNotMatch(scoresPage, /Team Rounds/)
@@ -4838,7 +4804,7 @@ test('profile actions, leaderboard freshness, and mobile line-item views match t
   assert.match(css, /\.compactLineItemChevron\{[\s\S]*display:none/)
 })
 
-test('home and score history use compact mobile filters and a filter-responsive profile summary without page titles', () => {
+test('score history retains compact mobile filters while home omits the retired score dashboard', () => {
   const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const scores = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
   const summary = fs.readFileSync(new URL('../src/components/FilteredGolfProfileSummary.tsx', import.meta.url), 'utf8')
@@ -4848,19 +4814,15 @@ test('home and score history use compact mobile filters and a filter-responsive 
   assert.doesNotMatch(home, /Smaller stats up top, bigger score rows below\./)
   assert.doesNotMatch(home, />Open My Golf Scores</)
   assert.doesNotMatch(scores, />My Golf Scores</)
-  assert.match(home, /const \[showFilters, setShowFilters\] = useState\(false\)/)
   assert.match(scores, /const \[showFilters, setShowFilters\] = useState\(false\)/)
-  assert.match(home, /className=\{`scoreFilterToolbar \$\{showFilters \? '' : 'scoreFilterToolbar--collapsed'\}`\}/)
   assert.match(scores, /className=\{`scoreFilterToolbar \$\{showFilters \? '' : 'scoreFilterToolbar--collapsed'\}`\}/)
-  assert.match(home, /className="scoreViewTabs" role="group"/)
   assert.match(scores, /className="scoreViewTabs" role="group"/)
-  assert.match(home, /scoreFilterGrid--solo/)
   assert.match(scores, /scoreFilterGrid--solo/)
-  assert.match(home, /message: 'filtered_golf_profile_summary_updated'/)
   assert.match(scores, /message: 'filtered_golf_profile_summary_updated'/)
   assert.doesNotMatch(home, /compactTilesGrid/)
   assert.doesNotMatch(scores, /compactTilesGrid/)
   assert.doesNotMatch(home, /<StatCard/)
+  assert.doesNotMatch(home, /scoreFilterToolbar|FilteredGolfProfileSummary|loggedRoundLineItem/)
   assert.doesNotMatch(scores, /<StatCard/)
   assert.match(summary, /aria-live="polite"/)
   assert.match(summary, /roundCount/)
@@ -4871,11 +4833,8 @@ test('home and score history use compact mobile filters and a filter-responsive 
   assert.match(css, /\.scoreFilterGrid--solo \.scoreFilterControl--course\{[\s\S]*grid-column:2/)
   assert.match(css, /\.filteredGolfProfileSummary\{/)
   assert.match(css, /\.filteredGolfProfileHandicapLink\{/)
-  assert.match(home, /scoreFiltersToggle/)
   assert.match(scores, /scoreFiltersToggle/)
-  assert.match(home, /showFilters \? 'Hide filters' : 'Show filters'/)
   assert.match(scores, /showFilters \? 'Hide filters' : 'Show filters'/)
-  assert.match(home, /score_filters_shown/)
   assert.match(scores, /score_filters_hidden/)
   assert.match(css, /\.scoreFilterActions\{/)
   assert.match(css, /\.scoreFiltersToggle/)
@@ -4884,7 +4843,6 @@ test('home and score history use compact mobile filters and a filter-responsive 
 test('round review popup opens hole-by-hole editing, restores the solo hole review, and supports Team Challenge comparison navigation', () => {
   const modal = fs.readFileSync(new URL('../src/components/RoundDetailModal.tsx', import.meta.url), 'utf8')
   const scorecard = fs.readFileSync(new URL('../src/components/HoleByHoleScorecard.tsx', import.meta.url), 'utf8')
-  const home = fs.readFileSync(new URL('../src/pages/Home.tsx', import.meta.url), 'utf8')
   const scores = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
 
@@ -4930,8 +4888,6 @@ test('round review popup opens hole-by-hole editing, restores the solo hole revi
   assert.match(css, /\.roundDetailEditScorecardCard\{[\s\S]*env\(safe-area-inset-top\)/)
   assert.match(css, /@media \(max-width:720px\)\{[\s\S]*\.roundDetailEditScorecardCard\{[\s\S]*width:100vw/)
 
-  assert.doesNotMatch(home, /Tap for details/)
-  assert.match(home, /loggedRoundLineItem/)
   assert.match(scores, /loggedRoundLineItem/)
   assert.match(css, /\.loggedRoundLineItem\{[\s\S]*padding:8px 10px/)
   assert.match(css, /@media \(max-width: 720px\)\{[\s\S]*\.loggedRoundLineItem\{[\s\S]*padding:7px 9px/)
