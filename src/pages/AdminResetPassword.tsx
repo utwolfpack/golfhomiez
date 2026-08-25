@@ -1,8 +1,10 @@
 import { FormEvent, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import { requestAdminPasswordReset, resetAdminPassword } from '../lib/admin'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { assertPasswordPolicy } from '../lib/password-policy'
 
 export default function AdminResetPassword() {
   const [params] = useSearchParams()
@@ -35,7 +37,7 @@ export default function AdminResetPassword() {
     setError(null)
     try {
       if (!token) throw new Error('Reset token missing from the URL.')
-      if (password.length < 8) throw new Error('Password must be at least 8 characters.')
+      assertPasswordPolicy(password)
       if (password !== confirmPassword) throw new Error('Passwords do not match.')
       logFrontendEvent({ category: 'admin.password_reset', message: 'admin_password_reset_submit_started' })
       await resetAdminPassword(token, password)
@@ -59,8 +61,11 @@ export default function AdminResetPassword() {
           </form>
         ) : (
           <form onSubmit={onReset} className="formStack" style={{ maxWidth: 520 }}>
-            <input className="input" type="password" placeholder="New admin password" value={password} onChange={e => setPassword(e.target.value)} />
-            <input className="input" type="password" placeholder="Confirm admin password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+            <div>
+              <input className="input" type="password" placeholder="New admin password" value={password} onChange={e => setPassword(e.target.value)} minLength={10} autoComplete="new-password" />
+              <PasswordCriteria password={password} />
+            </div>
+            <input className="input" type="password" placeholder="Confirm admin password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} minLength={10} autoComplete="new-password" />
             <button className="btn btnPrimary">Update password</button>
           </form>
         )}

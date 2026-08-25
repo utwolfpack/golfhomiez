@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { requestHostAccount } from '../lib/host-auth'
 import { searchGolfCourses, type GolfCourseOption } from '../lib/golf-courses'
+import { logFrontendEvent } from '../lib/frontend-logger'
+import { assertPasswordPolicy } from '../lib/password-policy'
 
 export default function CreateHostAccount() {
   const [firstName, setFirstName] = useState('')
@@ -68,8 +71,10 @@ export default function CreateHostAccount() {
       const selectedCourse = courses.find((entry) => entry.id === courseId)
       if (!selectedCourse) throw new Error('Golf Course is required.')
       if (!representativeDetails.trim()) throw new Error('Representative details are required.')
-      if (password.length < 8) throw new Error('Password must be at least 8 characters.')
+      assertPasswordPolicy(password)
       if (password !== confirmPassword) throw new Error('Passwords do not match.')
+
+      logFrontendEvent({ category: 'golf_course.registration', message: 'golf_course_account_request_started', data: { email: email.trim().toLowerCase(), golfCourseId: selectedCourse.id, stateCode: state } })
 
       await requestHostAccount({
         firstName: firstName.trim(),
@@ -90,8 +95,11 @@ export default function CreateHostAccount() {
       setRepresentativeDetails('')
       setPassword('')
       setConfirmPassword('')
+      logFrontendEvent({ category: 'golf_course.registration', message: 'golf_course_account_request_succeeded', data: { email: email.trim().toLowerCase(), golfCourseId: selectedCourse.id, stateCode: state } })
     } catch (err: any) {
-      setError(err?.message || 'Could not submit golf-course account request.')
+      const message = err?.message || 'Could not submit golf-course account request.'
+      setError(message)
+      logFrontendEvent({ category: 'golf_course.registration', level: 'error', message: 'golf_course_account_request_failed', data: { email: email.trim().toLowerCase(), error: message } })
     } finally {
       setBusy(false)
     }
@@ -127,7 +135,9 @@ export default function CreateHostAccount() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="new-password"
+                minLength={10}
               />
+              <PasswordCriteria password={password} />
             </div>
             <div>
               <label className="label">Confirm password</label>
@@ -137,6 +147,7 @@ export default function CreateHostAccount() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"
+                minLength={10}
               />
             </div>
           </div>

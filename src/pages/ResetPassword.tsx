@@ -1,7 +1,10 @@
 import { FormEvent, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import { resetPassword } from '../lib/auth-api'
+import { assertPasswordPolicy } from '../lib/password-policy'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 export default function ResetPassword() {
   const [params] = useSearchParams()
@@ -20,14 +23,18 @@ export default function ResetPassword() {
     setMessage(null)
     try {
       if (!token) throw new Error('Reset token missing from the URL')
-      if (password.length < 8) throw new Error('Password must be at least 8 characters')
+      assertPasswordPolicy(password)
       if (password !== confirmPassword) throw new Error('Passwords do not match')
+      logFrontendEvent({ category: 'auth.password_reset', message: 'password_reset_submit_started', data: { hasToken: Boolean(token) } })
       const result = await resetPassword(token, password)
       if (result.error) throw new Error(result.error.message || 'Reset failed')
       setMessage('Password updated. Redirecting to login…')
+      logFrontendEvent({ category: 'auth.password_reset', message: 'password_reset_submit_succeeded', data: { hasToken: Boolean(token) } })
       setTimeout(() => navigate('/login'), 1200)
     } catch (err: any) {
-      setError(err?.message || 'Reset failed')
+      const message = err?.message || 'Reset failed'
+      setError(message)
+      logFrontendEvent({ category: 'auth.password_reset', level: 'error', message: 'password_reset_submit_failed', data: { hasToken: Boolean(token), error: message } })
     } finally {
       setBusy(false)
     }
@@ -44,11 +51,12 @@ export default function ResetPassword() {
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">New password</label>
-            <input className="input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Create a new password" />
+            <input className="input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Create a new password" minLength={10} />
+            <PasswordCriteria password={password} />
           </div>
           <div>
             <label className="label">Confirm password</label>
-            <input className="input" type="password" autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" />
+            <input className="input" type="password" autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" minLength={10} />
           </div>
 
           {message ? <div className="small" style={{ color: '#166534' }}>{message}</div> : null}

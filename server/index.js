@@ -38,7 +38,8 @@ import { createGolfCoursePublicPageForApprovedHost, getGolfCoursePublicPageByHos
 import { buildSuggestedTournamentStartAssignments, listTournamentStartAssignmentsForTournaments, normalizeTeeTimeIntervalMinutes, normalizeTournamentStartTime, normalizeTournamentStartType, replaceTournamentStartAssignments } from './lib/tournament-start-schedule.js'
 import { loadTournamentFinalLeaderboard } from './lib/tournament-final-leaderboard.js'
 import { setTournamentArchiveState } from './lib/tournament-archive.js'
-import { getHomeMarketingSettings, updateHomeMarketingSettings } from './lib/marketing-settings.js'
+import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarketingSettings, listMarketingVideoSections, normalizeMarketingVideoAudience, updateHomeMarketingSettings } from './lib/marketing-settings.js'
+import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -53,6 +54,19 @@ const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
 const DEFAULT_TOURNAMENT_CHECK_IN_TIME = '08:00'
 const DEFAULT_TOURNAMENT_TEE_TIME = '08:30'
 const DEFAULT_TEE_TIME_INTERVAL_MINUTES = 10
+
+function rejectPasswordPolicy(req, res, password, accountType, action) {
+  const result = validatePasswordPolicy(password)
+  if (result.ok) return false
+  logApi('password_policy_rejected', {
+    ...requestContext(req),
+    accountType,
+    action,
+    failures: result.failures,
+  })
+  res.status(400).json({ message: PASSWORD_POLICY_MESSAGE })
+  return true
+}
 
 function resolveScoreCourseMetadata(state, matchedCourse) {
   const courseRating = Number(matchedCourse?.course_rating ?? matchedCourse?.courseRating)
@@ -319,6 +333,30 @@ app.get('/api/marketing/home', async (req, res) => {
   } catch (error) {
     logRouteError('Home marketing settings load error', req, error)
     return res.status(500).json({ message: 'Home marketing content is temporarily unavailable.' })
+  }
+})
+
+app.get('/api/marketing/videos', async (req, res) => {
+  try {
+    const audience = req.query.audience ? normalizeMarketingVideoAudience(req.query.audience) : null
+    const sections = await listMarketingVideoSections({ audience })
+    logApi('marketing_video_sections_loaded', {
+      ...requestContext(req),
+      audience,
+      sectionCount: sections.length,
+    })
+    return res.json({ sections })
+  } catch (error) {
+    if (/Video page must be/i.test(String(error?.message || ''))) {
+      logWarn('Marketing video section audience validation failed', {
+        ...requestContext(req),
+        audience: req.query.audience || null,
+        validationMessage: error.message,
+      })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Marketing video sections load error', req, error)
+    return res.status(500).json({ message: 'Marketing videos are temporarily unavailable.' })
   }
 })
 
@@ -2230,7 +2268,7 @@ app.post('/api/admin/reset-password', async (req, res) => {
     const token = String(req.body?.token || '').trim()
     const password = String(req.body?.password || '')
     if (!token) return res.status(400).json({ message: 'Reset token required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'admin', 'reset_password')) return
 
     await consumeAdminResetToken(token, password)
     logApi('admin_password_reset_completed', { ...requestContext(req) })
@@ -2297,6 +2335,88 @@ app.put('/api/admin/marketing/home', adminMiddleware, async (req, res) => {
     }
     logRouteError('Admin home marketing settings update error', req, error, { adminUserId: req.adminUser?.id || null })
     return res.status(500).json({ message: 'Could not save home marketing settings.' })
+  }
+})
+
+app.get('/api/admin/marketing/videos', adminMiddleware, async (req, res) => {
+  try {
+    const sections = await listMarketingVideoSections()
+    logApi('admin_marketing_video_sections_loaded', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      sectionCount: sections.length,
+    })
+    return res.json({ sections })
+  } catch (error) {
+    logRouteError('Admin marketing video sections load error', req, error, { adminUserId: req.adminUser?.id || null })
+    return res.status(500).json({ message: 'Could not load marketing video sections.' })
+  }
+})
+
+app.post('/api/admin/marketing/videos', adminMiddleware, async (req, res) => {
+  try {
+    logApi('admin_marketing_video_section_create_started', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      audience: req.body?.audience || null,
+      sectionName: req.body?.name || null,
+    })
+    const section = await createMarketingVideoSection(req.body, {
+      adminUserId: req.adminUser.id,
+      correlationId: req.correlationId || null,
+    })
+    logApi('admin_marketing_video_section_created', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      sectionId: section.id,
+      audience: section.audience,
+      sectionSlug: section.sectionSlug,
+      relativeLink: section.relativeLink,
+    })
+    return res.status(201).json(section)
+  } catch (error) {
+    if (/Video page must be|Video section name|valid YouTube video URL/i.test(String(error?.message || ''))) {
+      logWarn('Admin marketing video section validation failed', {
+        ...requestContext(req),
+        adminUserId: req.adminUser?.id || null,
+        validationMessage: error.message,
+      })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Admin marketing video section create error', req, error, { adminUserId: req.adminUser?.id || null })
+    return res.status(500).json({ message: 'Could not add marketing video section.' })
+  }
+})
+
+app.delete('/api/admin/marketing/videos/:sectionId', adminMiddleware, async (req, res) => {
+  try {
+    const sectionId = String(req.params.sectionId || '').trim()
+    logApi('admin_marketing_video_section_delete_started', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      sectionId,
+    })
+    const deleted = await deleteMarketingVideoSection(sectionId)
+    if (!deleted) {
+      logWarn('Admin marketing video section not found for delete', {
+        ...requestContext(req),
+        adminUserId: req.adminUser.id,
+        sectionId,
+      })
+      return res.status(404).json({ message: 'Marketing video section was not found.' })
+    }
+    logApi('admin_marketing_video_section_deleted', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      sectionId,
+    })
+    return res.status(204).end()
+  } catch (error) {
+    if (/Video section id is required/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Admin marketing video section delete error', req, error, { adminUserId: req.adminUser?.id || null })
+    return res.status(500).json({ message: 'Could not delete marketing video section.' })
   }
 })
 
@@ -2489,7 +2609,7 @@ app.post('/api/admin/admin-users', adminMiddleware, async (req, res) => {
     const password = String(req.body?.password || '')
     if (!username) return res.status(400).json({ message: 'Username is required' })
     if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'admin', 'create_account')) return
 
     const adminUser = await createAdminUser({ username, email, password })
     const adminUsers = await listAdminUsers()
@@ -2608,7 +2728,7 @@ app.post('/api/host/account-requests', async (req, res) => {
     if (!stateName) return res.status(400).json({ message: 'State is required.' })
     if (!golfCourseName) return res.status(400).json({ message: 'Golf course is required.' })
     if (!representativeDetails) return res.status(400).json({ message: 'Representative details are required.' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' })
+    if (rejectPasswordPolicy(req, res, password, 'golf_course', 'request_account')) return
 
     const matchedCourse = await findGolfCourseForState(stateCode, golfCourseName, golfCourseId)
     if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the database catalog for the selected state.' })
@@ -2686,7 +2806,7 @@ app.post('/api/host/reset-password', async (req, res) => {
     const token = String(req.body?.token || '').trim()
     const password = String(req.body?.password || '')
     if (!token) return res.status(400).json({ message: 'Reset token required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'golf_course', 'reset_password')) return
     const db = getPool()
     await resetHostPassword(db, { token, password })
     logApi('host_password_reset_completed', { ...requestContext(req) })
@@ -2744,7 +2864,7 @@ app.post('/api/host/accounts', hostAuthMiddleware, async (req, res) => {
     logApi('host_additional_account_created', { ...requestContext(req), hostAccountId: req.hostAccount.id, createdHostAccountId: normalized.id, email: normalized.email })
     return res.status(201).json({ hostAccount: normalized })
   } catch (error) {
-    if (error instanceof Error && /valid email|host name|at least 8|already uses|not available/i.test(error.message)) {
+    if (error instanceof Error && /valid email|host name|Password must|already uses|not available/i.test(error.message)) {
       logApi('host_additional_account_create_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, reason: error.message })
       return res.status(400).json({ message: error.message })
     }
@@ -3588,7 +3708,7 @@ app.post('/api/organizer/register', requireStorage, async (req, res) => {
     if (!firstName) return res.status(400).json({ message: 'First name is required' })
     if (!lastName) return res.status(400).json({ message: 'Last name is required' })
     if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'organizer', 'register_account')) return
     const db = getPool()
     const organizerAccount = await registerOrganizerAccount(db, { firstName, lastName, email, password })
     const session = await createOrganizerSession(db, organizerAccount.id)
@@ -3642,7 +3762,7 @@ app.post('/api/organizer/reset-password', requireStorage, async (req, res) => {
     const token = String(req.body?.token || '').trim()
     const password = String(req.body?.password || '')
     if (!token) return res.status(400).json({ message: 'Reset token required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'organizer', 'reset_password')) return
     const db = getPool()
     await resetOrganizerPassword(db, { token, password })
     logApi('organizer_password_reset_completed', { ...requestContext(req) })
@@ -6696,7 +6816,7 @@ app.post('/api/admin/reset-password', async (req, res) => {
     const token = String(req.body?.token || '').trim()
     const password = String(req.body?.password || '')
     if (!token) return res.status(400).json({ message: 'Reset token required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'admin', 'reset_password')) return
 
     await consumeAdminResetToken(token, password)
     logApi('admin_password_reset_completed', { ...requestContext(req) })
@@ -6728,7 +6848,7 @@ app.post('/api/admin/admin-users', adminMiddleware, async (req, res) => {
     const password = String(req.body?.password || '')
     if (!username) return res.status(400).json({ message: 'Username is required' })
     if (!isEmail(email)) return res.status(400).json({ message: 'A valid email is required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'admin', 'create_account')) return
 
     const adminUser = await createAdminUser({ username, email, password })
     const adminUsers = await listAdminUsers()
@@ -6862,7 +6982,7 @@ app.post('/api/host/reset-password', async (req, res) => {
     const token = String(req.body?.token || '').trim()
     const password = String(req.body?.password || '')
     if (!token) return res.status(400).json({ message: 'Reset token required' })
-    if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' })
+    if (rejectPasswordPolicy(req, res, password, 'golf_course', 'reset_password')) return
     const db = getPool()
     await resetHostPassword(db, { token, password })
     logApi('host_password_reset_completed', { ...requestContext(req) })

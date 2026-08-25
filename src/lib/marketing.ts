@@ -5,10 +5,35 @@ export const DEFAULT_HOME_MARKETING_SETTINGS = {
   golfHomiezCoursesVideoUrl: 'https://youtu.be/F9CrUZWAZJA',
 } as const
 
+export const MARKETING_VIDEO_AUDIENCES = {
+  golfHomiez: 'golf_homiez',
+  golfHomiezCourses: 'golf_homiez_courses',
+} as const
+
+export type MarketingVideoAudience = typeof MARKETING_VIDEO_AUDIENCES[keyof typeof MARKETING_VIDEO_AUDIENCES]
+
 export type HomeMarketingSettings = {
   golfHomiezVideoUrl: string
   golfHomiezCoursesVideoUrl: string
   updatedAt?: string | null
+}
+
+export type MarketingVideoSection = {
+  id: string
+  audience: MarketingVideoAudience
+  name: string
+  youtubeUrl: string
+  sectionSlug: string
+  relativeLink: string
+  displayOrder: number
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export type CreateMarketingVideoSectionInput = {
+  audience: MarketingVideoAudience
+  name: string
+  youtubeUrl: string
 }
 
 export function toYouTubeEmbedUrl(value: string): string | null {
@@ -50,5 +75,28 @@ export async function saveAdminHomeMarketingSettings(settings: Pick<HomeMarketin
   return api<HomeMarketingSettings>('/api/admin/marketing/home', {
     method: 'PUT',
     body: JSON.stringify(settings),
+  })
+}
+
+export async function fetchMarketingVideoSections(audience: MarketingVideoAudience) {
+  const result = await api<{ sections: MarketingVideoSection[] }>(`/api/marketing/videos?audience=${encodeURIComponent(audience)}`)
+  return result.sections || []
+}
+
+export async function fetchAdminMarketingVideoSections() {
+  const result = await api<{ sections: MarketingVideoSection[] }>('/api/admin/marketing/videos')
+  return result.sections || []
+}
+
+export async function createAdminMarketingVideoSection(input: CreateMarketingVideoSectionInput) {
+  return api<MarketingVideoSection>('/api/admin/marketing/videos', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deleteAdminMarketingVideoSection(sectionId: string) {
+  return api<void>(`/api/admin/marketing/videos/${encodeURIComponent(sectionId)}`, {
+    method: 'DELETE',
   })
 }

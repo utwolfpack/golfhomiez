@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import PageHero from '../components/PageHero'
 import { useHostAuth } from '../context/HostAuthContext'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 export default function HostLogin() {
   const [email, setEmail] = useState('')
@@ -16,10 +17,14 @@ export default function HostLogin() {
     setBusy(true)
     setError(null)
     try {
+      logFrontendEvent({ category: 'golf_course.login', message: 'golf_course_login_started', data: { email: email.trim().toLowerCase() } })
       await loginHost(email.trim(), password)
+      logFrontendEvent({ category: 'golf_course.login', message: 'golf_course_login_succeeded', data: { email: email.trim().toLowerCase() } })
       navigate('/host/portal', { replace: true })
     } catch (err: any) {
-      setError(err?.message || 'Could not sign in to the golf-course account')
+      const message = err?.message || 'Could not sign in to the golf-course account'
+      setError(message)
+      logFrontendEvent({ category: 'golf_course.login', level: 'error', message: 'golf_course_login_failed', data: { email: email.trim().toLowerCase(), error: message } })
     } finally {
       setBusy(false)
     }
@@ -28,7 +33,7 @@ export default function HostLogin() {
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
-        <PageHero eyebrow="Golf-course access" title="Sign in to your host portal" subtitle="Use the email and password for your approved golf-course account to manage your host portal." />
+        <PageHero eyebrow="Golf-course access" title="Sign in to your golf course portal" subtitle="Use the email and password for your approved golf-course account to manage your golf course portal." />
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">Email</label>
@@ -36,13 +41,21 @@ export default function HostLogin() {
           </div>
           <div>
             <label className="label">Password</label>
-            <input className="input" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Host password" />
+            <input className="input" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Golf course password" />
           </div>
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btnPrimary" disabled={busy}>{busy ? 'Signing in…' : 'Host login'}</button>
+            <button className="btn btnPrimary" disabled={busy}>{busy ? 'Signing in…' : 'Golf course login'}</button>
+            <Link
+              className="btn"
+              style={{ background: '#ffffff' }}
+              to="/host/register"
+              onClick={() => logFrontendEvent({ category: 'golf_course.login', message: 'create_golf_course_account_selected' })}
+            >
+              Create Golf Course Account
+            </Link>
           </div>
-          <div className="small"><Link to="/host/request-password-reset">Forgot host password?</Link></div>
+          <div className="small"><Link to="/host/request-password-reset">Forgot golf course password?</Link></div>
         </form>
       </div>
     </div>

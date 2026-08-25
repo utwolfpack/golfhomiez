@@ -3,9 +3,12 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import LocationInput from '../components/LocationInput'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 import { fetchOrganizerInviteEligibility, type OrganizerInviteEligibility } from '../lib/accounts'
 import type { SavedLocation } from '../lib/location-store'
+import { assertPasswordPolicy } from '../lib/password-policy'
+import { logFrontendEvent } from '../lib/frontend-logger'
 
 export default function OrganizerRegister() {
   const [params] = useSearchParams()
@@ -64,12 +67,16 @@ export default function OrganizerRegister() {
       if (!location) throw new Error('Location is required')
       if (!normalizedEmail) throw new Error('Email is required')
       if (!canCreateOrganizerAccess) throw new Error('You need at least one tournament invite from a host account before creating organizer access.')
-      if (password.length < 8) throw new Error('Password must be at least 8 characters')
+      assertPasswordPolicy(password)
       if (password !== confirmPassword) throw new Error('Passwords do not match')
+      logFrontendEvent({ category: 'organizer.register', message: 'organizer_register_started', data: { email: normalizedEmail } })
       await registerOrganizer({ firstName: firstName.trim(), lastName: lastName.trim(), email: normalizedEmail, password })
+      logFrontendEvent({ category: 'organizer.register', message: 'organizer_register_succeeded', data: { email: normalizedEmail } })
       navigate('/organizer/portal', { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed')
+      const message = err instanceof Error ? err.message : 'Registration failed'
+      setError(message)
+      logFrontendEvent({ category: 'organizer.register', level: 'error', message: 'organizer_register_failed', data: { email: normalizedEmail, error: message } })
     } finally {
       setBusy(false)
     }
@@ -101,11 +108,12 @@ export default function OrganizerRegister() {
           {!checkingEligibility && canCreateOrganizerAccess ? <div className="small" style={{ color: '#166534' }}>Tournament invite found. You can create organizer access for this email.</div> : null}
           <div>
             <label className="label">Password</label>
-            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={10} />
+            <PasswordCriteria password={password} />
           </div>
           <div>
             <label className="label">Confirm password</label>
-            <input className="input" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
+            <input className="input" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" minLength={10} />
           </div>
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

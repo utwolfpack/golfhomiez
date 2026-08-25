@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { sendMail } from '../mailer.js'
 import { getPool } from '../db.js'
+import { assertPasswordPolicy } from './password-policy.js'
 
 const HOST_SESSION_COOKIE = 'golfhomiez_host_session'
 const HOST_RESET_TTL_MS = 1000 * 60 * 60
@@ -415,9 +416,9 @@ export async function createHostPasswordReset(source, identifier) {
   const resetUrl = `${appOrigin.replace(/\/$/, '')}/host/reset-password?token=${encodeURIComponent(token)}`
   await sendMail({
     to: host.reset_email || host.email,
-    subject: 'Reset your GolfHomiez host password',
-    text: `Reset your host password: ${resetUrl}`,
-    html: `<p>Reset your host password:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
+    subject: 'Reset your GolfHomiez golf course password',
+    text: `Reset your golf course password: ${resetUrl}`,
+    html: `<p>Reset your golf course password:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
   })
   return { ok: true }
 }
@@ -425,6 +426,7 @@ export async function createHostPasswordReset(source, identifier) {
 
 export async function resetHostPassword(source, { token, password }) {
   const db = getDb(source)
+  assertPasswordPolicy(password)
   const resetColumns = await getColumns(db, 'host_password_reset_tokens')
   const tokenCol = resetColumns.has('token_hash') ? 'token_hash' : (resetColumns.has('token') ? 'token' : 'token_hash')
   const tokenValue = tokenCol === 'token_hash' ? sha256(String(token || '').trim()) : String(token || '').trim()
@@ -527,7 +529,7 @@ export async function createAdditionalHostAccount(source, { actingHostAccountId,
   const normalizedContactName = String(contactName || '').trim()
   if (!isHostEmail(normalizedEmail)) throw new Error('Enter a valid email address for the new host account.')
   if (!normalizedContactName) throw new Error('Enter the host name and try again.')
-  if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
+  assertPasswordPolicy(password)
   if (await getHostAccountByEmail(db, normalizedEmail)) throw new Error('A host account already uses that email address.')
 
   const identity = hostCourseIdentity(actingHost)

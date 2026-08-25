@@ -1,3 +1,5 @@
+import { validatePasswordPolicy } from './password-policy.js'
+
 export function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase()
 }
@@ -23,7 +25,8 @@ export function validateCredentials({ email, password, name, requireName = false
 
   const normalizedPassword = String(password || '')
   if (!normalizedPassword) return { ok: false, message: 'Password is required' }
-  if (normalizedPassword.length < 8) return { ok: false, message: 'Password must be at least 8 characters' }
+  const passwordValidation = validatePasswordPolicy(normalizedPassword)
+  if (!passwordValidation.ok) return { ok: false, message: passwordValidation.message }
 
   const normalizedName = String(name || '').trim()
   if (requireName && !normalizedName) return { ok: false, message: 'Name is required' }

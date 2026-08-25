@@ -3105,6 +3105,104 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
       return statements.join(';\n')
     },
   },
+  {
+    version: '20260825_081',
+    name: 'marketing_video_sections',
+    filename: '20260825_081_marketing_video_sections.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'marketing_video_sections'))) return false
+      const schemaReady = (
+        await columnExists(db, 'marketing_video_sections', 'id') &&
+        await columnExists(db, 'marketing_video_sections', 'audience') &&
+        await columnExists(db, 'marketing_video_sections', 'section_name') &&
+        await columnExists(db, 'marketing_video_sections', 'youtube_url') &&
+        await columnExists(db, 'marketing_video_sections', 'section_slug') &&
+        await columnExists(db, 'marketing_video_sections', 'display_order') &&
+        await columnExists(db, 'marketing_video_sections', 'created_by_admin_user_id') &&
+        await columnExists(db, 'marketing_video_sections', 'correlation_id') &&
+        await columnExists(db, 'marketing_video_sections', 'created_at') &&
+        await columnExists(db, 'marketing_video_sections', 'updated_at') &&
+        await indexExists(db, 'marketing_video_sections', 'uq_marketing_video_sections_audience_slug') &&
+        await indexExists(db, 'marketing_video_sections', 'idx_marketing_video_sections_audience_order') &&
+        await indexExists(db, 'marketing_video_sections', 'idx_marketing_video_sections_updated_at') &&
+        await indexExists(db, 'marketing_video_sections', 'idx_marketing_video_sections_correlation')
+      )
+      if (!schemaReady) return false
+
+      const [[row = {}] = []] = await db.execute(
+        `SELECT COUNT(*) AS default_count
+           FROM marketing_video_sections
+          WHERE id IN (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'default-user-create-account',
+          'default-user-team-tournament',
+          'default-user-challenge',
+          'default-user-log-round',
+          'default-course-manage-website',
+          'default-course-create-tournament',
+          'default-course-manage-account',
+        ],
+      )
+      return Number(row.default_count || 0) === 7
+    },
+    async getSql(db) {
+      if (!(await tableExists(db, 'marketing_video_sections'))) {
+        return loadMigrationSql('20260825_081_marketing_video_sections.sql')
+      }
+
+      const statements = []
+      if (!(await columnExists(db, 'marketing_video_sections', 'audience'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN audience VARCHAR(32) NOT NULL DEFAULT 'golf_homiez' AFTER id`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'section_name'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN section_name VARCHAR(191) NOT NULL DEFAULT 'Video' AFTER audience`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'youtube_url'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN youtube_url TEXT NOT NULL AFTER section_name`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'section_slug'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN section_slug VARCHAR(191) NOT NULL DEFAULT 'video' AFTER youtube_url`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'display_order'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN display_order INT NOT NULL DEFAULT 0 AFTER section_slug`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'created_by_admin_user_id'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN created_by_admin_user_id VARCHAR(191) NULL AFTER display_order`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'correlation_id'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN correlation_id VARCHAR(191) NULL AFTER created_by_admin_user_id`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'created_at'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`)
+      }
+      if (!(await columnExists(db, 'marketing_video_sections', 'updated_at'))) {
+        statements.push(`ALTER TABLE marketing_video_sections ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`)
+      }
+      if (!(await indexExists(db, 'marketing_video_sections', 'uq_marketing_video_sections_audience_slug'))) {
+        statements.push(`CREATE UNIQUE INDEX uq_marketing_video_sections_audience_slug ON marketing_video_sections (audience, section_slug)`)
+      }
+      if (!(await indexExists(db, 'marketing_video_sections', 'idx_marketing_video_sections_audience_order'))) {
+        statements.push(`CREATE INDEX idx_marketing_video_sections_audience_order ON marketing_video_sections (audience, display_order)`)
+      }
+      if (!(await indexExists(db, 'marketing_video_sections', 'idx_marketing_video_sections_updated_at'))) {
+        statements.push(`CREATE INDEX idx_marketing_video_sections_updated_at ON marketing_video_sections (updated_at)`)
+      }
+      if (!(await indexExists(db, 'marketing_video_sections', 'idx_marketing_video_sections_correlation'))) {
+        statements.push(`CREATE INDEX idx_marketing_video_sections_correlation ON marketing_video_sections (correlation_id)`)
+      }
+      statements.push(`INSERT IGNORE INTO marketing_video_sections
+        (id, audience, section_name, youtube_url, section_slug, display_order)
+        VALUES
+          ('default-user-create-account', 'golf_homiez', 'Create a Golf Homiez Account', 'https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share', 'create-a-golf-homiez-account', 10),
+          ('default-user-team-tournament', 'golf_homiez', 'Create a team and register for a tournament', 'https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share', 'create-a-team-and-register-for-a-tournament', 20),
+          ('default-user-challenge', 'golf_homiez', 'Create a challenge', 'https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share', 'create-a-challenge', 30),
+          ('default-user-log-round', 'golf_homiez', 'Log a round', 'https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share', 'log-a-round', 40),
+          ('default-course-manage-website', 'golf_homiez_courses', 'Manage Your Golf Homiez Website', 'https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share', 'manage-your-golf-homiez-website', 10),
+          ('default-course-create-tournament', 'golf_homiez_courses', 'Create a Tournament', 'https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share', 'create-a-tournament', 20),
+          ('default-course-manage-account', 'golf_homiez_courses', 'Manage your Golf Homiez Golf Course Account', 'https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share', 'manage-your-golf-homiez-golf-course-account', 30)`)
+      return statements.join(';\n')
+    },
+  },
 
 ]
 

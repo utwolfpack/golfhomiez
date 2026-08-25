@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router'
 import bannerImg from '../assets/GolfHomiezEmblem.png'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { DEFAULT_HOME_MARKETING_SETTINGS, fetchHomeMarketingSettings, toYouTubeEmbedUrl, type HomeMarketingSettings } from '../lib/marketing'
 
-function HomeVideoSection({ title, url, logKey }: { title: string; url: string; logKey: string }) {
+function HomeVideoSection({ title, url, logKey, pagePath }: { title: string; url: string; logKey: string; pagePath: string }) {
   const embedUrl = toYouTubeEmbedUrl(url)
 
   return (
     <section className="homeVideoSection card" aria-labelledby={`${logKey}-title`}>
       <div className="homeSectionHeader">
-        <h2 id={`${logKey}-title`}>{title}</h2>
+        <h2 id={`${logKey}-title`}>
+          <Link
+            className="homeVideoSectionTitleLink"
+            to={pagePath}
+            onClick={() => logFrontendEvent({ category: 'home.marketing', message: 'marketing_video_library_opened', data: { video: logKey, destination: pagePath } })}
+          >
+            {title}
+          </Link>
+        </h2>
       </div>
       {embedUrl ? (
         <div className="homeVideoFrameWrap">
@@ -81,8 +90,8 @@ export default function Home() {
       </section>
 
       <div className="homeCommercialStack" aria-label="GolfHomiez videos">
-        <HomeVideoSection title="Golf Homiez" url={marketingSettings.golfHomiezVideoUrl} logKey="golf-homiez" />
-        <HomeVideoSection title="Golf Homiez Courses" url={marketingSettings.golfHomiezCoursesVideoUrl} logKey="golf-homiez-courses" />
+        <HomeVideoSection title="Golf Homiez" url={marketingSettings.golfHomiezVideoUrl} logKey="golf-homiez" pagePath="/golfhomiezvideos" />
+        <HomeVideoSection title="Golf Homiez Courses" url={marketingSettings.golfHomiezCoursesVideoUrl} logKey="golf-homiez-courses" pagePath="/golfhomiezcoursevideos" />
       </div>
     </div>
   )

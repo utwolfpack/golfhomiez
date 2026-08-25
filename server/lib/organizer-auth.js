@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { getPool } from '../db.js'
 import { normalizeEmail } from './team-utils.js'
 import { sendMail } from '../mailer.js'
+import { assertPasswordPolicy } from './password-policy.js'
 
 const ORGANIZER_SESSION_COOKIE = 'golfhomiez_organizer_session'
 const ORGANIZER_RESET_TTL_MS = 1000 * 60 * 60
@@ -202,6 +203,7 @@ export async function registerOrganizerAccount(source, payload = {}) {
   const email = normalizeEmail(payload.email)
   const password = String(payload.password || '')
   if (!email || !password) throw new Error('Email and password are required')
+  assertPasswordPolicy(password)
   const existing = await getOrganizerAccountByEmailDirect(db, email)
   if (existing?.password_hash) throw new Error('Organizer account already exists for this email')
 
@@ -263,6 +265,7 @@ export async function createOrganizerPasswordReset(source, { email, resetUrlBase
 export async function resetOrganizerPassword(source, { token, password } = {}) {
   const db = getDb(source)
   await ensureOrganizerAuthSchema(db)
+  assertPasswordPolicy(password)
   const resetToken = String(token || '').trim()
   if (!resetToken) throw new Error('Invalid or expired reset token')
   const [rows] = await db.execute(
