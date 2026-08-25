@@ -38,6 +38,7 @@ import { createGolfCoursePublicPageForApprovedHost, getGolfCoursePublicPageByHos
 import { buildSuggestedTournamentStartAssignments, listTournamentStartAssignmentsForTournaments, normalizeTeeTimeIntervalMinutes, normalizeTournamentStartTime, normalizeTournamentStartType, replaceTournamentStartAssignments } from './lib/tournament-start-schedule.js'
 import { loadTournamentFinalLeaderboard } from './lib/tournament-final-leaderboard.js'
 import { setTournamentArchiveState } from './lib/tournament-archive.js'
+import { getHomeMarketingSettings, updateHomeMarketingSettings } from './lib/marketing-settings.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -305,6 +306,20 @@ app.use((error, req, res, next) => {
     return res.status(413).json({ message: 'Uploaded image is too large. Please select a smaller image or try again after the image is compressed.' })
   }
   return next(error)
+})
+
+app.get('/api/marketing/home', async (req, res) => {
+  try {
+    const settings = await getHomeMarketingSettings()
+    logApi('home_marketing_settings_loaded', {
+      ...requestContext(req),
+      updatedAt: settings.updatedAt || null,
+    })
+    return res.json(settings)
+  } catch (error) {
+    logRouteError('Home marketing settings load error', req, error)
+    return res.status(500).json({ message: 'Home marketing content is temporarily unavailable.' })
+  }
 })
 
 app.post(['/api/client-logs', '/api/client-log'], (req, res) => {
@@ -2237,6 +2252,51 @@ app.get('/api/admin/portal', adminMiddleware, async (req, res) => {
   } catch (error) {
     logRouteError('Admin portal load error', req, error)
     res.status(500).json({ message: 'Could not load admin portal' })
+  }
+})
+
+app.get('/api/admin/marketing/home', adminMiddleware, async (req, res) => {
+  try {
+    const settings = await getHomeMarketingSettings()
+    logApi('admin_home_marketing_settings_loaded', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      updatedAt: settings.updatedAt || null,
+    })
+    return res.json(settings)
+  } catch (error) {
+    logRouteError('Admin home marketing settings load error', req, error, { adminUserId: req.adminUser?.id || null })
+    return res.status(500).json({ message: 'Could not load home marketing settings.' })
+  }
+})
+
+app.put('/api/admin/marketing/home', adminMiddleware, async (req, res) => {
+  try {
+    logApi('admin_home_marketing_settings_update_started', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+    })
+    const settings = await updateHomeMarketingSettings(req.body, {
+      adminUserId: req.adminUser.id,
+      correlationId: req.correlationId || null,
+    })
+    logApi('admin_home_marketing_settings_updated', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      updatedAt: settings.updatedAt || null,
+    })
+    return res.json(settings)
+  } catch (error) {
+    if (/valid YouTube video URL/i.test(String(error?.message || ''))) {
+      logWarn('Admin home marketing settings validation failed', {
+        ...requestContext(req),
+        adminUserId: req.adminUser?.id || null,
+        validationMessage: error.message,
+      })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Admin home marketing settings update error', req, error, { adminUserId: req.adminUser?.id || null })
+    return res.status(500).json({ message: 'Could not save home marketing settings.' })
   }
 })
 

@@ -17,12 +17,13 @@ import { useAdminAuth } from '../context/AdminAuthContext'
 import { formatFriendlyDateTime } from '../lib/time-format'
 import { getUserTodayISO } from '../lib/date'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { DEFAULT_HOME_MARKETING_SETTINGS, fetchAdminHomeMarketingSettings, saveAdminHomeMarketingSettings, type HomeMarketingSettings } from '../lib/marketing'
 
 type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
 type RowRecord = Record<string, unknown>
 type DetailColumn = { key: string; label: string }
 type DetailModalState = { title: string; rows: RowRecord[]; columns: DetailColumn[] } | null
-type AdminPortalPage = 'golf' | 'tournaments' | 'api' | 'admin'
+type AdminPortalPage = 'golf' | 'tournaments' | 'api' | 'marketing' | 'admin'
 
 function isDateKey(key?: string) {
   return Boolean(key && /(^|_)(created|updated|expires|consumed|validated|reviewed|started|completed)_?at$|createdAt|updatedAt|expiresAt|consumedAt/i.test(key))
@@ -97,6 +98,7 @@ function AdminPortalTabs({ activePage, onSelect }: { activePage: AdminPortalPage
     { id: 'golf', label: 'Golf' },
     { id: 'tournaments', label: 'Tournaments' },
     { id: 'api', label: 'API Usage' },
+    { id: 'marketing', label: 'Marketing' },
     { id: 'admin', label: 'Admin' },
   ]
   return (
@@ -645,6 +647,68 @@ const adminColumns: DetailColumn[] = [
   { key: 'created_at', label: 'Created' },
 ]
 
+function MarketingDashboardSection({
+  form,
+  loading,
+  saving,
+  onChange,
+  onSave,
+}: {
+  form: HomeMarketingSettings
+  loading: boolean
+  saving: boolean
+  onChange: (next: HomeMarketingSettings) => void
+  onSave: (event: FormEvent) => void
+}) {
+  return (
+    <div className="adminPageContent" data-admin-page="marketing">
+      <section className="adminPageIntro">
+        <h2>Marketing</h2>
+        <p className="small">Manage the YouTube videos displayed on the GolfHomiez home dashboard.</p>
+      </section>
+      <section className="card adminPanel adminMarketingPanel">
+        <form className="formStack" onSubmit={onSave}>
+          <div>
+            <label className="label" htmlFor="golf-homiez-video-url">Golf Homiez YouTube URL</label>
+            <input
+              id="golf-homiez-video-url"
+              className="input"
+              type="url"
+              inputMode="url"
+              value={form.golfHomiezVideoUrl}
+              onChange={(event) => onChange({ ...form, golfHomiezVideoUrl: event.target.value })}
+              placeholder={DEFAULT_HOME_MARKETING_SETTINGS.golfHomiezVideoUrl}
+              disabled={loading || saving}
+              required
+            />
+            <div className="small adminMarketingHelp">Displayed in the Golf Homiez section on the home page.</div>
+          </div>
+          <div>
+            <label className="label" htmlFor="golf-homiez-courses-video-url">Golf Homiez Courses YouTube URL</label>
+            <input
+              id="golf-homiez-courses-video-url"
+              className="input"
+              type="url"
+              inputMode="url"
+              value={form.golfHomiezCoursesVideoUrl}
+              onChange={(event) => onChange({ ...form, golfHomiezCoursesVideoUrl: event.target.value })}
+              placeholder={DEFAULT_HOME_MARKETING_SETTINGS.golfHomiezCoursesVideoUrl}
+              disabled={loading || saving}
+              required
+            />
+            <div className="small adminMarketingHelp">Displayed in the Golf Homiez Courses section on the home page.</div>
+          </div>
+          <div className="adminMarketingActions">
+            <button className="btnPrimary" type="submit" disabled={loading || saving}>
+              {saving ? 'Saving…' : loading ? 'Loading…' : 'Save home videos'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
 export default function AdminPortal() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -668,6 +732,10 @@ export default function AdminPortal() {
   const [apiCallLoading, setApiCallLoading] = useState(false)
   const [apiCallError, setApiCallError] = useState<string | null>(null)
   const [apiCallRefreshedAt, setApiCallRefreshedAt] = useState<string | null>(null)
+  const [marketingForm, setMarketingForm] = useState<HomeMarketingSettings>(DEFAULT_HOME_MARKETING_SETTINGS)
+  const [marketingLoading, setMarketingLoading] = useState(false)
+  const [marketingSaving, setMarketingSaving] = useState(false)
+  const [marketingLoaded, setMarketingLoaded] = useState(false)
 
   async function loadPortal() {
     logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_load_started' })
@@ -694,10 +762,54 @@ export default function AdminPortal() {
     }
   }
 
+  async function loadMarketingSettings() {
+    setMarketingLoading(true)
+    setError(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.marketing', message: 'home_marketing_settings_load_started' })
+      const settings = await fetchAdminHomeMarketingSettings()
+      setMarketingForm(settings)
+      setMarketingLoaded(true)
+      logFrontendEvent({ category: 'admin.portal.marketing', message: 'home_marketing_settings_loaded', data: { updatedAt: settings.updatedAt || null } })
+    } catch (err) {
+      const loadError = err instanceof Error ? err.message : 'Could not load home marketing settings.'
+      setError(loadError)
+      logFrontendEvent({ category: 'admin.portal.marketing', level: 'error', message: 'home_marketing_settings_load_failed', data: { error: loadError } })
+    } finally {
+      setMarketingLoading(false)
+    }
+  }
+
+  async function onSaveMarketing(event: FormEvent) {
+    event.preventDefault()
+    setMarketingSaving(true)
+    setMessage(null)
+    setError(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.marketing', message: 'home_marketing_settings_save_started' })
+      const settings = await saveAdminHomeMarketingSettings({
+        golfHomiezVideoUrl: marketingForm.golfHomiezVideoUrl,
+        golfHomiezCoursesVideoUrl: marketingForm.golfHomiezCoursesVideoUrl,
+      })
+      setMarketingForm(settings)
+      setMarketingLoaded(true)
+      setMessage('Home page marketing videos saved.')
+      logFrontendEvent({ category: 'admin.portal.marketing', message: 'home_marketing_settings_saved', data: { updatedAt: settings.updatedAt || null } })
+    } catch (err) {
+      const saveError = err instanceof Error ? err.message : 'Could not save home marketing settings.'
+      setError(saveError)
+      logFrontendEvent({ category: 'admin.portal.marketing', level: 'error', message: 'home_marketing_settings_save_failed', data: { error: saveError } })
+    } finally {
+      setMarketingSaving(false)
+    }
+  }
+
   useEffect(() => {
     if (!adminUser) {
       setPortal(null)
       setApiCallReport(null)
+      setMarketingForm(DEFAULT_HOME_MARKETING_SETTINGS)
+      setMarketingLoaded(false)
       setActivePage('golf')
       return
     }
@@ -708,6 +820,7 @@ export default function AdminPortal() {
     setActivePage(page)
     logFrontendEvent({ category: 'admin.portal.navigation', message: 'admin_portal_page_selected', data: { page } })
     if (page === 'api' && !apiCallReport && !apiCallLoading) void loadExternalApiCalls(apiCallFilters)
+    if (page === 'marketing' && !marketingLoaded && !marketingLoading) void loadMarketingSettings()
   }
 
   function openDetails(title: string, rows: RowRecord[], columns: DetailColumn[]) {
@@ -738,6 +851,8 @@ export default function AdminPortal() {
   async function onLogout() {
     await logoutAdmin()
     setPortal(null)
+    setMarketingLoaded(false)
+    setMarketingForm(DEFAULT_HOME_MARKETING_SETTINGS)
     setActivePage('golf')
     setLoginForm({ username: '', password: '' })
     setMessage('Signed out of admin portal.')
@@ -920,6 +1035,15 @@ export default function AdminPortal() {
                 refreshedAt={apiCallRefreshedAt}
               />
             </div>
+          ) : null}
+          {activePage === 'marketing' ? (
+            <MarketingDashboardSection
+              form={marketingForm}
+              loading={marketingLoading}
+              saving={marketingSaving}
+              onChange={setMarketingForm}
+              onSave={onSaveMarketing}
+            />
           ) : null}
           {activePage === 'admin' ? (
             <AdminDashboardSection
