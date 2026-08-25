@@ -57,13 +57,15 @@ function normalizeTournamentScorecard(
   const defaultHoles = buildClientDefaultHoleScorecard(stateCode, course, teeColor)
   if (!holes?.length) return defaultHoles
 
+  const normalizedHoles = normalizeHoleScorecard(holes, stateCode, course, teeColor)
   const normalizedByHole = new Map(
-    normalizeHoleScorecard(holes, stateCode, course, teeColor)
+    normalizedHoles
       .map((hole) => [Math.trunc(Number(hole.hole)), hole] as const)
       .filter(([holeNumber]) => Number.isFinite(holeNumber) && holeNumber >= 1 && holeNumber <= 18),
   )
+  const holeLimit = normalizedHoles.length === 9 && normalizedHoles.every((hole) => Number(hole.hole) <= 9) ? 9 : 18
 
-  return defaultHoles.map((defaultHole) => {
+  return defaultHoles.slice(0, holeLimit).map((defaultHole) => {
     const persistedHole = normalizedByHole.get(defaultHole.hole)
     return persistedHole ? { ...defaultHole, ...persistedHole, hole: defaultHole.hole } : defaultHole
   })
@@ -77,7 +79,8 @@ function tournamentScorecardDefaultHole(holes: HoleScoreDetail[]) {
       .filter((holeNumber) => Number.isFinite(holeNumber) && holeNumber >= 1 && holeNumber <= 18),
   )
 
-  for (let holeNumber = 1; holeNumber <= 18; holeNumber += 1) {
+  const holeLimit = holes.length === 9 && holes.every((hole) => Number(hole.hole) <= 9) ? 9 : 18
+  for (let holeNumber = 1; holeNumber <= holeLimit; holeNumber += 1) {
     if (!savedHoleNumbers.has(holeNumber)) {
       return { hole: holeNumber, allHolesSaved: false, savedHoleCount: savedHoleNumbers.size }
     }
@@ -259,7 +262,8 @@ export default function TournamentTeamScoreModal({ tournament, onClose, onScoreU
         ? Number(refreshedCurrentTeam.totalScore)
         : null
       onScoreUpdated?.(refreshedTotalScore)
-      setSaveMessage(providedCount === 18 ? 'Team score saved. All 18 holes are entered.' : `Team score saved. ${providedCount} of 18 holes entered.`)
+      const holeCount = nextHoles.length === 9 ? 9 : 18
+      setSaveMessage(providedCount === holeCount ? `Team score saved. All ${holeCount} holes are entered.` : `Team score saved. ${providedCount} of ${holeCount} holes entered.`)
       logFrontendEvent({
         category: 'tournament.teamScore',
         message: 'score_persist_succeeded',

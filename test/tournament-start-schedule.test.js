@@ -163,7 +163,7 @@ test('host, organizer, public flyer, migration, and default banner integrations 
   assert.match(scheduleManagerSource, /Clear schedule/)
   assert.match(publicPortalSource, /Team start assignments/)
   assert.ok(publicPortalSource.indexOf('<TournamentTeamStartSchedule') < publicPortalSource.indexOf('<TournamentPublicSlotSummary'))
-  assert.match(templateSource, /4-Person Scramble/)
+  assert.match(templateSource, /tournamentTeamSize: 4/)
   assert.match(templateSource, /Team Stableford/)
   assert.match(migrationSource, /tournament_team_start_assignments/)
   assert.ok(fs.existsSync(path.join(projectRoot, 'public', 'DefaultGolfBanner.jpg')))

@@ -68,7 +68,7 @@ export function normalizeCreateTeamMembers(members, user) {
   const extras = raw
     .map((member) => {
       const email = normalizeEmail(member?.email)
-      const name = String(member?.name || '').replace(/\s+/g, ' ').trim() || (email ? email.split('@')[0] : '')
+      const name = String(member?.name || '').replace(/\s+/g, ' ').trim()
       return {
         id: member && member.id ? String(member.id) : uuidv4(),
         name,

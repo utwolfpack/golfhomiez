@@ -7,6 +7,7 @@ import { RecipientNotFoundError, sendInboxMessage, type InboxMessage } from '../
 import {
   addMessageGroupMember,
   createMessageGroup,
+  deleteMessageGroup,
   fetchMessageGroups,
   fetchNotifications,
   fetchTournamentConversation,
@@ -21,7 +22,9 @@ import {
   type NotificationsResponse,
   type TournamentConversation,
 } from '../lib/notifications'
-import { logFrontendEvent } from '../lib/frontend-logger'
+import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import InviteHomieModal from '../components/InviteHomieModal'
+import { lookupUserByEmail, sendHomieInvite } from '../lib/teams'
 
 const PAGE_SIZE = 10
 const FILTERS: Array<{ value: NotificationFilter; label: string }> = [
@@ -60,8 +63,16 @@ function challengeNotificationIsCompleted(thread: NotificationThread) {
   return thread.messages.some((message) => String(message.challengeStatus || '').trim().toLowerCase() === 'completed')
 }
 
-function parseMemberEmails(value: string) {
-  return [...new Set(value.split(/[\n,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean))]
+type GroupDraftMember = {
+  id: string
+  email: string
+  firstName: string
+  lastName: string
+  validationState: 'idle' | 'checking' | 'validated'
+}
+
+function blankGroupDraftMember(): GroupDraftMember {
+  return { id: crypto.randomUUID(), email: '', firstName: '', lastName: '', validationState: 'idle' }
 }
 
 export default function Inbox() {
@@ -85,8 +96,13 @@ export default function Inbox() {
   const [replySending, setReplySending] = useState(false)
 
   const [groupName, setGroupName] = useState('')
-  const [groupMemberEmails, setGroupMemberEmails] = useState('')
+  const [groupMembers, setGroupMembers] = useState<GroupDraftMember[]>([blankGroupDraftMember()])
   const [groupSaving, setGroupSaving] = useState(false)
+  const [groupInviteOpen, setGroupInviteOpen] = useState(false)
+  const [groupInviteTarget, setGroupInviteTarget] = useState<{ email: string; memberId?: string; groupId?: string } | null>(null)
+  const [groupMemberFeedback, setGroupMemberFeedback] = useState<{ tone: 'success' | 'warning' | 'error'; message: string } | null>(null)
+  const [groupBuilderFeedback, setGroupBuilderFeedback] = useState<{ tone: 'success' | 'warning' | 'error'; message: string } | null>(null)
+  const [groupFeedbackById, setGroupFeedbackById] = useState<Record<string, { tone: 'success' | 'warning' | 'error'; message: string }>>({})
   const [memberEmailByGroup, setMemberEmailByGroup] = useState<Record<string, string>>({})
   const [messageBodyByGroup, setMessageBodyByGroup] = useState<Record<string, string>>({})
   const [sendingGroupId, setSendingGroupId] = useState<string | null>(null)
@@ -330,43 +346,128 @@ export default function Inbox() {
     }
   }
 
+  function patchGroupMember(memberId: string, patch: Partial<GroupDraftMember>) {
+    setGroupMembers((current) => current.map((member) => member.id === memberId ? { ...member, ...patch } : member))
+  }
+
+  async function validateGroupMember(memberId: string) {
+    const member = groupMembers.find((item) => item.id === memberId)
+    const email = String(member?.email || '').trim().toLowerCase()
+    if (!email) {
+      setGroupMemberFeedback({ tone: 'error', message: 'Enter a golfer email before validating.' })
+      return
+    }
+    setError(null)
+    setStatus(null)
+    setGroupMemberFeedback(null)
+    patchGroupMember(memberId, { validationState: 'checking' })
+    const correlationId = getCorrelationId()
+    logFrontendEvent({ category: 'notifications.group', message: 'message_group_member_validation_started', data: { correlationId, email, memberId } })
+    try {
+      const result = await lookupUserByEmail(email)
+      if (!result.found) {
+        setGroupMembers((current) => {
+          const remaining = current.filter((item) => item.id !== memberId)
+          return remaining.length ? remaining : [blankGroupDraftMember()]
+        })
+        setGroupInviteTarget({ email, memberId })
+        setGroupInviteOpen(true)
+        setGroupMemberFeedback({ tone: 'warning', message: `${email} does not have a GolfHomiez account yet. Send an invite now, then add them after they register.` })
+        logFrontendEvent({ category: 'notifications.group', level: 'warn', message: 'message_group_member_not_found_invite_opened', data: { correlationId, email, memberId, draftLineRemoved: true } })
+        return
+      }
+      patchGroupMember(memberId, {
+        email: String(result.email || email).trim().toLowerCase(),
+        firstName: String(result.firstName || result.name || '').trim().split(/\s+/)[0] || '',
+        lastName: String(result.lastName || '').trim() || String(result.name || '').trim().split(/\s+/).slice(1).join(' '),
+        validationState: 'validated',
+      })
+      setGroupMemberFeedback({ tone: 'success', message: `${result.name || result.email || email} validated.` })
+      logFrontendEvent({ category: 'notifications.group', message: 'message_group_member_validation_succeeded', data: { correlationId, email, memberId } })
+    } catch (err) {
+      patchGroupMember(memberId, { validationState: 'idle' })
+      const message = err instanceof Error ? err.message : 'Could not validate golfer.'
+      setGroupMemberFeedback({ tone: 'error', message })
+      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_member_validation_failed', data: { correlationId, email, memberId, error: message } })
+    }
+  }
+
   async function handleCreateGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const populatedMembers = groupMembers.filter((member) => member.email.trim())
+    const unvalidatedMember = populatedMembers.find((member) => member.validationState !== 'validated')
+    if (unvalidatedMember) {
+      setGroupBuilderFeedback({ tone: 'error', message: `Validate ${unvalidatedMember.email.trim()} before creating the group.` })
+      return
+    }
     setGroupSaving(true)
     setError(null)
     setStatus(null)
+    setGroupBuilderFeedback(null)
+    setGroupMemberFeedback(null)
     try {
-      const memberEmails = parseMemberEmails(groupMemberEmails)
+      const memberEmails = populatedMembers.map((member) => member.email.trim().toLowerCase())
       const response = await createMessageGroup({ name: groupName, memberEmails })
       setGroupName('')
-      setGroupMemberEmails('')
-      setStatus(`Group ${response.group?.name || ''} created.`.trim())
+      setGroupMembers([blankGroupDraftMember()])
+      setGroupBuilderFeedback({ tone: 'success', message: `Group ${response.group?.name || ''} created.`.trim() })
       logFrontendEvent({ category: 'notifications.group', message: 'message_group_created', data: { groupId: response.group?.id || null, memberCount: response.group?.members?.length || 0 } })
       await loadNotifications(page, filter, deletedView)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not create group.'
-      setError(message)
+      setGroupBuilderFeedback({ tone: 'error', message })
       logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_create_failed', data: { error: message } })
     } finally {
       setGroupSaving(false)
     }
   }
 
+
   async function handleAddMember(group: MessageGroup) {
-    const email = String(memberEmailByGroup[group.id] || '').trim()
+    const email = String(memberEmailByGroup[group.id] || '').trim().toLowerCase()
     if (!email) return
     setError(null)
     setStatus(null)
+    const correlationId = getCorrelationId()
     try {
+      const lookup = await lookupUserByEmail(email)
+      if (!lookup.found) {
+        setMemberEmailByGroup((current) => ({ ...current, [group.id]: '' }))
+        setGroupInviteTarget({ email, groupId: group.id })
+        setGroupInviteOpen(true)
+        setGroupFeedbackById((current) => ({ ...current, [group.id]: { tone: 'warning', message: `${email} does not have a GolfHomiez account yet. Send an invite now, then add them after they register.` } }))
+        logFrontendEvent({ category: 'notifications.group', level: 'warn', message: 'existing_group_member_not_found_invite_opened', data: { correlationId, groupId: group.id, memberEmail: email, addMemberInputCleared: true } })
+        return
+      }
       await addMessageGroupMember(group.id, email)
       setMemberEmailByGroup((current) => ({ ...current, [group.id]: '' }))
-      setStatus(`${email} added to ${group.name}.`)
-      logFrontendEvent({ category: 'notifications.group', message: 'message_group_member_added', data: { groupId: group.id, memberEmail: email } })
+      setGroupFeedbackById((current) => ({ ...current, [group.id]: { tone: 'success', message: `${lookup.name || email} added to ${group.name}.` } }))
+      logFrontendEvent({ category: 'notifications.group', message: 'message_group_member_added', data: { correlationId, groupId: group.id, memberEmail: email } })
       await loadNotifications(page, filter, deletedView)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not add group member.'
+      setGroupFeedbackById((current) => ({ ...current, [group.id]: { tone: 'error', message } }))
+      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_member_add_failed', data: { correlationId, groupId: group.id, memberEmail: email, error: message } })
+    }
+  }
+
+  async function handleDeleteGroup(group: MessageGroup) {
+    const confirmed = window.confirm(`Delete ${group.name}? Existing group messages will remain in each member's notification history.`)
+    if (!confirmed) return
+    setError(null)
+    setStatus(null)
+    const correlationId = getCorrelationId()
+    logFrontendEvent({ category: 'notifications.group', message: 'message_group_delete_started', data: { correlationId, groupId: group.id, groupName: group.name } })
+    try {
+      await deleteMessageGroup(group.id)
+      setGroups((current) => current.filter((item) => item.id !== group.id))
+      setGroupBuilderFeedback({ tone: 'success', message: `${group.name} deleted. Existing group messages were preserved.` })
+      await loadNotifications(page, filter, deletedView)
+      logFrontendEvent({ category: 'notifications.group', message: 'message_group_delete_succeeded', data: { correlationId, groupId: group.id } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not delete message group.'
       setError(message)
-      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_member_add_failed', data: { groupId: group.id, memberEmail: email, error: message } })
+      logFrontendEvent({ category: 'notifications.group', level: 'error', message: 'message_group_delete_failed', data: { correlationId, groupId: group.id, error: message } })
     }
   }
 
@@ -375,7 +476,7 @@ export default function Inbox() {
     setStatus(null)
     try {
       await removeMessageGroupMember(group.id, email)
-      setStatus(`${email} removed from ${group.name}.`)
+      setGroupFeedbackById((current) => ({ ...current, [group.id]: { tone: 'success', message: `${email} removed from ${group.name}.` } }))
       logFrontendEvent({ category: 'notifications.group', message: 'message_group_member_removed', data: { groupId: group.id, memberEmail: email } })
       await loadNotifications(page, filter, deletedView)
     } catch (err) {
@@ -530,7 +631,7 @@ export default function Inbox() {
                       </div>
                     ) : null}
 
-                    <div className="notificationConversation" aria-label="Conversation thread">
+                    <div className="notificationConversation" aria-label={isChallengeThread ? "Challenge discussion thread" : "Conversation thread"}>
                       {thread.messageType === 'tournament_notification' && tournamentConversationLoading ? <p className="small">Loading tournament dialogue…</p> : null}
                       {(thread.messageType === 'tournament_notification'
                         ? (tournamentConversation?.messages || thread.messages.slice(0, 1))
@@ -540,7 +641,10 @@ export default function Inbox() {
                         return (
                           <div key={threadMessage.id} className={`notificationConversationMessage${fromMe ? ' fromMe' : ''}`}>
                             <div className="notificationConversationMeta">
-                              <strong>{fromMe ? 'You' : notificationSender(threadMessage)}</strong>
+                              <span className="notificationConversationIdentity">
+                                <strong>{fromMe ? 'You' : notificationSender(threadMessage)}</strong>
+                                {isChallengeThread && threadMessage.senderEmail ? <small>{threadMessage.senderEmail}</small> : null}
+                              </span>
                               <span>{formatTimestamp(threadMessage.createdAt)}</span>
                             </div>
                             <p>{threadMessage.body}</p>
@@ -570,7 +674,8 @@ export default function Inbox() {
                       </form>
                     ) : null}
                     {thread.messageType === 'tournament_notification' && !tournamentConversationLoading && !canMessageTournamentHost ? <p className="notificationReadOnlyNotice">The tournament host is not currently available for inbox messages.</p> : null}
-                    {thread.messageType === 'group_message' && !groupState?.viewerActive ? <p className="notificationReadOnlyNotice">You were removed from this group. This conversation is preserved through your removal date, but you can no longer contribute.</p> : null}
+                    {thread.messageType === 'group_message' && message.groupDeletedAt ? <p className="notificationReadOnlyNotice">This group was deleted. Existing messages are preserved, but no new group messages can be sent.</p> : null}
+                    {thread.messageType === 'group_message' && !message.groupDeletedAt && !groupState?.viewerActive ? <p className="notificationReadOnlyNotice">You were removed from this group. This conversation is preserved through your removal date, but you can no longer contribute.</p> : null}
                   </div>
                 ) : null}
               </article>
@@ -594,15 +699,41 @@ export default function Inbox() {
         </div>
         <form className="messageGroupCreateForm" onSubmit={handleCreateGroup}>
           <label>Group name<input value={groupName} maxLength={120} onChange={(event) => setGroupName(event.target.value)} required /></label>
-          <label>Member emails<textarea rows={2} value={groupMemberEmails} onChange={(event) => setGroupMemberEmails(event.target.value)} placeholder="golfer1@example.com, golfer2@example.com" /></label>
+          <div className="messageGroupBuilderMembers" aria-label="Group members">
+            {groupMembers.map((member, index) => (
+              <div className="messageGroupBuilderMember" key={member.id}>
+                <label>Email
+                  <input
+                    type="email"
+                    value={member.email}
+                    readOnly={member.validationState === 'validated'}
+                    onChange={(event) => patchGroupMember(member.id, { email: event.target.value, firstName: '', lastName: '', validationState: 'idle' })}
+                    placeholder={`Member ${index + 1} email`}
+                  />
+                </label>
+                <button type="button" className="button secondary small" disabled={member.validationState === 'checking' || member.validationState === 'validated' || !member.email.trim()} onClick={() => void validateGroupMember(member.id)}>
+                  {member.validationState === 'checking' ? 'Validating…' : member.validationState === 'validated' ? 'Validated' : 'Validate'}
+                </button>
+                <button type="button" className="button secondary small" onClick={() => setGroupMembers((current) => current.length === 1 ? [blankGroupDraftMember()] : current.filter((item) => item.id !== member.id))}>Remove</button>
+                {member.validationState === 'validated' ? <div className="messageGroupValidatedMember"><strong>{[member.firstName, member.lastName].filter(Boolean).join(' ') || member.email}</strong><span className="small">{member.email}</span></div> : null}
+              </div>
+            ))}
+          </div>
+          {groupMemberFeedback ? <div className={`messageGroupActionFeedback messageGroupActionFeedback--${groupMemberFeedback.tone}`} role={groupMemberFeedback.tone === 'error' ? 'alert' : 'status'}>{groupMemberFeedback.message}</div> : null}
+          <button type="button" className="button secondary small" onClick={() => setGroupMembers((current) => [...current, blankGroupDraftMember()])}>+ Add member</button>
+          <div className="small">Validate each golfer before creating the group. Golfers without an account can be invited, but are not added until after registration.</div>
           <button className="button primary" type="submit" disabled={groupSaving || !groupName.trim()}>{groupSaving ? 'Creating…' : 'Create group'}</button>
+          {groupBuilderFeedback ? <div className={`messageGroupActionFeedback messageGroupActionFeedback--${groupBuilderFeedback.tone}`} role={groupBuilderFeedback.tone === 'error' ? 'alert' : 'status'}>{groupBuilderFeedback.message}</div> : null}
         </form>
 
         <div className="messageGroupList">
           {groups.length === 0 ? <p className="emptyState">You do not have any message groups yet.</p> : null}
           {groups.map((group) => (
             <div className="messageGroupItem" key={group.id}>
-              <div className="messageGroupHeader"><strong>{group.name}</strong><span>{group.members.filter((member) => member.active).length} active members</span></div>
+              <div className="messageGroupHeader">
+                <div><strong>{group.name}</strong><span>{group.members.filter((member) => member.active).length} active members</span></div>
+                {group.canManage ? <button type="button" className="button secondary small messageGroupDeleteButton" onClick={() => void handleDeleteGroup(group)}>Delete group</button> : null}
+              </div>
               <div className="messageGroupMembers">
                 {group.members.map((member) => (
                   <span className={`messageGroupMember${member.active ? '' : ' removed'}`} key={`${group.id}:${member.email}`}>
@@ -612,9 +743,12 @@ export default function Inbox() {
                 ))}
               </div>
               {group.canManage ? (
-                <div className="messageGroupAddMember">
-                  <input type="email" aria-label={`Add member to ${group.name}`} placeholder="golfer@example.com" value={memberEmailByGroup[group.id] || ''} onChange={(event) => setMemberEmailByGroup((current) => ({ ...current, [group.id]: event.target.value }))} />
-                  <button type="button" className="button secondary small" onClick={() => void handleAddMember(group)} disabled={!String(memberEmailByGroup[group.id] || '').trim()}>Add member</button>
+                <div>
+                  <div className="messageGroupAddMember">
+                    <input type="email" aria-label={`Add member to ${group.name}`} placeholder="golfer@example.com" value={memberEmailByGroup[group.id] || ''} onChange={(event) => setMemberEmailByGroup((current) => ({ ...current, [group.id]: event.target.value }))} />
+                    <button type="button" className="button secondary small" onClick={() => void handleAddMember(group)} disabled={!String(memberEmailByGroup[group.id] || '').trim()}>Validate & add</button>
+                  </div>
+                  {groupFeedbackById[group.id] ? <div className={`messageGroupActionFeedback messageGroupActionFeedback--${groupFeedbackById[group.id].tone}`} role={groupFeedbackById[group.id].tone === 'error' ? 'alert' : 'status'}>{groupFeedbackById[group.id].message}</div> : null}
                 </div>
               ) : null}
               {group.viewerActive ? (
@@ -628,6 +762,31 @@ export default function Inbox() {
         </div>
       </section>
       ) : null}
+
+      <InviteHomieModal
+        open={groupInviteOpen}
+        defaultEmail={groupInviteTarget?.email || ''}
+        title="Invite Homie to GolfHomiez"
+        submitLabel="Send Invite"
+        onClose={() => {
+          setGroupInviteOpen(false)
+          setGroupInviteTarget(null)
+        }}
+        onSubmit={async ({ email, message }) => {
+          const correlationId = getCorrelationId()
+          logFrontendEvent({ category: 'notifications.group', message: 'message_group_invite_started', data: { correlationId, email, groupId: groupInviteTarget?.groupId || null } })
+          await sendHomieInvite(email, message)
+          const feedback = `Invite sent to ${email}. They were not added to the group; add them after they register for GolfHomiez.`
+          if (groupInviteTarget?.groupId) {
+            setGroupFeedbackById((current) => ({ ...current, [groupInviteTarget.groupId as string]: { tone: 'warning', message: feedback } }))
+          } else {
+            setGroupMemberFeedback({ tone: 'warning', message: feedback })
+          }
+          logFrontendEvent({ category: 'notifications.group', message: 'message_group_invite_succeeded', data: { correlationId, email, groupId: groupInviteTarget?.groupId || null, memberAdded: false } })
+          setGroupInviteOpen(false)
+          setGroupInviteTarget(null)
+        }}
+      />
     </main>
   )
 }

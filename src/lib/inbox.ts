@@ -32,6 +32,7 @@ export type InboxMessage = {
   recipientEmail: string
   groupId?: string | null
   groupName?: string | null
+  groupDeletedAt?: string | null
   tournamentId?: string | null
   tournamentConversationId?: string | null
   tournamentName?: string | null

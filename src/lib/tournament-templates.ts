@@ -40,6 +40,7 @@ export type TournamentTemplateData = {
   teeTimeIntervalMinutes?: number | null
   startType?: 'shotgun' | 'tee-times' | string | null
   tournamentFormat?: string | null
+  tournamentTeamSize?: number | null
   registrationDeadline?: string | null
   entryFee?: string | null
   feesInclude?: string | null
@@ -122,6 +123,18 @@ export function getTournamentTemplate(key?: string | null) {
   return TOURNAMENT_TEMPLATES.find((template) => template.key === key) || TOURNAMENT_TEMPLATES[0]
 }
 
+
+export const TOURNAMENT_TEAM_SIZE_OPTIONS = [2, 3, 4] as const
+export type TournamentTeamSize = typeof TOURNAMENT_TEAM_SIZE_OPTIONS[number]
+
+export function getTournamentTeamSize(templateData?: TournamentTemplateData | null): TournamentTeamSize {
+  const rawSize = Number(templateData?.tournamentTeamSize)
+  if (TOURNAMENT_TEAM_SIZE_OPTIONS.includes(rawSize as TournamentTeamSize)) return rawSize as TournamentTeamSize
+  const legacyMatch = String(templateData?.tournamentFormat || '').match(/\b([234])\b/)
+  const legacySize = legacyMatch ? Number(legacyMatch[1]) : 4
+  return TOURNAMENT_TEAM_SIZE_OPTIONS.includes(legacySize as TournamentTeamSize) ? legacySize as TournamentTeamSize : 4
+}
+
 export function emptyTournamentTemplateData(): TournamentTemplateData {
   return {
     hostOrganization: '',
@@ -133,6 +146,7 @@ export function emptyTournamentTemplateData(): TournamentTemplateData {
     teeTimeIntervalMinutes: DEFAULT_TEE_TIME_INTERVAL_MINUTES,
     startType: 'shotgun',
     tournamentFormat: '',
+    tournamentTeamSize: 4,
     registrationDeadline: '',
     entryFee: '',
     feesInclude: '',

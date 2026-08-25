@@ -294,6 +294,7 @@ export type TournamentFinalLeaderboardRow = {
   teamKey: string
   teamId?: string | null
   teamName: string
+  teamMemberNames?: string[]
   totalScore?: number | null
   relativeToPar?: number | null
   roundLabel: string

@@ -124,6 +124,10 @@ function TeamsInner() {
       if (!member.email) missing.push('Each team member email')
       if (member.email && !isValidEmailAddress(member.email)) missing.push('Valid team member emails')
     }
+    for (const member of createMembers.filter(member => member.email.trim() && member.validationState === 'invited')) {
+      if (!member.firstName.trim()) missing.push('First name for invited teammates')
+      if (!member.lastName.trim()) missing.push('Last name for invited teammates')
+    }
     if (createMembers.some(member => member.email.trim() && !['validated', 'invited'].includes(member.validationState || 'idle'))) missing.push('Validated or invited teammate emails')
     if (hasDuplicateEmails(normalizedCreateMembers)) missing.push('Unique teammate emails')
     return [...new Set(missing)]
@@ -509,7 +513,19 @@ function TeamsInner() {
                           </div>
                         </div>
                       ) : m.validationState === 'invited' ? (
-                        <div className="small" style={{ marginTop: 8 }}>Invited. This golfer can be included now and the team will remain pending until their account is created and verified.</div>
+                        <div style={{ marginTop: 10 }}>
+                          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <div>
+                              <label className="label">First name</label>
+                              <input className="input" value={m.firstName} onChange={e => patchCreateMember(m.id, 'firstName', e.target.value)} placeholder="First name" required />
+                            </div>
+                            <div>
+                              <label className="label">Last name</label>
+                              <input className="input" value={m.lastName} onChange={e => patchCreateMember(m.id, 'lastName', e.target.value)} placeholder="Last name" required />
+                            </div>
+                          </div>
+                          <div className="small" style={{ marginTop: 8 }}>Invite sent. Add this golfer's first and last name before saving the team. The team remains pending until their GolfHomiez account is created and verified.</div>
+                        </div>
                       ) : (
                         <div className="small" style={{ marginTop: 8 }}>Enter an email, then validate the golfer or invite them to GolfHomiez.</div>
                       )}
@@ -677,12 +693,12 @@ function TeamsInner() {
             const normalizedEmail = String(email || target.email || '').trim().toLowerCase()
             setCreateMembers(prev => prev.map(m => (
               m.id === target.memberId
-                ? { ...m, email: normalizedEmail, firstName: normalizedEmail.split('@')[0] || normalizedEmail, lastName: '', status: 'invited', verified: false, validationState: 'invited' }
+                ? { ...m, email: normalizedEmail, firstName: m.firstName, lastName: m.lastName, status: 'invited', verified: false, validationState: 'invited' }
                 : m
             )))
-            setMsg(`Registration invite sent to ${normalizedEmail}. They can be included on this team while their account is pending.`)
+            setMsg(`Registration invite sent to ${normalizedEmail}. Enter their first and last name before saving the team.`)
           }
-          logFrontendEvent({ category: 'teams.registration_invite', message: 'succeeded', data: { correlationId, teamId: target?.teamId || null, email, source: target?.source || null, memberId: target?.memberId || null } })
+          logFrontendEvent({ category: 'teams.registration_invite', message: 'succeeded', data: { correlationId, teamId: target?.teamId || null, email, source: target?.source || null, memberId: target?.memberId || null, manualNameRequired: target?.source === 'create' } })
           setInviteOpen(false)
           setInviteTarget(null)
           await load()

@@ -103,6 +103,7 @@ function mapNotificationRow(row) {
     individualChallengeParticipants: parseJsonArray(row.individual_participants_json),
     groupId: row.group_id || null,
     groupName: row.group_name || null,
+    groupDeletedAt: toIso(row.group_deleted_at),
     tournamentId: row.tournament_id || null,
     tournamentConversationId: row.tournament_conversation_id || null,
     tournamentName: row.tournament_name || null,
@@ -206,7 +207,7 @@ async function listGroupMessagesForUser(db, user) {
   const email = normalizeEmail(user?.email)
   if (!email) return []
   const [rows] = await db.execute(
-    `SELECT im.*, mg.name AS group_name
+    `SELECT im.*, mg.name AS group_name, mg.deleted_at AS group_deleted_at
        FROM inbox_messages im
        JOIN message_group_members mgm ON mgm.group_id = im.group_id
        JOIN message_groups mg ON mg.id = im.group_id
@@ -293,6 +294,7 @@ export async function listMessageGroups(db, user) {
             mgm.left_at AS viewer_left_at
        FROM message_groups mg
        JOIN message_group_members mgm ON mgm.group_id = mg.id AND LOWER(mgm.email) = ?
+      WHERE mg.deleted_at IS NULL
       ORDER BY mg.updated_at DESC, mg.created_at DESC`,
     [email],
   )
@@ -362,10 +364,20 @@ export async function createMessageGroup(db, user, { name, members = [] }) {
 }
 
 async function requireManageableGroup(db, groupId, user) {
-  const [[group] = []] = await db.execute('SELECT * FROM message_groups WHERE id = ? LIMIT 1', [String(groupId || '')])
+  const [[group] = []] = await db.execute('SELECT * FROM message_groups WHERE id = ? AND deleted_at IS NULL LIMIT 1', [String(groupId || '')])
   if (!group) return null
   const canManage = String(group.created_by_user_id || '') === String(user?.id || '') || normalizeEmail(group.created_by_email) === normalizeEmail(user?.email)
   return canManage ? group : null
+}
+
+export async function deleteMessageGroup(db, groupId, user) {
+  const group = await requireManageableGroup(db, groupId, user)
+  if (!group) return null
+  await db.execute(
+    'UPDATE message_groups SET deleted_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
+    [group.id],
+  )
+  return { groupId: group.id, messagesPreserved: true }
 }
 
 export async function addMessageGroupMember(db, groupId, user, member) {
@@ -423,6 +435,7 @@ export async function sendMessageGroupMessage(db, groupId, user, body, correlati
        FROM message_groups mg
        JOIN message_group_members mgm ON mgm.group_id = mg.id
       WHERE mg.id = ? AND LOWER(mgm.email) = ?
+        AND mg.deleted_at IS NULL
       LIMIT 1`,
     [String(groupId || ''), email],
   )
