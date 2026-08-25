@@ -95,8 +95,10 @@ export function calculateTeamChallengePoints(
   let completedHoles = 0
   let carryoverPoints = 0
   const holeResults: TeamChallengeHolePointResult[] = []
+  const explicitHoleCounts = [proposerHoles?.length || 0, challengedHoles?.length || 0].filter((count) => count > 0)
+  const holeCount = explicitHoleCounts.length > 0 && explicitHoleCounts.every((count) => count <= 9) && explicitHoleCounts.some((count) => count === 9) ? 9 : 18
 
-  for (let hole = 1; hole <= 18; hole += 1) {
+  for (let hole = 1; hole <= holeCount; hole += 1) {
     const proposerHole = proposerByHole.get(hole)
     const challengedHole = challengedByHole.get(hole)
     const proposerScore = holeScore(proposerHole)

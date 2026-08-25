@@ -270,7 +270,9 @@ test('Team Challenge leaderboard uses the hole comparison layout and only shows 
 
   assert.match(challengesPage, /inboxTeamChallengeHoleLeaderboardBoard/)
   assert.match(challengesPage, /renderTeamChallengeSummaryView\(message, \{[\s\S]*showScorebar: false,[\s\S]*leaderboardMode: true,[\s\S]*onTeamSelect:/)
-  assert.doesNotMatch(challengesPage, /<span>POS<\/span>[\s\S]{0,300}<span>TEAM<\/span>[\s\S]{0,300}<span>ROUND<\/span>/)
+  assert.match(challengesPage, /aria-label="Team Challenge stack rank"/)
+  assert.match(challengesPage, /<span>POS<\/span>[\s\S]{0,300}<span>TEAM<\/span>[\s\S]{0,300}<span>ROUND<\/span>/)
+  assert.match(challengesPage, /team_stack_rank_selected/)
   assert.match(challengesPage, /const showPushColumn = pointSummary\.scoringType === 'skins_push'/)
   assert.match(challengesPage, /const showPointsColumn = isSkinsTeamChallenge\(pointSummary\.scoringType\)/)
   assert.match(challengesPage, /\{showPushColumn \? <span>Push<\/span> : null\}/)

@@ -1,4 +1,4 @@
-import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, TOURNAMENT_TEMPLATES, emptyTournamentTemplateData, type TournamentTemplateData } from '../lib/tournament-templates'
+import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, TOURNAMENT_TEAM_SIZE_OPTIONS, TOURNAMENT_TEMPLATES, emptyTournamentTemplateData, getTournamentTeamSize, type TournamentTemplateData } from '../lib/tournament-templates'
 import ImageUploadField from './ImageUploadField'
 import { compressImageFile } from '../lib/image-upload'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
@@ -276,14 +276,19 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
         ))}
         {!hideRegistrationDeadline ? <TournamentRegistrationDeadlineField value={value} onChange={onChange} /> : null}
         <div>
-          <label className="label">Tournament format</label>
-          <input
+          <label className="label">Players on a team</label>
+          <select
             className="input"
-            type="text"
-            value={String(templateData.tournamentFormat || '')}
-            onChange={(e) => updateTemplateData({ tournamentFormat: e.target.value })}
-            placeholder="4-Person Scramble"
-          />
+            value={getTournamentTeamSize(templateData)}
+            onChange={(e) => {
+              const tournamentTeamSize = Number(e.target.value)
+              updateTemplateData({ tournamentTeamSize, tournamentFormat: `${tournamentTeamSize}-Player Team` })
+              logFrontendEvent({ category: 'tournament.builder', message: 'tournament_team_size_changed', data: { correlationId: getCorrelationId(), tournamentTeamSize } })
+            }}
+          >
+            {TOURNAMENT_TEAM_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} players per team</option>)}
+          </select>
+          <div className="small" style={{ marginTop: 4 }}>Registration teams must contain exactly this many golfers.</div>
         </div>
         <div>
           <label className="label tournament-template-label-with-tooltip">

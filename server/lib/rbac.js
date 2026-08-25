@@ -529,6 +529,11 @@ export function sanitizeTournamentTemplateData(value = {}) {
     teeTimeIntervalMinutes: Math.min(60, Math.max(5, Number.parseInt(String(source.teeTimeIntervalMinutes || ''), 10) || DEFAULT_TEE_TIME_INTERVAL_MINUTES)),
     startType: startType === 'tee-times' ? 'tee-times' : 'shotgun',
     tournamentFormat: cleanString('tournamentFormat'),
+    tournamentTeamSize: [2, 3, 4].includes(Number(source.tournamentTeamSize))
+      ? Number(source.tournamentTeamSize)
+      : ([2, 3, 4].includes(Number(String(source.tournamentFormat || '').match(/\b([234])\b/)?.[1]))
+          ? Number(String(source.tournamentFormat || '').match(/\b([234])\b/)?.[1])
+          : 4),
     registrationDeadline: cleanString('registrationDeadline'),
     entryFee: sanitizeCurrencyField(source.entryFee),
     feesInclude: cleanString('feesInclude'),

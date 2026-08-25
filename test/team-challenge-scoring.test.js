@@ -65,3 +65,11 @@ test('skins-push round detail displays the actual tied-hole carryover instead of
   assert.match(roundDetail, /result\.winner === 'tie' \|\| result\.winner === 'pending'\) return Math\.max\(0, result\.carryoverAfterHole\)/)
   assert.doesNotMatch(roundDetail, /carryoverAfterHole - pointSummary\.pointsPerHole/)
 })
+
+test('team challenge scoring only produces nine leaderboard holes when both course scorecards contain nine holes', async () => {
+  const { calculateTeamChallengePoints } = await loadScoringModule()
+  const nineHoleScores = holes([4, 4, 3, 5, 4, 4, 3, 5, 4], 4)
+  const result = calculateTeamChallengePoints(nineHoleScores, nineHoleScores, 'skins_push', 1)
+  assert.equal(result.holeResults.length, 9)
+  assert.equal(result.holeResults.at(-1)?.hole, 9)
+})

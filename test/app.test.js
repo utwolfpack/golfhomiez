@@ -1658,13 +1658,13 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
   assert.match(challengesPage, /function formatHoleMetadata\(hole: HoleScoreDetail\)/)
   assert.doesNotMatch(challengesPage, /items\.push\(`\$\{teeColorLabel\(selectedTeeColor\)\} tees`\)/)
   assert.match(challengesPage, /applyChallengeTeeColor\(normalizeHoleScorecard\(holes, getTeamChallengeStateCode\(message\), getTeamChallengeCourseName\(message\), selectedTeeColor\), selectedTeeColor\)/)
-  assert.match(challengesPage, /if \(preferCached && teamChallengeScorecards\[key\]\) return applyChallengeTeeColor\(teamChallengeScorecards\[key\], selectedTeeColor\)/)
+  assert.match(challengesPage, /preferCached && teamChallengeScorecards\[key\][\s\S]{0,220}applyChallengeTeeColor\(teamChallengeScorecards\[key\], selectedTeeColor\)/)
   assert.match(challengesPage, /if \(preferCached && individualChallengeScorecards\[key\]\) return applyChallengeTeeColor\(individualChallengeScorecards\[key\], selectedTeeColor\)/)
 })
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/latest-requirements.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -1833,6 +1833,9 @@ test('teams page supports team creation, invite validation, two-to-four roster s
   assert.match(teamsPage, /No GolfHomiez account was found/)
   assert.match(teamsPage, /m\.validationState === 'invited' \? 'Invited'/)
   assert.match(teamsPage, /status: 'invited'/)
+  assert.match(teamsPage, /First name for invited teammates/)
+  assert.match(teamsPage, /Last name for invited teammates/)
+  assert.match(teamsPage, /Add this golfer's first and last name before saving the team/)
   assert.match(teamsPage, /Status: <strong>\{teamStatusLabel\(t\)\}<\/strong>/)
   assert.match(teamsPage, /teams\.create\.member_validation/)
   assert.doesNotMatch(teamsPage, /Member 1 is always the signed-in user and cannot be changed\./)
@@ -2630,7 +2633,7 @@ test('tournament registrations migration keeps tournament_id compatible with tou
   assert.match(pkg, /"postinstall": "npm run cleanup:project-files && npm run db:migrate && npm run build"/)
 })
 
-test('tournament registration requires two-person or four-person teams and stores team details', () => {
+test('tournament registration enforces the configured two-to-four-player tournament team size and stores team details', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const accounts = fs.readFileSync(new URL('../src/lib/accounts.ts', import.meta.url), 'utf8')
   const portalPage = fs.readFileSync(new URL('../src/pages/TournamentPortal.tsx', import.meta.url), 'utf8')
@@ -2640,7 +2643,8 @@ test('tournament registration requires two-person or four-person teams and store
   const migrations = fs.readFileSync(new URL('../server/migrations/index.js', import.meta.url), 'utf8')
 
   assert.match(server, /resolveRegistrationTeam/)
-  assert.match(server, /Tournament teams must have exactly 2 or 4 players\./)
+  assert.match(server, /Tournament teams must have exactly \$\{normalizedRequiredTeamSize\} players for this tournament\./)
+  assert.match(server, /getTournamentTeamSizeFromTemplateData/)
   assert.match(server, /You must be a member of an existing team/)
   assert.match(server, /team_id, team_name, team_members_json/)
   assert.match(accounts, /fetchMyTeams/)
@@ -2803,7 +2807,8 @@ test('tournament flyer template is persisted, editable, and supports organizer-p
   assert.match(templateFields, /Beneficiary \/ Charity/)
   assert.match(templateFields, /Check-in time/)
   assert.match(templateFields, /Tee time/)
-  assert.match(templateFields, /type="text"[\s\S]{0,250}placeholder="4-Person Scramble"/)
+  assert.match(templateFields, /<label className="label">Players on a team<\/label>/)
+  assert.match(templateFields, /TOURNAMENT_TEAM_SIZE_OPTIONS\.map/)
   assert.doesNotMatch(templateFields, /list="standard-tournament-formats"|<datalist/)
   assert.match(templateFields, /Charity Image \(optional\)/)
   assert.match(templateFields, /Beneficiary \/ Charity message/)
@@ -3769,7 +3774,7 @@ test('host tournament creation supports an optional organizer and applies golf-c
   assert.match(templateLib, /'Team Best Ball'/)
   assert.match(templateLib, /'Team Shamble'/)
   assert.doesNotMatch(templateFields, /list="standard-tournament-formats"|STANDARD_TOURNAMENT_FORMATS\.map/)
-  assert.match(templateFields, /placeholder="4-Person Scramble"/)
+  assert.match(templateFields, /getTournamentTeamSize\(templateData\)/)
   assert.doesNotMatch(templateFields, /\['hostOrganization', 'Host organization'\]/)
 
   assert.match(hostPortal, /hostOrganization: String\(current\.hostOrganization \|\| ''\)\.trim\(\) \|\| golfCourseName/)
@@ -5052,11 +5057,11 @@ test('My Tournaments starts on the first null score from holes 1 through 18 and 
 
   assert.match(tournamentScoreModal, /function normalizeTournamentScorecard\(/)
   assert.match(tournamentScoreModal, /const defaultHoles = buildClientDefaultHoleScorecard\(stateCode, course, teeColor\)/)
-  assert.match(tournamentScoreModal, /return defaultHoles\.map\(\(defaultHole\) =>/)
+  assert.match(tournamentScoreModal, /return defaultHoles\.slice\(0, holeLimit\)\.map\(\(defaultHole\) =>/)
   assert.match(tournamentScoreModal, /function hasSavedTournamentHoleValue\(hole: HoleScoreDetail \| undefined\)/)
   assert.match(tournamentScoreModal, /return hasSavedHoleScoreValue\(hole\)/)
   assert.match(tournamentScoreModal, /const savedHoleNumbers = new Set\(/)
-  assert.match(tournamentScoreModal, /for \(let holeNumber = 1; holeNumber <= 18; holeNumber \+= 1\)/)
+  assert.match(tournamentScoreModal, /for \(let holeNumber = 1; holeNumber <= holeLimit; holeNumber \+= 1\)/)
   assert.match(tournamentScoreModal, /if \(!savedHoleNumbers\.has\(holeNumber\)\) \{[\s\S]{0,180}return \{ hole: holeNumber, allHolesSaved: false/)
   assert.match(tournamentScoreModal, /return \{ hole: 1, allHolesSaved: true, savedHoleCount: savedHoleNumbers\.size \}/)
   assert.match(tournamentScoreModal, /const normalized = normalizeTournamentScorecard\(currentTeam\.holes, stateCode, course, teeColor\)/)
@@ -5246,7 +5251,7 @@ test('tournament host and organizer flows return friendly actionable validation 
 })
 
 
-test('tournament flyer removes registration helper text, shows start times before event metadata, and uses a 4-Person Scramble format placeholder', () => {
+test('tournament flyer removes registration helper text, shows start times before event metadata, and uses the configured players-per-team selector', () => {
   const portalPage = fs.readFileSync(new URL('../src/pages/TournamentPortal.tsx', import.meta.url), 'utf8')
   const templateFields = fs.readFileSync(new URL('../src/components/TournamentTemplateFields.tsx', import.meta.url), 'utf8')
 
@@ -5254,7 +5259,8 @@ test('tournament flyer removes registration helper text, shows start times befor
   const scheduleIndex = portalPage.indexOf('<TournamentTeamStartSchedule assignments=')
   const metadataIndex = portalPage.indexOf('<strong>Date:</strong>')
   assert.ok(scheduleIndex >= 0 && metadataIndex >= 0 && scheduleIndex < metadataIndex)
-  assert.match(templateFields, /type="text"[\s\S]{0,300}placeholder="4-Person Scramble"/)
+  assert.match(templateFields, /Players on a team/)
+  assert.match(templateFields, /\{size\} players per team/)
 })
 
 test('completed tournament public pages keep the flyer and final leaderboard while removing start times, metadata, and registration controls', () => {
@@ -5316,6 +5322,7 @@ test('shared tournament template sanitizer preserves completed tournament summar
   })
   assert.equal(sanitized.tournamentSummary, 'Team Fairway won by two strokes and the event raised $12,500.')
   assert.equal(sanitized.tournamentFormat, '4-Person Scramble')
+  assert.equal(sanitized.tournamentTeamSize, 4)
 
   const longSummary = `A${'b'.repeat(6000)}`
   assert.equal(sanitizeTournamentTemplateData({ tournamentSummary: longSummary }).tournamentSummary.length, 5000)

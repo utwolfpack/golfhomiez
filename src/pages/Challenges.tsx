@@ -601,6 +601,19 @@ export default function Challenges() {
     return Array.isArray(holes) && holes.length ? applyChallengeTeeColor(normalizeHoleScorecard(holes, getTeamChallengeStateCode(message), getTeamChallengeCourseName(message), selectedTeeColor), selectedTeeColor) : null
   }
 
+  function getTeamChallengeDisplayHoleCount(message: InboxMessage) {
+    const explicitScorecards = [
+      getStoredTeamChallengeHoles(message, 'proposer'),
+      getStoredTeamChallengeHoles(message, 'challenged'),
+      teamChallengeScorecards[getTeamChallengeScoreKey(message, 'proposer')] || null,
+      teamChallengeScorecards[getTeamChallengeScoreKey(message, 'challenged')] || null,
+    ].filter((holes): holes is HoleScoreDetail[] => Array.isArray(holes) && holes.length > 0)
+    const explicitLengths = explicitScorecards.map((holes) => Math.min(18, Math.max(0, holes.length)))
+    if (explicitLengths.some((length) => length > 9)) return 18
+    if (explicitLengths.some((length) => length === 9)) return 9
+    return 18
+  }
+
   function getProvidedHoleCount(holes: HoleScoreDetail[]) {
     return holes.filter((hole) => hole.scoreProvided).length
   }
@@ -614,8 +627,11 @@ export default function Challenges() {
   function getTeamChallengeHoles(message: InboxMessage, side: 'proposer' | 'challenged', preferCached = true) {
     const key = getTeamChallengeScoreKey(message, side)
     const selectedTeeColor = getTeamChallengeTeeColor(message)
-    if (preferCached && teamChallengeScorecards[key]) return applyChallengeTeeColor(teamChallengeScorecards[key], selectedTeeColor)
-    return getStoredTeamChallengeHoles(message, side) || buildClientDefaultHoleScorecard(getTeamChallengeStateCode(message), getTeamChallengeCourseName(message), selectedTeeColor)
+    const displayHoleCount = getTeamChallengeDisplayHoleCount(message)
+    const holes = preferCached && teamChallengeScorecards[key]
+      ? applyChallengeTeeColor(teamChallengeScorecards[key], selectedTeeColor)
+      : (getStoredTeamChallengeHoles(message, side) || buildClientDefaultHoleScorecard(getTeamChallengeStateCode(message), getTeamChallengeCourseName(message), selectedTeeColor))
+    return holes.slice(0, displayHoleCount)
   }
 
   function getTeamChallengeScore(message: InboxMessage, side: 'proposer' | 'challenged', preferCached = true) {
@@ -2249,7 +2265,7 @@ export default function Challenges() {
         </div>
         {leaderboardMode ? (
           <div className="inboxLeaderboardUpdated">
-            {pointSummary.completedHoles} of 18 holes have scores from both teams • Select a team name for its round summary
+            {pointSummary.completedHoles} of {holeNumbers.length} holes have scores from both teams • Select a team name for its round summary
           </div>
         ) : null}
       </div>
@@ -2424,6 +2440,7 @@ export default function Challenges() {
     const selectedSide = activeTeamLeaderboardSide
     const selectedTeamName = selectedSide ? getTeamChallengeDisplayName(message, selectedSide) : ''
     const selectedSummaryRows = selectedSide ? getTeamRoundSummaryRows(message, selectedSide) : []
+    const rankedTeams = getTeamChallengeLeaderboardRows(message)
 
     return (
       <div className="modalOverlay inboxLeaderboardModalOverlay" role="presentation" onClick={() => returnFromTeamChallengeLeaderboard('overlay')}>
@@ -2488,6 +2505,30 @@ export default function Challenges() {
             </div>
           ) : (
             <div className="inboxLeaderboardBoard inboxTeamChallengeHoleLeaderboardBoard">
+              <div className="inboxTeamRankings" role="table" aria-label="Team Challenge stack rank">
+                <div className="inboxLeaderboardHeaderRow inboxTeamRankingsHeader" role="row">
+                  <span>POS</span><span>TEAM</span><span>ROUND</span><span>THRU</span><span>TOTAL</span>
+                </div>
+                {rankedTeams.map((row) => (
+                  <button
+                    type="button"
+                    role="row"
+                    className="inboxLeaderboardRow inboxTeamRankingsRow"
+                    key={row.side}
+                    onClick={() => {
+                      logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_stack_rank_selected', data: { messageId: message.id, threadId: messageThreadId(message), side: row.side, teamName: row.teamName, position: row.position } })
+                      openTeamLeaderboardRoundSummary(message, row.side)
+                    }}
+                  >
+                    <strong>{row.position}</strong>
+                    <span className="inboxLeaderboardPlayer"><strong>{row.teamName}</strong><small>{row.pointsRelativeLabel}</small></span>
+                    <strong>{row.roundLabel}</strong>
+                    <strong>{row.thru || '—'}</strong>
+                    <strong>{row.totalLabel}</strong>
+                  </button>
+                ))}
+              </div>
+              <div className="inboxTeamComparisonHeading">Hole-by-hole comparison</div>
               {renderTeamChallengeSummaryView(message, {
                 showScorebar: false,
                 leaderboardMode: true,
@@ -2726,7 +2767,12 @@ export default function Challenges() {
                 <h3>{label}</h3>
                 {team?.members?.length ? (
                   <div className="teamChallengeMembersList">
-                    {team.members.map((member) => <div className="teamChallengeMemberRow" key={member.id || member.email}><strong>{teamMemberDisplayName(member)}</strong></div>)}
+                    {team.members.map((member) => (
+                      <div className="teamChallengeMemberRow" key={member.id || member.email}>
+                        <strong>{teamMemberDisplayName(member)}</strong>
+                        <span className="small">{member.email || 'Email not available'}</span>
+                      </div>
+                    ))}
                   </div>
                 ) : <div className="small">Team member information is not available.</div>}
               </section>

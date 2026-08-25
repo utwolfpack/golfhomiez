@@ -2966,6 +2966,29 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
   },
 
 
+  {
+    version: '20260824_078',
+    name: 'message_group_soft_delete',
+    filename: '20260824_078_message_group_soft_delete.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'message_groups', 'deleted_at') &&
+        await indexExists(db, 'message_groups', 'idx_message_groups_deleted_at')
+      )
+    },
+    async getSql(db) {
+      const statements = []
+      if (!(await columnExists(db, 'message_groups', 'deleted_at'))) {
+        statements.push('ALTER TABLE message_groups ADD COLUMN deleted_at DATETIME(6) NULL AFTER updated_at')
+      }
+      if (!(await indexExists(db, 'message_groups', 'idx_message_groups_deleted_at'))) {
+        statements.push('CREATE INDEX idx_message_groups_deleted_at ON message_groups (deleted_at)')
+      }
+      return statements.join(';\n')
+    },
+  },
+
+
 ]
 
 export function sortMigrations(migrations) {

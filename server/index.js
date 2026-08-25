@@ -29,7 +29,7 @@ import { buildOrganizerInviteDetails, createHostManagedTournament, createTournam
 import { findTournamentDateConflict, formatTournamentScheduleDate, normalizeTournamentScheduleDate } from './lib/tournament-schedule-conflicts.js'
 import { requestUserTimeZone } from './lib/time-zone.js'
 import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles, normalizeIndividualChallengeParticipantEmails, normalizeTeamChallengeScoringType, normalizeTeamChallengePointsPerHole, validateIndividualChallengeDateRange, validateOptionalChallengeState, validateOptionalChallengeCourse } from './lib/inbox-service.js'
-import { addMessageGroupMember, appendTournamentPortalMessage, createMessageGroup, createTournamentMessageThread, createTournamentNotification, getTournamentMessageConversationForUser, getUserNotificationSummary, listMessageGroups, listTournamentMessageThreads, loadUserNotificationPage, markTournamentMessagesRead, removeMessageGroupMember, sendMessageGroupMessage, setNotificationThreadState, startTournamentUserConversationFromNotification, validateNotificationMessageBody } from './lib/notification-service.js'
+import { addMessageGroupMember, appendTournamentPortalMessage, createMessageGroup, deleteMessageGroup, createTournamentMessageThread, createTournamentNotification, getTournamentMessageConversationForUser, getUserNotificationSummary, listMessageGroups, listTournamentMessageThreads, loadUserNotificationPage, markTournamentMessagesRead, removeMessageGroupMember, sendMessageGroupMessage, setNotificationThreadState, startTournamentUserConversationFromNotification, validateNotificationMessageBody } from './lib/notification-service.js'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './lib/tee-colors.js'
 import { getExternalApiCallSummary } from './lib/external-api-metrics.js'
 import { getFeatureFlags, featureFlagDefinitionsForApi, isFeatureEnabled } from './lib/feature-flags.js'
@@ -1095,11 +1095,23 @@ async function attachTournamentCapacityStats(pool, tournament, registrations = [
   return { ...tournament, ...stats, registrationCount: stats.registeredTeamCount }
 }
 
-function enforceTournamentTeamSize(members = []) {
-  if (![2, 4].includes(members.length)) throw new Error('Tournament teams must have exactly 2 or 4 players.')
+function getTournamentTeamSizeFromTemplateData(templateData = {}) {
+  const source = templateData && typeof templateData === 'object' ? templateData : {}
+  const configuredSize = Number(source.tournamentTeamSize)
+  if ([2, 3, 4].includes(configuredSize)) return configuredSize
+  const legacyMatch = String(source.tournamentFormat || '').match(/\b([234])\b/)
+  const legacySize = legacyMatch ? Number(legacyMatch[1]) : 4
+  return [2, 3, 4].includes(legacySize) ? legacySize : 4
 }
 
-async function resolveRegistrationTeam(pool, body = {}, user) {
+function enforceTournamentTeamSize(members = [], requiredTeamSize = 4) {
+  const normalizedRequiredTeamSize = [2, 3, 4].includes(Number(requiredTeamSize)) ? Number(requiredTeamSize) : 4
+  if (members.length !== normalizedRequiredTeamSize) {
+    throw new Error(`Tournament teams must have exactly ${normalizedRequiredTeamSize} players for this tournament.`)
+  }
+}
+
+async function resolveRegistrationTeam(pool, body = {}, user, requiredTeamSize = 4) {
   const requestedTeamId = String(body.teamId || '').trim()
   const requesterEmail = normalizeEmail(user?.email)
 
@@ -1108,7 +1120,7 @@ async function resolveRegistrationTeam(pool, body = {}, user) {
     if (!team) throw new Error('Selected team was not found.')
     const isMember = (team.members || []).some((member) => normalizeEmail(member.email) === requesterEmail)
     if (!isMember) throw new Error('You must be a member of an existing team to register it for a tournament.')
-    enforceTournamentTeamSize(team.members || [])
+    enforceTournamentTeamSize(team.members || [], requiredTeamSize)
     return { teamId: team.id, teamName: team.name, teamMembers: team.members || [] }
   }
 
@@ -1116,7 +1128,7 @@ async function resolveRegistrationTeam(pool, body = {}, user) {
   const rawMembers = Array.isArray(body.teamMembers) ? body.teamMembers : []
   if (!teamName) throw new Error('Team name is required for tournament registration.')
   const normalizedMembers = normalizeCreateTeamMembers(rawMembers, user)
-  enforceTournamentTeamSize(normalizedMembers)
+  enforceTournamentTeamSize(normalizedMembers, requiredTeamSize)
   for (const member of normalizedMembers) {
     if (!member.name) throw new Error('Each team member must have a name.')
     if (!isEmail(member.email)) throw new Error(`Invalid team member email: ${member.email}`)
@@ -3008,6 +3020,7 @@ app.post('/api/host/tournaments', hostAuthMiddleware, async (req, res) => {
       checkInTime: input.templateData?.checkInTime || null,
       teeTime: input.templateData?.teeTime || null,
       templateKey: tournament.templateKey || input.templateKey || 'classic-flyer',
+      tournamentTeamSize: getTournamentTeamSizeFromTemplateData(input.templateData),
       userTimeZone,
       storedStartDate: normalizeTournamentScheduleDate(tournament.startDate) || null,
     })
@@ -3060,7 +3073,7 @@ app.put('/api/host/tournaments/:id', hostAuthMiddleware, async (req, res) => {
       tournamentUrl: tournament.status === 'published' ? tournamentPortalUrl(req, tournament.tournamentIdentifier || tournament.id) : null,
     })
     logApi('golfhomiez_tournament_search_record_synced', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, ...searchRecord })
-    logApi('host_tournament_updated', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, userTimeZone, requestedStartDate: normalizeTournamentScheduleDate(input.startDate) || null, storedStartDate: normalizeTournamentScheduleDate(tournament.startDate) || null })
+    logApi('host_tournament_updated', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, tournamentTeamSize: getTournamentTeamSizeFromTemplateData(input.templateData), userTimeZone, requestedStartDate: normalizeTournamentScheduleDate(input.startDate) || null, storedStartDate: normalizeTournamentScheduleDate(tournament.startDate) || null })
     res.json(tournament)
   } catch (error) {
     if (error instanceof Error && /required|invalid|cannot be after|Restore the archived/i.test(error.message)) {
@@ -3337,7 +3350,7 @@ app.put('/api/organizer/tournaments/:id', requireStorage, organizerAuthMiddlewar
       tournamentUrl: tournament.status === 'published' ? tournamentPortalUrl(req, tournament.tournamentIdentifier || tournament.id) : null,
     })
     logApi('golfhomiez_tournament_search_record_synced', { ...context, tournamentId: tournament.id, status: tournament.status, organizerEmail: normalizeEmail(req.organizerUser?.email), ...searchRecord })
-    logApi('organizer_tournament_updated', { ...context, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, email: normalizeEmail(req.organizerUser?.email) })
+    logApi('organizer_tournament_updated', { ...context, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, tournamentTeamSize: getTournamentTeamSizeFromTemplateData(input.templateData), email: normalizeEmail(req.organizerUser?.email) })
     res.json(tournament)
   } catch (error) {
     if (error instanceof Error && /required|invalid|cannot be after|Restore the archived/i.test(error.message)) {
@@ -3777,7 +3790,9 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
       return res.status(409).json({ ok: false, alreadyRegistered: true, tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, status: 'registered', registration: existingRegistration, message: 'You are already registered for this tournament.' })
     }
 
-    const registrationTeam = await resolveRegistrationTeam(pool, req.body || {}, req.user)
+    const requiredTeamSize = getTournamentTeamSizeFromTemplateData(portal.tournament.templateData)
+    logApi('tournament_registration_team_size_checked', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, requiredTeamSize })
+    const registrationTeam = await resolveRegistrationTeam(pool, req.body || {}, req.user, requiredTeamSize)
     const teamAlreadyRegistered = await tournamentTeamAlreadyRegistered(pool, resolvedTournamentId, registrationTeam)
     if (!teamAlreadyRegistered && Number(portal.tournament.openTeamSlotCount ?? 0) <= 0) {
       logApi('tournament_registration_slots_full', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, registeredTeamCount: portal.tournament.registeredTeamCount, teamSlotLimit: portal.tournament.teamSlotLimit, teamId: registrationTeam.teamId || null })
@@ -3843,7 +3858,7 @@ app.post('/api/tournament-portals/:id/register', requireStorage, authMiddleware,
         registeredAt: memberEmail === registeredEmail ? new Date().toISOString() : null,
       }
     })
-    logApi('tournament_registration_completed', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, authUserId: req.user.id, email: registeredEmail, teamSlotLimit: portal.tournament.teamSlotLimit, teamAlreadyRegistered, registeredTeamCount: Number(portal.tournament.registeredTeamCount || 0) + (teamAlreadyRegistered ? 0 : 1), openTeamSlotCount: Math.max(Number(portal.tournament.openTeamSlotCount || 0) - (teamAlreadyRegistered ? 0 : 1), 0) })
+    logApi('tournament_registration_completed', { ...requestContext(req), tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, authUserId: req.user.id, email: registeredEmail, requiredTeamSize, teamSlotLimit: portal.tournament.teamSlotLimit, teamAlreadyRegistered, registeredTeamCount: Number(portal.tournament.registeredTeamCount || 0) + (teamAlreadyRegistered ? 0 : 1), openTeamSlotCount: Math.max(Number(portal.tournament.openTeamSlotCount || 0) - (teamAlreadyRegistered ? 0 : 1), 0) })
     res.status(201).json({ ok: true, tournamentId: resolvedTournamentId, requestedTournamentId: tournamentId, status: 'registered', teamAlreadyRegistered, registration: { id: registrationId, tournamentId: resolvedTournamentId, authUserId: req.user.id, email: registeredEmail, name: req.user.name || registeredEmail, status: 'registered', teamId: registrationTeam.teamId, teamName: registrationTeam.teamName, teamMembers: responseTeamMembers } })
   } catch (error) {
     if (error instanceof Error && /team|member|email|players|name|exists/i.test(error.message)) {
@@ -4806,6 +4821,18 @@ app.post('/api/message-groups', requireStorage, authMiddleware, async (req, res)
   }
 })
 
+app.delete('/api/message-groups/:id', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const result = await deleteMessageGroup(getPool(), req.params.id, req.user)
+    if (!result) return res.status(404).json({ message: 'Message group not found or you cannot manage it.' })
+    logApi('message_group_deleted', { ...requestContext(req), groupId: req.params.id, messagesPreserved: true })
+    res.json({ ok: true, deletedGroupId: String(req.params.id), messagesPreserved: true })
+  } catch (error) {
+    logRouteError('Message group delete error', req, error)
+    res.status(500).json({ message: 'Could not delete message group' })
+  }
+})
+
 app.post('/api/message-groups/:id/members', requireStorage, authMiddleware, async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email)
@@ -5552,8 +5579,10 @@ async function hydrateTeamMembersFromDirectory(normalizedMembers, req, actionNam
     const found = await storage.findUserByEmail(member.email)
     if (!found) {
       const status = normalizeTeamMemberStatus(member.status || 'invited', false)
-      logApi(`${actionName}_member_directory_miss`, { ...requestContext(req), memberEmail: member.email, status })
-      hydrated.push({ ...member, name: fallbackName, status, verified: false })
+      const manualName = splitName(String(member.name || ''), '')
+      const missingRequiredName = !manualName.firstName || !manualName.lastName
+      logApi(`${actionName}_member_directory_miss`, { ...requestContext(req), memberEmail: member.email, status, missingRequiredName })
+      hydrated.push({ ...member, name: String(member.name || '').replace(/\s+/g, ' ').trim(), status, verified: false, _missingRequiredName: missingRequiredName })
       continue
     }
     const parts = splitName(found.name, found.email)
@@ -5619,6 +5648,12 @@ app.post('/api/teams', requireStorage, authMiddleware, async (req, res) => {
 
     let normalizedMembers = normalizeCreateTeamMembers(members, req.user)
     normalizedMembers = await hydrateTeamMembersFromDirectory(normalizedMembers, req, 'team_create')
+    const unnamedInvitedMember = normalizedMembers.find((member) => member._missingRequiredName)
+    if (unnamedInvitedMember) {
+      logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'invited_member_first_last_name_required', memberEmail: unnamedInvitedMember.email })
+      return res.status(400).json({ message: 'First name and last name are required for team members who do not have a GolfHomiez account.' })
+    }
+    normalizedMembers = normalizedMembers.map(({ _missingRequiredName, ...member }) => member)
 
     if (!normalizedMembers[0]?.email) {
       logApi('team_create_validation_failed', { ...requestContext(req), teamName: trimmed, reason: 'missing_signed_in_email' })
@@ -5698,6 +5733,12 @@ app.put('/api/teams/:id', requireStorage, authMiddleware, async (req, res) => {
 
     let normalizedMembers = normalizeCreateTeamMembers(members, req.user)
     normalizedMembers = await hydrateTeamMembersFromDirectory(normalizedMembers, req, 'team_update')
+    const unnamedInvitedMember = normalizedMembers.find((member) => member._missingRequiredName)
+    if (unnamedInvitedMember) {
+      logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'invited_member_first_last_name_required', memberEmail: unnamedInvitedMember.email })
+      return res.status(400).json({ message: 'First name and last name are required for team members who do not have a GolfHomiez account.' })
+    }
+    normalizedMembers = normalizedMembers.map(({ _missingRequiredName, ...member }) => member)
 
     if (!normalizedMembers[0]?.email) {
       logApi('team_update_validation_failed', { ...requestContext(req), teamId: id, teamName: trimmed, reason: 'missing_signed_in_email' })

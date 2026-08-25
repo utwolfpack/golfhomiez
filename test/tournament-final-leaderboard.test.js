@@ -48,3 +48,22 @@ test('final tournament leaderboard supports name-keyed registrations and partial
   ])
   assert.equal(rows[0].thru, 2)
 })
+
+
+test('final tournament leaderboard includes unique registered team member names for flyer display', () => {
+  const rows = buildTournamentFinalLeaderboardRows([
+    {
+      id: 'reg-roster',
+      teamId: 'roster-team',
+      teamName: 'Roster Team',
+      teamMembers: [
+        { name: 'Alex Golfer', email: 'alex@example.com' },
+        { name: 'Blake Golfer', email: 'blake@example.com' },
+        { name: 'Alex Golfer', email: 'alex2@example.com' },
+        { name: '', email: 'unnamed@example.com' },
+      ],
+    },
+  ], [])
+
+  assert.deepEqual(rows[0].teamMemberNames, ['Alex Golfer', 'Blake Golfer'])
+})

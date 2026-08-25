@@ -133,6 +133,14 @@ export async function createMessageGroup(input: { name: string; memberEmails: st
   return result
 }
 
+export async function deleteMessageGroup(groupId: string): Promise<{ ok: boolean; deletedGroupId: string; messagesPreserved: boolean }> {
+  const result = await api<{ ok: boolean; deletedGroupId: string; messagesPreserved: boolean }>(`/api/message-groups/${encodeURIComponent(groupId)}`, {
+    method: 'DELETE',
+  })
+  notifyNotificationsChanged()
+  return result
+}
+
 export async function addMessageGroupMember(groupId: string, email: string): Promise<{ group: MessageGroup | null }> {
   const result = await api<{ group: MessageGroup | null }>(`/api/message-groups/${encodeURIComponent(groupId)}/members`, {
     method: 'POST',

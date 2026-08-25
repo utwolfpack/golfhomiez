@@ -281,6 +281,8 @@ export default function Home() {
     })
   }
 
+  const hasActiveScoreFilters = stateFilter !== 'all' || courseFilter !== 'all' || teamFilter !== 'all'
+
   function clearFilters() {
     setStateFilter('all')
     setCourseFilter('all')
@@ -376,7 +378,7 @@ export default function Home() {
             </>
           ) : null}
           <div className="scoreFilterActions">
-            <button type="button" className="scoreFiltersClear" onClick={clearFilters}>Clear filters</button>
+            {hasActiveScoreFilters ? <button type="button" className="scoreFiltersClear" onClick={clearFilters}>Clear filters</button> : null}
             <button type="button" className="scoreFiltersToggle" onClick={toggleFilters} aria-expanded={showFilters}>{showFilters ? 'Hide filters' : 'Show filters'}</button>
           </div>
         </div>

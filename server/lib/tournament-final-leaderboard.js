@@ -6,6 +6,21 @@ function normalizeTeamKey(registration = {}) {
   return `registration:${registration.id}`
 }
 
+
+function normalizeTeamMemberNames(registration = {}) {
+  const names = []
+  const seen = new Set()
+  for (const member of Array.isArray(registration.teamMembers || registration.team_members) ? (registration.teamMembers || registration.team_members) : []) {
+    const name = String(member?.name || '').replace(/\s+/g, ' ').trim()
+    if (!name) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    names.push(name)
+  }
+  return names
+}
+
 function parseScoreHoles(value) {
   if (!value) return []
   try {
@@ -83,6 +98,7 @@ export function buildTournamentFinalLeaderboardRows(registrations = [], scoreRow
       teamKey,
       teamId: registration.teamId || registration.team_id || score?.teamId || null,
       teamName: String(registration.teamName || registration.team_name || score?.teamName || registration.name || '').trim() || 'Tournament team',
+      teamMemberNames: normalizeTeamMemberNames(registration),
       totalScore: score?.totalScore ?? null,
       relativeToPar: score?.relativeToPar ?? null,
       roundLabel: score?.roundLabel || '—',

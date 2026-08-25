@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { fetchMyTeams, fetchTournamentPortal, registerForTournament, type TournamentFinalLeaderboardRow, type TournamentPortal as TournamentPortalData, type TournamentStartAssignment } from '../lib/accounts'
 import type { Team } from '../types'
 import { formatFriendlyDate } from '../lib/time-format'
-import { DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, getTournamentTemplate, emptyTournamentTemplateData, type TournamentTemplateData, type TournamentAttributeIconKey } from '../lib/tournament-templates'
+import { DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, getTournamentTemplate, emptyTournamentTemplateData, getTournamentTeamSize, type TournamentTemplateData, type TournamentAttributeIconKey } from '../lib/tournament-templates'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import { getTournamentQrCodeUrl } from '../lib/tournament-qr'
 import golfHomiezEmblemUrl from '../assets/GolfHomiezEmblem.png'
@@ -67,7 +67,7 @@ const ATTRIBUTE_ROWS: Array<{ key: TournamentAttributeIconKey; label: string; va
   { key: 'teeTime', label: 'Tee time', value: (_tournament, templateData) => templateData.teeTime || 'To be announced' },
   { key: 'course', label: 'Course / Venue', value: (tournament) => tournament.hostGolfCourseName || 'To be announced' },
   { key: 'location', label: 'Location', value: (tournament, templateData) => templateData.locationAddress || tournament.hostGolfCourseAddress || tournament.hostGolfCourseName || 'To be announced' },
-  { key: 'format', label: 'Format', value: (_tournament, templateData) => templateData.tournamentFormat || 'To be announced' },
+  { key: 'format', label: 'Players / team', value: (_tournament, templateData) => `${getTournamentTeamSize(templateData)} players` },
   { key: 'registrationFee', label: 'Registration Fee', value: (_tournament, templateData) => templateData.entryFee || 'To be announced' },
 ]
 
@@ -517,7 +517,10 @@ function TournamentFinalLeaderboard({ rows }: { rows: TournamentFinalLeaderboard
           <Fragment key={row.teamKey}>
             <div className={`tournament-final-leaderboard-row ${row.position <= 3 ? `tournament-final-leaderboard-row--top${row.position}` : ''}`} role="row">
               <strong className="tournament-final-leaderboard-position">{row.position}</strong>
-              <strong className="tournament-final-leaderboard-team">{row.teamName}</strong>
+              <div className="tournament-final-leaderboard-team">
+                <strong>{row.teamName}</strong>
+                {row.teamMemberNames?.length ? <span className="tournament-final-leaderboard-team-members">{row.teamMemberNames.join(' · ')}</span> : null}
+              </div>
               <span>{row.roundLabel || '—'}</span>
               <strong>{row.totalScore == null ? '—' : row.totalScore}</strong>
               <span className="small">{row.holesCompleted >= 18 ? 'Final' : row.holesCompleted > 0 ? `${row.holesCompleted} holes` : 'No score'}</span>
@@ -690,6 +693,9 @@ export default function TournamentPortal() {
   const [selectedTeamId, setSelectedTeamId] = useState('')
   const [newTeamName, setNewTeamName] = useState('')
   const [newTeamMembers, setNewTeamMembers] = useState<Array<{ id: string; name: string; email: string }>>([])
+  const requiredTeamSize = getTournamentTeamSize(portal?.tournament?.templateData)
+  const requiredTeammateCount = Math.max(1, requiredTeamSize - 1)
+  const eligibleTeams = useMemo(() => teams.filter((team) => (team.members?.length || 0) === requiredTeamSize), [teams, requiredTeamSize])
 
   useEffect(() => {
     let active = true
@@ -722,8 +728,8 @@ export default function TournamentPortal() {
       try {
         const result = await fetchMyTeams()
         if (!active) return
-        setTeams(result.filter((team) => [2, 4].includes(team.members?.length || 0)))
-        if (result[0]?.id) setSelectedTeamId(result[0].id)
+        setTeams(result)
+        logFrontendEvent({ category: 'tournament.portal', message: 'team_options_loaded', data: { tournamentId: id, teamCount: result.length } })
       } catch (err) {
         logFrontendEvent({ category: 'tournament.portal', level: 'warn', message: 'team_options_load_failed', data: { tournamentId: id, error: err instanceof Error ? err.message : String(err) } })
       }
@@ -731,12 +737,26 @@ export default function TournamentPortal() {
     return () => { active = false }
   }, [id, user])
 
+  useEffect(() => {
+    setSelectedTeamId((current) => eligibleTeams.some((team) => team.id === current) ? current : (eligibleTeams[0]?.id || ''))
+  }, [eligibleTeams])
+
+  useEffect(() => {
+    setNewTeamMembers((current) => Array.from({ length: requiredTeammateCount }, (_, index) => (
+      current[index] || { id: crypto.randomUUID(), name: '', email: '' }
+    )))
+    logFrontendEvent({ category: 'tournament.portal', message: 'registration_team_size_applied', data: { tournamentId: id, requiredTeamSize, requiredTeammateCount } })
+  }, [id, requiredTeamSize, requiredTeammateCount])
+
   const registrationClosed = useMemo(() => {
     const status = portal?.tournament.status
     return status === 'cancelled' || status === 'completed'
   }, [portal?.tournament.status])
 
   const slotsFull = useMemo(() => getTournamentCapacityStats(portal).openTeamSlotCount <= 0, [portal])
+  const registrationTeamReady = teamMode === 'existing'
+    ? Boolean(selectedTeamId && eligibleTeams.some((team) => team.id === selectedTeamId))
+    : Boolean(newTeamName.trim() && newTeamMembers.length === requiredTeammateCount && newTeamMembers.every((member) => member.name.trim() && member.email.trim()))
 
   async function onRegister() {
     if (!id) return
@@ -744,6 +764,15 @@ export default function TournamentPortal() {
       const returnTo = `/tournaments/${encodeURIComponent(id)}`
       logFrontendEvent({ category: 'tournament.portal', message: 'registration_requires_account', data: { tournamentId: id, returnTo } })
       navigate(`/register?returnTo=${encodeURIComponent(returnTo)}`)
+      return
+    }
+
+    if (!registrationTeamReady) {
+      const message = teamMode === 'existing'
+        ? `Select one of your ${requiredTeamSize}-player teams.`
+        : `Enter a team name and exactly ${requiredTeammateCount} teammate${requiredTeammateCount === 1 ? '' : 's'} so the team has ${requiredTeamSize} players including you.`
+      setError(message)
+      logFrontendEvent({ category: 'tournament.portal', level: 'warn', message: 'registration_team_size_validation_failed', data: { tournamentId: id, requiredTeamSize, teamMode, selectedTeamId: selectedTeamId || null, teammateCount: newTeamMembers.length } })
       return
     }
 
@@ -771,7 +800,7 @@ export default function TournamentPortal() {
           },
         }
       })
-      logFrontendEvent({ category: 'tournament.portal', message: 'registration_completed', data: { tournamentId: id, alreadyRegistered: Boolean(result.alreadyRegistered), teamAlreadyRegistered: Boolean(result.teamAlreadyRegistered) } })
+      logFrontendEvent({ category: 'tournament.portal', message: 'registration_completed', data: { tournamentId: id, requiredTeamSize, alreadyRegistered: Boolean(result.alreadyRegistered), teamAlreadyRegistered: Boolean(result.teamAlreadyRegistered) } })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not register for tournament.'
       setError(message)
@@ -835,8 +864,9 @@ export default function TournamentPortal() {
                             <label className="label">Team</label>
                             <select className="input" value={selectedTeamId} onChange={(e) => setSelectedTeamId(e.target.value)}>
                               <option value="">Select one of your teams</option>
-                              {teams.map((team) => <option key={team.id} value={team.id}>{team.name} ({team.members?.length || 0} players)</option>)}
+                              {eligibleTeams.map((team) => <option key={team.id} value={team.id}>{team.name} ({team.members?.length || 0} players)</option>)}
                             </select>
+                            {eligibleTeams.length === 0 ? <div className="small" style={{ marginTop: 6 }}>You do not currently have a {requiredTeamSize}-player team. Choose New team to create one for this tournament.</div> : null}
                           </div>
                         ) : (
                           <div className="formStack">
@@ -844,15 +874,13 @@ export default function TournamentPortal() {
                               <label className="label">Team name</label>
                               <input className="input" value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="Team name" />
                             </div>
-                            <div className="small">Add 1 or 3 teammates. You are automatically included, so tournament teams must total exactly 2 or 4 players.</div>
+                            <div className="small">This tournament requires exactly {requiredTeamSize} players per team. You are included automatically; enter {requiredTeammateCount} teammate{requiredTeammateCount === 1 ? '' : 's'} below.</div>
                             {newTeamMembers.map((member, index) => (
-                              <div key={member.id} className="grid tournament-registration-member-row" style={{ gridTemplateColumns: '1fr 1fr auto', gap: 8 }}>
+                              <div key={member.id} className="grid tournament-registration-member-row" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                                 <input className="input" value={member.name} onChange={(e) => setNewTeamMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, name: e.target.value } : item))} placeholder={`Teammate ${index + 1} name`} />
-                                <input className="input" value={member.email} onChange={(e) => setNewTeamMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, email: e.target.value } : item))} placeholder="email@example.com" />
-                                <button type="button" className="btn" onClick={() => setNewTeamMembers((prev) => prev.filter((item) => item.id !== member.id))}>Remove</button>
+                                <input className="input" type="email" value={member.email} onChange={(e) => setNewTeamMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, email: e.target.value } : item))} placeholder="email@example.com" />
                               </div>
                             ))}
-                            {newTeamMembers.length < 3 ? <button type="button" className="btn" onClick={() => setNewTeamMembers((prev) => [...prev, { id: crypto.randomUUID(), name: '', email: '' }])}>+ Add teammate</button> : null}
                           </div>
                         )}
                       </div>
@@ -862,7 +890,7 @@ export default function TournamentPortal() {
                     ) : slotsFull ? (
                       <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>Tournament team slots are full.</div>
                     ) : (
-                      <button className="btn btnPrimary" type="button" disabled={registering || registrationClosed || authLoading || slotsFull} onClick={onRegister}>
+                      <button className="btn btnPrimary" type="button" disabled={registering || registrationClosed || authLoading || slotsFull || (Boolean(user) && !registrationTeamReady)} onClick={onRegister}>
                         {registering ? 'Registering…' : user ? 'Register for tournament team' : 'Create account to register'}
                       </button>
                     )}
