@@ -1,8 +1,10 @@
 import { FormEvent, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import { resetOrganizerPassword } from '../lib/organizer-auth'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { assertPasswordPolicy } from '../lib/password-policy'
 
 export default function OrganizerResetPassword() {
   const [params] = useSearchParams()
@@ -21,7 +23,7 @@ export default function OrganizerResetPassword() {
     setMessage(null)
     try {
       if (!token) throw new Error('Reset token missing from the URL')
-      if (password.length < 8) throw new Error('Password must be at least 8 characters')
+      assertPasswordPolicy(password)
       if (password !== confirmPassword) throw new Error('Passwords do not match')
       logFrontendEvent({ category: 'organizer.password_reset', message: 'organizer_password_reset_submit_started', data: { hasToken: Boolean(token) } })
       const result = await resetOrganizerPassword(token, password)
@@ -45,11 +47,12 @@ export default function OrganizerResetPassword() {
         <form onSubmit={onSubmit} className="formStack" style={{ maxWidth: 560 }}>
           <div>
             <label className="label">New password</label>
-            <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a new organizer password" required minLength={8} />
+            <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a new organizer password" required minLength={10} />
+            <PasswordCriteria password={password} />
           </div>
           <div>
             <label className="label">Confirm password</label>
-            <input className="input" type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter the organizer password" required minLength={8} />
+            <input className="input" type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter the organizer password" required minLength={10} />
           </div>
           {message ? <div className="small" style={{ color: '#166534' }}>{message}</div> : null}
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}

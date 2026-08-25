@@ -1,8 +1,10 @@
 import { betterAuth } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { getPool } from './db.js'
 import { setLatestPasswordReset, setLatestVerificationLink } from './auth-debug.js'
 import { sendMail } from './mailer.js'
 import { logApi, logError } from './lib/logger.js'
+import { PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE, getPasswordPolicyFailures } from './lib/password-policy.js'
 
 const authSecret = process.env.BETTER_AUTH_SECRET || 'dev-only-secret-change-me-1234567890123456'
 
@@ -26,6 +28,7 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
+    minPasswordLength: PASSWORD_MIN_LENGTH,
     sendResetPassword: async ({ user, url, token }, request) => {
       const expiresAt = request?.body?.expiresAt || null
       setLatestPasswordReset({
@@ -51,6 +54,26 @@ export const auth = betterAuth({
       })
       console.log(`[better-auth] password reset email sent to ${user.email}`)
     },
+  },
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      const password = ctx.path === '/sign-up/email'
+        ? ctx.body?.password
+        : ['/reset-password', '/change-password'].includes(ctx.path)
+          ? ctx.body?.newPassword
+          : null
+
+      if (password == null) return
+      const failures = getPasswordPolicyFailures(password)
+      if (!failures.length) return
+
+      logApi('auth_password_policy_rejected', {
+        correlationId: ctx.request?.headers?.get?.('x-correlation-id') || null,
+        path: ctx.path,
+        failures,
+      })
+      throw new APIError('BAD_REQUEST', { message: PASSWORD_POLICY_MESSAGE })
+    }),
   },
   emailVerification: {
     sendOnSignUp: true,

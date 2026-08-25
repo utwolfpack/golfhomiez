@@ -4,6 +4,7 @@ import { sendMail } from '../mailer.js'
 import { normalizeEmail, isEmail } from './team-utils.js'
 import { ensureHostAuthSchema } from './host-auth.js'
 import { createGolfCoursePublicPageForApprovedHost } from './golf-course-public-pages.js'
+import { assertPasswordPolicy } from './password-policy.js'
 
 const ADMIN_COOKIE = 'golf_admin_session'
 export const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24
@@ -562,7 +563,7 @@ export async function createAdminUser({ username, email, password }) {
   const normalized = normalizeEmail(email)
   if (!normalizedUsername) throw new Error('Username is required.')
   if (!isEmail(normalized)) throw new Error('A valid email is required.')
-  if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
+  assertPasswordPolicy(password)
   const id = crypto.randomUUID().replace(/-/g, '')
   const { salt, hash } = createPasswordRecord(password)
   await pool().execute(
@@ -625,6 +626,7 @@ export async function createAdminResetToken(adminUserId) {
 
 export async function consumeAdminResetToken(rawToken, nextPassword) {
   await ensureAdminPortalSchema()
+  assertPasswordPolicy(nextPassword)
   const tokenHash = sha256(rawToken)
   const [rows] = await pool().execute(
     `SELECT id, admin_user_id
@@ -663,7 +665,7 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
   if (!normalizedStateName) throw new Error('State is required.')
   if (!normalizedGolfCourseName) throw new Error('Golf course is required.')
   if (!normalizedRepresentativeDetails) throw new Error('Representative details are required.')
-  if (normalizedPassword.length < 8) throw new Error('Password must be at least 8 characters.')
+  assertPasswordPolicy(normalizedPassword)
 
   const id = crypto.randomUUID().replace(/-/g, '')
   const requestColumns = await getTableColumns('host_account_requests')

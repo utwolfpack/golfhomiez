@@ -1632,7 +1632,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -2004,9 +2004,9 @@ test('host auth flow keeps request-based host access and removes host invite red
   assert.doesNotMatch(hostRegister, /Public sign-up for golf-course admins\./)
   assert.match(hostRedeem, /Host invites have been retired/)
   assert.doesNotMatch(hostRedeem, /Security key/)
-  assert.match(hostLogin, /Sign in to your host portal/)
+  assert.match(hostLogin, /Sign in to your golf course portal/)
   assert.doesNotMatch(hostLogin, /to="\/host\/redeem"/)
-  assert.match(hostLogin, /Forgot host password\?/)
+  assert.match(hostLogin, /Forgot golf course password\?/)
   assert.match(hostReset, /Finish your golf-course password reset/)
 })
 

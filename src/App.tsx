@@ -9,6 +9,7 @@ import AdminPortal from './pages/AdminPortal'
 import AdminScheduledJobs from './pages/AdminScheduledJobs'
 import AdminResetPassword from './pages/AdminResetPassword'
 import Home from './pages/Home'
+import { GolfHomiezCourseVideos, GolfHomiezVideos } from './pages/MarketingVideos'
 import Login from './pages/Login'
 const Register = lazy(() => import('./pages/Register'))
 import SoloLogger from './pages/SoloLogger'
@@ -135,6 +136,8 @@ export default function App() {
             <NavBar />
             <Routes>
               <Route path="/" element={<Home />} />
+              <Route path="/golfhomiezvideos" element={<GolfHomiezVideos />} />
+              <Route path="/golfhomiezcoursevideos" element={<GolfHomiezCourseVideos />} />
               <Route path="/solo-logger" element={<ProtectedRoute><SoloLogger /></ProtectedRoute>} />
               <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />

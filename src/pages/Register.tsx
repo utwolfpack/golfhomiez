@@ -2,7 +2,9 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { assertPasswordPolicy } from '../lib/password-policy'
 
 export default function Register() {
   const [params] = useSearchParams()
@@ -29,7 +31,7 @@ export default function Register() {
       const trimmedLastName = lastName.trim()
       if (!trimmedFirstName) throw new Error('First name is required')
       if (!trimmedLastName) throw new Error('Last name is required')
-      if (password.length < 8) throw new Error('Password must be at least 8 characters')
+      assertPasswordPolicy(password)
       if (password !== confirmPassword) throw new Error('Passwords do not match')
       logFrontendEvent({ category: 'auth.register', message: 'register_submit_started', data: { email: email.trim().toLowerCase(), locationDeferredToProfile: true } })
       const result = await register(trimmedFirstName, trimmedLastName, email.trim(), password)
@@ -72,12 +74,13 @@ export default function Register() {
 
           <div>
             <label className="label">Password</label>
-            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Create a password" autoComplete="new-password" />
+            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Create a password" autoComplete="new-password" minLength={10} />
+            <PasswordCriteria password={password} />
           </div>
 
           <div>
             <label className="label">Confirm password</label>
-            <input className="input" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" autoComplete="new-password" />
+            <input className="input" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" autoComplete="new-password" minLength={10} />
           </div>
 
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}

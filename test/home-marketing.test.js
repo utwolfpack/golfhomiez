@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
-import { extractYouTubeVideoId, validateYouTubeUrl } from '../server/lib/marketing-settings.js'
+import { extractYouTubeVideoId, marketingVideoSectionRelativeLink, normalizeMarketingVideoAudience, slugifyMarketingVideoSection, validateYouTubeUrl } from '../server/lib/marketing-settings.js'
 import { APP_MIGRATIONS } from '../server/migrations/index.js'
 
 test('home presents only the mission and two responsive YouTube commercial sections', async () => {
@@ -16,6 +16,9 @@ test('home presents only the mission and two responsive YouTube commercial secti
   assert.doesNotMatch(home, /Fairways, Friends & Scorecards/)
   assert.match(home, /title="Golf Homiez"/)
   assert.match(home, /title="Golf Homiez Courses"/)
+  assert.match(home, /pagePath="\/golfhomiezvideos"/)
+  assert.match(home, /pagePath="\/golfhomiezcoursevideos"/)
+  assert.match(home, /homeVideoSectionTitleLink/)
   const missionPosition = home.indexOf('className="bannerCard homeMissionBanner"')
   const golferVideoPosition = home.indexOf('title="Golf Homiez"')
   const courseVideoPosition = home.indexOf('title="Golf Homiez Courses"')
@@ -98,4 +101,75 @@ test('homepage demo statistics assets and seeded records are retired through mig
   assert.equal(packageJson.scripts['seed:homepage-demo'], undefined)
   assert.equal(existsSync(new URL('../server/scripts/seed-homepage-demo.js', import.meta.url)), false)
   assert.equal(existsSync(new URL('../src/lib/dashboardSample.ts', import.meta.url)), false)
+})
+
+
+test('GolfHomiez video library pages and direct helper links are wired into the application', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const videosPage = await readFile(new URL('../src/pages/MarketingVideos.tsx', import.meta.url), 'utf8')
+  const marketingClient = await readFile(new URL('../src/lib/marketing.ts', import.meta.url), 'utf8')
+  const server = await readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  const css = await readFile(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(app, /path="\/golfhomiezvideos"/)
+  assert.match(app, /path="\/golfhomiezcoursevideos"/)
+  assert.match(videosPage, /Golf Homiez Videos/)
+  assert.match(videosPage, /Golf Homiez Course Videos/)
+  assert.match(videosPage, /section\.relativeLink/)
+  assert.match(videosPage, /helper_video_deep_link_opened/)
+  assert.match(videosPage, /scrollIntoView/)
+  assert.match(marketingClient, /\/api\/marketing\/videos\?audience=/)
+  assert.match(server, /app\.get\('\/api\/marketing\/videos'/)
+  assert.match(css, /\.marketingVideoLibrarySection\{[\s\S]*scroll-margin-top:/)
+  assert.match(css, /\.marketingVideoLibraryFrameWrap--short\{[\s\S]*aspect-ratio:9 \/ 16/)
+})
+
+test('admin Marketing page can add and delete helper video sections with generated relative links', async () => {
+  const adminPortal = await readFile(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8')
+  const marketingClient = await readFile(new URL('../src/lib/marketing.ts', import.meta.url), 'utf8')
+  const server = await readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(adminPortal, /Helper video sections/)
+  assert.match(adminPortal, /Golf Homiez Users/)
+  assert.match(adminPortal, /Golf Homiez Courses/)
+  assert.match(adminPortal, /Section name/)
+  assert.match(adminPortal, /Add video section/)
+  assert.match(adminPortal, /onDeleteMarketingSection/)
+  assert.match(adminPortal, /section\.relativeLink/)
+  assert.match(marketingClient, /createAdminMarketingVideoSection/)
+  assert.match(marketingClient, /deleteAdminMarketingVideoSection/)
+  assert.match(server, /app\.get\('\/api\/admin\/marketing\/videos', adminMiddleware/)
+  assert.match(server, /app\.post\('\/api\/admin\/marketing\/videos', adminMiddleware/)
+  assert.match(server, /app\.delete\('\/api\/admin\/marketing\/videos\/:sectionId', adminMiddleware/)
+  assert.match(server, /admin_marketing_video_section_created/)
+  assert.match(server, /admin_marketing_video_section_deleted/)
+})
+
+test('marketing helper section utilities generate stable page anchors and accept YouTube Shorts', () => {
+  assert.equal(extractYouTubeVideoId('https://www.youtube.com/shorts/Tj2D1R2rsSU?feature=share'), 'Tj2D1R2rsSU')
+  assert.equal(normalizeMarketingVideoAudience('golf_homiez'), 'golf_homiez')
+  assert.equal(normalizeMarketingVideoAudience('golf_homiez_courses'), 'golf_homiez_courses')
+  assert.throws(() => normalizeMarketingVideoAudience('other'), /Video page must be/)
+  assert.equal(slugifyMarketingVideoSection('Create a Golf Homiez Account'), 'create-a-golf-homiez-account')
+  assert.equal(marketingVideoSectionRelativeLink('golf_homiez', 'create-a-challenge'), '/golfhomiezvideos#create-a-challenge')
+  assert.equal(marketingVideoSectionRelativeLink('golf_homiez_courses', 'create-a-tournament'), '/golfhomiezcoursevideos#create-a-tournament')
+})
+
+test('marketing video section migration seeds all requested user and course helper videos', async () => {
+  const migration = APP_MIGRATIONS.find((entry) => entry.version === '20260825_081')
+  const sql = await readFile(new URL('../migration_scripts/20260825_081_marketing_video_sections.sql', import.meta.url), 'utf8')
+
+  assert.ok(migration)
+  assert.equal(migration.name, 'marketing_video_sections')
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS marketing_video_sections/)
+  assert.match(sql, /Create a Golf Homiez Account/)
+  assert.match(sql, /Create a team and register for a tournament/)
+  assert.match(sql, /Create a challenge/)
+  assert.match(sql, /Log a round/)
+  assert.match(sql, /Manage Your Golf Homiez Website/)
+  assert.match(sql, /Create a Tournament/)
+  assert.match(sql, /Manage your Golf Homiez Golf Course Account/)
+  assert.match(sql, /Tj2D1R2rsSU/)
+  assert.match(sql, /correlation_id VARCHAR\(191\)/)
+  assert.match(sql, /uq_marketing_video_sections_audience_slug/)
 })

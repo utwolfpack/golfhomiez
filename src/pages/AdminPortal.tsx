@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import {
   approveHostAccountRequest,
   createAdminAccount,
@@ -17,7 +18,8 @@ import { useAdminAuth } from '../context/AdminAuthContext'
 import { formatFriendlyDateTime } from '../lib/time-format'
 import { getUserTodayISO } from '../lib/date'
 import { logFrontendEvent } from '../lib/frontend-logger'
-import { DEFAULT_HOME_MARKETING_SETTINGS, fetchAdminHomeMarketingSettings, saveAdminHomeMarketingSettings, type HomeMarketingSettings } from '../lib/marketing'
+import { createAdminMarketingVideoSection, DEFAULT_HOME_MARKETING_SETTINGS, deleteAdminMarketingVideoSection, fetchAdminHomeMarketingSettings, fetchAdminMarketingVideoSections, MARKETING_VIDEO_AUDIENCES, saveAdminHomeMarketingSettings, type CreateMarketingVideoSectionInput, type HomeMarketingSettings, type MarketingVideoSection } from '../lib/marketing'
+import { assertPasswordPolicy } from '../lib/password-policy'
 
 type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
 type RowRecord = Record<string, unknown>
@@ -581,7 +583,11 @@ function AdminDashboardSection({
               <form className="formStack" onSubmit={onCreateAdmin}>
                 <div><label className="label">Username</label><input className="input" value={newAdminForm.username} onChange={(e) => setNewAdminForm((state) => ({ ...state, username: e.target.value }))} /></div>
                 <div><label className="label">Email</label><input className="input" type="email" value={newAdminForm.email} onChange={(e) => setNewAdminForm((state) => ({ ...state, email: e.target.value }))} /></div>
-                <div><label className="label">Password</label><input className="input" type="password" value={newAdminForm.password} onChange={(e) => setNewAdminForm((state) => ({ ...state, password: e.target.value }))} /></div>
+                <div>
+                  <label className="label">Password</label>
+                  <input className="input" type="password" minLength={10} autoComplete="new-password" value={newAdminForm.password} onChange={(e) => setNewAdminForm((state) => ({ ...state, password: e.target.value }))} />
+                  <PasswordCriteria password={newAdminForm.password} />
+                </div>
                 <button className="btnPrimary" type="submit">Create admin user</button>
               </form>
             </FormCard>
@@ -651,22 +657,81 @@ function MarketingDashboardSection({
   form,
   loading,
   saving,
+  sections,
+  sectionForm,
+  sectionSaving,
+  deletingSectionId,
   onChange,
   onSave,
+  onSectionFormChange,
+  onAddSection,
+  onDeleteSection,
 }: {
   form: HomeMarketingSettings
   loading: boolean
   saving: boolean
+  sections: MarketingVideoSection[]
+  sectionForm: CreateMarketingVideoSectionInput
+  sectionSaving: boolean
+  deletingSectionId: string | null
   onChange: (next: HomeMarketingSettings) => void
   onSave: (event: FormEvent) => void
+  onSectionFormChange: (next: CreateMarketingVideoSectionInput) => void
+  onAddSection: (event: FormEvent) => void
+  onDeleteSection: (section: MarketingVideoSection) => void
 }) {
+  const userSections = sections.filter((section) => section.audience === MARKETING_VIDEO_AUDIENCES.golfHomiez)
+  const courseSections = sections.filter((section) => section.audience === MARKETING_VIDEO_AUDIENCES.golfHomiezCourses)
+
+  function renderSectionList(title: string, pagePath: string, pageSections: MarketingVideoSection[]) {
+    return (
+      <section className="adminMarketingVideoGroup" aria-label={`${title} helper videos`}>
+        <div className="adminMarketingVideoGroupHeader">
+          <div>
+            <h3>{title}</h3>
+            <Link to={pagePath} target="_blank" rel="noreferrer">Open video page</Link>
+          </div>
+          <span className="pill">{pageSections.length} sections</span>
+        </div>
+        {pageSections.length ? (
+          <div className="adminMarketingVideoSectionList">
+            {pageSections.map((section) => (
+              <article key={section.id} className="adminMarketingVideoSectionRow">
+                <div className="adminMarketingVideoSectionDetails">
+                  <strong>{section.name}</strong>
+                  <span className="small">{section.youtubeUrl}</span>
+                  <Link className="adminMarketingRelativeLink" to={section.relativeLink} target="_blank" rel="noreferrer">
+                    {section.relativeLink}
+                  </Link>
+                </div>
+                <button
+                  className="btn btnDanger"
+                  type="button"
+                  disabled={loading || sectionSaving || deletingSectionId === section.id}
+                  onClick={() => onDeleteSection(section)}
+                >
+                  {deletingSectionId === section.id ? 'Deleting…' : 'Delete'}
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : <p className="small">No helper video sections are configured for this page.</p>}
+      </section>
+    )
+  }
+
   return (
     <div className="adminPageContent" data-admin-page="marketing">
       <section className="adminPageIntro">
         <h2>Marketing</h2>
-        <p className="small">Manage the YouTube videos displayed on the GolfHomiez home dashboard.</p>
+        <p className="small">Manage the home-page commercial videos and the directly linkable GolfHomiez helper-video libraries.</p>
       </section>
+
       <section className="card adminPanel adminMarketingPanel">
+        <div className="adminMarketingPanelHeading">
+          <h3>Home page videos</h3>
+          <p className="small">These are the two videos shown directly on the GolfHomiez home page.</p>
+        </div>
         <form className="formStack" onSubmit={onSave}>
           <div>
             <label className="label" htmlFor="golf-homiez-video-url">Golf Homiez YouTube URL</label>
@@ -681,7 +746,7 @@ function MarketingDashboardSection({
               disabled={loading || saving}
               required
             />
-            <div className="small adminMarketingHelp">Displayed in the Golf Homiez section on the home page.</div>
+            <div className="small adminMarketingHelp">Displayed in the Golf Homiez section on the home page. Its title links to /golfhomiezvideos.</div>
           </div>
           <div>
             <label className="label" htmlFor="golf-homiez-courses-video-url">Golf Homiez Courses YouTube URL</label>
@@ -696,7 +761,7 @@ function MarketingDashboardSection({
               disabled={loading || saving}
               required
             />
-            <div className="small adminMarketingHelp">Displayed in the Golf Homiez Courses section on the home page.</div>
+            <div className="small adminMarketingHelp">Displayed in the Golf Homiez Courses section on the home page. Its title links to /golfhomiezcoursevideos.</div>
           </div>
           <div className="adminMarketingActions">
             <button className="btnPrimary" type="submit" disabled={loading || saving}>
@@ -704,6 +769,66 @@ function MarketingDashboardSection({
             </button>
           </div>
         </form>
+      </section>
+
+      <section className="card adminPanel adminMarketingPanel">
+        <div className="adminMarketingPanelHeading">
+          <h3>Helper video sections</h3>
+          <p className="small">Add a named YouTube section to either video page. GolfHomiez automatically creates a stable relative link that can be used from anywhere in the application.</p>
+        </div>
+        <form className="adminMarketingSectionForm" onSubmit={onAddSection}>
+          <div>
+            <label className="label" htmlFor="marketing-video-audience">Video page</label>
+            <select
+              id="marketing-video-audience"
+              className="select"
+              value={sectionForm.audience}
+              onChange={(event) => onSectionFormChange({ ...sectionForm, audience: event.target.value as CreateMarketingVideoSectionInput['audience'] })}
+              disabled={loading || sectionSaving}
+            >
+              <option value={MARKETING_VIDEO_AUDIENCES.golfHomiez}>Golf Homiez Users</option>
+              <option value={MARKETING_VIDEO_AUDIENCES.golfHomiezCourses}>Golf Homiez Courses</option>
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="marketing-video-section-name">Section name</label>
+            <input
+              id="marketing-video-section-name"
+              className="input"
+              type="text"
+              maxLength={160}
+              value={sectionForm.name}
+              onChange={(event) => onSectionFormChange({ ...sectionForm, name: event.target.value })}
+              placeholder="Example: Register for a tournament"
+              disabled={loading || sectionSaving}
+              required
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="marketing-video-section-url">YouTube URL</label>
+            <input
+              id="marketing-video-section-url"
+              className="input"
+              type="url"
+              inputMode="url"
+              value={sectionForm.youtubeUrl}
+              onChange={(event) => onSectionFormChange({ ...sectionForm, youtubeUrl: event.target.value })}
+              placeholder="https://www.youtube.com/shorts/..."
+              disabled={loading || sectionSaving}
+              required
+            />
+          </div>
+          <div className="adminMarketingActions">
+            <button className="btnPrimary" type="submit" disabled={loading || sectionSaving}>
+              {sectionSaving ? 'Adding…' : 'Add video section'}
+            </button>
+          </div>
+        </form>
+
+        <div className="adminMarketingVideoGroups">
+          {renderSectionList('Golf Homiez Users', '/golfhomiezvideos', userSections)}
+          {renderSectionList('Golf Homiez Courses', '/golfhomiezcoursevideos', courseSections)}
+        </div>
       </section>
     </div>
   )
@@ -736,6 +861,14 @@ export default function AdminPortal() {
   const [marketingLoading, setMarketingLoading] = useState(false)
   const [marketingSaving, setMarketingSaving] = useState(false)
   const [marketingLoaded, setMarketingLoaded] = useState(false)
+  const [marketingSections, setMarketingSections] = useState<MarketingVideoSection[]>([])
+  const [marketingSectionForm, setMarketingSectionForm] = useState<CreateMarketingVideoSectionInput>({
+    audience: MARKETING_VIDEO_AUDIENCES.golfHomiez,
+    name: '',
+    youtubeUrl: '',
+  })
+  const [marketingSectionSaving, setMarketingSectionSaving] = useState(false)
+  const [deletingMarketingSectionId, setDeletingMarketingSectionId] = useState<string | null>(null)
 
   async function loadPortal() {
     logFrontendEvent({ category: 'admin.portal', message: 'admin_portal_metadata_load_started' })
@@ -766,15 +899,23 @@ export default function AdminPortal() {
     setMarketingLoading(true)
     setError(null)
     try {
-      logFrontendEvent({ category: 'admin.portal.marketing', message: 'home_marketing_settings_load_started' })
-      const settings = await fetchAdminHomeMarketingSettings()
+      logFrontendEvent({ category: 'admin.portal.marketing', message: 'marketing_content_load_started' })
+      const [settings, sections] = await Promise.all([
+        fetchAdminHomeMarketingSettings(),
+        fetchAdminMarketingVideoSections(),
+      ])
       setMarketingForm(settings)
+      setMarketingSections(sections)
       setMarketingLoaded(true)
-      logFrontendEvent({ category: 'admin.portal.marketing', message: 'home_marketing_settings_loaded', data: { updatedAt: settings.updatedAt || null } })
+      logFrontendEvent({
+        category: 'admin.portal.marketing',
+        message: 'marketing_content_loaded',
+        data: { updatedAt: settings.updatedAt || null, sectionCount: sections.length },
+      })
     } catch (err) {
-      const loadError = err instanceof Error ? err.message : 'Could not load home marketing settings.'
+      const loadError = err instanceof Error ? err.message : 'Could not load marketing content.'
       setError(loadError)
-      logFrontendEvent({ category: 'admin.portal.marketing', level: 'error', message: 'home_marketing_settings_load_failed', data: { error: loadError } })
+      logFrontendEvent({ category: 'admin.portal.marketing', level: 'error', message: 'marketing_content_load_failed', data: { error: loadError } })
     } finally {
       setMarketingLoading(false)
     }
@@ -804,11 +945,69 @@ export default function AdminPortal() {
     }
   }
 
+  async function onAddMarketingSection(event: FormEvent) {
+    event.preventDefault()
+    setMarketingSectionSaving(true)
+    setMessage(null)
+    setError(null)
+    try {
+      logFrontendEvent({
+        category: 'admin.portal.marketing',
+        message: 'marketing_video_section_create_started',
+        data: { audience: marketingSectionForm.audience, name: marketingSectionForm.name },
+      })
+      const section = await createAdminMarketingVideoSection(marketingSectionForm)
+      setMarketingSections((current) => [...current, section].sort((a, b) => a.audience.localeCompare(b.audience) || a.displayOrder - b.displayOrder || a.name.localeCompare(b.name)))
+      setMarketingSectionForm((current) => ({ ...current, name: '', youtubeUrl: '' }))
+      setMessage(`Video section "${section.name}" added.`)
+      logFrontendEvent({
+        category: 'admin.portal.marketing',
+        message: 'marketing_video_section_created',
+        data: { sectionId: section.id, audience: section.audience, relativeLink: section.relativeLink },
+      })
+    } catch (err) {
+      const createError = err instanceof Error ? err.message : 'Could not add marketing video section.'
+      setError(createError)
+      logFrontendEvent({ category: 'admin.portal.marketing', level: 'error', message: 'marketing_video_section_create_failed', data: { error: createError } })
+    } finally {
+      setMarketingSectionSaving(false)
+    }
+  }
+
+  async function onDeleteMarketingSection(section: MarketingVideoSection) {
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(`Delete the video section "${section.name}"?`)
+      if (!confirmed) return
+    }
+    setDeletingMarketingSectionId(section.id)
+    setMessage(null)
+    setError(null)
+    try {
+      logFrontendEvent({
+        category: 'admin.portal.marketing',
+        message: 'marketing_video_section_delete_started',
+        data: { sectionId: section.id, audience: section.audience, relativeLink: section.relativeLink },
+      })
+      await deleteAdminMarketingVideoSection(section.id)
+      setMarketingSections((current) => current.filter((entry) => entry.id !== section.id))
+      setMessage(`Video section "${section.name}" deleted.`)
+      logFrontendEvent({ category: 'admin.portal.marketing', message: 'marketing_video_section_deleted', data: { sectionId: section.id } })
+    } catch (err) {
+      const deleteError = err instanceof Error ? err.message : 'Could not delete marketing video section.'
+      setError(deleteError)
+      logFrontendEvent({ category: 'admin.portal.marketing', level: 'error', message: 'marketing_video_section_delete_failed', data: { sectionId: section.id, error: deleteError } })
+    } finally {
+      setDeletingMarketingSectionId(null)
+    }
+  }
+
   useEffect(() => {
     if (!adminUser) {
       setPortal(null)
       setApiCallReport(null)
       setMarketingForm(DEFAULT_HOME_MARKETING_SETTINGS)
+      setMarketingSections([])
+      setMarketingSectionForm({ audience: MARKETING_VIDEO_AUDIENCES.golfHomiez, name: '', youtubeUrl: '' })
       setMarketingLoaded(false)
       setActivePage('golf')
       return
@@ -853,6 +1052,8 @@ export default function AdminPortal() {
     setPortal(null)
     setMarketingLoaded(false)
     setMarketingForm(DEFAULT_HOME_MARKETING_SETTINGS)
+    setMarketingSections([])
+    setMarketingSectionForm({ audience: MARKETING_VIDEO_AUDIENCES.golfHomiez, name: '', youtubeUrl: '' })
     setActivePage('golf')
     setLoginForm({ username: '', password: '' })
     setMessage('Signed out of admin portal.')
@@ -864,13 +1065,17 @@ export default function AdminPortal() {
     setMessage(null)
     setError(null)
     try {
+      assertPasswordPolicy(newAdminForm.password)
       logFrontendEvent({ category: 'admin.portal.admin_user', message: 'admin_user_create_started', data: { email: newAdminForm.email } })
       const result = await createAdminAccount(newAdminForm.username, newAdminForm.email, newAdminForm.password)
       setMessage(`Admin user ${result.adminUser.username} created.`)
+      logFrontendEvent({ category: 'admin.portal.admin_user', message: 'admin_user_create_succeeded', data: { adminUserId: result.adminUser.id || null, email: result.adminUser.email } })
       setNewAdminForm({ username: '', email: '', password: '' })
       await loadPortal()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create admin account.')
+      const message = err instanceof Error ? err.message : 'Could not create admin account.'
+      setError(message)
+      logFrontendEvent({ category: 'admin.portal.admin_user', level: 'error', message: 'admin_user_create_failed', data: { email: newAdminForm.email, error: message } })
     }
   }
 
@@ -1041,8 +1246,15 @@ export default function AdminPortal() {
               form={marketingForm}
               loading={marketingLoading}
               saving={marketingSaving}
+              sections={marketingSections}
+              sectionForm={marketingSectionForm}
+              sectionSaving={marketingSectionSaving}
+              deletingSectionId={deletingMarketingSectionId}
               onChange={setMarketingForm}
               onSave={onSaveMarketing}
+              onSectionFormChange={setMarketingSectionForm}
+              onAddSection={onAddMarketingSection}
+              onDeleteSection={onDeleteMarketingSection}
             />
           ) : null}
           {activePage === 'admin' ? (

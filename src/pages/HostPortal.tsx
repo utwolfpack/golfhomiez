@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import PageHero from '../components/PageHero'
+import PasswordCriteria from '../components/PasswordCriteria'
 import { useHostAuth } from '../context/HostAuthContext'
 import { archiveHostTournamentRecord, createHostTournament, restoreHostTournamentRecord, sendHostTournamentInvite, updateHostTournamentRecord, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
@@ -13,6 +14,7 @@ import { createAdditionalHostAccount as createAdditionalHostLogin, deleteHostAcc
 import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_CHECK_IN_TIME, DEFAULT_TOURNAMENT_TEE_TIME, emptyTournamentTemplateData } from '../lib/tournament-templates'
 import { getFriendlyTournamentError, validateTournamentForSave } from '../lib/tournament-errors'
 import { getCurrentYearInUserTimeZone, getUserTimeZone } from '../lib/time-zone'
+import { assertPasswordPolicy } from '../lib/password-policy'
 
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
 const TOURNAMENTS_PER_PAGE = 10
@@ -311,6 +313,7 @@ export default function HostPortal() {
     setError(null)
     setSuccess(null)
     try {
+      assertPasswordPolicy(newHostAccount.password)
       const result = await createAdditionalHostLogin(newHostAccount)
       if (!result.response.ok) throw new Error((result.data as any)?.message || 'The host account could not be created. Review the information and try again.')
       setNewHostAccount({ contactName: '', email: '', password: '' })
@@ -683,8 +686,9 @@ export default function HostPortal() {
                   </div>
                   <div>
                     <label className="label">Initial password</label>
-                    <input className="input" type="password" autoComplete="new-password" minLength={8} value={newHostAccount.password} onChange={(event) => setNewHostAccount((current) => ({ ...current, password: event.target.value }))} required />
-                    <div className="small">At least 8 characters. Share this password securely with the new host.</div>
+                    <input className="input" type="password" autoComplete="new-password" minLength={10} value={newHostAccount.password} onChange={(event) => setNewHostAccount((current) => ({ ...current, password: event.target.value }))} required />
+                    <PasswordCriteria password={newHostAccount.password} />
+                    <div className="small">Share this password securely with the new host.</div>
                   </div>
                   <button className="btn btnPrimary" disabled={hostAccountBusy}>{hostAccountBusy ? 'Creating…' : 'Create host account'}</button>
                 </form>
