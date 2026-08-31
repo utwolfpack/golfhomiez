@@ -133,8 +133,10 @@ export default function App() {
           <HostAuthProvider>
             <RouteDiagnostics />
             <ProfileEnrichmentGate />
+            <a className="skipLink" href="#main-content">Skip to main content</a>
             <NavBar />
-            <Routes>
+            <main id="main-content" className="appMain" tabIndex={-1}>
+              <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/golfhomiezvideos" element={<GolfHomiezVideos />} />
               <Route path="/golfhomiezcoursevideos" element={<GolfHomiezCourseVideos />} />
@@ -175,7 +177,8 @@ export default function App() {
               <Route path="/:golfCourseSlug/calendar" element={<GolfCourseCalendarPage />} />
               <Route path="/:golfCourseSlug" element={<GolfCoursePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+              </Routes>
+            </main>
           </HostAuthProvider>
         </OrganizerAuthProvider>
       </AdminAuthProvider>

@@ -30,6 +30,11 @@ test('home presents only the mission and two responsive YouTube commercial secti
   assert.doesNotMatch(home, /backgroundImage:/)
   assert.match(home, /fetchHomeMarketingSettings/)
   assert.match(home, /home_marketing_settings_load_failed_using_defaults/)
+  assert.match(home, /Join GolfHomiez/)
+  assert.match(home, /to="\/register"/)
+  assert.match(home, /create_account_selected/)
+  assert.match(home, /Browse videos/)
+  assert.match(home, /marketing_video_library_browse_selected/)
   assert.match(home, /<iframe/)
   assert.match(css, /\.homeMissionBanner\{[\s\S]*background-color:#c0ddc6/)
   assert.match(css, /\.homeMissionBanner\{[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(150px,28%\)/)
@@ -39,6 +44,18 @@ test('home presents only the mission and two responsive YouTube commercial secti
   assert.match(css, /\.homeMissionEmblem\{[\s\S]*max-width:240px/)
   assert.match(css, /\.homeVideoFrameWrap\{[\s\S]*aspect-ratio:16 \/ 9/)
   assert.match(css, /@media \(max-width: 720px\)[\s\S]*\.homeMissionBanner\{[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(92px,30%\)/)
+  assert.match(css, /\.homeCommercialStack\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.match(css, /@media \(max-width:720px\)[\s\S]*\.homeCommercialStack\{grid-template-columns:1fr/)
+})
+
+test('application shell offers keyboard navigation and consistent main content focus', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const css = await readFile(new URL('../src/index.css', import.meta.url), 'utf8')
+
+  assert.match(app, /href="#main-content">Skip to main content/)
+  assert.match(app, /<main id="main-content" className="appMain" tabIndex=\{-1\}>/)
+  assert.match(css, /\.skipLink\{[\s\S]*transform:translateY\(-160%\)/)
+  assert.match(css, /\.skipLink:focus\{[\s\S]*transform:translateY\(0\)/)
 })
 
 test('marketing admin page manages both home YouTube URLs through authenticated APIs and correlated logging', async () => {

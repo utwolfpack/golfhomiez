@@ -1,29 +1,33 @@
 :root{
-  --bg1:#eafff0;
-  --bg2:#f7fff9;
+  --bg1:#f1f7f0;
+  --bg2:#fbfcf8;
   --card:#ffffff;
-  --line:#d7eadc;
-  --text:#0b2b16;
-  --muted:#2f5a3d;
-  --primary:#16a34a;
-  --primaryDark:#0f7a36;
-  --accent:#f59e0b;
-  --shadow:0 10px 26px rgba(9,46,24,.10);
+  --line:#d8e3d7;
+  --text:#10251a;
+  --muted:#4a6455;
+  --primary:#247a46;
+  --primaryDark:#155832;
+  --accent:#e9a53a;
+  --shadow:0 12px 36px rgba(15,49,29,.09);
+  --shadowStrong:0 22px 60px rgba(7,34,19,.16);
 
   font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
   color:var(--text);
   background:
-    radial-gradient(1200px 600px at 12% -10%, rgba(134, 239, 172, .45), transparent 55%),
-    radial-gradient(900px 520px at 100% 0%, rgba(245, 158, 11, .16), transparent 45%),
-    linear-gradient(180deg, #f5fff7 0%, #effcf2 100%);
+    radial-gradient(900px 500px at 8% -10%, rgba(113, 169, 120, .22), transparent 60%),
+    radial-gradient(760px 440px at 100% 0%, rgba(233, 165, 58, .12), transparent 52%),
+    linear-gradient(180deg, #fbfcf8 0%, #f0f6ef 100%);
 }
 
 *{box-sizing:border-box;}
 html,body,#root{min-height:100%;}
-body{margin:0;}
+body{margin:0;line-height:1.5;}
 a{color:inherit;text-decoration:none;}
 
-.container{max-width:1120px;margin:0 auto;padding:14px 16px 18px;}
+.container{max-width:1180px;margin:0 auto;padding:22px 20px 30px;}
+.appMain{min-height:calc(100vh - 72px);}
+.skipLink{position:fixed;top:10px;left:12px;z-index:1000;padding:10px 14px;border-radius:10px;background:#fff;color:#123f27;font-weight:800;box-shadow:var(--shadowStrong);transform:translateY(-160%);transition:transform .16s ease;}
+.skipLink:focus{transform:translateY(0);outline:3px solid var(--accent);}
 .pageStack{display:grid;gap:14px;}
 .pageCardShell{display:grid;gap:14px;}
 .pageSimpleTitle{
@@ -8187,6 +8191,42 @@ button.navDropdownItem{font:inherit;}
 .homeVideoSectionTitleLink:hover,
 .homeVideoSectionTitleLink:focus-visible{
   color:#14532d;
+}
+
+/* 2026 UI modernization: clearer hierarchy, faster guest onboarding, and responsive learning cards. */
+.homeDashboard{gap:22px;padding-bottom:28px;}
+.homeMissionBanner{min-height:420px;grid-template-columns:minmax(0,1.25fr) minmax(250px,.75fr);gap:40px;padding:clamp(28px,5vw,64px);border:1px solid rgba(255,255,255,.22);background-color:#c0ddc6;background-image:radial-gradient(circle at 84% 22%,rgba(255,255,255,.13),transparent 28%),linear-gradient(135deg,#123d26 0%,#1d6539 58%,#2b7d47 100%);box-shadow:var(--shadowStrong);}
+.homeMissionContent{color:#fff;}
+.homeMissionEyebrow{color:#d8edb5;}
+.homeMissionContent h1{max-width:720px;font-size:clamp(2.2rem,5.8vw,4.6rem);line-height:.98;letter-spacing:-.045em;}
+.homeMissionContent p{max-width:720px;font-size:clamp(1rem,1.8vw,1.16rem);font-weight:500;color:rgba(255,255,255,.83);}
+.homeMissionEmblem{max-width:310px;filter:drop-shadow(0 22px 30px rgba(0,0,0,.24));}
+.homeMissionActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px;}
+.homeMissionActions .btn{min-height:44px;padding:10px 16px;font-weight:800;transition:transform .14s ease,box-shadow .14s ease,background .14s ease;}
+.homeMissionActions .btn:hover{transform:translateY(-1px);box-shadow:0 10px 22px rgba(0,0,0,.16);}
+.homeMissionPrimaryAction{border-color:#f2c66f;background:#f2c66f;color:#173523;}
+.homeMissionPrimaryAction:hover{background:#f7d38b;}
+.homeMissionSecondaryAction{border-color:rgba(255,255,255,.42);background:rgba(255,255,255,.08);color:#fff;backdrop-filter:blur(8px);}
+.homeMissionSecondaryAction:hover{background:rgba(255,255,255,.15);}
+.homeBenefitList{display:flex;gap:10px 22px;flex-wrap:wrap;margin:22px 0 0;padding:0;list-style:none;color:rgba(255,255,255,.78);font-size:.86rem;font-weight:700;}
+.homeBenefitList li{display:flex;align-items:center;gap:7px;}
+.homeBenefitList li::before{content:'✓';display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:rgba(216,237,181,.18);color:#d8edb5;font-size:.72rem;}
+.homeCommercialStack{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;}
+.homeVideoSection{min-width:0;padding:18px;}
+.homeSectionKicker{margin-bottom:2px;color:#5b7765;font-size:.7rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase;}
+.homeVideoBrowseLink{flex:0 0 auto;color:#24633d;font-size:.84rem;font-weight:800;}
+.homeVideoBrowseLink:hover,.homeVideoBrowseLink:focus-visible{text-decoration:underline;text-underline-offset:3px;}
+.homeVideoSectionTitleLink{text-decoration:none;}
+
+@media (max-width:720px){
+  .container{padding:14px 12px 20px;}
+  .homeDashboard{gap:14px;padding-bottom:20px;}
+  .homeMissionBanner{grid-template-columns:1fr;gap:24px;padding:26px 20px 22px;}
+  .homeMissionEmblemWrap{position:absolute;right:14px;top:14px;opacity:.18;}
+  .homeMissionEmblem{max-width:150px;}
+  .homeMissionActions .btn{flex:1 1 140px;}
+  .homeBenefitList{gap:8px 14px;margin-top:18px;}
+  .homeCommercialStack{grid-template-columns:1fr;gap:12px;}
 }
 .marketingVideoLibraryPage{
   display:grid;
