@@ -10,7 +10,9 @@ function HomeVideoSection({ title, url, logKey, pagePath }: { title: string; url
   return (
     <section className="homeVideoSection card" aria-labelledby={`${logKey}-title`}>
       <div className="homeSectionHeader">
-        <h2 id={`${logKey}-title`}>
+        <div>
+          <div className="homeSectionKicker">Watch &amp; learn</div>
+          <h2 id={`${logKey}-title`}>
           <Link
             className="homeVideoSectionTitleLink"
             to={pagePath}
@@ -18,7 +20,15 @@ function HomeVideoSection({ title, url, logKey, pagePath }: { title: string; url
           >
             {title}
           </Link>
-        </h2>
+          </h2>
+        </div>
+        <Link
+          className="homeVideoBrowseLink"
+          to={pagePath}
+          onClick={() => logFrontendEvent({ category: 'home.marketing', message: 'marketing_video_library_browse_selected', data: { video: logKey, destination: pagePath } })}
+        >
+          Browse videos <span aria-hidden="true">→</span>
+        </Link>
       </div>
       {embedUrl ? (
         <div className="homeVideoFrameWrap">
@@ -77,6 +87,15 @@ export default function Home() {
           <div className="homeMissionEyebrow">GolfHomiez Mission</div>
           <h1 id="golfhomiez-mission-title">Built by golfers, for golfers.</h1>
           <p>GolfHomiez makes golf simple, social, and fun. Log solo rounds or team challenges with your homiez, then create, register for, and follow seamless golf-course tournaments through dedicated GolfHomiez course pages that showcase every hosted event.</p>
+          <div className="homeMissionActions" aria-label="Get started with GolfHomiez">
+            <Link className="btn homeMissionPrimaryAction" to="/register" onClick={() => logFrontendEvent({ category: 'home.hero', message: 'create_account_selected', data: { destination: '/register' } })}>Join GolfHomiez</Link>
+            <Link className="btn homeMissionSecondaryAction" to="/login" onClick={() => logFrontendEvent({ category: 'home.hero', message: 'sign_in_selected', data: { destination: '/login' } })}>Sign in</Link>
+          </div>
+          <ul className="homeBenefitList" aria-label="GolfHomiez highlights">
+            <li>Track rounds</li>
+            <li>Challenge friends</li>
+            <li>Play tournaments</li>
+          </ul>
         </div>
         <div className="homeMissionEmblemWrap" aria-hidden="true">
           <img
