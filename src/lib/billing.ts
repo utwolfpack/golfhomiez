@@ -16,7 +16,7 @@ export type BillingStatus = {
   hasPaymentAccount?: boolean
   paymentMethod?: {
     brand: string
-    lastFour: string
+    lastFour?: string | null
     expMonth?: number | null
     expYear?: number | null
   } | null
@@ -24,6 +24,7 @@ export type BillingStatus = {
 
 export const fetchBillingStatus = () => api<BillingStatus>('/api/billing/status')
 export const startCheckout = () => api<{ url: string }>('/api/billing/checkout', { method: 'POST' })
+export const startPaymentMethodCheckout = () => api<{ url: string }>('/api/billing/payment-method', { method: 'POST' })
 export const completeCheckout = (sessionId: string) => api<BillingStatus>('/api/billing/checkout/complete', { method: 'POST', body: JSON.stringify({ sessionId }) })
 export const openBillingPortal = () => api<{ url: string }>('/api/billing/portal', { method: 'POST' })
 export const cancelSubscription = () => api<BillingStatus>('/api/billing/cancel', { method: 'POST' })
