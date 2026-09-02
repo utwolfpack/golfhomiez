@@ -198,9 +198,9 @@ export async function getBillingStatus(pool, user, now = new Date()) {
     try { accessCode = decryptAccessCode(redemption.codeCiphertext) } catch (error) { logError('billing_access_code_decrypt_failed', { error, userId: user.id }) }
   }
   const complimentary = ['legacy_free', 'code_free', 'complimentary_host', 'complimentary_organizer'].includes(accessSource)
-  const paymentMethod = account.payment_method_last_four ? {
+  const paymentMethod = account.payment_method_brand || account.payment_method_last_four ? {
     brand: account.payment_method_brand || 'Card',
-    lastFour: account.payment_method_last_four,
+    lastFour: account.payment_method_last_four || null,
     expMonth: account.payment_method_exp_month == null ? null : Number(account.payment_method_exp_month),
     expYear: account.payment_method_exp_year == null ? null : Number(account.payment_method_exp_year),
   } : null
@@ -243,6 +243,7 @@ export async function createCheckout(pool, user, baseUrl) {
   const checkout = {
     mode: 'subscription',
     customer: customerId,
+    payment_method_types: ['card'],
     line_items: [{ price: priceId(), quantity: 1 }],
     success_url: `${baseUrl}/profile/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${baseUrl}/profile/billing?checkout=cancelled`,
@@ -277,6 +278,23 @@ export async function createCheckout(pool, user, baseUrl) {
   return session.url
 }
 
+export async function createPaymentMethodCheckout(pool, user, baseUrl) {
+  const account = await ensureBillingAccount(pool, user)
+  if (!account.stripe_customer_id) throw new Error('No payment account exists yet')
+  const session = await stripeClient().checkout.sessions.create({
+    mode: 'setup',
+    customer: account.stripe_customer_id,
+    payment_method_types: ['card'],
+    success_url: `${baseUrl}/profile/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/profile/billing?checkout=cancelled`,
+    metadata: { golfhomiez_user_id: user.id, purpose: 'payment_method_update' },
+    branding_settings: buildCheckoutBranding(),
+    locale: 'auto',
+  })
+  logApi('stripe_card_setup_session_created', { userId: user.id, stripeCustomerId: account.stripe_customer_id })
+  return session.url
+}
+
 export async function completeCheckout(pool, user, sessionId) {
   const normalizedSessionId = String(sessionId || '').trim()
   if (!normalizedSessionId.startsWith('cs_')) {
@@ -286,7 +304,7 @@ export async function completeCheckout(pool, user, sessionId) {
   }
   const account = await ensureBillingAccount(pool, user)
   const session = await stripeClient().checkout.sessions.retrieve(normalizedSessionId, {
-    expand: ['subscription', 'subscription.default_payment_method'],
+    expand: ['subscription', 'subscription.default_payment_method', 'setup_intent', 'setup_intent.payment_method'],
   })
   if (session.status !== 'complete' || session.metadata?.golfhomiez_user_id !== user.id) {
     const error = new Error('Checkout is not complete for this account.')
@@ -300,7 +318,17 @@ export async function completeCheckout(pool, user, sessionId) {
     throw error
   }
   const subscription = session.subscription
-  if (subscription && typeof subscription !== 'string') await syncSubscription(pool, subscription)
+  if (session.mode === 'setup') {
+    const setupIntent = session.setup_intent
+    const paymentMethod = typeof setupIntent === 'string'
+      ? (await stripeClient().setupIntents.retrieve(setupIntent, { expand: ['payment_method'] })).payment_method
+      : setupIntent?.payment_method
+    const paymentMethodId = typeof paymentMethod === 'string' ? paymentMethod : paymentMethod?.id
+    if (!paymentMethodId) throw new Error('Stripe did not return the saved card.')
+    const stripe = stripeClient()
+    await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: paymentMethodId } })
+    if (account.stripe_subscription_id) await stripe.subscriptions.update(account.stripe_subscription_id, { default_payment_method: paymentMethodId })
+  } else if (subscription && typeof subscription !== 'string') await syncSubscription(pool, subscription)
   else if (typeof subscription === 'string') {
     await pool.execute('UPDATE billing_accounts SET stripe_subscription_id = ? WHERE user_id = ?', [subscription, user.id])
   }
@@ -482,15 +510,17 @@ async function resolveStripePaymentMethod(stripe, account) {
     paymentMethod = methods.data[0] || null
   }
   if (typeof paymentMethod === 'string') paymentMethod = await stripe.paymentMethods.retrieve(paymentMethod)
-  return paymentMethod?.card ? paymentMethod : null
+  return paymentMethod && !paymentMethod.deleted ? paymentMethod : null
 }
 
 async function syncCustomerPaymentMethod(pool, account) {
   const method = await resolveStripePaymentMethod(stripeClient(), account)
+  const methodBrand = method?.card?.brand || method?.type || null
+  const methodLastFour = method?.card?.last4 || method?.us_bank_account?.last4 || null
   await pool.execute(
     `UPDATE billing_accounts SET payment_method_brand = ?, payment_method_last_four = ?,
       payment_method_exp_month = ?, payment_method_exp_year = ? WHERE user_id = ?`,
-    [method?.card?.brand || null, method?.card?.last4 || null, method?.card?.exp_month || null, method?.card?.exp_year || null, account.user_id],
+    [methodBrand, methodLastFour, method?.card?.exp_month || null, method?.card?.exp_year || null, account.user_id],
   )
   return method
 }

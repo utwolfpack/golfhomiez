@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router'
-import { cancelSubscription, completeCheckout, fetchBillingStatus, openBillingPortal, redeemAccessCode, resumeSubscription, startCheckout, type BillingStatus } from '../lib/billing'
+import { cancelSubscription, completeCheckout, fetchBillingStatus, redeemAccessCode, resumeSubscription, startCheckout, startPaymentMethodCheckout, type BillingStatus } from '../lib/billing'
 import { useAuth } from '../context/AuthContext'
 import { logFrontendEvent } from '../lib/frontend-logger'
 
@@ -22,6 +22,12 @@ function cardBrand(value?: string | null) {
   return brand.charAt(0).toUpperCase() + brand.slice(1)
 }
 
+function paymentMethodDescription(method: NonNullable<BillingStatus['paymentMethod']>) {
+  const brand = cardBrand(method.brand)
+  if (method.brand.toLowerCase() === 'link' && !method.lastFour) return 'Card details unavailable — update the card below'
+  return method.lastFour ? `${brand} ending in ${method.lastFour}` : brand
+}
+
 export default function Billing() {
   const [status, setStatus] = useState<BillingStatus | null>(null)
   const [code, setCode] = useState('')
@@ -34,7 +40,11 @@ export default function Billing() {
     const sessionId = new URLSearchParams(window.location.search).get('session_id')
     const request = sessionId ? completeCheckout(sessionId) : fetchBillingStatus()
     request
-      .then((result) => { if (active) setStatus(result); logFrontendEvent({ category: 'billing', message: 'payment_information_loaded', data: { accessSource: result.accessSource, setupComplete: result.setupComplete } }) })
+      .then((result) => {
+        if (active) setStatus(result)
+        void refreshBillingStatus()
+        logFrontendEvent({ category: 'billing', message: 'payment_information_loaded', data: { accessSource: result.accessSource, setupComplete: result.setupComplete } })
+      })
       .catch((error) => { if (active) setMessage(error instanceof Error ? error.message : 'Payment information could not be loaded.') })
     return () => { active = false }
   }, [])
@@ -71,6 +81,8 @@ export default function Billing() {
   if (!status.enabled) return <div className="container"><div className="card"><h1>Payment Information</h1><p>Billing is disabled in this environment.</p><Link className="btn btnPrimary" to="/profile">Back to profile</Link></div></div>
 
   const permanentlyFree = ['legacy_free', 'code_free', 'complimentary_host', 'complimentary_organizer'].includes(status.accessSource)
+  const subscriptionCanBeCancelled = ['active', 'trialing'].includes(String(status.subscriptionStatus || '')) && !status.cancelAtPeriodEnd
+  const subscriptionCanBeReactivated = ['canceled', 'unpaid'].includes(String(status.subscriptionStatus || ''))
   return <div className="container pageStack billingPage"><section className="card pageCardShell">
     <div className="billingHeading"><div><span className="pageHeroEyebrow">Account setup</span><h1>Payment Information</h1></div><span className={`billingSetupBadge ${status.setupComplete ? 'isComplete' : ''}`}>{status.setupComplete ? 'Setup complete' : 'Action needed'}</span></div>
     <p className="billingIntro">Golf Homiez is only $0.99 per month. We appreciate you being a part of the Golf Homiez Community!</p>
@@ -83,13 +95,14 @@ export default function Billing() {
     </div>
     {status.paymentMethod ? <section className="paymentMethodCard" aria-label="Payment method">
       <div className="paymentMethodIcon" aria-hidden="true">••••</div>
-      <div><span className="small">Payment method</span><strong>{cardBrand(status.paymentMethod.brand)} ending in {status.paymentMethod.lastFour}</strong><span>Expires {String(status.paymentMethod.expMonth || '').padStart(2, '0')}/{status.paymentMethod.expYear || '—'}</span></div>
+      <div><span className="small">Payment method</span><strong>{paymentMethodDescription(status.paymentMethod)}</strong>{status.paymentMethod.expMonth && status.paymentMethod.expYear ? <span>Expires {String(status.paymentMethod.expMonth).padStart(2, '0')}/{status.paymentMethod.expYear}</span> : null}</div>
     </section> : null}
     {message ? <p role="status" className="statusNotice">{message}</p> : null}
     {!permanentlyFree ? <div className="billingActions">
-      <button type="button" className="btn btnPrimary" disabled={busy} onClick={() => void redirect(startCheckout)}>{status.paymentMethod ? 'Reactivate subscription' : 'Add payment method'}</button>
-      {status.hasPaymentAccount ? <button type="button" className="btn" disabled={busy} onClick={() => void redirect(openBillingPortal)}>Manage payment method</button> : null}
-      {status.subscriptionStatus === 'active' && !status.cancelAtPeriodEnd ? <button type="button" className="btn" disabled={busy} onClick={() => void changeCancellation(true)}>Cancel at period end</button> : null}
+      {!status.paymentMethod ? <button type="button" className="btn btnPrimary" disabled={busy} onClick={() => void redirect(startCheckout)}>Add payment method</button> : null}
+      {status.hasPaymentAccount ? <button type="button" className="btn" disabled={busy} onClick={() => void redirect(startPaymentMethodCheckout)}>Add or change payment method</button> : null}
+      {subscriptionCanBeReactivated ? <button type="button" className="btn btnPrimary" disabled={busy} onClick={() => void redirect(startCheckout)}>Reactivate subscription</button> : null}
+      {subscriptionCanBeCancelled ? <button type="button" className="btn" disabled={busy} onClick={() => void changeCancellation(true)}>Cancel at period end</button> : null}
       {status.cancelAtPeriodEnd ? <button type="button" className="btn btnPrimary" disabled={busy} onClick={() => void changeCancellation(false)}>Undo cancellation</button> : null}
     </div> : null}
     {!permanentlyFree ? <div className="promoCodePanel"><div><label className="label" htmlFor="billing-code">Homie Token</label><p className="small">Enter the friendly Homie Token provided by Golf Homiez.</p></div><div className="promoCodeControls"><input className="input" id="billing-code" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" /><button type="button" className="btn btnPrimary" disabled={busy || code.trim().length < 1} onClick={() => void redeem()}>Apply Homie Token</button></div></div> : null}

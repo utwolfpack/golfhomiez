@@ -40,7 +40,7 @@ import { loadTournamentFinalLeaderboard } from './lib/tournament-final-leaderboa
 import { setTournamentArchiveState } from './lib/tournament-archive.js'
 import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarketingSettings, listMarketingVideoSections, normalizeMarketingVideoAudience, updateHomeMarketingSettings } from './lib/marketing-settings.js'
 import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
-import { completeCheckout, createAccessCode, createCheckout, createPortal, getBillingStatus, listAccessCodes, processStripeWebhook, redeemAccessCode, requireBillingAccess, setCancellation, updateAccessCode } from './lib/billing.js'
+import { completeCheckout, createAccessCode, createCheckout, createPaymentMethodCheckout, createPortal, getBillingStatus, listAccessCodes, processStripeWebhook, redeemAccessCode, requireBillingAccess, setCancellation, updateAccessCode } from './lib/billing.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -488,7 +488,7 @@ async function authMiddleware(req, res, next) {
     const user = await getAuthenticatedUserFromRequest(req)
     if (!user) return res.status(401).json({ message: 'Unauthorized' })
     req.user = user
-    const billingRecoveryPaths = new Set(['/api/profile', '/api/billing/status', '/api/billing/checkout', '/api/billing/checkout/complete', '/api/billing/portal', '/api/billing/cancel', '/api/billing/resume', '/api/billing/redeem-code'])
+    const billingRecoveryPaths = new Set(['/api/profile', '/api/billing/status', '/api/billing/checkout', '/api/billing/checkout/complete', '/api/billing/payment-method', '/api/billing/portal', '/api/billing/cancel', '/api/billing/resume', '/api/billing/redeem-code'])
     if (!billingRecoveryPaths.has(req.path)) {
       const [[profile]] = await getPool().execute(
         'SELECT profile_enriched_at AS profileEnrichedAt FROM app_users WHERE auth_user_id = ? OR id = ? LIMIT 1',
@@ -540,6 +540,15 @@ app.post('/api/billing/checkout/complete', requireStorage, authMiddleware, async
     logRouteError('Billing checkout completion error', req, error, { body: undefined })
     return res.status(error.statusCode || 500).json({ message: error.message || 'Could not confirm Checkout.' })
   }
+})
+
+app.post('/api/billing/payment-method', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const url = await createPaymentMethodCheckout(getPool(), req.user, getClientAppBaseUrl(req))
+    logApi('billing_payment_method_checkout_created', { ...requestContext(req), userId: req.user.id })
+    return res.json({ url })
+  }
+  catch (error) { logRouteError('Billing payment method checkout error', req, error); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not update payment method.' }) }
 })
 
 app.post('/api/billing/portal', requireStorage, authMiddleware, async (req, res) => {
