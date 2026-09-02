@@ -1251,7 +1251,7 @@ test('logging writes to root access and error log files with request middleware 
 
 
 
-test('profile page removes state code, uses smiley selection, and returns to profile after save', () => {
+test('profile page removes state code, uses smiley selection, and continues required account setup after save', () => {
   const profile = fs.readFileSync(new URL('../src/pages/Profile.tsx', import.meta.url), 'utf8')
   const profileLib = fs.readFileSync(new URL('../src/lib/profile.ts', import.meta.url), 'utf8')
   const locationButton = fs.readFileSync(new URL('../src/components/UseMyLocationButton.tsx', import.meta.url), 'utf8')
@@ -1261,6 +1261,10 @@ test('profile page removes state code, uses smiley selection, and returns to pro
   assert.doesNotMatch(profile, /Update where you play and what kind of golf company you are looking for\./)
   assert.doesNotMatch(profile, /State code/)
   assert.match(profile, /saving \? 'Saving…' : 'Save'/)
+  assert.match(profile, /hasSavedPaymentProfile \? <Link[^>]+to="\/profile\/billing">Account payment<\/Link> : <span[^>]+aria-disabled="true"/)
+  assert.match(profile, /Save your phone number and address to unlock Account payment\./)
+  assert.ok(profile.indexOf('profilePrimaryZipCode') < profile.indexOf("onClick={handleSave}"), 'Save appears after ZIP Code')
+  assert.ok(profile.indexOf("onClick={handleSave}") < profile.indexOf('<ProfileSummarySection'), 'Save appears immediately before later profile sections')
   assert.match(profile, /<label className="label">Phone<\/label>/)
   assert.match(profile, /type="tel"/)
   assert.match(profile, /required aria-invalid=\{Boolean\(validateRequiredPhoneNumber\(form\.phone\)\)\}/)
@@ -1271,7 +1275,7 @@ test('profile page removes state code, uses smiley selection, and returns to pro
   assert.match(profile, /btnLightGreen/)
   assert.match(profile, /Prefer to golf with other sober golfers/)
   assert.match(profile, /Selected preference/)
-  assert.match(profile, /navigate\('\/profile', \{ replace: true \}\)/)
+  assert.match(profile, /navigate\(billingStatus\?\.enabled && !billingStatus\.setupComplete \? '\/profile\/billing' : '\/profile'/)
   assert.match(profile, /if \(prev\.sobrietyPreference === 'sober_only'\) return prev/)
   assert.match(profile, /if \(prev\.alcoholPreference === 'alcohol_friendly' \|\| prev\.cannabisPreference === 'weed_friendly'\) return prev/)
   assert.doesNotMatch(profileLib, /primaryStateCode/)
@@ -1632,7 +1636,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/billing.test.js test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -1920,7 +1924,7 @@ test('profile enrichment runs on first sign-in and adds editable profile fields 
   const profilePage = fs.readFileSync(new URL('../src/pages/Profile.tsx', import.meta.url), 'utf8')
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
 
-  assert.match(app, /ProfileEnrichmentGate/)
+  assert.match(app, /AccountSetupGate/)
   assert.match(app, /navigate\('\/profile\?enrich=1'/)
   assert.match(app, /path="\/profile"/)
   assert.match(authContext, /needsProfileEnrichment/)
@@ -2128,7 +2132,8 @@ test('golfadmin portal is organized into Golf, Tournaments, API Usage, Marketing
   assert.match(adminPortal, /data-admin-page="admin"/)
   assert.match(adminPortal, /admin_portal_page_selected/)
 
-  assert.match(adminPortal, /Verified users/)
+  assert.match(adminPortal, /Homie Token/)
+  assert.match(adminPortal, /Paid Homie/)
   assert.match(adminPortal, /Rounds \/ scores/)
   assert.match(adminPortal, /Active challenges/)
   assert.match(adminPortal, /Completed challenges/)
@@ -2138,7 +2143,8 @@ test('golfadmin portal is organized into Golf, Tournaments, API Usage, Marketing
   assert.match(adminPortal, /Scored tournament teams/)
   assert.match(adminPortal, /Scheduled jobs/)
 
-  assert.match(adminLib, /verifiedUserCount/)
+  assert.match(adminLib, /homieTokenUserCount/)
+  assert.match(adminLib, /paidHomieCount/)
   assert.match(adminLib, /COUNT\(DISTINCT CASE WHEN .*completed.*challengeKey/)
   assert.match(adminLib, /tournamentRegistrationCount/)
   assert.match(adminLib, /scoredTournamentTeamCount/)
@@ -2669,7 +2675,7 @@ test('published and completed tournaments remain available on the public tournam
   assert.doesNotMatch(organizerPage, /Make this tournament publicly visible/)
 })
 
-test('front-end tournament times are formatted without milliseconds and profile save returns to the profile route', () => {
+test('front-end tournament times are formatted without milliseconds and profile save continues account setup', () => {
   const timeFormat = fs.readFileSync(new URL('../src/lib/time-format.ts', import.meta.url), 'utf8')
   const hostPage = fs.readFileSync(new URL('../src/pages/HostPortal.tsx', import.meta.url), 'utf8')
   const organizerPage = fs.readFileSync(new URL('../src/pages/OrganizerTournaments.tsx', import.meta.url), 'utf8')
@@ -2680,7 +2686,7 @@ test('front-end tournament times are formatted without milliseconds and profile 
   assert.match(hostPage, /formatFriendlyDateTime/)
   assert.match(organizerPage, /formatFriendlyDateTime/)
   assert.match(profilePage, /refreshProfileStatus/)
-  assert.match(profilePage, /navigate\('\/profile', \{ replace: true \}\)/)
+  assert.match(profilePage, /'\/profile\/billing' : '\/profile'/)
 })
 
 test('tournament UI supports a single tournament date and clears end date on updates', () => {

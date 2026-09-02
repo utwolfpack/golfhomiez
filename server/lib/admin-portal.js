@@ -5,6 +5,7 @@ import { normalizeEmail, isEmail } from './team-utils.js'
 import { ensureHostAuthSchema } from './host-auth.js'
 import { createGolfCoursePublicPageForApprovedHost } from './golf-course-public-pages.js'
 import { assertPasswordPolicy } from './password-policy.js'
+import { listBillingAdminCustomers } from './billing.js'
 
 const ADMIN_COOKIE = 'golf_admin_session'
 export const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24
@@ -812,7 +813,6 @@ export async function listPortalData() {
   await ensureAdminPortalSchema()
   const db = pool()
   const [[{ userCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS userCount FROM `user`')
-  const [[{ verifiedUserCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS verifiedUserCount FROM `user` WHERE emailVerified = 1')
   const [[{ appUserCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS appUserCount FROM app_users')
   const [[{ teamCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS teamCount FROM teams')
   const [[{ scoreCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS scoreCount FROM scores')
@@ -820,6 +820,9 @@ export async function listPortalData() {
   const [[{ organizerCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS organizerCount FROM organizer_role_accounts')
   const [[{ tournamentCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS tournamentCount FROM tournaments')
   const [[{ hostAccountRequestCount = 0 } = {}]] = await db.query("SELECT COUNT(*) AS hostAccountRequestCount FROM host_account_requests WHERE status = 'pending'")
+  const billingCustomers = await listBillingAdminCustomers(db)
+  const homieTokenUsers = billingCustomers.filter((customer) => customer.accessSource === 'code_free')
+  const paidHomies = billingCustomers.filter((customer) => customer.accessSource === 'stripe' && ['active', 'trialing', 'past_due'].includes(String(customer.subscriptionStatus || '')))
 
   const selectColumn = (columns, tableAlias, candidates, alias, fallback = 'NULL') => {
     const columnName = candidates.find((candidate) => columns.has(candidate))
@@ -1014,13 +1017,15 @@ export async function listPortalData() {
       t.updated_at,
       ${createdBySelect},
       COALESCE(${creatorParts.join(', ') || 'NULL'}) AS creator,
-      COALESCE(${golfCourseParts.join(', ') || 'NULL'}) AS golf_course_name
+      COALESCE(${golfCourseParts.join(', ') || 'NULL'}) AS golf_course_name,
+      (SELECT COUNT(DISTINCT COALESCE(NULLIF(tr.auth_user_id, ''), NULLIF(LOWER(tr.email), '')))
+         FROM tournament_registrations tr
+        WHERE tr.tournament_id = t.id AND tr.status = 'registered') AS generated_user_count
     FROM tournaments t
     LEFT JOIN organizer_role_accounts ora ON ora.id = t.organizer_account_id
     LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
     LEFT JOIN host_accounts ha ON ha.id = t.host_account_id
     ORDER BY t.created_at DESC
-    LIMIT 50
   `)
 
   const requestSelectColumns = [
@@ -1043,7 +1048,6 @@ export async function listPortalData() {
   return {
     summary: {
       userCount,
-      verifiedUserCount,
       appUserCount,
       teamCount,
       scoreCount,
@@ -1061,6 +1065,10 @@ export async function listPortalData() {
       hostAccountRequestCount,
       adminCount,
       activeAdminCount,
+      homieTokenUserCount: homieTokenUsers.length,
+      paidHomieCount: paidHomies.length,
+      tournamentsCompletedCount: Number(tournamentStatusCounts.find((row) => String(row.status).toLowerCase() === 'completed')?.count || 0),
+      tournamentsCreatedCount: Number(tournamentCount || 0),
     },
     admins,
     hosts,
@@ -1074,5 +1082,7 @@ export async function listPortalData() {
     teams,
     scores,
     requests,
+    homieTokenUsers,
+    paidHomies,
   }
 }

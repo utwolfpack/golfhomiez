@@ -3203,6 +3203,39 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
       return statements.join(';\n')
     },
   },
+  {
+    version: '20260901_082',
+    name: 'stripe_billing',
+    filename: '20260901_082_stripe_billing.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'billing_accounts') &&
+        await tableExists(db, 'billing_access_codes') &&
+        await tableExists(db, 'billing_access_code_redemptions') &&
+        await tableExists(db, 'stripe_webhook_events')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260901_082_stripe_billing.sql')
+    },
+  },
+  {
+    version: '20260902_083',
+    name: 'billing_onboarding_details',
+    filename: '20260902_083_billing_onboarding_details.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'billing_access_codes', 'code_ciphertext') &&
+        await columnExists(db, 'billing_accounts', 'payment_method_brand') &&
+        await columnExists(db, 'billing_accounts', 'payment_method_last_four') &&
+        await columnExists(db, 'billing_accounts', 'payment_method_exp_month') &&
+        await columnExists(db, 'billing_accounts', 'payment_method_exp_year')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260902_083_billing_onboarding_details.sql')
+    },
+  },
 
 ]
 

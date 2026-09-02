@@ -272,6 +272,7 @@ export default function NavBar() {
                       <>
                         <NavLink className="navDropdownItem" to="/golfadmin" onClick={() => setOpen(false)}>Admin portal</NavLink>
                         <NavLink className="navDropdownItem" to="/golfadmin/scheduled-jobs" onClick={() => setOpen(false)}>Scheduled jobs</NavLink>
+                        <NavLink className="navDropdownItem" to="/golfadmin/access-codes" onClick={() => setOpen(false)}>Homie Tokens</NavLink>
                       </>
                     ) : null}
                     {hostAccount ? (

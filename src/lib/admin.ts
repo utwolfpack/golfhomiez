@@ -39,6 +39,8 @@ export async function fetchAdminPortal() {
     teams: Array<Record<string, unknown>>
     scores: Array<Record<string, unknown>>
     requests: Array<Record<string, unknown>>
+    homieTokenUsers: Array<Record<string, unknown>>
+    paidHomies: Array<Record<string, unknown>>
   }>('/api/admin/portal')
 }
 
@@ -184,3 +186,9 @@ export async function cancelScheduledJob(jobId: string) {
     method: 'POST',
   })
 }
+
+export type BillingAccessCodeRedemption = { id: string; redeemedAt: string; userId?: string | null; email?: string | null; name?: string | null }
+export type BillingAccessCode = { id: string; code: string; homieToken: string; codeLastFour: string; label?: string | null; maxRedemptions?: number | null; redemptionCount: number; expiresAt?: string | null; active: boolean; createdAt: string; redemptions: BillingAccessCodeRedemption[] }
+export const fetchBillingAccessCodes = () => api<{ codes: BillingAccessCode[] }>('/api/admin/billing/access-codes')
+export const createBillingAccessCode = (input: { homieToken: string; label?: string; maxRedemptions?: number | null; expiresAt?: string | null }) => api<{ created: { id: string; code: string; homieToken: string; codeLastFour: string }; codes: BillingAccessCode[] }>('/api/admin/billing/access-codes', { method: 'POST', body: JSON.stringify(input) })
+export const updateBillingAccessCode = (id: string, input: { active?: boolean; maxRedemptions?: number | null; expiresAt?: string | null }) => api<{ codes: BillingAccessCode[] }>(`/api/admin/billing/access-codes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) })

@@ -480,10 +480,10 @@ function GolfDashboardSection({ portal, onOpenDetails }: { portal: PortalState |
       </section>
       <div className="adminMetricGrid">
         <MetricButton label="Users" value={Number(summary.userCount || 0)} onClick={() => onOpenDetails('User metadata', (portal?.users ?? []) as RowRecord[], userColumns)} />
-        <MetricCard label="Verified users" value={Number(summary.verifiedUserCount || 0)} />
+        <MetricButton label="Homie Token" value={Number(summary.homieTokenUserCount || 0)} onClick={() => onOpenDetails('Homie Token user metadata', (portal?.homieTokenUsers ?? []) as RowRecord[], homieTokenUserColumns)} />
+        <MetricButton label="Paid Homie" value={Number(summary.paidHomieCount || 0)} onClick={() => onOpenDetails('Paid Homie metadata', (portal?.paidHomies ?? []) as RowRecord[], paidHomieColumns)} />
         <MetricButton label="Teams" value={Number(summary.teamCount || 0)} onClick={() => onOpenDetails('Team metadata', (portal?.teams ?? []) as RowRecord[], teamColumns)} />
         <MetricButton label="Rounds / scores" value={Number(summary.scoreCount || 0)} onClick={() => onOpenDetails('Score metadata', (portal?.scores ?? []) as RowRecord[], scoreColumns)} />
-        <MetricButton label="Tournaments" value={Number(summary.tournamentCount || 0)} onClick={() => onOpenDetails('Tournament metadata', (portal?.tournaments ?? []) as RowRecord[], tournamentColumns)} />
         <MetricButton label="Challenges" value={Number(summary.challengeCount || 0)} onClick={() => onOpenDetails('Challenge metadata', (portal?.challenges ?? []) as RowRecord[], challengeColumns)} />
         <MetricCard label="Active challenges" value={Number(summary.activeChallengeCount || 0)} />
         <MetricCard label="Completed challenges" value={Number(summary.completedChallengeCount || 0)} />
@@ -498,6 +498,8 @@ function GolfDashboardSection({ portal, onOpenDetails }: { portal: PortalState |
 
 function TournamentDashboardSection({ portal, onOpenDetails }: { portal: PortalState | null; onOpenDetails: (title: string, rows: RowRecord[], columns: DetailColumn[]) => void }) {
   const summary = portal?.summary ?? {}
+  const tournaments = (portal?.tournaments ?? []) as RowRecord[]
+  const completedTournaments = tournaments.filter((tournament) => String(tournament.status || '').toLowerCase() === 'completed')
   return (
     <div className="adminPageContent" data-admin-page="tournaments">
       <section className="adminPageIntro">
@@ -505,7 +507,8 @@ function TournamentDashboardSection({ portal, onOpenDetails }: { portal: PortalS
         <p className="small">Host, organizer, registration, scoring, and tournament status metrics.</p>
       </section>
       <div className="adminMetricGrid">
-        <MetricButton label="Tournaments" value={Number(summary.tournamentCount || 0)} onClick={() => onOpenDetails('Tournament metadata', (portal?.tournaments ?? []) as RowRecord[], tournamentColumns)} />
+        <MetricButton label="Tournaments Completed" value={Number(summary.tournamentsCompletedCount || 0)} onClick={() => onOpenDetails('Completed Golf Homiez tournament metadata', completedTournaments, tournamentColumns)} />
+        <MetricButton label="Tournaments Created" value={Number(summary.tournamentsCreatedCount || 0)} onClick={() => onOpenDetails('Created Golf Homiez tournament metadata', tournaments, tournamentColumns)} />
         <MetricButton label="Host accounts" value={Number(summary.hostCount || 0)} onClick={() => onOpenDetails('Host account metadata', (portal?.hosts ?? []) as RowRecord[], hostColumns)} />
         <MetricCard label="Validated hosts" value={Number(summary.validatedHostCount || 0)} />
         <MetricButton label="Organizer accounts" value={Number(summary.organizerCount || 0)} onClick={() => onOpenDetails('Organizer account metadata', (portal?.organizers ?? []) as RowRecord[], organizerColumns)} />
@@ -605,6 +608,23 @@ const userColumns: DetailColumn[] = [
   { key: 'emailVerified', label: 'Verified' },
   { key: 'createdAt', label: 'Created' },
 ]
+const homieTokenUserColumns: DetailColumn[] = [
+  { key: 'email', label: 'Email' },
+  { key: 'name', label: 'Name' },
+  { key: 'homieToken', label: 'Homie Token' },
+  { key: 'homieTokenLabel', label: 'Token label' },
+  { key: 'homieTokenRedeemedAt', label: 'Redeemed' },
+  { key: 'homieTokenId', label: 'Internal mapping ID' },
+]
+const paidHomieColumns: DetailColumn[] = [
+  { key: 'email', label: 'Email' },
+  { key: 'name', label: 'Name' },
+  { key: 'subscriptionStatus', label: 'Subscription' },
+  { key: 'paymentMethodBrand', label: 'Card' },
+  { key: 'paymentMethodLastFour', label: 'Last four' },
+  { key: 'stripeCustomerId', label: 'Stripe customer' },
+  { key: 'createdAt', label: 'Created' },
+]
 const teamColumns: DetailColumn[] = [
   { key: 'name', label: 'Team' },
   { key: 'created_by_email', label: 'Created by' },
@@ -636,6 +656,7 @@ const tournamentColumns: DetailColumn[] = [
   { key: 'creator', label: 'Created by' },
   { key: 'created_at', label: 'Created' },
   { key: 'golf_course_name', label: 'Golf course' },
+  { key: 'generated_user_count', label: 'Users generated' },
 ]
 const challengeColumns: DetailColumn[] = [
   { key: 'message_type', label: 'Type' },
