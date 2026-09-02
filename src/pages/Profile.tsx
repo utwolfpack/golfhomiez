@@ -50,6 +50,7 @@ function ProfileInner() {
   const [status, setStatus] = useState<string | null>(null)
   const [needsEnrichment, setNeedsEnrichment] = useState(false)
   const [hasSavedPhoneNumber, setHasSavedPhoneNumber] = useState(false)
+  const [hasSavedPaymentProfile, setHasSavedPaymentProfile] = useState(false)
   const [profileSummary, setProfileSummary] = useState<ProfileSummary | null>(null)
   const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({})
   const [citySuggestions, setCitySuggestions] = useState<ResolvedLocation[]>([])
@@ -60,7 +61,7 @@ function ProfileInner() {
   const cityBlurTimer = useRef<number | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, hasRole, refreshProfileStatus, refreshSession } = useAuth()
+  const { user, hasRole, billingStatus, refreshProfileStatus, refreshSession } = useAuth()
 
   const isGuidedEnrichment = useMemo(() => new URLSearchParams(location.search).get('enrich') === '1', [location.search])
   const isPreferenceRestricted = hasRole('admin') || hasRole('host') || hasRole('organizer')
@@ -92,6 +93,12 @@ function ProfileInner() {
         setProfileEmail(loadedEmail)
         const savedPhoneAvailable = Boolean(sanitizePhoneInput(profile.phone || '').trim())
         setHasSavedPhoneNumber(savedPhoneAvailable)
+        setHasSavedPaymentProfile(Boolean(
+          savedPhoneAvailable
+          && profile.primaryCity?.trim()
+          && profile.primaryState?.trim()
+          && profile.primaryZipCode?.trim()
+        ))
         setNeedsEnrichment(Boolean(profile.needsEnrichment))
         setProfileSummary(profile.summary || null)
         setFeatureFlags(profile.featureFlags || {})
@@ -268,6 +275,12 @@ function ProfileInner() {
       const saved = await saveProfile(payload)
       setForm((current) => ({ ...current, firstName: saved.firstName || normalizedForm.firstName, lastName: saved.lastName || normalizedForm.lastName }))
       setHasSavedPhoneNumber(Boolean(sanitizePhoneInput(saved.phone || '').trim()))
+      setHasSavedPaymentProfile(Boolean(
+        sanitizePhoneInput(saved.phone || normalizedForm.phone || '').trim()
+        && String(saved.primaryCity || normalizedForm.primaryCity || '').trim()
+        && String(saved.primaryState || normalizedForm.primaryState || '').trim()
+        && String(saved.primaryZipCode || normalizedForm.primaryZipCode || '').trim()
+      ))
       setNeedsEnrichment(Boolean(saved.needsEnrichment))
       setProfileSummary(saved.summary || null)
       setFeatureFlags(saved.featureFlags || {})
@@ -276,7 +289,7 @@ function ProfileInner() {
       await refreshProfileStatus()
       await refreshSession()
       logFrontendEvent({ category: 'profile.save', message: 'profile_session_name_refreshed', data: { hasName: Boolean(saved.firstName && saved.lastName) } })
-      navigate('/profile', { replace: true })
+      navigate(billingStatus?.enabled && !billingStatus.setupComplete ? '/profile/billing' : '/profile', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save profile.')
       logFrontendEvent({ category: 'profile.save', level: 'error', message: 'profile_save_failed', data: { error: err instanceof Error ? err.message : String(err) } })
@@ -299,15 +312,24 @@ function ProfileInner() {
           actions={
             <div>
               <div className="profileHeaderLinks" aria-label="Profile page links">
+                {hasSavedPaymentProfile ? <Link className="btn btnLightGreen btnSmall" to="/profile/billing">Account payment</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save your phone number and address to unlock Account payment.">Account payment</span>}
                 {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/support">Support</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Support.">Support</span>}
                 {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/invite-homie">Invite Homie</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Invite Homie.">Invite Homie</span>}
                 {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/teams">Teams</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Teams.">Teams</span>}
                 {hasSavedPhoneNumber ? <Link className="btn btnLightGreen btnSmall" to="/inbox">Notifications</Link> : <span className="btn btnLightGreen btnSmall" aria-disabled="true" title="Save a phone number to unlock Notifications.">Notifications</span>}
               </div>
-              {!hasSavedPhoneNumber ? <div className="profileHeaderLinksHint">Save your phone number to unlock these profile actions.</div> : null}
+              {!hasSavedPaymentProfile ? <div className="profileHeaderLinksHint">Save your phone number and address to unlock Account payment.</div> : !hasSavedPhoneNumber ? <div className="profileHeaderLinksHint">Save your phone number to unlock these profile actions.</div> : null}
             </div>
           }
         />
+
+        {(isGuidedEnrichment || needsEnrichment || (billingStatus?.enabled && !billingStatus.setupComplete)) ? <div className="onboardingGuide" role="note">
+          <div><strong>Let’s finish setting up your account</strong><span>Complete these two quick steps before exploring the rest of Golf Homiez.</span></div>
+          <ol>
+            <li className={!needsEnrichment ? 'isComplete' : ''}><strong>Profile information</strong><span>Add your name, phone number, city, state, and zip code, then save below.</span></li>
+            <li className={billingStatus?.setupComplete ? 'isComplete' : ''}><strong>Payment or Homie Token</strong><span>{!hasSavedPaymentProfile ? 'Save your phone number and address before continuing to Payment Information.' : 'Add a payment method or use a Homie Token on the Payment Information page.'}</span>{hasSavedPaymentProfile && !billingStatus?.setupComplete ? <Link className="btn btnPrimary btnSmall" to="/profile/billing">Continue to Payment Information</Link> : null}</li>
+          </ol>
+        </div> : null}
 
         <div className="formStack" style={{ maxWidth: 860 }}>
           <div className="formRow formRow--split">
@@ -386,6 +408,11 @@ function ProfileInner() {
               </div>
             </div>
             {cityHelperText ? <div className="small" style={{ marginTop: 6 }}>{cityHelperText}</div> : null}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+              <button type="button" className="btn btnPrimary" disabled={saving} onClick={handleSave}>{saving ? 'Saving…' : 'Save'}</button>
+            </div>
+            {error ? <div className="small" style={{ color: '#b91c1c', marginTop: 8 }}>{error}</div> : null}
+            {status ? <div className="small" style={{ color: '#166534', marginTop: 8 }}>{status}</div> : null}
           </div>
 
           <ProfileSummarySection summary={profileSummary} />
@@ -415,13 +442,7 @@ function ProfileInner() {
             </>
           ) : <div className="small">Preference settings are not available for admin, host, or organizer accounts.</div>) : null}
 
-          {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
-          {status ? <div className="small" style={{ color: '#166534' }}>{status}</div> : null}
-
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btnPrimary" disabled={saving} onClick={handleSave}>{saving ? 'Saving…' : 'Save'}</button>
-            {!needsEnrichment && !isGuidedEnrichment ? <button type="button" className="btn" onClick={() => navigate('/')}>Done</button> : null}
-          </div>
+          {!needsEnrichment && !isGuidedEnrichment ? <div><button type="button" className="btn" onClick={() => navigate('/')}>Done</button></div> : null}
         </div>
       </div>
     </div>

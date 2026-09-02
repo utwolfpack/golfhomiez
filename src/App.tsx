@@ -7,6 +7,7 @@ import { AdminAuthProvider, useAdminAuth } from './context/AdminAuthContext'
 import { OrganizerAuthProvider, useOrganizerAuth } from './context/OrganizerAuthContext'
 import AdminPortal from './pages/AdminPortal'
 import AdminScheduledJobs from './pages/AdminScheduledJobs'
+import AdminAccessCodes from './pages/AdminAccessCodes'
 import AdminResetPassword from './pages/AdminResetPassword'
 import Home from './pages/Home'
 import { GolfHomiezCourseVideos, GolfHomiezVideos } from './pages/MarketingVideos'
@@ -23,6 +24,7 @@ import FindTournament from './pages/FindTournament'
 import FindCourse from './pages/FindCourse'
 import VerifyContact from './pages/VerifyContact'
 import Profile from './pages/Profile'
+import Billing from './pages/Billing'
 import CreateHostAccount from './pages/CreateHostAccount'
 import OrganizerLogin from './pages/OrganizerLogin'
 import OrganizerRegister from './pages/OrganizerRegister'
@@ -60,16 +62,21 @@ function RouteDiagnostics() {
   return null
 }
 
-function ProfileEnrichmentGate() {
+function AccountSetupGate() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, loading, needsProfileEnrichment, profileStatusLoading } = useAuth()
+  const { user, loading, needsProfileEnrichment, profileStatusLoading, billingStatus, billingStatusLoading } = useAuth()
 
   useEffect(() => {
-    if (loading || profileStatusLoading || !user || !needsProfileEnrichment) return
-    if (location.pathname === '/profile') return
-    navigate('/profile?enrich=1', { replace: true })
-  }, [loading, profileStatusLoading, user, needsProfileEnrichment, location.pathname, navigate])
+    if (loading || profileStatusLoading || billingStatusLoading || !user) return
+    if (needsProfileEnrichment) {
+      if (location.pathname !== '/profile') navigate('/profile?enrich=1', { replace: true })
+      return
+    }
+    if (billingStatus?.enabled && (!billingStatus.accessAllowed || !billingStatus.setupComplete)) {
+      if (!['/profile', '/profile/billing'].includes(location.pathname)) navigate('/profile/billing', { replace: true })
+    }
+  }, [loading, profileStatusLoading, billingStatusLoading, user, needsProfileEnrichment, billingStatus, location.pathname, navigate])
 
   return null
 }
@@ -132,7 +139,7 @@ export default function App() {
         <OrganizerAuthProvider>
           <HostAuthProvider>
             <RouteDiagnostics />
-            <ProfileEnrichmentGate />
+            <AccountSetupGate />
             <a className="skipLink" href="#main-content">Skip to main content</a>
             <NavBar />
             <main id="main-content" className="appMain" tabIndex={-1}>
@@ -143,6 +150,7 @@ export default function App() {
               <Route path="/solo-logger" element={<ProtectedRoute><SoloLogger /></ProtectedRoute>} />
               <Route path="/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+              <Route path="/profile/billing" element={<Billing />} />
               <Route path="/directions" element={<Directions />} />
               <Route path="/support" element={<SupportAccessRoute><Support /></SupportAccessRoute>} />
               <Route path="/inbox" element={<ProtectedRoute><Inbox /></ProtectedRoute>} />
@@ -174,6 +182,7 @@ export default function App() {
               <Route path="/golfadmin/forgot-password" element={<AdminResetPassword />} />
               <Route path="/golfadmin/reset-password" element={<AdminResetPassword />} />
               <Route path="/golfadmin/scheduled-jobs" element={<AdminEntryRoute><AdminScheduledJobs /></AdminEntryRoute>} />
+              <Route path="/golfadmin/access-codes" element={<AdminEntryRoute><AdminAccessCodes /></AdminEntryRoute>} />
               <Route path="/:golfCourseSlug/calendar" element={<GolfCourseCalendarPage />} />
               <Route path="/:golfCourseSlug" element={<GolfCoursePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

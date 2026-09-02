@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const projectRoot = new URL('../', import.meta.url)
 
@@ -12,7 +13,7 @@ async function readProjectJson(relativePath) {
 }
 
 async function collectFiles(directoryUrl, predicate) {
-  const directoryPath = directoryUrl.pathname
+  const directoryPath = fileURLToPath(directoryUrl)
   const entries = await readdir(directoryPath, { withFileTypes: true })
   const files = []
 
@@ -37,6 +38,7 @@ test('npm audit v2 remediation pins direct dependencies to patched major lines',
   assert.equal(packageJson.dependencies.react, '^19.2.8')
   assert.equal(packageJson.dependencies['react-dom'], '^19.2.8')
   assert.equal(packageJson.dependencies['react-router'], '^8.3.0')
+  assert.equal(packageJson.dependencies.mysql2, '^3.24.3')
   assert.equal(packageJson.dependencies['react-router-dom'], undefined)
   assert.equal(packageJson.dependencies.uuid, '^11.1.1')
   assert.equal(packageJson.devDependencies.eslint, '^10.8.0')
@@ -59,7 +61,8 @@ test('npm audit remediation keeps patched transitive dependencies without unsafe
     'js-yaml': '4.3.0',
     kysely: '0.28.17',
     postcss: '8.5.23',
-    qs: '6.15.3',
+    qs: '6.16.0',
+    '@humanfs/node': '0.16.8',
   })
   assert.equal(Object.keys(packageJson.overrides).some((key) => key.startsWith('brace-expansion')), false)
   assert.equal(Object.keys(packageJson.overrides).some((key) => key.startsWith('nanoid')), false)

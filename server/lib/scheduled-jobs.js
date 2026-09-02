@@ -14,6 +14,7 @@ import { normalizeTournamentScrubValues, runScrubTournaments } from './tournamen
 import { runScrubGolfHomiezTournaments } from './golfhomiez-tournament-scrub.js'
 import { normalizeGolfCourseDataJobConfig, runGetGolfCourseData } from './golf-course-data-import.js'
 import { nextRunForSchedule, normalizeScheduleConfig, scheduleLabel } from './scheduled-job-schedule.js'
+import { reconcileStripeSubscriptions } from './billing.js'
 import {
   getScheduledJobRecord,
   listScheduledJobRecords,
@@ -72,6 +73,21 @@ function normalizeJobConfig(definition, input) {
 }
 
 export const SCHEDULED_JOB_DEFINITIONS = [
+  {
+    id: 'reconcileStripeSubscriptions',
+    name: 'Reconcile Stripe subscriptions',
+    description: 'Refreshes local subscription state from Stripe to repair missed or delayed webhook delivery.',
+    scheduleLabel: 'Daily 03:30 MT',
+    defaultScheduleLabel: 'Daily 03:30 MT',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'daily', time: '03:30', dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: {},
+    async run({ pool }) {
+      if (String(process.env.BILLING_ENABLED || '').toLowerCase() !== 'true') return { skipped: true, reason: 'billing_disabled' }
+      return reconcileStripeSubscriptions(pool)
+    },
+  },
   {
     id: 'getGolfCourseData',
     name: 'getGolfCourseData',

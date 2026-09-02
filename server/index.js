@@ -40,6 +40,7 @@ import { loadTournamentFinalLeaderboard } from './lib/tournament-final-leaderboa
 import { setTournamentArchiveState } from './lib/tournament-archive.js'
 import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarketingSettings, listMarketingVideoSections, normalizeMarketingVideoAudience, updateHomeMarketingSettings } from './lib/marketing-settings.js'
 import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
+import { completeCheckout, createAccessCode, createCheckout, createPortal, getBillingStatus, listAccessCodes, processStripeWebhook, redeemAccessCode, requireBillingAccess, setCancellation, updateAccessCode } from './lib/billing.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -312,6 +313,15 @@ app.get('/api/locations/nearest', async (req, res) => {
 })
 
 app.all('/api/auth/*', toNodeHandler(auth))
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
+  try {
+    const result = await processStripeWebhook(getPool(), req.body, req.headers['stripe-signature'])
+    return res.json({ received: true, ...result })
+  } catch (error) {
+    logRouteError('Stripe webhook error', req, error)
+    return res.status(400).json({ message: 'Invalid Stripe webhook.' })
+  }
+})
 const apiJsonBodyLimit = String(process.env.API_JSON_BODY_LIMIT || '4mb').trim() || '4mb'
 app.use(express.json({ limit: apiJsonBodyLimit }))
 app.use((error, req, res, next) => {
@@ -478,12 +488,98 @@ async function authMiddleware(req, res, next) {
     const user = await getAuthenticatedUserFromRequest(req)
     if (!user) return res.status(401).json({ message: 'Unauthorized' })
     req.user = user
+    const billingRecoveryPaths = new Set(['/api/profile', '/api/billing/status', '/api/billing/checkout', '/api/billing/checkout/complete', '/api/billing/portal', '/api/billing/cancel', '/api/billing/resume', '/api/billing/redeem-code'])
+    if (!billingRecoveryPaths.has(req.path)) {
+      const [[profile]] = await getPool().execute(
+        'SELECT profile_enriched_at AS profileEnrichedAt FROM app_users WHERE auth_user_id = ? OR id = ? LIMIT 1',
+        [user.id, user.id],
+      )
+      if (!profile?.profileEnrichedAt) {
+        logApi('profile_setup_required', { ...requestContext(req), userId: user.id })
+        return res.status(428).json({ message: 'Complete your required profile information before continuing.', code: 'PROFILE_SETUP_REQUIRED' })
+      }
+      const entitlement = await requireBillingAccess(getPool(), user)
+      if (!entitlement) return res.status(402).json({ message: 'Subscription or access code required.', code: 'BILLING_ACCESS_REQUIRED' })
+      if (!entitlement.setupComplete) {
+        logApi('billing_setup_required', { ...requestContext(req), userId: user.id })
+        return res.status(428).json({ message: 'Add a payment method or use a promo code before continuing.', code: 'BILLING_SETUP_REQUIRED' })
+      }
+      req.billingEntitlement = entitlement
+    }
     next()
   } catch (error) {
     logRouteError('Auth middleware error', req, error)
     res.status(500).json({ message: 'Authentication failed' })
   }
 }
+
+app.get('/api/billing/status', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const status = await getBillingStatus(getPool(), req.user)
+    logApi('billing_status_loaded', { ...requestContext(req), accessSource: status.accessSource, accessAllowed: status.accessAllowed, setupComplete: status.setupComplete })
+    return res.json(status)
+  }
+  catch (error) { logRouteError('Billing status error', req, error); return res.status(500).json({ message: 'Could not load billing status.' }) }
+})
+
+app.post('/api/billing/checkout', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const url = await createCheckout(getPool(), req.user, getClientAppBaseUrl(req))
+    logApi('billing_checkout_created', { ...requestContext(req), userId: req.user.id })
+    return res.json({ url })
+  }
+  catch (error) { logRouteError('Billing checkout error', req, error); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not start checkout.' }) }
+})
+
+app.post('/api/billing/checkout/complete', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const status = await completeCheckout(getPool(), req.user, req.body?.sessionId)
+    logApi('billing_checkout_completion_confirmed', { ...requestContext(req), userId: req.user.id, setupComplete: status.setupComplete })
+    return res.json(status)
+  } catch (error) {
+    logRouteError('Billing checkout completion error', req, error, { body: undefined })
+    return res.status(error.statusCode || 500).json({ message: error.message || 'Could not confirm Checkout.' })
+  }
+})
+
+app.post('/api/billing/portal', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const url = await createPortal(getPool(), req.user, getClientAppBaseUrl(req))
+    logApi('billing_portal_created', { ...requestContext(req), userId: req.user.id })
+    return res.json({ url })
+  }
+  catch (error) { logRouteError('Billing portal error', req, error); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not open billing portal.' }) }
+})
+
+app.post('/api/billing/cancel', requireStorage, authMiddleware, async (req, res) => {
+  try { const status = await setCancellation(getPool(), req.user, true); logApi('billing_cancellation_scheduled', { ...requestContext(req), userId: req.user.id }); return res.json(status) }
+  catch (error) { logRouteError('Billing cancellation error', req, error); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not schedule cancellation.' }) }
+})
+
+app.post('/api/billing/resume', requireStorage, authMiddleware, async (req, res) => {
+  try { return res.json(await setCancellation(getPool(), req.user, false)) }
+  catch (error) { logRouteError('Billing resume error', req, error); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not resume subscription.' }) }
+})
+
+app.post('/api/billing/redeem-code', requireStorage, authMiddleware, async (req, res) => {
+  try { await redeemAccessCode(getPool(), req.user, req.body?.code); return res.json(await getBillingStatus(getPool(), req.user)) }
+  catch (error) { logRouteError('Billing promo-code redemption error', req, error, { body: undefined }); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not redeem access code.' }) }
+})
+
+app.get('/api/admin/billing/access-codes', adminMiddleware, async (req, res) => {
+  try { const codes = await listAccessCodes(getPool()); logApi('admin_access_codes_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, codeCount: codes.length }); return res.json({ codes }) }
+  catch (error) { logRouteError('Admin access-code list error', req, error); return res.status(500).json({ message: 'Could not load access codes.' }) }
+})
+
+app.post('/api/admin/billing/access-codes', adminMiddleware, async (req, res) => {
+  try { return res.status(201).json({ created: await createAccessCode(getPool(), req.adminUser, req.body), codes: await listAccessCodes(getPool()) }) }
+  catch (error) { logRouteError('Admin access-code create error', req, error); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not create access code.' }) }
+})
+
+app.patch('/api/admin/billing/access-codes/:id', adminMiddleware, async (req, res) => {
+  try { await updateAccessCode(getPool(), req.params.id, req.body || {}); return res.json({ codes: await listAccessCodes(getPool()) }) }
+  catch (error) { logRouteError('Admin access-code update error', req, error); return res.status(error.statusCode || 500).json({ message: error.message || 'Could not update access code.' }) }
+})
 
 async function adminMiddleware(req, res, next) {
   try {

@@ -13,7 +13,7 @@
     "postinstall": "npm run cleanup:project-files && npm run db:migrate && npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "node --test test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js",
+    "test": "node --test test/billing.test.js test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js",
     "db:rollback:chat": "node server/scripts/run-one-time-chat-schema-rollback.js",
     "db:migrate": "node server/run-migrations.js",
     "golf-courses:import-opengolfapi": "node server/scripts/import-opengolfapi-courses.js",
@@ -23,6 +23,7 @@
     "cleanup:project-files": "node server/scripts/cleanup-project-files.js",
     "test:security": "node --test test/dependency-security.test.js",
     "security:audit": "npm audit --audit-level=low",
+    "stripe:configure-portal": "node server/scripts/configure-stripe-portal.js",
     "data:reset:user": "node server/scripts/reset-account-data.js user --all",
     "data:reset:host": "node server/scripts/reset-account-data.js host --all",
     "data:reset:organizer": "node server/scripts/reset-account-data.js organizer --all",
@@ -41,11 +42,12 @@
     "country-state-city": "^3.2.1",
     "dotenv": "^17.3.1",
     "express": "^4.22.2",
-    "mysql2": "^3.11.3",
+    "mysql2": "^3.24.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "uuid": "^11.1.1",
-    "react-router": "^8.3.0"
+    "react-router": "^8.3.0",
+    "stripe": "^20.4.0",
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -69,6 +71,7 @@
     "js-yaml": "4.3.0",
     "kysely": "0.28.17",
     "postcss": "8.5.23",
-    "qs": "6.15.3"
+    "qs": "6.16.0",
+    "@humanfs/node": "0.16.8"
   }
 }

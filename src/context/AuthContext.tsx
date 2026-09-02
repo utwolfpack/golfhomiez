@@ -3,6 +3,7 @@ import { getSessionAuth, signInEmail, signOutAuth, signUpEmail } from '../lib/au
 import { fetchProfile } from '../lib/profile'
 import { fetchRbacSummary } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import { fetchBillingStatus, type BillingStatus } from '../lib/billing'
 
 export type User = { id: string; email: string; name?: string | null }
 
@@ -12,6 +13,8 @@ type AuthState = {
   needsProfileEnrichment: boolean
   profileStatusLoading: boolean
   roles: string[]
+  billingStatus: BillingStatus | null
+  billingStatusLoading: boolean
   hasRole: (role: string) => boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
@@ -19,6 +22,7 @@ type AuthState = {
   refreshSession: () => Promise<void>
   refreshProfileStatus: () => Promise<void>
   refreshRoles: () => Promise<void>
+  refreshBillingStatus: () => Promise<void>
 }
 
 const Ctx = createContext<AuthState | null>(null)
@@ -33,6 +37,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [needsProfileEnrichment, setNeedsProfileEnrichment] = useState(false)
   const [profileStatusLoading, setProfileStatusLoading] = useState(false)
   const [roles, setRoles] = useState<string[]>([])
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null)
+  const [billingStatusLoading, setBillingStatusLoading] = useState(false)
+
+  async function refreshBillingStatus(nextUser?: User | null) {
+    const activeUser = nextUser ?? user
+    if (!activeUser) { setBillingStatus(null); return }
+    setBillingStatusLoading(true)
+    try { setBillingStatus(await fetchBillingStatus()) }
+    catch (error) { logFrontendEvent({ level: 'warn', category: 'auth.billing', message: 'billing_status_failed', data: { error: error instanceof Error ? error.message : String(error) } }) }
+    finally { setBillingStatusLoading(false) }
+  }
 
   async function refreshRoles(nextUser?: User | null) {
     const activeUser = nextUser ?? user
@@ -86,7 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const nextUser = toUser(result.data)
     setUser(nextUser)
     logFrontendEvent({ category: 'auth.session', message: 'refresh_session_succeeded', data: { hasUser: Boolean(result.data?.user) } })
-    await Promise.all([refreshProfileStatus(nextUser), refreshRoles(nextUser)])
+    await Promise.all([refreshProfileStatus(nextUser), refreshRoles(nextUser), refreshBillingStatus(nextUser)])
   }
 
   useEffect(() => {
@@ -102,7 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(nextUser)
         logFrontendEvent({ category: 'auth.session', message: 'initial_session_checked', data: { hasUser: Boolean(result.data?.user) } })
         if (nextUser) {
-          await Promise.all([refreshProfileStatus(nextUser), refreshRoles(nextUser)])
+          await Promise.all([refreshProfileStatus(nextUser), refreshRoles(nextUser), refreshBillingStatus(nextUser)])
         }
       } finally {
         if (active) setLoading(false)
@@ -132,6 +147,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     needsProfileEnrichment,
     profileStatusLoading,
     roles,
+    billingStatus,
+    billingStatusLoading,
     hasRole(role: string) {
       return roles.includes(role)
     },
@@ -146,6 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null)
       setRoles([])
       setNeedsProfileEnrichment(false)
+      setBillingStatus(null)
     },
     async register(firstName, lastName, email, password) {
       const normalizedEmail = email.trim().toLowerCase()
@@ -164,7 +182,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshSession,
     refreshProfileStatus,
     refreshRoles,
-  }), [user, loading, needsProfileEnrichment, profileStatusLoading, roles])
+    refreshBillingStatus,
+  }), [user, loading, needsProfileEnrichment, profileStatusLoading, roles, billingStatus, billingStatusLoading])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
