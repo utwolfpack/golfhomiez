@@ -3236,6 +3236,34 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
       return loadMigrationSql('20260902_083_billing_onboarding_details.sql')
     },
   },
+  {
+    version: '20260903_084',
+    name: 'course_calendar_events',
+    filename: '20260903_084_course_calendar_events.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'golf_course_events') &&
+        await columnExists(db, 'golf_course_events', 'id') &&
+        await columnExists(db, 'golf_course_events', 'golf_course_public_page_id') &&
+        await columnExists(db, 'golf_course_events', 'title') &&
+        await columnExists(db, 'golf_course_events', 'event_date') &&
+        await columnExists(db, 'golf_course_events', 'start_time') &&
+        await columnExists(db, 'golf_course_events', 'end_time') &&
+        await columnExists(db, 'golf_course_events', 'details') &&
+        await columnExists(db, 'golf_course_events', 'is_public') &&
+        await columnExists(db, 'golf_course_events', 'created_by_host_account_id') &&
+        await columnExists(db, 'golf_course_events', 'correlation_id') &&
+        await columnExists(db, 'golf_course_events', 'created_at') &&
+        await columnExists(db, 'golf_course_events', 'updated_at') &&
+        await indexExists(db, 'golf_course_events', 'idx_golf_course_events_page_date') &&
+        await indexExists(db, 'golf_course_events', 'idx_golf_course_events_public_date') &&
+        await indexExists(db, 'golf_course_events', 'idx_golf_course_events_correlation')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260903_084_course_calendar_events.sql')
+    },
+  },
 
 ]
 

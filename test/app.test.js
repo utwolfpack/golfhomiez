@@ -3179,7 +3179,8 @@ test('manual tournament delete controls are removed and cancelled tournaments ar
   assert.doesNotMatch(deleteLib, /DELETE FROM organizer_role_accounts\b/)
   assert.doesNotMatch(accounts, /deleteHostTournamentRecord/)
   assert.doesNotMatch(accounts, /deleteOrganizerTournamentRecord/)
-  assert.doesNotMatch(accounts, /method: 'DELETE'/)
+  // Other resources (such as golf-course calendar events) may legitimately use DELETE.
+  // This regression test is specifically about keeping tournament delete APIs removed.
   assert.doesNotMatch(hostPage, /Delete tournament/)
   assert.doesNotMatch(hostPage, /window\.confirm/)
   assert.match(hostPage, /This tournament is scheduled to be deleted because it is cancelled/)

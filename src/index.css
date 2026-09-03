@@ -8492,3 +8492,278 @@ button.navDropdownItem{font:inherit;}
     width:100%;
   }
 }
+
+/* Course calendar events: host management, public legend, and upcoming course events. */
+.hostCourseEventSection{
+  display:grid;
+  gap:10px;
+}
+
+.hostCourseEventForm{
+  padding:14px;
+  border:1px solid rgba(15,23,42,.1);
+  border-radius:12px;
+  background:#f8faf9;
+}
+
+.hostCourseEventList{
+  display:grid;
+  gap:5px;
+}
+
+.hostCourseEventRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:7px 9px;
+  border-bottom:1px solid rgba(15,23,42,.1);
+  background:#fff;
+}
+
+.hostCourseEventRow:last-child{
+  border-bottom:0;
+}
+
+.hostCourseEventRowMain{
+  display:flex;
+  align-items:baseline;
+  gap:9px;
+  min-width:0;
+  flex-wrap:wrap;
+}
+
+.hostCourseEventRowMain > strong{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.hostCourseEventRowActions{
+  display:flex;
+  gap:7px;
+  flex:0 0 auto;
+  flex-wrap:wrap;
+}
+
+.golfCourseCalendarLegend{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+  color:#475569;
+  font-size:.86rem;
+  font-weight:750;
+}
+
+.golfCourseCalendarLegend span{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+}
+
+.golfCourseCalendarLegend i{
+  display:inline-block;
+  width:12px;
+  height:12px;
+  border-radius:4px;
+  border:1px solid rgba(15,23,42,.14);
+}
+
+.golfCourseCalendarLegendTournament{
+  background:#eef7f0;
+}
+
+.golfCourseCalendarLegendCourseEvent{
+  background:#fff3d6;
+}
+
+.golfCourseCalendarLegend{
+  padding:10px 12px;
+  border:1px solid rgba(15,23,42,.08);
+  border-radius:10px;
+  background:#f8faf9;
+}
+
+.golfCourseCalendarEvent--courseEvent{
+  border-color:rgba(173,108,11,.34);
+  background:#fff3d6;
+  color:#74480b;
+}
+
+.golfCourseCalendarEvent--courseEvent:hover,
+.golfCourseCalendarEvent--courseEvent:focus-visible{
+  border-color:rgba(173,108,11,.64);
+  background:#ffe9b4;
+}
+
+.golfCourseCalendarDetails--courseEvent{
+  border-top:4px solid #c78313;
+}
+
+.golfCourseCalendarCourseEventDetails{
+  padding:12px 14px;
+  border:1px solid rgba(173,108,11,.2);
+  border-radius:10px;
+  background:#fffbf2;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+}
+
+.golfCourseUpcomingEvents{
+  display:grid;
+  gap:6px;
+  margin:10px 0 12px;
+  padding:9px 10px;
+  border:1px solid rgba(173,108,11,.22);
+  border-radius:12px;
+  background:linear-gradient(180deg,#fffdf7 0%,#fffaf0 100%);
+  overflow:visible;
+}
+
+.golfCourseUpcomingEventsHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
+.golfCourseUpcomingEventsHeader h3{
+  margin:0;
+  font-size:1rem;
+}
+
+.golfCourseUpcomingEventsHeader > span{
+  padding:3px 7px;
+  border-radius:999px;
+  background:#fff3d6;
+  color:#74480b;
+  font-size:.72rem;
+  font-weight:800;
+}
+
+.golfCourseUpcomingEventList{
+  display:grid;
+  gap:2px;
+}
+
+.golfCourseUpcomingEventRow{
+  display:grid;
+  grid-template-columns:minmax(150px,.8fr) minmax(0,1.7fr) auto;
+  align-items:center;
+  gap:10px;
+  min-height:34px;
+  padding:4px 7px;
+  border-bottom:1px solid rgba(15,23,42,.09);
+  background:#fff;
+  color:inherit;
+  text-decoration:none;
+  overflow:visible;
+}
+
+.golfCourseUpcomingEventRow:last-child{
+  border-bottom:0;
+}
+
+.golfCourseUpcomingEventRow:hover,
+.golfCourseUpcomingEventRow:focus-visible{
+  background:#fffaf0;
+  outline:2px solid rgba(173,108,11,.28);
+  outline-offset:-2px;
+}
+
+.golfCourseUpcomingEventDate,
+.golfCourseUpcomingEventMain{
+  display:flex;
+  align-items:baseline;
+  gap:7px;
+  min-width:0;
+}
+
+.golfCourseUpcomingEventDate span{
+  color:#64748b;
+  font-size:.76rem;
+  white-space:nowrap;
+}
+
+.golfCourseUpcomingEventMain > strong{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.golfCourseUpcomingEventAction{
+  color:#74480b;
+  font-size:.82rem;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.golfCourseUpcomingEventsEmpty{
+  margin:0;
+  color:#64748b;
+}
+
+@media (max-width:760px){
+  .hostCourseEventRow{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:center;
+  }
+
+  .hostCourseEventRowActions{
+    flex-wrap:nowrap;
+  }
+
+  .hostCourseEventRowActions .btn{
+    padding:5px 8px;
+  }
+
+  .golfCourseUpcomingEventRow{
+    grid-template-columns:minmax(118px,.9fr) minmax(0,1.5fr) auto;
+    gap:6px;
+    padding:4px 5px;
+  }
+
+  .golfCourseUpcomingEventDate{
+    display:grid;
+    gap:0;
+  }
+
+  .golfCourseUpcomingEventMain{
+    gap:5px;
+  }
+
+  .golfCourseUpcomingEventAction{
+    font-size:0;
+  }
+
+  .golfCourseUpcomingEventAction::after{
+    content:'›';
+    font-size:1rem;
+  }
+}
+
+.golfCourseUpcomingEventType{
+  justify-self:start;
+  display:inline-flex;
+  width:max-content;
+  padding:2px 7px;
+  border-radius:999px;
+  font-size:.68rem !important;
+  font-weight:850;
+  letter-spacing:.025em;
+  line-height:1.45;
+  text-transform:uppercase;
+}
+
+.golfCourseUpcomingEventType--tournament{
+  background:#eef7f0;
+  color:#0b3d1d !important;
+}
+
+.golfCourseUpcomingEventType--courseEvent{
+  background:#fff3d6;
+  color:#74480b !important;
+}

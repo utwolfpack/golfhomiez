@@ -4,6 +4,7 @@ import dns from 'node:dns/promises'
 import net from 'node:net'
 import { logApi, logWarn } from './logger.js'
 import { normalizeTournamentScheduleDate } from './tournament-schedule-conflicts.js'
+import { listCourseEventsForPage } from './course-events.js'
 
 const MAX_WEBSITE_HTML_BYTES = 1_000_000
 const WEBSITE_FETCH_TIMEOUT_MS = 7_500
@@ -307,7 +308,7 @@ function mapTournament(row) {
   }
 }
 
-function mapPage(row, { baseUrl = '', tournaments = [], calendarAvailable = tournaments.length > 0 } = {}) {
+function mapPage(row, { baseUrl = '', tournaments = [], courseEvents = [], calendarAvailable = tournaments.length > 0 || courseEvents.length > 0 } = {}) {
   if (!row) return null
   const path = `/${row.slug}`
   const calendarPath = `${path}/calendar`
@@ -341,6 +342,8 @@ function mapPage(row, { baseUrl = '', tournaments = [], calendarAvailable = tour
     sourceLastSyncedAt: row.source_last_synced_at || null,
     tournamentCount: mappedTournaments.length,
     tournaments: mappedTournaments,
+    courseEventCount: courseEvents.length,
+    courseEvents,
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
   }
@@ -584,9 +587,11 @@ export async function getGolfCoursePublicPageBySlug(db, slug, options = {}) {
   const tournamentColumns = await columnsForTable(db, 'tournaments')
   const searchColumns = await columnsForTable(db, 'golf_course_tournaments')
   const schema = { tournamentColumns, searchColumns }
-  const calendarAvailable = await getCourseTournamentCalendarAvailability(db, criteria, schema)
+  const tournamentCalendarAvailable = await getCourseTournamentCalendarAvailability(db, criteria, schema)
   const tournaments = await listPublicTournamentsForCoursePage(db, criteria, schema)
-  return mapPage(rows[0], { baseUrl: options.baseUrl, tournaments, calendarAvailable })
+  const courseEvents = await listCourseEventsForPage(db, rows[0].id, { publicOnly: true, limit: 500 })
+  const calendarAvailable = tournamentCalendarAvailable || courseEvents.length > 0
+  return mapPage(rows[0], { baseUrl: options.baseUrl, tournaments, courseEvents, calendarAvailable })
 }
 
 function firstProvidedValue(input, keys, fallback) {

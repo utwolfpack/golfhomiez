@@ -53,6 +53,7 @@ export type TournamentTemplateData = {
   supportingPhotoUrl?: string | null
   miscNotes?: string | null
   tournamentSummary?: string | null
+  tournamentCourseMisc?: string | null
   sponsorsAvailable?: boolean | null
 }
 
@@ -159,6 +160,7 @@ export function emptyTournamentTemplateData(): TournamentTemplateData {
     supportingPhotoUrl: '',
     miscNotes: '',
     tournamentSummary: '',
+    tournamentCourseMisc: '',
     sponsorsAvailable: false,
   }
 }

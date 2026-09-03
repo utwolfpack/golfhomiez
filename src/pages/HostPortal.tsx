@@ -3,10 +3,10 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import PageHero from '../components/PageHero'
 import PasswordCriteria from '../components/PasswordCriteria'
 import { useHostAuth } from '../context/HostAuthContext'
-import { archiveHostTournamentRecord, createHostTournament, restoreHostTournamentRecord, sendHostTournamentInvite, updateHostTournamentRecord, type Tournament, type TournamentInput } from '../lib/accounts'
+import { archiveHostTournamentRecord, createHostCourseEvent, createHostTournament, deleteHostCourseEvent, fetchHostCourseEvents, restoreHostTournamentRecord, sendHostTournamentInvite, updateHostCourseEvent, updateHostTournamentRecord, type CourseEventInput, type GolfCoursePublicPageEvent, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDateTime } from '../lib/time-format'
-import TournamentTemplateFields, { TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
+import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
 import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
@@ -131,6 +131,31 @@ function createEmptyTournamentForm(defaultLocation = '', golfCourseName = ''): T
     templateData: applyGolfCourseTournamentDefaults({}, defaultLocation, golfCourseName),
     teamSlotLimit: DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT,
   }
+}
+
+function createEmptyCourseEventForm(): CourseEventInput {
+  return { title: '', eventDate: '', startTime: '', endTime: '', details: '' }
+}
+
+function formatCourseEventDate(value?: string | null) {
+  const key = String(value || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return 'Date not set'
+  const [year, month, day] = key.split('-').map(Number)
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(year, month - 1, day, 12))
+}
+
+function formatCourseEventTime(value?: string | null) {
+  const normalized = String(value || '').slice(0, 5)
+  if (!/^\d{2}:\d{2}$/.test(normalized)) return ''
+  const [hour, minute] = normalized.split(':').map(Number)
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(2000, 0, 1, hour, minute))
+}
+
+function courseEventTimeRange(event: GolfCoursePublicPageEvent) {
+  const start = formatCourseEventTime(event.startTime)
+  const end = formatCourseEventTime(event.endTime)
+  if (start && end) return `${start} – ${end}`
+  return start || 'Time to be announced'
 }
 
 function formatRegisteredAt(value?: string | null) {
@@ -280,6 +305,13 @@ export default function HostPortal() {
   const [newHostAccount, setNewHostAccount] = useState({ contactName: '', email: '', password: '' })
   const [transferTargetHostAccountId, setTransferTargetHostAccountId] = useState('')
   const [deleteCurrentAdminAfterTransfer, setDeleteCurrentAdminAfterTransfer] = useState(false)
+  const [courseEvents, setCourseEvents] = useState<GolfCoursePublicPageEvent[]>([])
+  const [courseEventsLoading, setCourseEventsLoading] = useState(false)
+  const [courseEventBusy, setCourseEventBusy] = useState(false)
+  const [courseEventError, setCourseEventError] = useState<string | null>(null)
+  const [createCourseEventOpen, setCreateCourseEventOpen] = useState(false)
+  const [courseEventForm, setCourseEventForm] = useState<CourseEventInput>(() => createEmptyCourseEventForm())
+  const [editingCourseEventId, setEditingCourseEventId] = useState<string | null>(null)
 
   async function loadPortal() {
     const result = await fetchHostPortal()
@@ -293,11 +325,28 @@ export default function HostPortal() {
     })
   }
 
+  async function loadCourseEvents() {
+    setCourseEventsLoading(true)
+    try {
+      const loaded = await fetchHostCourseEvents()
+      setCourseEvents(loaded.events || [])
+      setCourseEventError(null)
+      logFrontendEvent({ category: 'host.portal.course-events', message: 'host_course_events_loaded', data: { eventCount: loaded.events?.length || 0, calendarPath: loaded.calendarPath || null } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load golf-course calendar events.'
+      setCourseEventError(message)
+      logFrontendEvent({ category: 'host.portal.course-events', level: 'error', message: 'host_course_events_load_failed', data: { error: message } })
+    } finally {
+      setCourseEventsLoading(false)
+    }
+  }
+
   useEffect(() => {
     let active = true
     ;(async () => {
       try {
         await loadPortal()
+        if (active) await loadCourseEvents()
       } catch (err: any) {
         if (active) setError(err?.message || 'Could not load host portal')
       } finally {
@@ -375,6 +424,82 @@ export default function HostPortal() {
       logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_account_delete_failed', data: { deletedHostAccountId: hostAccountId, error: message } })
     } finally {
       setHostAccountBusy(false)
+    }
+  }
+
+  function startCourseEventEdit(event: GolfCoursePublicPageEvent) {
+    setEditingCourseEventId(event.id)
+    setCourseEventForm({
+      title: event.title || '',
+      eventDate: event.eventDate || '',
+      startTime: event.startTime || '',
+      endTime: event.endTime || '',
+      details: event.details || '',
+    })
+    setCreateCourseEventOpen(true)
+    setCourseEventError(null)
+    logFrontendEvent({ category: 'host.portal.course-events', message: 'host_course_event_edit_started', data: { courseEventId: event.id, eventDate: event.eventDate } })
+  }
+
+  function resetCourseEventForm() {
+    setEditingCourseEventId(null)
+    setCourseEventForm(createEmptyCourseEventForm())
+    setCourseEventError(null)
+  }
+
+  async function onSaveCourseEvent(event: FormEvent) {
+    event.preventDefault()
+    setCourseEventBusy(true)
+    setCourseEventError(null)
+    try {
+      const payload: CourseEventInput = {
+        title: String(courseEventForm.title || '').trim(),
+        eventDate: String(courseEventForm.eventDate || '').trim(),
+        startTime: String(courseEventForm.startTime || '').trim() || null,
+        endTime: String(courseEventForm.endTime || '').trim() || null,
+        details: String(courseEventForm.details || '').trim() || null,
+      }
+      const saved = editingCourseEventId
+        ? await updateHostCourseEvent(editingCourseEventId, payload)
+        : await createHostCourseEvent(payload)
+      const savedEvent = saved.event
+      logFrontendEvent({
+        category: 'host.portal.course-events',
+        message: editingCourseEventId ? 'host_course_event_updated' : 'host_course_event_created',
+        data: { courseEventId: savedEvent.id, eventDate: savedEvent.eventDate, startTime: savedEvent.startTime || null, hasDetails: Boolean(savedEvent.details) },
+      })
+      setSuccess(editingCourseEventId ? 'Course event updated.' : 'Course event added to the public calendar.')
+      resetCourseEventForm()
+      setCreateCourseEventOpen(false)
+      await loadCourseEvents()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save the golf-course event.'
+      setCourseEventError(message)
+      logFrontendEvent({ category: 'host.portal.course-events', level: 'error', message: editingCourseEventId ? 'host_course_event_update_failed' : 'host_course_event_create_failed', data: { courseEventId: editingCourseEventId, error: message } })
+    } finally {
+      setCourseEventBusy(false)
+    }
+  }
+
+  async function onDeleteCourseEvent(event: GolfCoursePublicPageEvent) {
+    if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete ${event.title} from the golf-course calendar?`)) return
+    setCourseEventBusy(true)
+    setCourseEventError(null)
+    try {
+      await deleteHostCourseEvent(event.id)
+      logFrontendEvent({ category: 'host.portal.course-events', message: 'host_course_event_deleted', data: { courseEventId: event.id, eventDate: event.eventDate } })
+      if (editingCourseEventId === event.id) {
+        resetCourseEventForm()
+        setCreateCourseEventOpen(false)
+      }
+      setSuccess('Course event deleted.')
+      await loadCourseEvents()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not delete the golf-course event.'
+      setCourseEventError(message)
+      logFrontendEvent({ category: 'host.portal.course-events', level: 'error', message: 'host_course_event_delete_failed', data: { courseEventId: event.id, error: message } })
+    } finally {
+      setCourseEventBusy(false)
     }
   }
 
@@ -531,7 +656,7 @@ export default function HostPortal() {
       setEditingId(null)
       setEditForm(null)
       setTournamentInfoOpen(false)
-      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || editForm.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((editForm.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((editForm.templateData as any)?.tournamentSummary || '').length, requestedStartDate: editForm.startDate || null, storedStartDate: saved.startDate || null, userTimeZone: getUserTimeZone() } })
+      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || editForm.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((editForm.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((editForm.templateData as any)?.tournamentSummary || '').length, tournamentCourseMiscPresent: Boolean(String((editForm.templateData as any)?.tournamentCourseMisc || '').trim()), tournamentCourseMiscLength: String((editForm.templateData as any)?.tournamentCourseMisc || '').length, requestedStartDate: editForm.startDate || null, storedStartDate: saved.startDate || null, userTimeZone: getUserTimeZone() } })
     } catch (err) {
       const message = getFriendlyTournamentError(err, 'save')
       const conflict = err && typeof err === 'object' && 'conflict' in err ? (err as any).conflict : null
@@ -625,7 +750,7 @@ export default function HostPortal() {
   const safeTournamentPage = Math.min(tournamentPage, totalTournamentPages)
   const pagedHostedTournaments = selectedHostedTournaments.slice((safeTournamentPage - 1) * TOURNAMENTS_PER_PAGE, safeTournamentPage * TOURNAMENTS_PER_PAGE)
   const visibleHostedTournaments = editingId ? selectedTournamentPool.filter((tournament) => tournament.id === editingId) : pagedHostedTournaments
-
+  const sortedCourseEvents = [...courseEvents].sort((left, right) => `${left.eventDate} ${left.startTime || '99:99'}`.localeCompare(`${right.eventDate} ${right.startTime || '99:99'}`))
   useEffect(() => {
     if (tournamentPage > totalTournamentPages) setTournamentPage(totalTournamentPages)
   }, [tournamentPage, totalTournamentPages])
@@ -647,75 +772,83 @@ export default function HostPortal() {
 
         {portalData?.account ? (
           <div className="formStack" style={{ maxWidth: 1100 }}>
-            {!createTournamentOpen && !editingId ? <section className="card" style={{ padding: 16 }} data-testid="host-admin-section">
+            {!editingId && !createTournamentOpen ? <section className="card hostCourseEventSection" style={{ padding: 16 }} data-testid="host-course-event-section">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div>
-                  <strong>Golf-course host accounts</strong>
-                  <div className="small">Every host can update the course profile and create or modify tournaments. The course admin can also transfer admin access and delete other host accounts.</div>
+                  <strong>Course calendar events</strong>
+                  <div className="small">Add public course events that are not tournaments. Use the date, time, and notes to tell golfers what they need to know.</div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btnPrimary" type="button" onClick={() => setHostAccountFormOpen((open) => !open)}>{hostAccountFormOpen ? 'Cancel add host' : 'Add host account'}</button>
-                </div>
+                <button
+                  className="btn btnPrimary"
+                  type="button"
+                  aria-expanded={createCourseEventOpen}
+                  aria-controls="host-create-course-event-panel"
+                  onClick={() => {
+                    const nextOpen = !createCourseEventOpen
+                    if (!nextOpen) resetCourseEventForm()
+                    setCreateCourseEventOpen(nextOpen)
+                    setCourseEventError(null)
+                    logFrontendEvent({ category: 'host.portal.course-events', message: nextOpen ? 'host_course_event_create_panel_opened' : 'host_course_event_create_panel_minimized', data: { editingCourseEventId } })
+                  }}
+                >
+                  {createCourseEventOpen ? 'Minimize course event' : 'Add course event'}
+                </button>
               </div>
 
-              <div className="formStack" style={{ marginTop: 12 }}>
-                {(portalData.hostAccounts || []).map((account) => (
-                  <div key={account.id} className="card" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div>
-                      <strong>{account.contactName || account.email}</strong>{account.isCourseAdmin ? ' — Admin' : ''}
-                      <div className="small">{account.email}</div>
-                    </div>
-                    {portalData.account?.isCourseAdmin && account.id !== portalData.account.id ? (
-                      <button className="btn" type="button" disabled={hostAccountBusy} onClick={() => void onDeleteHostAccount(account.id)}>Delete host</button>
-                    ) : null}
+              {courseEventError ? <div className="small" role="alert" style={{ color: '#b91c1c', marginTop: 10 }}>{courseEventError}</div> : null}
+
+              {createCourseEventOpen ? (
+                <form id="host-create-course-event-panel" className="formStack hostCourseEventForm" style={{ marginTop: 16 }} onSubmit={onSaveCourseEvent}>
+                  <div>
+                    <label className="label">Event name</label>
+                    <input className="input" required maxLength={191} value={courseEventForm.title} onChange={(event) => setCourseEventForm((current) => ({ ...current, title: event.target.value }))} placeholder="Ladies league kickoff" />
                   </div>
-                ))}
-              </div>
-
-              {hostAccountFormOpen ? (
-                <form className="formStack" style={{ marginTop: 12 }} onSubmit={onCreateHostAccount}>
                   <div className="formRow formRow--split">
                     <div>
-                      <label className="label">Host name</label>
-                      <input className="input" value={newHostAccount.contactName} onChange={(event) => setNewHostAccount((current) => ({ ...current, contactName: event.target.value }))} required />
+                      <label className="label">Event date</label>
+                      <input className="input" type="date" required value={courseEventForm.eventDate} onChange={(event) => setCourseEventForm((current) => ({ ...current, eventDate: event.target.value }))} />
                     </div>
                     <div>
-                      <label className="label">Host email</label>
-                      <input className="input" type="email" autoComplete="email" value={newHostAccount.email} onChange={(event) => setNewHostAccount((current) => ({ ...current, email: event.target.value }))} required />
+                      <label className="label">Start time (optional)</label>
+                      <input className="input" type="time" value={courseEventForm.startTime || ''} onChange={(event) => setCourseEventForm((current) => ({ ...current, startTime: event.target.value }))} />
                     </div>
                   </div>
                   <div>
-                    <label className="label">Initial password</label>
-                    <input className="input" type="password" autoComplete="new-password" minLength={10} value={newHostAccount.password} onChange={(event) => setNewHostAccount((current) => ({ ...current, password: event.target.value }))} required />
-                    <PasswordCriteria password={newHostAccount.password} />
-                    <div className="small">Share this password securely with the new host.</div>
+                    <label className="label">End time (optional)</label>
+                    <input className="input" type="time" value={courseEventForm.endTime || ''} onChange={(event) => setCourseEventForm((current) => ({ ...current, endTime: event.target.value }))} />
                   </div>
-                  <button className="btn btnPrimary" disabled={hostAccountBusy}>{hostAccountBusy ? 'Creating…' : 'Create host account'}</button>
+                  <div>
+                    <label className="label">Event details (optional)</label>
+                    <textarea className="input" rows={4} maxLength={5000} value={courseEventForm.details || ''} onChange={(event) => setCourseEventForm((current) => ({ ...current, details: event.target.value }))} placeholder="Add check-in details, audience, pricing, food, league information, or anything golfers should know." />
+                    <div className="small" style={{ marginTop: 4 }}>This event will be visible to the public on the golf-course calendar.</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button className="btn btnPrimary" disabled={courseEventBusy}>{courseEventBusy ? 'Saving…' : (editingCourseEventId ? 'Save event changes' : 'Add event to calendar')}</button>
+                    <button type="button" className="btn" onClick={() => { resetCourseEventForm(); setCreateCourseEventOpen(false); logFrontendEvent({ category: 'host.portal.course-events', message: 'host_course_event_flow_cancelled' }) }}>Cancel</button>
+                  </div>
                 </form>
               ) : null}
 
-              {portalData.account?.isCourseAdmin && (portalData.hostAccounts || []).some((account) => account.id !== portalData.account?.id) ? (
-                <div className="formStack" style={{ marginTop: 16 }}>
-                  <div>
-                    <strong>Transfer course admin</strong>
-                    <div className="small">Choose an existing host account. No email confirmation is required.</div>
+              <div className="hostCourseEventList" style={{ marginTop: 16 }}>
+                {courseEventsLoading ? <div className="small">Loading course events…</div> : null}
+                {!courseEventsLoading && sortedCourseEvents.length === 0 ? <div className="small">No course events have been added yet.</div> : null}
+                {sortedCourseEvents.map((courseEvent) => (
+                  <div className="hostCourseEventRow" key={courseEvent.id}>
+                    <div className="hostCourseEventRowMain">
+                      <strong>{courseEvent.title}</strong>
+                      <div className="small">{formatCourseEventDate(courseEvent.eventDate)} · {courseEventTimeRange(courseEvent)}</div>
+                    </div>
+                    <div className="hostCourseEventRowActions">
+                      <button type="button" className="btn btnSmall" disabled={courseEventBusy} onClick={() => startCourseEventEdit(courseEvent)}>Edit</button>
+                      <button type="button" className="btn btnSmall" disabled={courseEventBusy} onClick={() => void onDeleteCourseEvent(courseEvent)}>Delete</button>
+                    </div>
                   </div>
-                  <select className="input" value={transferTargetHostAccountId} onChange={(event) => setTransferTargetHostAccountId(event.target.value)}>
-                    <option value="">Select a host</option>
-                    {(portalData.hostAccounts || []).filter((account) => account.id !== portalData.account?.id).map((account) => (
-                      <option key={account.id} value={account.id}>{account.contactName || account.email} — {account.email}</option>
-                    ))}
-                  </select>
-                  <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="checkbox" checked={deleteCurrentAdminAfterTransfer} onChange={(event) => setDeleteCurrentAdminAfterTransfer(event.target.checked)} />
-                    Delete my current admin account after the transfer
-                  </label>
-                  <button className="btn" type="button" disabled={hostAccountBusy || !transferTargetHostAccountId} onClick={() => void onTransferHostAdmin()}>{hostAccountBusy ? 'Working…' : 'Transfer admin'}</button>
-                </div>
-              ) : null}
+                ))}
+              </div>
             </section> : null}
 
-            {!editingId ? <section className="card" style={{ padding: 16 }}>
+
+            {!editingId ? <section className="card" style={{ padding: 16 }} data-testid="host-create-tournament-section">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div>
                   <strong>Create tournament</strong>
@@ -847,6 +980,74 @@ export default function HostPortal() {
               ) : null}
             </section> : null}
 
+            {!createTournamentOpen && !editingId ? <section className="card" style={{ padding: 16 }} data-testid="host-admin-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div>
+                  <strong>Golf-course host accounts</strong>
+                  <div className="small">Every host can update the course profile and create or modify tournaments. The course admin can also transfer admin access and delete other host accounts.</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn btnPrimary" type="button" onClick={() => setHostAccountFormOpen((open) => !open)}>{hostAccountFormOpen ? 'Cancel add host' : 'Add host account'}</button>
+                </div>
+              </div>
+
+              <div className="formStack" style={{ marginTop: 12 }}>
+                {(portalData.hostAccounts || []).map((account) => (
+                  <div key={account.id} className="card" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div>
+                      <strong>{account.contactName || account.email}</strong>{account.isCourseAdmin ? ' — Admin' : ''}
+                      <div className="small">{account.email}</div>
+                    </div>
+                    {portalData.account?.isCourseAdmin && account.id !== portalData.account.id ? (
+                      <button className="btn" type="button" disabled={hostAccountBusy} onClick={() => void onDeleteHostAccount(account.id)}>Delete host</button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+
+              {hostAccountFormOpen ? (
+                <form className="formStack" style={{ marginTop: 12 }} onSubmit={onCreateHostAccount}>
+                  <div className="formRow formRow--split">
+                    <div>
+                      <label className="label">Host name</label>
+                      <input className="input" value={newHostAccount.contactName} onChange={(event) => setNewHostAccount((current) => ({ ...current, contactName: event.target.value }))} required />
+                    </div>
+                    <div>
+                      <label className="label">Host email</label>
+                      <input className="input" type="email" autoComplete="email" value={newHostAccount.email} onChange={(event) => setNewHostAccount((current) => ({ ...current, email: event.target.value }))} required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Initial password</label>
+                    <input className="input" type="password" autoComplete="new-password" minLength={10} value={newHostAccount.password} onChange={(event) => setNewHostAccount((current) => ({ ...current, password: event.target.value }))} required />
+                    <PasswordCriteria password={newHostAccount.password} />
+                    <div className="small">Share this password securely with the new host.</div>
+                  </div>
+                  <button className="btn btnPrimary" disabled={hostAccountBusy}>{hostAccountBusy ? 'Creating…' : 'Create host account'}</button>
+                </form>
+              ) : null}
+
+              {portalData.account?.isCourseAdmin && (portalData.hostAccounts || []).some((account) => account.id !== portalData.account?.id) ? (
+                <div className="formStack" style={{ marginTop: 16 }}>
+                  <div>
+                    <strong>Transfer course admin</strong>
+                    <div className="small">Choose an existing host account. No email confirmation is required.</div>
+                  </div>
+                  <select className="input" value={transferTargetHostAccountId} onChange={(event) => setTransferTargetHostAccountId(event.target.value)}>
+                    <option value="">Select a host</option>
+                    {(portalData.hostAccounts || []).filter((account) => account.id !== portalData.account?.id).map((account) => (
+                      <option key={account.id} value={account.id}>{account.contactName || account.email} — {account.email}</option>
+                    ))}
+                  </select>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input type="checkbox" checked={deleteCurrentAdminAfterTransfer} onChange={(event) => setDeleteCurrentAdminAfterTransfer(event.target.checked)} />
+                    Delete my current admin account after the transfer
+                  </label>
+                  <button className="btn" type="button" disabled={hostAccountBusy || !transferTargetHostAccountId} onClick={() => void onTransferHostAdmin()}>{hostAccountBusy ? 'Working…' : 'Transfer admin'}</button>
+                </div>
+              ) : null}
+            </section> : null}
+
             {!createTournamentOpen ? (
               <div>
                 {!editingId ? (
@@ -971,6 +1172,7 @@ export default function HostPortal() {
                                                         } : previous)}
                                                       />
                                                       <TournamentSummaryField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                                      <TournamentCourseMiscField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                                                       <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
                                                         <div style={{ fontWeight: 700 }}>Organizer</div>
                                                         {tournament.organizerEmail ? (

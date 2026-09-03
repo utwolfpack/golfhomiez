@@ -35,6 +35,7 @@ import { getExternalApiCallSummary } from './lib/external-api-metrics.js'
 import { getFeatureFlags, featureFlagDefinitionsForApi, isFeatureEnabled } from './lib/feature-flags.js'
 import { loadProfileSummary } from './lib/profile-summary.js'
 import { createGolfCoursePublicPageForApprovedHost, getGolfCoursePublicPageByHostAccount, getGolfCoursePublicPageBySlug, syncGolfCoursePublicPageCatalogDefaults, updateGolfCoursePublicPageForHost } from './lib/golf-course-public-pages.js'
+import { createCourseEvent, deleteCourseEvent, listCourseEventsForPage, updateCourseEvent } from './lib/course-events.js'
 import { buildSuggestedTournamentStartAssignments, listTournamentStartAssignmentsForTournaments, normalizeTeeTimeIntervalMinutes, normalizeTournamentStartTime, normalizeTournamentStartType, replaceTournamentStartAssignments } from './lib/tournament-start-schedule.js'
 import { loadTournamentFinalLeaderboard } from './lib/tournament-final-leaderboard.js'
 import { setTournamentArchiveState } from './lib/tournament-archive.js'
@@ -1604,6 +1605,17 @@ async function getTournamentPortalById(pool, tournamentId, req = null) {
 }
 
 
+function stripPrivateTournamentTemplateData(tournament) {
+  if (!tournament || typeof tournament !== 'object') return tournament
+  const templateData = tournament.templateData && typeof tournament.templateData === 'object' && !Array.isArray(tournament.templateData)
+    ? tournament.templateData
+    : null
+  if (!templateData || !Object.prototype.hasOwnProperty.call(templateData, 'tournamentCourseMisc')) return tournament
+  const publicTemplateData = { ...templateData }
+  delete publicTemplateData.tournamentCourseMisc
+  return { ...tournament, templateData: publicTemplateData }
+}
+
 function publicTournamentPortalResponse(portal, viewerRegistration = null) {
   const { registrations: _registrations, registrationCount: _registrationCount, registeredTeamCount: _registeredTeamCount, verifiedUserCount: _verifiedUserCount, ...publicPortal } = portal || {}
   const {
@@ -1613,15 +1625,16 @@ function publicTournamentPortalResponse(portal, viewerRegistration = null) {
     verifiedUserCount: _tournamentVerifiedUserCount,
     ...publicTournament
   } = publicPortal.tournament || {}
-  const completed = String(publicTournament.status || '').toLowerCase() === 'completed'
+  const safePublicTournament = stripPrivateTournamentTemplateData(publicTournament)
+  const completed = String(safePublicTournament.status || '').toLowerCase() === 'completed'
 
   return {
     ...publicPortal,
     startAssignments: completed ? [] : (publicPortal.startAssignments || []),
     finalLeaderboard: completed ? (Array.isArray(publicPortal.finalLeaderboard) ? publicPortal.finalLeaderboard : []) : [],
     tournament: {
-      ...publicTournament,
-      startAssignments: completed ? [] : (publicTournament.startAssignments || []),
+      ...safePublicTournament,
+      startAssignments: completed ? [] : (safePublicTournament.startAssignments || []),
     },
     viewerRegistration,
     isViewerRegistered: Boolean(viewerRegistration),
@@ -2953,6 +2966,93 @@ app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
 })
 
 
+async function resolveHostCourseCalendarPage(db, req) {
+  const page = await getGolfCoursePublicPageByHostAccount(db, req.hostAccount.id, { baseUrl: getHostAppBaseUrl(req) })
+  if (!page?.id) {
+    const error = new Error('Golf-course public page is not available yet. Open the host profile once to finish setting up the course page, then try again.')
+    error.code = 'GOLF_COURSE_PUBLIC_PAGE_REQUIRED'
+    throw error
+  }
+  return page
+}
+
+app.get('/api/host/course-events', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const page = await resolveHostCourseCalendarPage(db, req)
+    const events = await listCourseEventsForPage(db, page.id, { publicOnly: false, limit: 500 })
+    logApi('host_course_events_loaded', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, eventCount: events.length })
+    return res.json({ events, calendarPath: page.calendarPath, calendarUrl: page.calendarUrl, publicPagePath: page.path })
+  } catch (error) {
+    if (error?.code === 'GOLF_COURSE_PUBLIC_PAGE_REQUIRED') return res.status(409).json({ message: error.message })
+    logRouteError('Host course events load error', req, error)
+    return res.status(500).json({ message: 'Could not load golf-course calendar events.' })
+  }
+})
+
+app.post('/api/host/course-events', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const page = await resolveHostCourseCalendarPage(db, req)
+    logApi('host_course_event_create_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id })
+    const event = await createCourseEvent(db, {
+      golfCoursePublicPageId: page.id,
+      hostAccountId: req.hostAccount.id,
+      correlationId: req.correlationId,
+      input: req.body || {},
+    })
+    logApi('host_course_event_created', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: event?.id || null, eventDate: event?.eventDate || null })
+    return res.status(201).json({ event })
+  } catch (error) {
+    if (error?.code === 'GOLF_COURSE_PUBLIC_PAGE_REQUIRED') return res.status(409).json({ message: error.message })
+    if (error instanceof Error && /Event name|Event date|Event start time|Event end time/i.test(error.message)) {
+      logApi('host_course_event_create_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, reason: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host course event create error', req, error)
+    return res.status(500).json({ message: 'Could not create the golf-course event.' })
+  }
+})
+
+app.put('/api/host/course-events/:id', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const page = await resolveHostCourseCalendarPage(db, req)
+    const eventId = String(req.params.id || '').trim()
+    logApi('host_course_event_update_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: eventId })
+    const event = await updateCourseEvent(db, { id: eventId, golfCoursePublicPageId: page.id, correlationId: req.correlationId, input: req.body || {} })
+    if (!event) return res.status(404).json({ message: 'Golf-course event not found.' })
+    logApi('host_course_event_updated', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: event.id, eventDate: event.eventDate })
+    return res.json({ event })
+  } catch (error) {
+    if (error?.code === 'GOLF_COURSE_PUBLIC_PAGE_REQUIRED') return res.status(409).json({ message: error.message })
+    if (error instanceof Error && /Event name|Event date|Event start time|Event end time/i.test(error.message)) {
+      logApi('host_course_event_update_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, courseEventId: req.params?.id || null, reason: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host course event update error', req, error)
+    return res.status(500).json({ message: 'Could not update the golf-course event.' })
+  }
+})
+
+app.delete('/api/host/course-events/:id', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const page = await resolveHostCourseCalendarPage(db, req)
+    const eventId = String(req.params.id || '').trim()
+    logApi('host_course_event_delete_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: eventId })
+    const deleted = await deleteCourseEvent(db, { id: eventId, golfCoursePublicPageId: page.id })
+    if (!deleted) return res.status(404).json({ message: 'Golf-course event not found.' })
+    logApi('host_course_event_deleted', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: eventId })
+    return res.json({ deleted: true, id: eventId })
+  } catch (error) {
+    if (error?.code === 'GOLF_COURSE_PUBLIC_PAGE_REQUIRED') return res.status(409).json({ message: error.message })
+    logRouteError('Host course event delete error', req, error)
+    return res.status(500).json({ message: 'Could not delete the golf-course event.' })
+  }
+})
+
+
 app.post('/api/host/accounts', hostAuthMiddleware, async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email)
@@ -3027,7 +3127,7 @@ app.get('/api/golf-course-pages/:slug', async (req, res) => {
       logApi('golf_course_public_page_not_found', { ...requestContext(req), slug })
       return res.status(404).json({ message: 'Golf-course page not found.' })
     }
-    logApi('golf_course_public_page_loaded', { ...requestContext(req), slug: page.slug, hostAccountId: page.hostAccountId, tournamentCount: page.tournamentCount, calendarAvailable: page.calendarAvailable, calendarPath: page.calendarPath })
+    logApi('golf_course_public_page_loaded', { ...requestContext(req), slug: page.slug, hostAccountId: page.hostAccountId, tournamentCount: page.tournamentCount, courseEventCount: page.courseEventCount, calendarAvailable: page.calendarAvailable, calendarPath: page.calendarPath })
     return res.json(page)
   } catch (error) {
     logRouteError('Golf-course public page load error', req, error)
@@ -3358,7 +3458,7 @@ app.put('/api/host/tournaments/:id', hostAuthMiddleware, async (req, res) => {
       tournamentUrl: tournament.status === 'published' ? tournamentPortalUrl(req, tournament.tournamentIdentifier || tournament.id) : null,
     })
     logApi('golfhomiez_tournament_search_record_synced', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, ...searchRecord })
-    logApi('host_tournament_updated', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, tournamentTeamSize: getTournamentTeamSizeFromTemplateData(input.templateData), userTimeZone, requestedStartDate: normalizeTournamentScheduleDate(input.startDate) || null, storedStartDate: normalizeTournamentScheduleDate(tournament.startDate) || null })
+    logApi('host_tournament_updated', { ...context, hostAccountId: req.hostAccount.id, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, tournamentCourseMiscPresent: Boolean(input.templateData?.tournamentCourseMisc), tournamentCourseMiscLength: String(input.templateData?.tournamentCourseMisc || '').length, tournamentTeamSize: getTournamentTeamSizeFromTemplateData(input.templateData), userTimeZone, requestedStartDate: normalizeTournamentScheduleDate(input.startDate) || null, storedStartDate: normalizeTournamentScheduleDate(tournament.startDate) || null })
     res.json(tournament)
   } catch (error) {
     if (error instanceof Error && /required|invalid|cannot be after|Restore the archived/i.test(error.message)) {
@@ -3635,7 +3735,7 @@ app.put('/api/organizer/tournaments/:id', requireStorage, organizerAuthMiddlewar
       tournamentUrl: tournament.status === 'published' ? tournamentPortalUrl(req, tournament.tournamentIdentifier || tournament.id) : null,
     })
     logApi('golfhomiez_tournament_search_record_synced', { ...context, tournamentId: tournament.id, status: tournament.status, organizerEmail: normalizeEmail(req.organizerUser?.email), ...searchRecord })
-    logApi('organizer_tournament_updated', { ...context, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, tournamentTeamSize: getTournamentTeamSizeFromTemplateData(input.templateData), email: normalizeEmail(req.organizerUser?.email) })
+    logApi('organizer_tournament_updated', { ...context, tournamentId: tournament.id, status: tournament.status, templateKey: tournament.templateKey || input.templateKey || 'classic-flyer', teamSlotLimit: tournament.teamSlotLimit, registeredTeamCount: tournament.registeredTeamCount, openTeamSlotCount: tournament.openTeamSlotCount, tournamentSummaryPresent: Boolean(input.templateData?.tournamentSummary), tournamentSummaryLength: String(input.templateData?.tournamentSummary || '').length, tournamentCourseMiscPresent: Boolean(input.templateData?.tournamentCourseMisc), tournamentCourseMiscLength: String(input.templateData?.tournamentCourseMisc || '').length, tournamentTeamSize: getTournamentTeamSizeFromTemplateData(input.templateData), email: normalizeEmail(req.organizerUser?.email) })
     res.json(tournament)
   } catch (error) {
     if (error instanceof Error && /required|invalid|cannot be after|Restore the archived/i.test(error.message)) {
@@ -4339,13 +4439,13 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
     }
     const tournaments = registrationRows.map(({ row, registration }) => {
       const score = teamScoreByTournamentAndTeam.get(`${row.id}::${tournamentRegistrationTeamKey(registration)}`) || null
-      return {
+      return stripPrivateTournamentTemplateData({
         ...mapTournamentPortalRow(row, req),
         tournamentIdentifier: row.tournament_identifier || null,
         registration,
         teamScore: score?.totalScore ?? null,
         teamScoreUpdatedAt: score?.updatedAt || null,
-      }
+      })
     })
     logApi('user_registered_tournaments_loaded', {
       ...requestContext(req),
