@@ -546,6 +546,7 @@ export function sanitizeTournamentTemplateData(value = {}) {
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
     miscNotes: cleanString('miscNotes'),
     tournamentSummary: source.tournamentSummary == null ? null : (String(source.tournamentSummary).trim().slice(0, 5000) || null),
+    tournamentCourseMisc: source.tournamentCourseMisc == null ? null : (String(source.tournamentCourseMisc).trim().slice(0, 5000) || null),
     sponsorsAvailable: Boolean(source.sponsorsAvailable),
   }
 }
@@ -578,6 +579,17 @@ function mapTournamentRow(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+function stripTournamentCourseMisc(tournament) {
+  if (!tournament || typeof tournament !== 'object') return tournament
+  const templateData = tournament.templateData && typeof tournament.templateData === 'object' && !Array.isArray(tournament.templateData)
+    ? tournament.templateData
+    : null
+  if (!templateData || !Object.prototype.hasOwnProperty.call(templateData, 'tournamentCourseMisc')) return tournament
+  const publicTemplateData = { ...templateData }
+  delete publicTemplateData.tournamentCourseMisc
+  return { ...tournament, templateData: publicTemplateData }
 }
 
 export async function ensureTournamentInviteSchema(pool) {
@@ -1138,7 +1150,7 @@ export async function listAllTournaments(pool) {
        LEFT JOIN host_role_accounts hra ON hra.id = t.host_account_id
       ORDER BY t.start_date DESC, t.created_at DESC`,
   )
-  return rows.map(mapTournamentRow)
+  return rows.map((row) => stripTournamentCourseMisc(mapTournamentRow(row)))
 }
 
 export async function listRoleAssignments(pool) {

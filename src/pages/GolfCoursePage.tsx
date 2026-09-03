@@ -6,6 +6,7 @@ import { fetchGolfCoursePublicPage, type GolfCoursePublicPage as GolfCoursePubli
 import { logFrontendEvent } from '../lib/frontend-logger'
 const defaultGolfCourseBanner = '/DefaultGolfBanner.jpg'
 const TOURNAMENTS_PER_PAGE = 15
+const UPCOMING_CALENDAR_ITEM_LIMIT = 5
 
 function formatTournamentDate(value?: string | null) {
   if (!value) return 'Date to be announced'
@@ -69,7 +70,7 @@ export default function GolfCoursePage() {
         logFrontendEvent({
           category: 'golf-course.public-page',
           message: 'golf_course_public_page_loaded',
-          data: { slug: loaded.slug, golfCourseId: loaded.golfCourseId || null, tournamentCount: loaded.tournamentCount, uploadedBannerUsed: Boolean(loaded.bannerImageData) },
+          data: { slug: loaded.slug, golfCourseId: loaded.golfCourseId || null, tournamentCount: loaded.tournamentCount, courseEventCount: loaded.courseEventCount, uploadedBannerUsed: Boolean(loaded.bannerImageData) },
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not load golf-course page.'
@@ -111,6 +112,29 @@ export default function GolfCoursePage() {
   const pageCount = Math.max(1, Math.ceil(filteredTournaments.length / TOURNAMENTS_PER_PAGE))
   const safeTournamentPage = Math.min(Math.max(selectedTournamentPage, 1), pageCount)
   const visibleTournaments = filteredTournaments.slice((safeTournamentPage - 1) * TOURNAMENTS_PER_PAGE, safeTournamentPage * TOURNAMENTS_PER_PAGE)
+  const todayCourseDateKey = useMemo(() => {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }, [])
+  const upcomingCalendarItems = useMemo(() => [
+    ...(page?.tournaments || [])
+      .filter((tournament) => ['published', 'completed'].includes(String(tournament.status || '').toLowerCase()) && String(tournament.startDate || '').slice(0, 10) >= todayCourseDateKey)
+      .map((tournament) => ({ kind: 'tournament' as const, id: tournament.id, title: tournament.name, eventDate: String(tournament.startDate || '').slice(0, 10), startTime: tournament.startTime || null, details: `${formatTournamentStartType(tournament.startType)} tournament`, path: tournament.portalPath })),
+    ...(page?.courseEvents || [])
+      .filter((event) => String(event.eventDate || '') >= todayCourseDateKey)
+      .map((event) => ({ kind: 'courseEvent' as const, id: event.id, title: event.title, eventDate: event.eventDate, startTime: event.startTime || null, endTime: event.endTime || null, details: event.details || null, path: page?.calendarPath || '' })),
+  ]
+    .sort((left, right) => {
+      const dateCompare = String(left.eventDate || '').localeCompare(String(right.eventDate || ''))
+      if (dateCompare) return dateCompare
+      const leftTime = String(left.startTime || '99:99')
+      const rightTime = String(right.startTime || '99:99')
+      return leftTime.localeCompare(rightTime) || String(left.title || '').localeCompare(String(right.title || ''))
+    })
+    .slice(0, UPCOMING_CALENDAR_ITEM_LIMIT), [page?.calendarPath, page?.courseEvents, page?.tournaments, todayCourseDateKey])
 
   useEffect(() => {
     setSelectedTournamentYear(String(new Date().getFullYear()))
@@ -168,6 +192,42 @@ export default function GolfCoursePage() {
               </Link>
             ) : null}
           </div>
+          <section className="golfCourseUpcomingEvents" aria-label="Upcoming golf course events">
+            <div className="golfCourseUpcomingEventsHeader">
+              <div>
+                <div className="golfCoursePublicEyebrow">Course calendar</div>
+                <h3>Upcoming events</h3>
+              </div>
+              <span>{upcomingCalendarItems.length ? `Next ${upcomingCalendarItems.length}` : 'No events scheduled'}</span>
+            </div>
+            {upcomingCalendarItems.length ? (
+              <div className="golfCourseUpcomingEventList">
+                {upcomingCalendarItems.map((event) => {
+                  const timeRange = [formatTournamentStartTime(event.startTime), event.kind === 'courseEvent' ? formatTournamentStartTime(event.endTime) : ''].filter(Boolean).join(' – ')
+                  return (
+                    <Link
+                      key={`${event.kind}-${event.id}`}
+                      className="golfCourseUpcomingEventRow"
+                      to={event.path || page.calendarPath}
+                      onClick={() => logFrontendEvent({ category: 'golf-course.public-page', message: event.kind === 'tournament' ? 'upcoming_tournament_selected' : 'upcoming_course_event_selected', data: { slug: page.slug, itemId: event.id, itemType: event.kind, eventDate: event.eventDate, destinationPath: event.path || page.calendarPath } })}
+                    >
+                      <div className="golfCourseUpcomingEventDate">
+                        <strong>{formatTournamentDate(event.eventDate)}</strong>
+                        <span>{timeRange || 'Time TBA'}</span>
+                      </div>
+                      <div className="golfCourseUpcomingEventMain">
+                        <span className={`golfCourseUpcomingEventType golfCourseUpcomingEventType--${event.kind}`}>{event.kind === 'tournament' ? 'Tournament' : 'Course event'}</span>
+                        <strong>{event.title}</strong>
+                      </div>
+                      <span className="golfCourseUpcomingEventAction" aria-hidden="true">View →</span>
+                    </Link>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="golfCourseUpcomingEventsEmpty">No upcoming course events are scheduled yet. Check the tournament calendar for tournament dates and future updates.</p>
+            )}
+          </section>
           <p>{page.summary}</p>
           <div className="golfCoursePublicContactGrid">
             {address ? (

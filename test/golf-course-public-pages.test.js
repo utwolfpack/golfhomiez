@@ -12,6 +12,12 @@ import {
   syncGolfCoursePublicPageCatalogDefaults,
   updateGolfCoursePublicPageForHost,
 } from '../server/lib/golf-course-public-pages.js'
+import {
+  createCourseEvent,
+  deleteCourseEvent,
+  sanitizeCourseEventInput,
+  updateCourseEvent,
+} from '../server/lib/course-events.js'
 
 test('golf-course page slug uses course name plus two-letter state with no spaces', () => {
   assert.equal(buildGolfCoursePageBaseSlug('Murray Parkway Golf Course', 'UT'), 'murrayparkwaygolfcourseut')
@@ -93,6 +99,7 @@ test('approved host page creation appends a number when the base slug is already
       }
       if (/UPDATE host_accounts SET golf_course_id/i.test(sql)) return [{ affectedRows: 1 }]
       if (/FROM golf_course_public_pages WHERE id = \?/i.test(sql)) return [[inserted.row]]
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -149,6 +156,7 @@ test('public golf-course page includes linked public tournaments for the relativ
           { id: 'tournament-2', tournament_identifier: null, name: 'Fall Classic', start_date: '2026-09-12', status: 'completed', template_data: JSON.stringify({ startType: 'tee-times', teeTime: '08:30' }) },
         ]]
       }
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -208,6 +216,7 @@ test('golf-course calendar becomes available after the first tournament without 
         publicQuery = sql
         return [[]]
       }
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -265,6 +274,7 @@ test('public golf-course page includes synced GolfHomiez tournaments when course
           status: 'published',
         }]]
       }
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -306,6 +316,7 @@ test('public golf-course page tournament rollup does not reference missing cours
         tournamentQuery = sql
         return [[{ id: 'tournament-1', tournament_identifier: null, name: 'Lake View Open', start_date: '2026-09-12', status: 'published' }]]
       }
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -336,6 +347,7 @@ test('additional host accounts resolve the shared golf-course public page by gol
       if (/FROM golf_course_public_pages WHERE host_account_id/i.test(sql)) return [[]]
       if (/SELECT golf_course_id FROM host_accounts WHERE id/i.test(sql)) return [[{ golf_course_id: 'course-1' }]]
       if (/FROM golf_course_public_pages WHERE golf_course_id/i.test(sql)) return [[sharedPage]]
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -386,6 +398,7 @@ test('host public-page updates can clear optional website, banner, and contact f
         })
         return [{ affectedRows: 1 }]
       }
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -456,6 +469,7 @@ test('catalog defaults populate missing public profile contact and address data 
         return [{ affectedRows: 1 }]
       }
       if (/SELECT \* FROM golf_course_public_pages WHERE host_account_id/i.test(sql)) return [[row]]
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
       throw new Error(`Unexpected SQL: ${sql}`)
     },
   }
@@ -504,4 +518,118 @@ test('migration, API route, host editor, frontend route, and correlated logging 
   assert.match(hostProfile, /readOnly aria-readonly="true"/)
   assert.match(hostProfile, /logFrontendEvent/)
   assert.match(adminPage, /host_account_approval_completed/)
+})
+
+test('course calendar event validation and CRUD preserve public event details and correlation ids', async () => {
+  assert.deepEqual(sanitizeCourseEventInput({
+    title: '  Ladies League Kickoff  ',
+    eventDate: '2026-09-18',
+    startTime: '08:30',
+    endTime: '11:15',
+    details: '  Check in near the first tee.  ',
+  }), {
+    title: 'Ladies League Kickoff',
+    eventDate: '2026-09-18',
+    startTime: '08:30',
+    endTime: '11:15',
+    details: 'Check in near the first tee.',
+  })
+  assert.throws(() => sanitizeCourseEventInput({ title: 'Bad date', eventDate: '2026-02-31' }), /valid calendar date/i)
+  assert.throws(() => sanitizeCourseEventInput({ title: 'Bad time', eventDate: '2026-09-18', startTime: '14:00', endTime: '09:00' }), /cannot be before/i)
+
+  let row = null
+  const db = {
+    async execute(sql, params = []) {
+      if (/INSERT INTO golf_course_events/i.test(sql)) {
+        row = {
+          id: params[0],
+          golf_course_public_page_id: params[1],
+          title: params[2],
+          event_date: params[3],
+          start_time: params[4],
+          end_time: params[5],
+          details: params[6],
+          is_public: 1,
+          created_by_host_account_id: params[7],
+          correlation_id: params[8],
+          created_at: '2026-09-03 10:00:00',
+          updated_at: '2026-09-03 10:00:00',
+        }
+        return [{ affectedRows: 1 }]
+      }
+      if (/SELECT \* FROM golf_course_events WHERE id/i.test(sql)) return [[row]]
+      if (/UPDATE golf_course_events/i.test(sql)) {
+        row = { ...row, title: params[0], event_date: params[1], start_time: params[2], end_time: params[3], details: params[4], correlation_id: params[5] }
+        return [{ affectedRows: 1 }]
+      }
+      if (/DELETE FROM golf_course_events/i.test(sql)) {
+        row = null
+        return [{ affectedRows: 1 }]
+      }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    },
+  }
+
+  const created = await createCourseEvent(db, {
+    golfCoursePublicPageId: 'page-1',
+    hostAccountId: 'host-1',
+    correlationId: 'corr-create',
+    input: { title: 'Ladies League Kickoff', eventDate: '2026-09-18', startTime: '08:30', details: 'Public details' },
+  })
+  assert.equal(created.isPublic, true)
+  assert.equal(created.correlationId, 'corr-create')
+
+  const updated = await updateCourseEvent(db, {
+    id: created.id,
+    golfCoursePublicPageId: 'page-1',
+    correlationId: 'corr-update',
+    input: { title: 'Ladies League Opening Day', eventDate: '2026-09-19', startTime: '09:00', endTime: '12:00', details: 'Updated details' },
+  })
+  assert.equal(updated.title, 'Ladies League Opening Day')
+  assert.equal(updated.eventDate, '2026-09-19')
+  assert.equal(updated.correlationId, 'corr-update')
+  assert.equal(await deleteCourseEvent(db, { id: created.id, golfCoursePublicPageId: 'page-1' }), true)
+})
+
+test('public golf-course page exposes public course events and makes the course calendar available without a tournament', async () => {
+  const db = {
+    async execute(sql, params = []) {
+      if (/FROM golf_course_public_pages WHERE slug/i.test(sql)) {
+        return [[{
+          id: 'page-1',
+          host_account_id: 'host-1',
+          golf_course_id: 'course-1',
+          slug: 'golfhomiezlakeviewut',
+          golf_course_name: 'Golf Homiez Lake View',
+          summary: 'Course summary',
+          state_code: 'UT',
+          is_published: 1,
+        }]]
+      }
+      if (/FROM information_schema\.COLUMNS/i.test(sql)) return [[]]
+      if (/FROM golf_course_events/i.test(sql)) {
+        assert.deepEqual(params, ['page-1'])
+        assert.match(sql, /is_public = 1/)
+        return [[{
+          id: 'event-1',
+          golf_course_public_page_id: 'page-1',
+          title: 'Junior Golf Clinic',
+          event_date: '2026-09-20',
+          start_time: '10:00:00',
+          end_time: '12:00:00',
+          details: 'Open to junior golfers.',
+          is_public: 1,
+        }]]
+      }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    },
+  }
+
+  const page = await getGolfCoursePublicPageBySlug(db, 'golfhomiezlakeviewut')
+  assert.equal(page.tournamentCount, 0)
+  assert.equal(page.courseEventCount, 1)
+  assert.equal(page.calendarAvailable, true)
+  assert.equal(page.courseEvents[0].title, 'Junior Golf Clinic')
+  assert.equal(page.courseEvents[0].startTime, '10:00')
+  assert.equal(page.courseEvents[0].details, 'Open to junior golfers.')
 })

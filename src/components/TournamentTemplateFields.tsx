@@ -132,6 +132,27 @@ export function TournamentSummaryField({ value, onChange }: Props) {
   )
 }
 
+export function TournamentCourseMiscField({ value, onChange }: Props) {
+  const templateData = { ...emptyTournamentTemplateData(), ...(value.templateData || {}) }
+  const misc = String(templateData.tournamentCourseMisc || '')
+
+  return (
+    <div className="card tournament-course-misc-editor" style={{ padding: 14, background: '#fffaf0' }}>
+      <label className="label" htmlFor="tournament-course-misc">Tournament Course Misc</label>
+      <textarea
+        id="tournament-course-misc"
+        className="input"
+        rows={5}
+        maxLength={5000}
+        value={misc}
+        onChange={(event) => onChange({ ...value, templateData: { ...templateData, tournamentCourseMisc: event.target.value } })}
+        placeholder="Track course-only administrative notes such as who has paid, special arrangements, supplies, staffing, or other tournament needs."
+      />
+      <div className="small" style={{ marginTop: 4 }}>Private course notes for tournament administration. Only the tournament host and organizer can view this information; it is never shown on the public tournament page.</div>
+    </div>
+  )
+}
+
 export default function TournamentTemplateFields({ value, onChange, hideRegistrationDeadline = false }: Props) {
   const templateData = { ...emptyTournamentTemplateData(), ...(value.templateData || {}) }
   const supportingPhotoUrl = templateData.supportingPhotoUrl || ''

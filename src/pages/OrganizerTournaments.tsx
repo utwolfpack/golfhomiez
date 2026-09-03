@@ -5,7 +5,7 @@ import PageHero from '../components/PageHero'
 import { archiveOrganizerTournamentRecord, fetchOrganizerPortal, restoreOrganizerTournamentRecord, updateOrganizerTournamentRecord, type OrganizerPortalSummary, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDateTime } from '../lib/time-format'
-import TournamentTemplateFields, { TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
+import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
 import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
@@ -300,7 +300,7 @@ export default function OrganizerTournaments() {
       setEditingId(null)
       setForm(null)
       setTournamentInfoOpen(false)
-      logFrontendEvent({ category: 'tournaments.organizer', message: 'tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || form.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((form.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((form.templateData as any)?.tournamentSummary || '').length } })
+      logFrontendEvent({ category: 'tournaments.organizer', message: 'tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || form.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((form.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((form.templateData as any)?.tournamentSummary || '').length, tournamentCourseMiscPresent: Boolean(String((form.templateData as any)?.tournamentCourseMisc || '').trim()), tournamentCourseMiscLength: String((form.templateData as any)?.tournamentCourseMisc || '').length } })
     } catch (err) {
       const message = getFriendlyTournamentError(err, 'save')
       setError(message)
@@ -415,6 +415,7 @@ export default function OrganizerTournaments() {
                                             } : previous)}
                                           />
                                           <TournamentSummaryField value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                          <TournamentCourseMiscField value={form} onChange={(next) => setForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                       </div>
                     ) : null}
                   </div>

@@ -17,6 +17,27 @@ export type GolfCoursePublicPageTournament = {
   portalPath: string
 }
 
+export type GolfCoursePublicPageEvent = {
+  id: string
+  golfCoursePublicPageId: string
+  title: string
+  eventDate: string
+  startTime?: string | null
+  endTime?: string | null
+  details?: string | null
+  isPublic: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export type CourseEventInput = {
+  title: string
+  eventDate: string
+  startTime?: string | null
+  endTime?: string | null
+  details?: string | null
+}
+
 export type GolfCoursePublicPageInput = {
   summary: string
   bannerImageUrl?: string | null
@@ -45,6 +66,8 @@ export type GolfCoursePublicPage = GolfCoursePublicPageInput & {
   sourceLastSyncedAt?: string | null
   tournamentCount: number
   tournaments: GolfCoursePublicPageTournament[]
+  courseEventCount: number
+  courseEvents: GolfCoursePublicPageEvent[]
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -493,6 +516,22 @@ export function updateHostProfile(input: Partial<HostAccountInput>) {
 
 export function fetchGolfCoursePublicPage(slug: string) {
   return api<GolfCoursePublicPage>(`/api/golf-course-pages/${encodeURIComponent(slug)}`)
+}
+
+export function fetchHostCourseEvents() {
+  return api<{ events: GolfCoursePublicPageEvent[]; calendarPath: string; calendarUrl: string; publicPagePath: string }>('/api/host/course-events')
+}
+
+export function createHostCourseEvent(input: CourseEventInput) {
+  return api<{ event: GolfCoursePublicPageEvent }>('/api/host/course-events', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function updateHostCourseEvent(eventId: string, input: CourseEventInput) {
+  return api<{ event: GolfCoursePublicPageEvent }>(`/api/host/course-events/${encodeURIComponent(eventId)}`, { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function deleteHostCourseEvent(eventId: string) {
+  return api<{ deleted: boolean; id: string }>(`/api/host/course-events/${encodeURIComponent(eventId)}`, { method: 'DELETE' })
 }
 
 export function fetchOrganizerProfile() {
