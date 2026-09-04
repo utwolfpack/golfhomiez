@@ -131,10 +131,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return
     let lastRefreshAt = 0
     const refreshOnActivity = () => {
+      // visibilitychange fires while the browser is backgrounding and again
+      // when it returns. Avoid starting refresh work while hidden because
+      // mobile browsers can suspend that work mid-transition.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        logFrontendEvent({ category: 'auth.session', message: 'activity_ttl_refresh_skipped_hidden', data: { userId: user.id } })
+        return
+      }
       const now = Date.now()
       if (now - lastRefreshAt < 60_000) return
       lastRefreshAt = now
-      logFrontendEvent({ category: 'auth.session', message: 'activity_ttl_refresh_started', data: { userId: user.id } })
+      logFrontendEvent({ category: 'auth.session', message: 'activity_ttl_refresh_started', data: { userId: user.id, visibilityState: typeof document === 'undefined' ? null : document.visibilityState } })
       void refreshSession()
     }
     const events = ['click', 'keydown', 'focus', 'visibilitychange']

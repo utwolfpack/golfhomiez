@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
@@ -14,6 +14,7 @@ import type { HoleScoreDetail, SoloScoreEntry } from '../types'
 import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from '../lib/tee-colors'
 import { fetchProfile } from '../lib/profile'
+import { clearSoloScoreFlowState, loadSoloScoreFlowState, saveSoloScoreFlowState } from '../lib/score-flow-state'
 
 type ExistingSoloRoundResponse = {
   score: SoloScoreEntry | null
@@ -76,6 +77,7 @@ export default function SoloLogger() {
   const [holes, setHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('', '', DEFAULT_TEE_COLOR))
   const [persistedSoloScoreId, setPersistedSoloScoreId] = useState<string | null>(null)
   const [persistedSoloHoles, setPersistedSoloHoles] = useState<HoleScoreDetail[] | null>(null)
+  const [scorecardResumeHole, setScorecardResumeHole] = useState<number | null>(null)
 
   const [saving, setSaving] = useState(false)
   const [canceling, setCanceling] = useState(false)
@@ -86,6 +88,7 @@ export default function SoloLogger() {
   const [profileStateLoaded, setProfileStateLoaded] = useState(false)
 
   const pendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
+  const scoreFlowRestoreHandledUserRef = useRef('')
 
   const { states: stateOptions, loading: statesLoading, error: statesError } = useGolfCourseStates()
   const providedHoleCount = useMemo(() => getProvidedHoleCount(holes), [holes])
@@ -94,6 +97,50 @@ export default function SoloLogger() {
   const roundContextLocked = useMemo(() => useHoles && holes.some((hole) => hole.scoreProvided), [useHoles, holes])
   const totalHoleCount = useMemo(() => Math.max(1, Math.min(18, holes.length || 18)), [holes])
   const incompleteRoundLabel = providedHoleCount > 0 && providedHoleCount < totalHoleCount ? `${providedHoleCount} of ${totalHoleCount} holes saved` : ''
+
+  useLayoutEffect(() => {
+    const userId = String(user?.id || '').trim()
+    if (!userId || scoreFlowRestoreHandledUserRef.current === userId) return
+    scoreFlowRestoreHandledUserRef.current = userId
+
+    const restored = loadSoloScoreFlowState(userId)
+    if (!restored) return
+
+    setDate(restored.date)
+    setState(restored.state)
+    setCourse(restored.course)
+    setCourseId(restored.courseId)
+    setCourseSearch(restored.courseSearch || restored.course)
+    setTeeColor(normalizeTeeColor(restored.teeColor))
+    setScorecardResumeHole(restored.activeHole)
+    logFrontendEvent({
+      category: 'solo.round.resume',
+      message: 'solo_score_flow_restored_after_page_reload',
+      data: {
+        correlationId: getCorrelationId(),
+        date: restored.date,
+        state: restored.state,
+        course: restored.course,
+        courseId: restored.courseId || null,
+        teeColor: restored.teeColor,
+        activeHole: restored.activeHole,
+        resumeAgeMs: Math.max(0, Date.now() - restored.savedAt),
+      },
+    })
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id || !soloScorecardSetupReady) return
+    saveSoloScoreFlowState(user.id, {
+      date,
+      state,
+      course,
+      courseId,
+      courseSearch: courseSearch || course,
+      teeColor,
+      activeHole: scorecardResumeHole || 1,
+    })
+  }, [user?.id, date, state, course, courseId, courseSearch, teeColor, scorecardResumeHole, soloScorecardSetupReady])
 
   useEffect(() => {
     if (!useHoles) return
@@ -224,6 +271,8 @@ export default function SoloLogger() {
     try {
       const cancelResult = await cancelSoloRoundRecords()
       logFrontendEvent({ category: 'solo.round.cancel', message: 'succeeded', data: { correlationId, scoreId: persistedSoloScoreId, cancelResult } })
+      clearSoloScoreFlowState(user?.id)
+      logFrontendEvent({ category: 'solo.round.resume', message: 'solo_score_flow_cleared', data: { correlationId, reason: 'cancel_round' } })
       nav('/my-golf-scores')
     } catch (e: any) {
       const message = e?.message || 'Could not cancel this round.'
@@ -244,6 +293,8 @@ export default function SoloLogger() {
         ? await pendingHoleSaveRef.current('solo_close_button')
         : { saved: false, hole: null, providedHoleNumbers: [] }
       logFrontendEvent({ category: 'solo.round.close', message: 'succeeded', data: { correlationId, scoreId: persistedSoloScoreId, pendingHoleSaved: pendingSaveResult.saved, pendingHole: pendingSaveResult.hole, providedHoleNumbers: pendingSaveResult.providedHoleNumbers } })
+      clearSoloScoreFlowState(user?.id)
+      logFrontendEvent({ category: 'solo.round.resume', message: 'solo_score_flow_cleared', data: { correlationId, reason: 'close_round' } })
       nav('/my-golf-scores')
     } catch (e: any) {
       const message = e?.message || 'Could not save the current hole score before closing.'
@@ -411,6 +462,8 @@ export default function SoloLogger() {
             teeColor={teeColor}
             persistedHoles={persistedSoloHoles}
             registerPendingHoleSave={(handler) => { pendingHoleSaveRef.current = handler }}
+            initialHoleNumber={scorecardResumeHole}
+            onActiveHoleChange={(holeNumber) => setScorecardResumeHole(holeNumber)}
           />
 
           {incompleteRoundLabel ? <div className="roundIncompleteBadge soloIncompleteRoundBadge" style={{ marginTop: 10 }}>Incomplete round • {incompleteRoundLabel}</div> : null}

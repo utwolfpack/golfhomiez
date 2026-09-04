@@ -256,8 +256,10 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
   const defaultHoleSelectionKeyRef = useRef('')
   const selectedTeeColor = normalizeTeeColor(teeColor)
   const persistedHolesRef = useRef<HoleScoreDetail[] | null>(persistedHoles)
+  const holesRef = useRef<HoleScoreDetail[]>(holes)
   const initialHoleNumberRef = useRef<number | null>(initialHoleNumber)
   persistedHolesRef.current = persistedHoles
+  holesRef.current = holes
   initialHoleNumberRef.current = initialHoleNumber
   const latestPendingStateRef = useRef({
     enabled,
@@ -408,8 +410,38 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
           }
         }
 
+        // The persisted round lookup and the draft/geometry requests run in
+        // parallel. Reconcile again immediately before publishing the load so
+        // a slower response can never overwrite hole scores that arrived while
+        // this request was in flight.
+        const providedBeforeLateReconcile = getProvidedHoleNumbers(nextHoles)
+        const latestPersistedHolesAfterLoad = persistedHolesRef.current
+        if (Array.isArray(latestPersistedHolesAfterLoad) && latestPersistedHolesAfterLoad.length > 0) {
+          nextHoles = mergeProvidedHoleScores(nextHoles, latestPersistedHolesAfterLoad)
+        }
+        const latestRenderedHoles = holesRef.current
+        if (Array.isArray(latestRenderedHoles) && latestRenderedHoles.length > 0) {
+          nextHoles = mergeProvidedHoleScores(nextHoles, latestRenderedHoles)
+        }
+
         nextHoles = withSelectedTeeColor(nextHoles, selectedTeeColor)
         const loadedProvidedHoleNumbers = getProvidedHoleNumbers(nextHoles)
+        if (loadedProvidedHoleNumbers.join(',') !== providedBeforeLateReconcile.join(',')) {
+          logFrontendEvent({
+            category: 'scorecard.load',
+            message: 'late_state_reconciled',
+            data: {
+              correlationId,
+              stateCode,
+              course,
+              courseId,
+              teeColor: selectedTeeColor,
+              beforeProvidedHoleNumbers: providedBeforeLateReconcile,
+              afterProvidedHoleNumbers: loadedProvidedHoleNumbers,
+              preventedStaleLoadOverwrite: true,
+            },
+          })
+        }
         const loadedUnsavedHoleNumbers = nextHoles
           .filter((hole) => !hasSavedHoleScoreValue(hole))
           .map((hole) => hole.hole)

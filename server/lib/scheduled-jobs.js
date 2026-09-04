@@ -15,6 +15,8 @@ import { runScrubGolfHomiezTournaments } from './golfhomiez-tournament-scrub.js'
 import { normalizeGolfCourseDataJobConfig, runGetGolfCourseData } from './golf-course-data-import.js'
 import { nextRunForSchedule, normalizeScheduleConfig, scheduleLabel } from './scheduled-job-schedule.js'
 import { reconcileStripeSubscriptions } from './billing.js'
+import { runBuildGolfCourseEmails } from './golf-course-emails.js'
+import { normalizeGolfCourseEmailScrubValues, runScrubGolfCourseEmails } from './golf-course-email-scrub.js'
 import {
   getScheduledJobRecord,
   listScheduledJobRecords,
@@ -66,6 +68,9 @@ function normalizeJobConfig(definition, input) {
   if (definition.id === 'scrubTournaments') {
     return { matchValues: normalizeTournamentScrubValues(config.matchValues) }
   }
+  if (definition.id === 'scrubGolfCourseEmails') {
+    return { matchValues: normalizeGolfCourseEmailScrubValues(config.matchValues) }
+  }
   if (definition.id === 'getGolfCourseData') {
     return normalizeGolfCourseDataJobConfig(config)
   }
@@ -108,6 +113,50 @@ export const SCHEDULED_JOB_DEFINITIONS = [
         logScheduledJob,
         signal,
         jobConfig,
+      })
+    },
+  },
+  {
+    id: 'buildGolfCourseEmails',
+    name: 'Build Golf Course Emails',
+    description: 'Builds docs/golfCourseEmails.csv from active golf-course websites. Each course uses at most two page attempts, with only a single transient retry when the first request fails, and captures course name, email address, and any nearby contact name or position found on the site.',
+    scheduleLabel: 'Manual',
+    defaultScheduleLabel: 'Manual',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: {},
+    backgroundManualRun: true,
+    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal }) {
+      return runBuildGolfCourseEmails(pool, {
+        correlationId,
+        triggeredBy,
+        logApi,
+        logError,
+        logScheduledJob,
+        signal,
+      })
+    },
+  },
+  {
+    id: 'scrubGolfCourseEmails',
+    name: 'Scrub Golf Course Emails',
+    description: 'Deletes rows from docs/golfCourseEmails.csv when the Email Address column contains one of the configured literal scrub values and removes duplicate email-address rows so only the first record for each email remains.',
+    scheduleLabel: 'Manual',
+    defaultScheduleLabel: 'Manual',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: { matchValues: [] },
+    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal, jobConfig }) {
+      return runScrubGolfCourseEmails(pool, {
+        matchValues: jobConfig?.matchValues || [],
+        correlationId,
+        triggeredBy,
+        logApi,
+        logError,
+        logScheduledJob,
+        signal,
       })
     },
   },

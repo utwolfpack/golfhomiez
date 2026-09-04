@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { FormEvent } from 'react'
 import type { HoleScoreDetail, ScoreEntry } from '../types'
@@ -13,6 +13,7 @@ import HoleByHoleScorecard from './HoleByHoleScorecard'
 import HoleStrokeScore from './HoleStrokeScore'
 import type { PendingHoleScoreSaveHandler } from './HoleByHoleScorecard'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import { clearRoundEditScoreFlowState, loadRoundEditScoreFlowState, saveRoundEditScoreFlowState } from '../lib/score-flow-state'
 
 type DisplayHoleScore = {
   hole: number
@@ -44,6 +45,7 @@ type RoundDetailModalProps = {
   onClose: () => void
   onRoundUpdated?: (round: ScoreEntry) => void
   onRoundDeleted?: (roundId: string) => void
+  scoreFlowUserId?: string | null
 }
 
 function displayName(value: unknown, fallback: string) {
@@ -168,6 +170,13 @@ function providedHoleScoreTotal(holes: HoleScoreDetail[]) {
   return holes
     .filter((hole) => hole.scoreProvided)
     .reduce((sum, hole) => sum + (Number.isFinite(Number(hole.score)) ? Number(hole.score) : 0), 0)
+}
+
+function firstUnscoredHoleNumber(holes: HoleScoreDetail[]) {
+  const firstMissing = holes.find((hole) => !hasSavedHoleScoreValue(hole))
+  const holeNumber = Number(firstMissing?.hole)
+  if (Number.isFinite(holeNumber)) return Math.max(1, Math.min(18, Math.trunc(holeNumber)))
+  return 1
 }
 
 function teamEditResult(teamTotal: number, opponentTotal: number) {
@@ -348,7 +357,7 @@ function renderTeamSummaryValue(label: string, canOpenScoreView: boolean, isActi
   )
 }
 
-export default function RoundDetailModal({ round, allScores, onClose, onRoundUpdated, onRoundDeleted }: RoundDetailModalProps) {
+export default function RoundDetailModal({ round, allScores, onClose, onRoundUpdated, onRoundDeleted, scoreFlowUserId = null }: RoundDetailModalProps) {
   const [detailView, setDetailView] = useState<'round' | 'team' | 'opponent'>('round')
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState<RoundEditForm>(() => buildRoundEditForm(round))
@@ -357,6 +366,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const [editOpponentHoles, setEditOpponentHoles] = useState<HoleScoreDetail[]>(() => buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']))
   const pendingEditHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const [activeEditScorecardSide, setActiveEditScorecardSide] = useState<'solo' | 'team' | 'opponent' | null>(null)
+  const [resumeActiveHole, setResumeActiveHole] = useState<number | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [isClosingEditScorecard, setIsClosingEditScorecard] = useState(false)
@@ -364,16 +374,62 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const roundId = (round as any)?.id
 
   useEffect(() => {
+    const restored = roundId ? loadRoundEditScoreFlowState(scoreFlowUserId) : null
+    const resumeThisRound = Boolean(restored && restored.roundId === String(roundId || ''))
+
     setDetailView('round')
-    setIsEditing(false)
+    setIsEditing(resumeThisRound)
     setActionError(null)
-    setActiveEditScorecardSide(null)
+    setActiveEditScorecardSide(resumeThisRound ? restored!.side : null)
+    setResumeActiveHole(resumeThisRound ? restored!.activeHole : null)
     pendingEditHoleSaveRef.current = null
     setEditForm(buildRoundEditForm(round))
     setEditSoloHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
     setEditTeamHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
     setEditOpponentHoles(buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']))
-  }, [roundId])
+
+    if (resumeThisRound && restored) {
+      logFrontendEvent({
+        category: 'round.detail.edit.resume',
+        message: 'round_edit_scorecard_restored_after_page_reload',
+        data: {
+          correlationId: getCorrelationId(),
+          scoreId: restored.roundId,
+          side: restored.side,
+          activeHole: restored.activeHole,
+          resumeAgeMs: Math.max(0, Date.now() - restored.savedAt),
+        },
+      })
+    }
+  }, [roundId, scoreFlowUserId])
+
+  const rememberRoundEditScoreFlow = useCallback((side: 'solo' | 'team' | 'opponent', holeNumber: number, reason: string) => {
+    const scoreId = String(roundId || '')
+    if (!scoreId || !scoreFlowUserId) return
+    const saved = saveRoundEditScoreFlowState(scoreFlowUserId, {
+      roundId: scoreId,
+      side,
+      activeHole: holeNumber,
+    })
+    if (!saved) return
+    setResumeActiveHole(saved.activeHole)
+    logFrontendEvent({
+      category: 'round.detail.edit.resume',
+      message: 'round_edit_scorecard_resume_state_saved',
+      data: {
+        correlationId: getCorrelationId(),
+        scoreId,
+        side,
+        activeHole: saved.activeHole,
+        reason,
+      },
+    })
+  }, [roundId, scoreFlowUserId])
+
+  const handleActiveEditHoleChange = useCallback((holeNumber: number) => {
+    if (!activeEditScorecardSide) return
+    rememberRoundEditScoreFlow(activeEditScorecardSide, holeNumber, 'active_hole_changed')
+  }, [activeEditScorecardSide, rememberRoundEditScoreFlow])
 
   useEffect(() => {
     if (!round || !activeEditScorecardSide || typeof document === 'undefined') return
@@ -502,14 +558,22 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
 
   const beginHoleByHoleEdit = () => {
     const defaultSide: 'solo' | 'team' = displayMode === 'solo' ? 'solo' : 'team'
+    const nextSoloHoles = buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json'])
+    const nextTeamHoles = buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json'])
+    const nextOpponentHoles = buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json'])
+    const defaultHoles = defaultSide === 'solo' ? nextSoloHoles : nextTeamHoles
+    const defaultHole = firstUnscoredHoleNumber(defaultHoles)
+
     setIsEditing(true)
     setActionError(null)
     setDetailView('round')
     setEditForm(buildRoundEditForm(round))
-    setEditSoloHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
-    setEditTeamHoles(buildEditableHoleScores(round, ['holes', 'holes_json', 'holeScores', 'hole_scores_json']))
-    setEditOpponentHoles(buildEditableHoleScores(round, ['opponentHoles', 'opponent_holes_json', 'opponent_holes', 'opponentHoleScores', 'opponent_hole_scores_json']))
+    setEditSoloHoles(nextSoloHoles)
+    setEditTeamHoles(nextTeamHoles)
+    setEditOpponentHoles(nextOpponentHoles)
     setActiveEditScorecardSide(defaultSide)
+    setResumeActiveHole(defaultHole)
+    rememberRoundEditScoreFlow(defaultSide, defaultHole, 'hole_by_hole_edit_opened')
     logFrontendEvent({
       category: 'round.detail.edit',
       message: 'hole_by_hole_edit_opened',
@@ -519,6 +583,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
         mode: displayMode,
         defaultSide,
         defaultHoleSelection: 'first_unscored_hole',
+        defaultHole,
         fullViewportScorecard: true,
         sharedHoleInputFlow: true,
       },
@@ -608,6 +673,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
     setIsSavingEdit(true)
     try {
       await saveRoundEditChanges('save_changes_button')
+      clearRoundEditScoreFlowState(scoreFlowUserId)
+      setResumeActiveHole(null)
       setIsEditing(false)
       setDetailView('round')
     } catch (error: any) {
@@ -626,12 +693,54 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
     setIsDeleting(true)
     try {
       await api<{ ok: boolean }>(`/api/scores/${encodeURIComponent(String((round as any).id))}`, { method: 'DELETE' })
+      clearRoundEditScoreFlowState(scoreFlowUserId)
+      setResumeActiveHole(null)
       onRoundDeleted?.(String((round as any).id))
       onClose()
     } catch (error: any) {
       setActionError(error?.message || 'Could not delete this round')
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  const clearPersistedRoundEditDraft = async (side: 'solo' | 'team' | 'opponent') => {
+    const params = new URLSearchParams({
+      mode: side === 'solo' ? 'solo' : 'team',
+      date: editForm.date,
+      state: editForm.state,
+      course: editForm.course,
+      scoringSide: side === 'solo' ? 'team' : side,
+    })
+    if (side !== 'solo') {
+      if (editForm.team) params.set('team', editForm.team)
+      if (editForm.opponentTeam) params.set('opponentTeam', editForm.opponentTeam)
+    }
+
+    try {
+      const result = await api<{ clearedDraftHoles?: number }>(`/api/scorecard-drafts?${params.toString()}`, { method: 'DELETE' })
+      logFrontendEvent({
+        category: 'round.detail.edit.draft',
+        message: 'cleared_after_round_persist',
+        data: {
+          correlationId: getCorrelationId(),
+          scoreId: String((round as any).id || ''),
+          side,
+          clearedDraftHoles: Number(result?.clearedDraftHoles || 0),
+        },
+      })
+    } catch (error: any) {
+      logFrontendEvent({
+        category: 'round.detail.edit.draft',
+        level: 'warn',
+        message: 'clear_after_round_persist_failed',
+        data: {
+          correlationId: getCorrelationId(),
+          scoreId: String((round as any).id || ''),
+          side,
+          error: error?.message || 'Could not clear persisted scorecard draft.',
+        },
+      })
     }
   }
 
@@ -657,6 +766,7 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
 
     try {
       await saveRoundEditChanges(`edit_scorecard_${side}_hole_save`, overrides)
+      await clearPersistedRoundEditDraft(side)
     } catch (error: any) {
       const message = error?.message || 'Could not save this hole score to the round.'
       setActionError(message)
@@ -667,6 +777,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
 
   const handleParentClose = async () => {
     if (!isEditing) {
+      clearRoundEditScoreFlowState(scoreFlowUserId)
+      setResumeActiveHole(null)
       onClose()
       return
     }
@@ -688,6 +800,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
             ? { opponentHoles: pendingSaveResult.holes }
             : {}
       await saveRoundEditChanges('round_detail_parent_close_button', overrides)
+      clearRoundEditScoreFlowState(scoreFlowUserId)
+      setResumeActiveHole(null)
       logFrontendEvent({ category: 'round.detail.parent_close', message: 'succeeded', data: { correlationId, scoreId, mode: displayMode, pendingHoleSaved: pendingSaveResult?.saved || false, pendingHole: pendingSaveResult?.hole || null } })
       onClose()
     } catch (error: any) {
@@ -710,6 +824,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
       const pendingSaveResult = pendingEditHoleSaveRef.current
         ? await pendingEditHoleSaveRef.current(source)
         : { saved: false, hole: null, providedHoleNumbers: [] }
+      clearRoundEditScoreFlowState(scoreFlowUserId)
+      setResumeActiveHole(null)
       setActiveEditScorecardSide(null)
       pendingEditHoleSaveRef.current = null
       if (finishEditing) {
@@ -738,8 +854,12 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
         ? await pendingEditHoleSaveRef.current('round_detail_scorecard_side_switch')
         : { saved: false, hole: null, providedHoleNumbers: [] }
       pendingEditHoleSaveRef.current = null
+      const nextSideHoles = nextSide === 'team' ? editTeamHoles : editOpponentHoles
+      const nextSideHole = firstUnscoredHoleNumber(nextSideHoles)
+      setResumeActiveHole(nextSideHole)
       setActiveEditScorecardSide(nextSide)
-      logFrontendEvent({ category: 'round.detail.edit_scorecard.side', message: 'switch_succeeded', data: { correlationId, scoreId: String((round as any).id || ''), previousSide, nextSide, pendingHoleSaved: pendingSaveResult.saved, pendingHole: pendingSaveResult.hole } })
+      rememberRoundEditScoreFlow(nextSide, nextSideHole, 'scorecard_side_switched')
+      logFrontendEvent({ category: 'round.detail.edit_scorecard.side', message: 'switch_succeeded', data: { correlationId, scoreId: String((round as any).id || ''), previousSide, nextSide, pendingHoleSaved: pendingSaveResult.saved, pendingHole: pendingSaveResult.hole, nextSideHole } })
     } catch (error: any) {
       const message = error?.message || 'Could not save the current hole before switching scorecards.'
       setActionError(message)
@@ -750,6 +870,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   }
 
   const resetEditState = () => {
+    clearRoundEditScoreFlowState(scoreFlowUserId)
+    setResumeActiveHole(null)
     setIsEditing(false)
     setActionError(null)
     setActiveEditScorecardSide(null)
@@ -900,6 +1022,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
             : { mode: 'team', date: editForm.date, team: editForm.team, opponentTeam: editForm.opponentTeam, scoringSide: activeEditScorecardSide }}
           compactMobileInput
           registerPendingHoleSave={(handler) => { pendingEditHoleSaveRef.current = handler }}
+          initialHoleNumber={resumeActiveHole}
+          onActiveHoleChange={handleActiveEditHoleChange}
         />
         {actionError ? <div className="roundDetailActionError roundDetailEditScorecardError" role="alert">{actionError}</div> : null}
         <div className="holeInputModalFooter roundDetailEditScorecardFooter">

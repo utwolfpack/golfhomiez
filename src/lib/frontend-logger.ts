@@ -284,6 +284,42 @@ export function installFrontendDiagnostics(): void {
       handlingRuntimeError = false
     }
   })
+
+  const navigationType = (() => {
+    try {
+      const entry = globalThis.performance?.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined
+      return entry?.type || null
+    } catch {
+      return null
+    }
+  })()
+
+  const logLifecycleEvent = (message: string, data: Record<string, unknown>) => {
+    const detail = { correlationId: getCorrelationId(), navigationType, ...data }
+    emitPixelBeacon(`runtime_${message}`, stringifyDetail(detail))
+    void sendFrontendLog(buildFrontendPayload(message, 'info', 'runtime.lifecycle', detail))
+  }
+
+  globalThis.addEventListener?.('pageshow', (event: PageTransitionEvent | any) => {
+    logLifecycleEvent('page_shown', {
+      persisted: Boolean(event?.persisted),
+      visibilityState: globalThis.document?.visibilityState || null,
+    })
+  })
+
+  globalThis.addEventListener?.('pagehide', (event: PageTransitionEvent | any) => {
+    logLifecycleEvent('page_hidden', {
+      persisted: Boolean(event?.persisted),
+      visibilityState: globalThis.document?.visibilityState || null,
+    })
+  })
+
+  globalThis.document?.addEventListener?.('visibilitychange', () => {
+    logLifecycleEvent('visibility_changed', {
+      visibilityState: globalThis.document?.visibilityState || null,
+      hidden: Boolean(globalThis.document?.hidden),
+    })
+  })
 }
 
 export const installRuntimeDiagnostics = installFrontendDiagnostics
