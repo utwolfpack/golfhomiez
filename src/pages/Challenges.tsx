@@ -37,6 +37,7 @@ import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
 import { fetchProfile } from '../lib/profile'
 import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType, teamChallengeScoringTypeLabel, type TeamChallengeScoringType } from '../lib/team-challenge-scoring'
+import { clearChallengeScoreFlowState, loadChallengeScoreFlowState, saveChallengeScoreFlowState } from '../lib/score-flow-state'
 
 type TeamChallengeLeaderboardSide = 'proposer' | 'challenged'
 type ChallengeDetailSection = 'settings' | 'score' | 'discussion'
@@ -313,6 +314,7 @@ export default function Challenges() {
   const deepLinkedThreadRef = useRef<string | null>(null)
   const teamChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const individualChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
+  const challengeScoreFlowRestoreAttemptedRef = useRef(false)
   const [completingChallengeThreadId, setCompletingChallengeThreadId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -368,9 +370,44 @@ export default function Challenges() {
 
   function rememberScorecardResumeHole(key: string, holeNumber: number | null | undefined) {
     const normalizedHole = Number(holeNumber)
-    if (!Number.isFinite(normalizedHole) || normalizedHole < 1) return
-    const nextHole = Math.trunc(normalizedHole)
+    if (!Number.isFinite(normalizedHole) || normalizedHole < 1) return null
+    const nextHole = Math.max(1, Math.min(18, Math.trunc(normalizedHole)))
     setScorecardResumeHoles((current) => (current[key] === nextHole ? current : { ...current, [key]: nextHole }))
+    return nextHole
+  }
+
+  function rememberTeamChallengeScoreFlow(message: InboxMessage, side: 'proposer' | 'challenged', holeNumber: number | null | undefined) {
+    const key = getTeamChallengeScoreKey(message, side)
+    const nextHole = rememberScorecardResumeHole(key, holeNumber)
+    if (!nextHole || isChallengeCompleted(message) || message.challengeDeletedAt) return
+    saveChallengeScoreFlowState(user?.id, {
+      kind: 'team',
+      threadId: messageThreadId(message),
+      side,
+      activeHole: nextHole,
+    })
+  }
+
+  function rememberIndividualChallengeScoreFlow(message: InboxMessage, participant: IndividualChallengeParticipant, holeNumber: number | null | undefined) {
+    const key = getIndividualChallengeScoreKey(message, participant)
+    const nextHole = rememberScorecardResumeHole(key, holeNumber)
+    const email = participantEmail(participant)
+    if (!nextHole || !email || isChallengeCompleted(message) || message.challengeDeletedAt) return
+    saveChallengeScoreFlowState(user?.id, {
+      kind: 'individual',
+      threadId: messageThreadId(message),
+      participantEmail: email,
+      activeHole: nextHole,
+    })
+  }
+
+  function clearPersistedChallengeScoreFlow(reason: string, message?: InboxMessage | null) {
+    clearChallengeScoreFlowState(user?.id)
+    logFrontendEvent({
+      category: 'inbox.challenge.scorecard.resume',
+      message: 'challenge_score_flow_cleared',
+      data: { correlationId: getCorrelationId(), reason, threadId: message ? messageThreadId(message) : null },
+    })
   }
 
   function resolveLeaderboardResumeHole(holes: HoleScoreDetail[], currentHole: number | null | undefined, saved: boolean) {
@@ -786,6 +823,7 @@ export default function Challenges() {
       const opened = await openTeamChallengeLeaderboard(message, { message, side })
       if (opened) {
         setActiveTeamChallengeScorecard(null)
+        clearPersistedChallengeScoreFlow('team_leaderboard_opened', opened)
         logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'scorecard_transitioned_to_leaderboard', data: { messageId: message.id, threadId: messageThreadId(message), side, returnToHole: resumeHole } })
       }
     } catch (err) {
@@ -808,6 +846,7 @@ export default function Challenges() {
       : returnTarget.message
     setActiveTeamChallengeScorecard({ message: returnMessage, side: returnTarget.side })
     const key = getTeamChallengeScoreKey(returnMessage, returnTarget.side)
+    rememberTeamChallengeScoreFlow(returnMessage, returnTarget.side, scorecardResumeHoles[key] || 1)
     logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'returned_to_hole_scorecard', data: { messageId: returnMessage.id, threadId: messageThreadId(returnMessage), side: returnTarget.side, source, returnToHole: scorecardResumeHoles[key] || null } })
   }
 
@@ -1019,6 +1058,7 @@ export default function Challenges() {
       const opened = await openIndividualChallengeLeaderboard(message, { message, participant })
       if (opened) {
         setActiveIndividualChallengeScorecard(null)
+        clearPersistedChallengeScoreFlow('individual_leaderboard_opened', opened)
         logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'scorecard_transitioned_to_leaderboard', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), returnToHole: resumeHole } })
       }
     } catch (err) {
@@ -1049,6 +1089,7 @@ export default function Challenges() {
       .find((participant) => participantEmail(participant) === targetEmail) || returnTarget.participant
     setActiveIndividualChallengeScorecard({ message: returnMessage, participant: returnParticipant })
     const key = getIndividualChallengeScoreKey(returnMessage, returnParticipant)
+    rememberIndividualChallengeScoreFlow(returnMessage, returnParticipant, scorecardResumeHoles[key] || 1)
     logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'returned_to_hole_scorecard', data: { messageId: returnMessage.id, threadId: messageThreadId(returnMessage), participantEmail: targetEmail, source, returnToHole: scorecardResumeHoles[key] || null } })
   }
 
@@ -1147,6 +1188,78 @@ export default function Challenges() {
   useEffect(() => {
     void loadInbox()
   }, [])
+
+  useEffect(() => {
+    if (!user?.id || loading || challengeScoreFlowRestoreAttemptedRef.current) return
+
+    const restored = loadChallengeScoreFlowState(user.id)
+    if (!restored) {
+      challengeScoreFlowRestoreAttemptedRef.current = true
+      return
+    }
+
+    const thread = teamChallengeThreads.find((item) => item.threadId === restored.threadId)
+    if (!thread) {
+      challengeScoreFlowRestoreAttemptedRef.current = true
+      clearChallengeScoreFlowState(user.id)
+      logFrontendEvent({ category: 'inbox.challenge.scorecard.resume', level: 'warn', message: 'challenge_score_flow_restore_target_missing', data: { correlationId: getCorrelationId(), threadId: restored.threadId, kind: restored.kind, activeHole: restored.activeHole } })
+      return
+    }
+
+    const message = getInitialChallengeMessage(thread)
+    if (isChallengeCompleted(message) || message.challengeDeletedAt) {
+      challengeScoreFlowRestoreAttemptedRef.current = true
+      clearChallengeScoreFlowState(user.id)
+      logFrontendEvent({ category: 'inbox.challenge.scorecard.resume', message: 'challenge_score_flow_restore_skipped_inactive', data: { correlationId: getCorrelationId(), threadId: restored.threadId, kind: restored.kind, completed: isChallengeCompleted(message), deleted: Boolean(message.challengeDeletedAt) } })
+      return
+    }
+
+    let restoredTarget = false
+    if (restored.kind === 'team' && message.messageType === 'challenge_request' && restored.side) {
+      const key = getTeamChallengeScoreKey(message, restored.side)
+      const holes = getTeamChallengeHoles(message, restored.side)
+      setTeamChallengeScorecards((current) => ({ ...current, [key]: holes }))
+      setScorecardResumeHoles((current) => ({ ...current, [key]: restored.activeHole }))
+      setActiveTeamChallengeScorecard({ message, side: restored.side })
+      restoredTarget = true
+    } else if (restored.kind === 'individual' && message.messageType === 'individual_challenge' && restored.participantEmail) {
+      const participant = getIndividualChallengeParticipants(message).find((item) => participantEmail(item) === restored.participantEmail)
+      if (participant && getIndividualChallengeParticipantCourseName(message, participant)) {
+        const key = getIndividualChallengeScoreKey(message, participant)
+        const holes = getIndividualChallengeHoles(message, participant)
+        setIndividualChallengeScorecards((current) => ({ ...current, [key]: holes }))
+        setScorecardResumeHoles((current) => ({ ...current, [key]: restored.activeHole }))
+        setActiveIndividualChallengeScorecard({ message, participant })
+        restoredTarget = true
+      }
+    }
+
+    challengeScoreFlowRestoreAttemptedRef.current = true
+    if (!restoredTarget) {
+      clearChallengeScoreFlowState(user.id)
+      logFrontendEvent({ category: 'inbox.challenge.scorecard.resume', level: 'warn', message: 'challenge_score_flow_restore_target_invalid', data: { correlationId: getCorrelationId(), threadId: restored.threadId, kind: restored.kind, activeHole: restored.activeHole } })
+      return
+    }
+
+    setChallengeView('active')
+    setExpandedThreadId(thread.threadId)
+    setExpandedChallengeSections((current) => ({ ...current, [challengeSectionKey(message, 'score')]: true }))
+    setChallengeSettingsDraft(buildChallengeSettingsDraft(message))
+    logFrontendEvent({
+      category: 'inbox.challenge.scorecard.resume',
+      message: 'challenge_score_flow_restored_after_page_reload',
+      data: {
+        correlationId: getCorrelationId(),
+        threadId: restored.threadId,
+        messageId: message.id,
+        kind: restored.kind,
+        side: restored.side || null,
+        participantEmail: restored.participantEmail || null,
+        activeHole: restored.activeHole,
+        resumeAgeMs: Math.max(0, Date.now() - restored.savedAt),
+      },
+    })
+  }, [user?.id, loading, teamChallengeThreads])
 
   useEffect(() => {
     if (loading) return
@@ -1505,9 +1618,11 @@ export default function Challenges() {
   function openTeamChallengeScorecard(message: InboxMessage, side: 'proposer' | 'challenged') {
     const key = getTeamChallengeScoreKey(message, side)
     const holes = getTeamChallengeHoles(message, side)
+    const resumeHole = scorecardResumeHoles[key] || nextUnscoredHoleNumber(holes, 0) || holes[0]?.hole || 1
     setTeamChallengeScorecards((prev) => ({ ...prev, [key]: holes }))
     setActiveTeamChallengeScorecard({ message, side })
-    logFrontendEvent({ category: 'inbox.teamChallenge.scorecard', message: 'team_challenge_scorecard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, side, challengeTeeColor: getTeamChallengeTeeColor(message), proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId, lineItemReviewView: true, reviewColumns: ['Hole', 'Par', 'Score', 'Distance'], reviewHoleCount: holes.length } })
+    rememberTeamChallengeScoreFlow(message, side, resumeHole)
+    logFrontendEvent({ category: 'inbox.teamChallenge.scorecard', message: 'team_challenge_scorecard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, side, challengeTeeColor: getTeamChallengeTeeColor(message), proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId, resumeHole, lineItemReviewView: true, reviewColumns: ['Hole', 'Par', 'Score', 'Distance'], reviewHoleCount: holes.length } })
   }
 
   function updateTeamChallengeScorecard(message: InboxMessage, side: 'proposer' | 'challenged', holes: HoleScoreDetail[]) {
@@ -1575,6 +1690,7 @@ export default function Challenges() {
     if (providedCount === 0 && options.source !== 'hole_reset') {
       if (options.closeModal || options.allowEmptyClose) {
         setActiveTeamChallengeScorecard(null)
+        clearPersistedChallengeScoreFlow(options.source === 'modal_close' ? 'team_modal_close_empty' : 'team_score_close_empty', message)
         logFrontendEvent({ category: 'inbox.teamChallenge.score', message: 'team_challenge_score_close_without_entered_holes', data: { messageId: message.id, threadId: message.threadId || message.id, side, scoringType, source: options.source } })
         return null
       }
@@ -1604,7 +1720,10 @@ export default function Challenges() {
       logFrontendEvent({ category: 'inbox.teamChallenge.score', message: options.source === 'modal_close' ? 'team_challenge_score_modal_close_save_started' : 'team_challenge_score_update_started', data: { messageId: message.id, threadId: message.threadId || message.id, side, scoringType, challengePointsPerHole: getTeamChallengePointsPerHole(message), score, providedCount, holeCount: holes.length, missingHoleNumbers, proposerTeamId: message.proposerTeamId, challengedTeamId: message.challengedTeamId, source: options.source, strokeDifferentialBonusTotal: getTeamChallengePointSummary(message).holeResults.reduce((sum, hole) => sum + hole.strokeDifferentialBonus, 0) } })
       const updated = await updateTeamChallengeScore(message.id, score, holes)
       patchTeamChallengeUpdate(updated)
-      if (options.closeModal) setActiveTeamChallengeScorecard(null)
+      if (options.closeModal) {
+        setActiveTeamChallengeScorecard(null)
+        clearPersistedChallengeScoreFlow(options.source === 'manual_save' ? 'team_manual_save' : 'team_modal_close', updated)
+      }
       setStatus(providedCount > 0 ? `Team Challenge score saved. ${providedCount} of ${holes.length || 18} holes entered.` : 'Team Challenge score cleared.')
       logFrontendEvent({ category: 'inbox.teamChallenge.score', message: options.source === 'modal_close' ? 'team_challenge_score_modal_close_save_succeeded' : 'team_challenge_score_update_succeeded', data: { messageId: updated.id, threadId: updated.threadId || updated.id, side, scoringType: getTeamChallengeScoringType(updated), challengePointsPerHole: getTeamChallengePointsPerHole(updated), score, providedCount, holeCount: holes.length, proposerTeamScore: updated.proposerTeamScore, challengedTeamScore: updated.challengedTeamScore, source: options.source, strokeDifferentialBonusTotal: getTeamChallengePointSummary(updated).holeResults.reduce((sum, hole) => sum + hole.strokeDifferentialBonus, 0) } })
       await loadInbox()
@@ -1629,6 +1748,7 @@ export default function Challenges() {
       return
     }
     setActiveTeamChallengeScorecard(null)
+    clearPersistedChallengeScoreFlow('team_modal_close', message)
   }
 
   function patchIndividualChallengeUpdate(updated: InboxMessage, participantEmailToUpdate?: string) {
@@ -1663,7 +1783,10 @@ export default function Challenges() {
       logFrontendEvent({ category: 'inbox.individualChallenge.score', message: options.source === 'hole_save' ? 'individual_challenge_hole_score_record_started' : 'individual_challenge_score_update_started', data: { messageId: message.id, threadId: message.threadId || message.id, participantEmail: participantEmail(participant), score, providedCount, holeCount: holes.length, source: options.source } })
       const updated = await updateIndividualChallengeScore(message.id, score, holes)
       patchIndividualChallengeUpdate(updated, participantEmail(participant))
-      if (options.closeModal) setActiveIndividualChallengeScorecard(null)
+      if (options.closeModal) {
+        setActiveIndividualChallengeScorecard(null)
+        clearPersistedChallengeScoreFlow('individual_score_save_close', updated)
+      }
       setStatus(providedCount > 0 ? `${providedCount} of ${holes.length || 18} Individual Challenge holes saved.` : 'Individual Challenge score cleared.')
       logFrontendEvent({ category: 'inbox.individualChallenge.score', message: options.source === 'hole_save' ? 'individual_challenge_hole_score_record_succeeded' : 'individual_challenge_score_update_succeeded', data: { messageId: updated.id, threadId: updated.threadId || updated.id, participantEmail: participantEmail(participant), score, providedCount, holeCount: holes.length, source: options.source } })
       await loadInbox()
@@ -1697,9 +1820,17 @@ export default function Challenges() {
     }
     const key = getIndividualChallengeScoreKey(message, participant)
     const holes = getIndividualChallengeHoles(message, participant)
+    const resumeHole = scorecardResumeHoles[key] || nextUnscoredHoleNumber(holes, 0) || holes[0]?.hole || 1
     setIndividualChallengeScorecards((prev) => ({ ...prev, [key]: holes }))
     setActiveIndividualChallengeScorecard({ message, participant })
-    logFrontendEvent({ category: 'inbox.individualChallenge.scorecard', message: 'individual_challenge_scorecard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, participantEmail: participantEmail(participant), courseState: getIndividualChallengeParticipantStateCode(message, participant), courseName: getIndividualChallengeParticipantCourseName(message, participant), editable: currentUserCanEditIndividualParticipant(participant), lineItemReviewView: true, reviewColumns: ['Hole', 'Par', 'Score', 'Distance'], reviewHoleCount: holes.length } })
+    rememberIndividualChallengeScoreFlow(message, participant, resumeHole)
+    logFrontendEvent({ category: 'inbox.individualChallenge.scorecard', message: 'individual_challenge_scorecard_opened', data: { messageId: message.id, threadId: message.threadId || message.id, participantEmail: participantEmail(participant), courseState: getIndividualChallengeParticipantStateCode(message, participant), courseName: getIndividualChallengeParticipantCourseName(message, participant), editable: currentUserCanEditIndividualParticipant(participant), resumeHole, lineItemReviewView: true, reviewColumns: ['Hole', 'Par', 'Score', 'Distance'], reviewHoleCount: holes.length } })
+  }
+
+  function closeIndividualChallengeScorecard(message: InboxMessage, participant: IndividualChallengeParticipant, reason: 'button' | 'overlay') {
+    setActiveIndividualChallengeScorecard(null)
+    clearPersistedChallengeScoreFlow(`individual_modal_close_${reason}`, message)
+    logFrontendEvent({ category: 'inbox.individualChallenge.scorecard', message: 'individual_challenge_scorecard_closed', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), reason } })
   }
 
   async function saveIndividualChallengeCourse() {
@@ -2299,7 +2430,7 @@ export default function Challenges() {
                 teeColor={getTeamChallengeTeeColor(message)}
                 registerPendingHoleSave={(handler) => { teamChallengePendingHoleSaveRef.current = handler }}
                 initialHoleNumber={scorecardResumeHoles[key] || null}
-                onActiveHoleChange={(holeNumber) => rememberScorecardResumeHole(key, holeNumber)}
+                onActiveHoleChange={(holeNumber) => rememberTeamChallengeScoreFlow(message, side, holeNumber)}
               />
               <div className="small holeInputModalHint">Enter each hole score, then save the Team Challenge score.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
@@ -2368,7 +2499,7 @@ export default function Challenges() {
     const score = getIndividualChallengeScore(message, participant)
 
     return (
-      <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => setActiveIndividualChallengeScorecard(null)}>
+      <div className="modalOverlay teamScorecardModalOverlay" role="presentation" onClick={() => closeIndividualChallengeScorecard(message, participant, 'overlay')}>
         <div className="modalCard teamScorecardModalCard" role="dialog" aria-modal="true" aria-label={`${golferName} Individual Challenge scorecard`} onClick={(event) => event.stopPropagation()}>
           {editable ? (
             <>
@@ -2384,11 +2515,11 @@ export default function Challenges() {
                 teeColor={getTeamChallengeTeeColor(message)}
                 registerPendingHoleSave={(handler) => { individualChallengePendingHoleSaveRef.current = handler }}
                 initialHoleNumber={scorecardResumeHoles[getIndividualChallengeScoreKey(message, participant)] || null}
-                onActiveHoleChange={(holeNumber) => rememberScorecardResumeHole(getIndividualChallengeScoreKey(message, participant), holeNumber)}
+                onActiveHoleChange={(holeNumber) => rememberIndividualChallengeScoreFlow(message, participant, holeNumber)}
               />
               <div className="small holeInputModalHint">Enter each hole score; each completed hole saves automatically.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
-                <button type="button" className="btn btnSmall" onClick={() => setActiveIndividualChallengeScorecard(null)}>Close</button>
+                <button type="button" className="btn btnSmall" onClick={() => closeIndividualChallengeScorecard(message, participant, 'button')}>Close</button>
                 <button
                   type="button"
                   className="btn btnSmall inboxLeaderboardButton"
@@ -2415,7 +2546,7 @@ export default function Challenges() {
               </div>
               {renderReadonlyIndividualChallengeHoles(holes)}
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
-                <button type="button" className="btn btnSmall" onClick={() => setActiveIndividualChallengeScorecard(null)}>Close</button>
+                <button type="button" className="btn btnSmall" onClick={() => closeIndividualChallengeScorecard(message, participant, 'button')}>Close</button>
                 <button
                   type="button"
                   className="btn btnSmall inboxLeaderboardButton"

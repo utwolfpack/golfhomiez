@@ -10,6 +10,7 @@ import { api } from '../lib/api'
 import { fetchTeamChallengeScoreRecords } from '../lib/inbox'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { getIncompleteRoundStatus } from '../lib/round-status'
+import { clearRoundEditScoreFlowState, loadRoundEditScoreFlowState } from '../lib/score-flow-state'
 import { sortScoresNewestFirst } from '../lib/roundInsights'
 import { calculateHandicapFromScores } from '../lib/handicap'
 import type { ScoreEntry, SoloScoreEntry, TeamScoreEntry } from '../types'
@@ -149,7 +150,35 @@ function MyGolfScoresInner() {
           .map(normalizeScoreEntry)
           .filter((s) => isSoloScore(s) && String((s as any).createdByEmail || '').toLowerCase() === email)
         const normalizedTeamChallenges = (challengeData.scores || []).map(normalizeScoreEntry).filter(isTeamChallengeScore)
+        const nextScores = [...normalizedSoloScores, ...normalizedTeamChallenges]
         setScores([...normalizedSoloScores, ...normalizedTeamChallenges])
+
+        const restoredRoundEdit = loadRoundEditScoreFlowState(user?.id)
+        if (restoredRoundEdit) {
+          const resumedRound = nextScores.find((score) => String(score.id) === restoredRoundEdit.roundId)
+          if (resumedRound) {
+            setSelectedRound(resumedRound)
+            logFrontendEvent({
+              category: 'myGolfScores.roundEditResume',
+              message: 'active_round_editor_restored_after_page_reload',
+              data: {
+                roundId: restoredRoundEdit.roundId,
+                side: restoredRoundEdit.side,
+                activeHole: restoredRoundEdit.activeHole,
+                resumeAgeMs: Math.max(0, Date.now() - restoredRoundEdit.savedAt),
+              },
+            })
+          } else {
+            clearRoundEditScoreFlowState(user?.id)
+            logFrontendEvent({
+              category: 'myGolfScores.roundEditResume',
+              level: 'warn',
+              message: 'stale_round_editor_resume_state_cleared',
+              data: { roundId: restoredRoundEdit.roundId },
+            })
+          }
+        }
+
         logFrontendEvent({ category: 'myGolfScores.teamChallengeScores', message: 'team_challenge_score_records_loaded', data: { count: normalizedTeamChallenges.length } })
       } catch (e: any) {
         setError(e?.message || null)
@@ -158,7 +187,7 @@ function MyGolfScoresInner() {
         setLoading(false)
       }
     })()
-  }, [user?.email])
+  }, [user?.email, user?.id])
 
   const scopedByView = useMemo(() => scores.filter((s) => (view === 'all' ? true : view === 'solo' ? isSoloScore(s) : isTeamChallengeScore(s))), [scores, view])
   const nameByAbbr = useMemo(() => new Map(apiStateOptions.map((s) => [s.abbr, s.name])), [apiStateOptions])
@@ -270,6 +299,7 @@ function MyGolfScoresInner() {
   }
 
   function handleRoundDeleted(roundId: string) {
+    clearRoundEditScoreFlowState(user?.id)
     setScores((current) => current.filter((score) => score.id !== roundId))
     setSelectedRound(null)
   }
@@ -371,7 +401,16 @@ function MyGolfScoresInner() {
         ) : null}
       </div>
 
-      <RoundDetailModal round={selectedRound} allScores={filteredScores} onClose={() => setSelectedRound(null)} onRoundUpdated={handleRoundUpdated} onRoundDeleted={handleRoundDeleted} />
+      <RoundDetailModal round={selectedRound}
+        allScores={filteredScores}
+        scoreFlowUserId={user?.id}
+        onClose={() => {
+          clearRoundEditScoreFlowState(user?.id)
+          setSelectedRound(null)
+        }}
+        onRoundUpdated={handleRoundUpdated}
+        onRoundDeleted={handleRoundDeleted}
+      />
       <HandicapBreakdownModal open={showHandicapModal} stats={handicapStats} onClose={() => setShowHandicapModal(false)} />
     </div>
   )

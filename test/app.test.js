@@ -1636,7 +1636,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/billing.test.js test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/billing.test.js test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/golf-course-emails.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -3464,6 +3464,8 @@ test('admin scheduled jobs page, manual run API, migration, and dedicated logs a
   assert.match(page, /option value="monthly">Monthly/)
   assert.match(page, /option value="manual">Manual/)
   assert.match(page, /Tournament-name scrub values/)
+  assert.match(page, /Email-address scrub values/)
+  assert.match(page, /Scrub Golf Course Emails runs/)
   assert.match(page, /scheduled_job_cancel_requested/)
   assert.match(page, /Next scheduled run/)
   assert.match(page, /Last output\/status/)
@@ -3488,6 +3490,9 @@ test('admin scheduled jobs page, manual run API, migration, and dedicated logs a
   assert.match(scheduledJobs, /defaultSchedule: \{ type: 'manual'/)
   assert.match(scheduledJobs, /id: 'scrubTournaments'/)
   assert.match(scheduledJobs, /runScrubTournaments/)
+  assert.match(scheduledJobs, /id: 'scrubGolfCourseEmails'/)
+  assert.match(scheduledJobs, /name: 'Scrub Golf Course Emails'/)
+  assert.match(scheduledJobs, /runScrubGolfCourseEmails/)
   assert.match(scheduledJobs, /id: 'retryFailedTournamentWebsites'/)
   assert.match(scheduledJobs, /runRetryFailedTournamentWebsites/)
   assert.match(scheduledJobs, /configureScheduledJob/)

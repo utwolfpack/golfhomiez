@@ -173,7 +173,7 @@ export default function AdminScheduledJobs() {
         dayOfWeek: schedule.type === 'weekly' ? Number(schedule.dayOfWeek ?? 0) : null,
         dayOfMonth: schedule.type === 'monthly' ? Number(schedule.dayOfMonth ?? 1) : null,
       }
-      const jobConfig = scheduleJob.id === 'scrubTournaments'
+      const jobConfig = ['scrubTournaments', 'scrubGolfCourseEmails'].includes(scheduleJob.id)
         ? { ...(scheduleJob.jobConfig || {}), matchValues: scrubValues }
         : (scheduleJob.jobConfig || {})
       logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_job_schedule_save_started', data: { jobId: scheduleJob.id, jobName: scheduleJob.name, schedule: normalizedSchedule, scrubValueCount: scrubValues.length } })
@@ -235,7 +235,7 @@ export default function AdminScheduledJobs() {
                       <td data-label="Scheduled job" className="scheduledJobsNameCell">
                         <strong>{job.name}</strong>
                         <div className="small">{job.scheduleLabel || 'Manual'}{job.scheduleTimeZone ? ` · ${job.scheduleTimeZone}` : ''}</div>
-                        {job.id === 'scrubTournaments' ? <div className="small">{job.jobConfig?.matchValues?.length || 0} scrub value(s)</div> : null}
+                        {['scrubTournaments', 'scrubGolfCourseEmails'].includes(job.id) ? <div className="small">{job.jobConfig?.matchValues?.length || 0} scrub value(s)</div> : null}
                         {job.id === 'getGolfCourseData' ? (
                           <>
                             <div className="small">All US states + DC · fast mode · {String(job.jobConfig?.courseConcurrency || 8)} concurrent courses · bulk metadata + holes/tees enrichment</div>
@@ -337,10 +337,14 @@ export default function AdminScheduledJobs() {
 
             {schedule.type === 'manual' ? <div className="small scheduledJobManualHint">Manual does not schedule the job. Use Run now to execute it.</div> : null}
 
-            {scheduleJob.id === 'scrubTournaments' ? (
+            {['scrubTournaments', 'scrubGolfCourseEmails'].includes(scheduleJob.id) ? (
               <div className="scheduledJobScrubConfig">
-                <h3 style={{ margin: 0 }}>Tournament-name scrub values</h3>
-                <p className="small">When scrubTournaments runs, any discovered tournament whose tournament_name contains one of these literal values is deleted.</p>
+                <h3 style={{ margin: 0 }}>{scheduleJob.id === 'scrubGolfCourseEmails' ? 'Email-address scrub values' : 'Tournament-name scrub values'}</h3>
+                <p className="small">
+                  {scheduleJob.id === 'scrubGolfCourseEmails'
+                    ? 'When Scrub Golf Course Emails runs, each golfCourseEmails.csv record is checked and the row is deleted when Email Address contains any configured literal value.'
+                    : 'When scrubTournaments runs, any discovered tournament whose tournament_name contains one of these literal values is deleted.'}
+                </p>
                 <div className="scheduledJobScrubAddRow">
                   <input
                     className="input"
@@ -352,7 +356,7 @@ export default function AdminScheduledJobs() {
                         addScrubValue()
                       }
                     }}
-                    placeholder="Example: junior league"
+                    placeholder={scheduleJob.id === 'scrubGolfCourseEmails' ? 'Example: noreply@' : 'Example: junior league'}
                     maxLength={191}
                   />
                   <button className="btn" type="button" onClick={addScrubValue}>Add value</button>

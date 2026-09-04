@@ -169,3 +169,107 @@ test('host course events share the public course calendar while tournament cours
   assert.match(server, /delete publicTemplateData\.tournamentCourseMisc/)
   assert.match(rbac, /listAllTournaments[\s\S]*stripTournamentCourseMisc/)
 })
+
+test('mobile score entry resumes the active challenge or solo hole after a page reload', () => {
+  const challenge = read('src/pages/Challenges.tsx')
+  const solo = read('src/pages/SoloLogger.tsx')
+  const scoreFlowState = read('src/lib/score-flow-state.ts')
+
+  assert.match(scoreFlowState, /gh\.scoreFlow\.challenge\./)
+  assert.match(scoreFlowState, /gh\.scoreFlow\.solo\./)
+  assert.match(scoreFlowState, /sessionStorage/)
+  assert.match(scoreFlowState, /SCORE_FLOW_TTL_MS = 12 \* 60 \* 60 \* 1000/)
+  assert.doesNotMatch(scoreFlowState, /localStorage/)
+
+  assert.match(challenge, /loadChallengeScoreFlowState\(user\.id\)/)
+  assert.match(challenge, /challenge_score_flow_restored_after_page_reload/)
+  assert.match(challenge, /setExpandedThreadId\(thread\.threadId\)/)
+  assert.match(challenge, /\[challengeSectionKey\(message, 'score'\)\]: true/)
+  assert.match(challenge, /setActiveTeamChallengeScorecard\(\{ message, side: restored\.side \}\)/)
+  assert.match(challenge, /setActiveIndividualChallengeScorecard\(\{ message, participant \}\)/)
+  assert.match(challenge, /onActiveHoleChange=\{\(holeNumber\) => rememberTeamChallengeScoreFlow/)
+  assert.match(challenge, /onActiveHoleChange=\{\(holeNumber\) => rememberIndividualChallengeScoreFlow/)
+  assert.match(challenge, /clearPersistedChallengeScoreFlow\('team_modal_close'/)
+  assert.match(challenge, /individual_modal_close_\$\{reason\}/)
+
+  assert.match(solo, /loadSoloScoreFlowState\(userId\)/)
+  assert.match(solo, /useLayoutEffect\(\(\) =>/)
+  assert.match(solo, /solo_score_flow_restored_after_page_reload/)
+  assert.match(solo, /initialHoleNumber=\{scorecardResumeHole\}/)
+  assert.match(solo, /onActiveHoleChange=\{\(holeNumber\) => setScorecardResumeHole\(holeNumber\)\}/)
+  assert.match(solo, /saveSoloScoreFlowState\(user\.id/)
+  assert.match(solo, /clearSoloScoreFlowState\(user\?\.id\)/)
+})
+
+test('frontend lifecycle diagnostics retain the shared correlation id across mobile app switching', () => {
+  const frontendLogger = read('src/lib/frontend-logger.ts')
+  const serverLogger = read('server/lib/logger.js')
+
+  assert.match(frontendLogger, /CORRELATION_STORAGE_KEY = 'gh\.correlationId'/)
+  assert.match(frontendLogger, /X-Correlation-Id/)
+  assert.match(frontendLogger, /addEventListener\?\.\('pageshow'/)
+  assert.match(frontendLogger, /addEventListener\?\.\('pagehide'/)
+  assert.match(frontendLogger, /addEventListener\?\.\('visibilitychange'/)
+  assert.match(frontendLogger, /runtime\.lifecycle/)
+  assert.match(frontendLogger, /navigationType/)
+
+  assert.match(serverLogger, /access\.log/)
+  assert.match(serverLogger, /api\.log/)
+  assert.match(serverLogger, /frontend\.log/)
+  assert.match(serverLogger, /error\.log/)
+  assert.match(serverLogger, /correlationId/)
+})
+
+test('database migrations remain part of npm install and mobile score resume needs no schema dependency', () => {
+  const packageJson = JSON.parse(read('package.json'))
+  const scoreFlowState = read('src/lib/score-flow-state.ts')
+
+  assert.equal(packageJson.scripts.postinstall, 'npm run cleanup:project-files && npm run db:migrate && npm run build')
+  assert.match(scoreFlowState, /sessionStorage/)
+  assert.doesNotMatch(scoreFlowState, /fetch\(|\/api\//)
+})
+
+test('existing-round hole editor resumes its active hole and scorecard loads never overwrite newer saved holes', () => {
+  const myScores = read('src/pages/MyGolfScores.tsx')
+  const roundDetail = read('src/components/RoundDetailModal.tsx')
+  const holeScorecard = read('src/components/HoleByHoleScorecard.tsx')
+  const scoreFlowState = read('src/lib/score-flow-state.ts')
+
+  assert.match(scoreFlowState, /gh\.scoreFlow\.roundEdit\./)
+  assert.match(scoreFlowState, /loadRoundEditScoreFlowState/)
+  assert.match(scoreFlowState, /saveRoundEditScoreFlowState/)
+  assert.match(scoreFlowState, /clearRoundEditScoreFlowState/)
+
+  assert.match(myScores, /loadRoundEditScoreFlowState\(user\?\.id\)/)
+  assert.match(myScores, /active_round_editor_restored_after_page_reload/)
+  assert.match(myScores, /setSelectedRound\(resumedRound\)/)
+  assert.match(myScores, /scoreFlowUserId=\{user\?\.id\}/)
+
+  assert.match(roundDetail, /round_edit_scorecard_restored_after_page_reload/)
+  assert.match(roundDetail, /initialHoleNumber=\{resumeActiveHole\}/)
+  assert.match(roundDetail, /onActiveHoleChange=\{handleActiveEditHoleChange\}/)
+  assert.match(roundDetail, /round_edit_scorecard_resume_state_saved/)
+  assert.match(roundDetail, /cleared_after_round_persist/)
+  assert.match(roundDetail, /\/api\/scorecard-drafts\?\$\{params\.toString\(\)\}/)
+
+  assert.match(holeScorecard, /const holesRef = useRef<HoleScoreDetail\[]>\(holes\)/)
+  assert.match(holeScorecard, /latestPersistedHolesAfterLoad = persistedHolesRef\.current/)
+  assert.match(holeScorecard, /latestRenderedHoles = holesRef\.current/)
+  assert.match(holeScorecard, /late_state_reconciled/)
+  assert.match(holeScorecard, /preventedStaleLoadOverwrite: true/)
+})
+
+test('background auth refresh cannot unmount an active protected scorecard', () => {
+  const protectedRoute = read('src/components/ProtectedRoute.tsx')
+  const authContext = read('src/context/AuthContext.tsx')
+
+  assert.match(protectedRoute, /const \{ user, loading, hasRole, needsProfileEnrichment, billingStatus \} = useAuth\(\)/)
+  assert.match(protectedRoute, /if \(loading\) return <div className="container"><div className="card">Loading\.\.\.<\/div><\/div>/)
+  assert.doesNotMatch(protectedRoute, /loading \|\| profileStatusLoading \|\| billingStatusLoading/)
+
+  assert.match(authContext, /document\.visibilityState === 'hidden'/)
+  assert.match(authContext, /activity_ttl_refresh_skipped_hidden/)
+  assert.match(authContext, /activity_ttl_refresh_started/)
+  assert.match(authContext, /visibilityState: typeof document === 'undefined' \? null : document\.visibilityState/)
+  assert.match(authContext, /\['click', 'keydown', 'focus', 'visibilitychange'\]/)
+})
