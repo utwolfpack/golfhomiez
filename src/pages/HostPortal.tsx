@@ -10,7 +10,7 @@ import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistra
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
 import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
-import { createAdditionalHostAccount as createAdditionalHostLogin, deleteHostAccount as deleteHostLogin, fetchHostPortal, transferHostAdmin } from '../lib/host-auth'
+import { createAdditionalHostAccount as createAdditionalHostLogin, deleteHostAccount as deleteHostLogin, fetchHostPortal, reviewHostAccountRequest, transferHostAdmin, type HostPendingAccountRequest } from '../lib/host-auth'
 import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_CHECK_IN_TIME, DEFAULT_TOURNAMENT_TEE_TIME, emptyTournamentTemplateData } from '../lib/tournament-templates'
 import { getFriendlyTournamentError, validateTournamentForSave } from '../lib/tournament-errors'
 import { getCurrentYearInUserTimeZone, getUserTimeZone } from '../lib/time-zone'
@@ -30,6 +30,7 @@ type HostPortalState = {
     isCourseAdmin?: boolean
   }
   hostAccounts?: Array<{ id: string; email: string; contactName?: string | null; isCourseAdmin?: boolean; isValidated: boolean }>
+  pendingHostAccountRequests?: HostPendingAccountRequest[]
   invites?: Array<{ id: string; email: string; golfCourseName: string | null; consumedAt: string | null }>
   tournaments?: Tournament[]
 }
@@ -302,6 +303,7 @@ export default function HostPortal() {
   const [tournamentPage, setTournamentPage] = useState(1)
   const [hostAccountFormOpen, setHostAccountFormOpen] = useState(false)
   const [hostAccountBusy, setHostAccountBusy] = useState(false)
+  const [hostAccountRequestBusyId, setHostAccountRequestBusyId] = useState<string | null>(null)
   const [newHostAccount, setNewHostAccount] = useState({ contactName: '', email: '', password: '' })
   const [transferTargetHostAccountId, setTransferTargetHostAccountId] = useState('')
   const [deleteCurrentAdminAfterTransfer, setDeleteCurrentAdminAfterTransfer] = useState(false)
@@ -424,6 +426,39 @@ export default function HostPortal() {
       logFrontendEvent({ category: 'host.portal', level: 'error', message: 'host_account_delete_failed', data: { deletedHostAccountId: hostAccountId, error: message } })
     } finally {
       setHostAccountBusy(false)
+    }
+  }
+
+  async function onReviewHostAccountRequest(request: HostPendingAccountRequest, decision: 'approve' | 'deny') {
+    setHostAccountRequestBusyId(request.id)
+    setError(null)
+    setSuccess(null)
+    logFrontendEvent({
+      category: 'host.portal.account-requests',
+      message: 'host_account_request_review_started',
+      data: { requestId: request.id, decision, requesterEmail: request.email, golfCourseId: request.golfCourseId || null },
+    })
+    try {
+      const result = await reviewHostAccountRequest(request.id, decision)
+      if (!result.response.ok) throw new Error((result.data as any)?.message || 'The host account request could not be reviewed. Refresh the portal and try again.')
+      setSuccess(decision === 'approve' ? 'Host account request approved.' : 'Host account request denied.')
+      logFrontendEvent({
+        category: 'host.portal.account-requests',
+        message: 'host_account_request_review_completed',
+        data: { requestId: request.id, decision, approvedHostAccountId: result.data?.hostAccountId || null },
+      })
+      await loadPortal()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The host account request could not be reviewed. Refresh the portal and try again.'
+      setError(message)
+      logFrontendEvent({
+        category: 'host.portal.account-requests',
+        level: 'error',
+        message: 'host_account_request_review_failed',
+        data: { requestId: request.id, decision, error: message },
+      })
+    } finally {
+      setHostAccountRequestBusyId(null)
     }
   }
 
@@ -980,6 +1015,36 @@ export default function HostPortal() {
               ) : null}
             </section> : null}
 
+            {!createTournamentOpen && !editingId && (portalData.pendingHostAccountRequests || []).length ? (
+              <section className="card" style={{ padding: 16 }} data-testid="host-pending-account-requests-section">
+                <div>
+                  <strong>Pending golf-course account requests</strong>
+                  <div className="small">These people requested host access for this golf course. Any existing host for this course can approve or deny a request.</div>
+                </div>
+                <div className="formStack" style={{ marginTop: 12 }}>
+                  {(portalData.pendingHostAccountRequests || []).map((request) => {
+                    const requestBusy = hostAccountRequestBusyId === request.id
+                    return (
+                      <div key={request.id} className="card" style={{ padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                          <div>
+                            <strong>{request.firstName} {request.lastName}</strong>
+                            <div className="small">{request.email}</div>
+                            <div className="small" style={{ marginTop: 6 }}>{request.representativeDetails}</div>
+                            {request.createdAt ? <div className="small" style={{ marginTop: 6 }}>Requested {formatFriendlyDateTime(request.createdAt)}</div> : null}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button className="btn btnPrimary" type="button" disabled={requestBusy} onClick={() => void onReviewHostAccountRequest(request, 'approve')}>{requestBusy ? 'Working…' : 'Approve'}</button>
+                            <button className="btn" type="button" disabled={requestBusy} onClick={() => void onReviewHostAccountRequest(request, 'deny')}>{requestBusy ? 'Working…' : 'Deny'}</button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            ) : null}
+
             {!createTournamentOpen && !editingId ? <section className="card" style={{ padding: 16 }} data-testid="host-admin-section">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div>
@@ -1226,6 +1291,7 @@ export default function HostPortal() {
                         tournament={tournament}
                         archived={showArchivedTournaments}
                         busy={archiveBusyId === tournament.id}
+                        showPublishedLeaderboard
                         onSelect={showArchivedTournaments ? undefined : startEditing}
                         onArchive={onArchiveTournament}
                         onRestore={onRestoreTournament}

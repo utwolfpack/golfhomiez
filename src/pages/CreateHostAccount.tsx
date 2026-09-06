@@ -22,6 +22,7 @@ export default function CreateHostAccount() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showThankYou, setShowThankYou] = useState(false)
+  const [requestRouting, setRequestRouting] = useState<{ approvalRoute?: string; primaryHostName?: string | null } | null>(null)
   const { states: stateOptions, loading: statesLoading, error: statesError } = useGolfCourseStates()
 
   const selectedStateName = useMemo(
@@ -76,7 +77,7 @@ export default function CreateHostAccount() {
 
       logFrontendEvent({ category: 'golf_course.registration', message: 'golf_course_account_request_started', data: { email: email.trim().toLowerCase(), golfCourseId: selectedCourse.id, stateCode: state } })
 
-      await requestHostAccount({
+      const result = await requestHostAccount({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
@@ -87,7 +88,10 @@ export default function CreateHostAccount() {
         representativeDetails: representativeDetails.trim(),
         password,
       })
+      if (!result.response.ok || !result.data?.request) throw new Error((result.data as any)?.message || 'Could not submit golf-course account request.')
+      const submittedRequest = result.data.request
 
+      setRequestRouting({ approvalRoute: submittedRequest.approvalRoute, primaryHostName: submittedRequest.primaryHostName || null })
       setShowThankYou(true)
       setFirstName('')
       setLastName('')
@@ -95,7 +99,7 @@ export default function CreateHostAccount() {
       setRepresentativeDetails('')
       setPassword('')
       setConfirmPassword('')
-      logFrontendEvent({ category: 'golf_course.registration', message: 'golf_course_account_request_succeeded', data: { email: email.trim().toLowerCase(), golfCourseId: selectedCourse.id, stateCode: state } })
+      logFrontendEvent({ category: 'golf_course.registration', message: 'golf_course_account_request_succeeded', data: { email: email.trim().toLowerCase(), golfCourseId: selectedCourse.id, stateCode: state, approvalRoute: submittedRequest.approvalRoute || 'golfhomiez_admin', primaryHostName: submittedRequest.primaryHostName || null } })
     } catch (err: any) {
       const message = err?.message || 'Could not submit golf-course account request.'
       setError(message)
@@ -201,9 +205,15 @@ export default function CreateHostAccount() {
         <div className="modalOverlay" onMouseDown={() => setShowThankYou(false)}>
           <div className="modalCard" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
             <h2 style={{ marginTop: 0 }}>Thank you</h2>
-            <p>
-              thank you for your Golf Homiez golf-course account request. Your request will be reviewed and you should hear back from us within 24-hours. Be in touch soon! :)
-            </p>
+            {requestRouting?.approvalRoute === 'course_primary_host' ? (
+              <p>
+                Thank you for your Golf Homiez golf-course account request. Your request has been routed to the current golf-course account admin{requestRouting.primaryHostName ? `, ${requestRouting.primaryHostName},` : ''} for approval. You will receive an email after the golf-course host team reviews the request.
+              </p>
+            ) : (
+              <p>
+                Thank you for your Golf Homiez golf-course account request. Your request will be reviewed and you should hear back from us within 24 hours.
+              </p>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn btnPrimary" type="button" onClick={() => setShowThankYou(false)}>Close</button>
             </div>

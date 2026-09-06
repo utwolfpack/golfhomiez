@@ -1722,7 +1722,7 @@ test('navigation uses styled dropdown items and exposes unread notifications fro
   assert.match(css, /color:#15803d/)
 })
 
-test('guest navigation exposes host and organizer login links and login/reset pages omit requested helper copy', () => {
+test('guest navigation exposes golf-course account access and organizer login links and login/reset pages omit requested helper copy', () => {
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const nav = fs.readFileSync(new URL('../src/components/NavBar.tsx', import.meta.url), 'utf8')
   const login = fs.readFileSync(new URL('../src/pages/Login.tsx', import.meta.url), 'utf8')
@@ -1733,7 +1733,9 @@ test('guest navigation exposes host and organizer login links and login/reset pa
   assert.match(app, /path="\/organizer\/login"[\s\S]*?<OrganizerLogin \/>/)
   assert.match(nav, /aria-label="Open login and registration menu"/)
   assert.match(nav, /id="app-guest-menu"/)
-  assert.match(nav, /to="\/host\/login"[\s\S]*>Host Login<\/NavLink>/)
+  assert.match(nav, /to="\/host\/login"[\s\S]*>Golf Course Login<\/NavLink>/)
+  assert.match(nav, /to="\/host\/register"[\s\S]*>Create Golf Course Account<\/NavLink>/)
+  assert.ok(nav.indexOf('>Create Golf Course Account</NavLink>') > nav.indexOf('>Golf Course Login</NavLink>'))
   assert.match(nav, /to="\/organizer\/login"[\s\S]*>Organizer Login<\/NavLink>/)
   assert.match(nav, /guest_menu_toggled/)
   assert.match(nav, /guest_navigation_selected/)
@@ -5249,7 +5251,7 @@ test('completed tournament public pages keep the flyer and final leaderboard whi
   assert.match(styles, /\.tournament-final-leaderboard/)
 })
 
-test('completed tournament pages and QR codes remain publicly addressable while management line items expose the public tournament URL', () => {
+test('completed tournament pages remain publicly addressable while management rows expose a non-linking registration URL with explicit preview', () => {
   const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
   const hostPage = fs.readFileSync(new URL('../src/pages/HostPortal.tsx', import.meta.url), 'utf8')
   const organizerPage = fs.readFileSync(new URL('../src/pages/OrganizerTournaments.tsx', import.meta.url), 'utf8')
@@ -5260,7 +5262,11 @@ test('completed tournament pages and QR codes remain publicly addressable while 
   assert.match(hostPage, /TournamentManagementLineItem/)
   assert.match(organizerPage, /TournamentManagementLineItem/)
   assert.match(lineItem, /\['published', 'completed'\]\.includes/)
-  assert.match(lineItem, /Golfer Registration URL/)
+  assert.match(lineItem, /GOLFER REGISTRATION URL/)
+  assert.match(lineItem, /tournament-management-line__url-text/)
+  assert.doesNotMatch(lineItem, /<a href=\{tournamentUrl\}/)
+  assert.match(lineItem, /previewTournamentUrl/)
+  assert.match(lineItem, /window\.open\(tournamentUrl, '_blank', 'noopener,noreferrer'\)/)
 })
 
 test('host and organizer tournament management uses paginated line items with status and focused editing', () => {
@@ -5279,7 +5285,8 @@ test('host and organizer tournament management uses paginated line items with st
   assert.match(hostPage, /selectedHostedTournaments\.slice\(\(safeTournamentPage - 1\) \* TOURNAMENTS_PER_PAGE, safeTournamentPage \* TOURNAMENTS_PER_PAGE\)/)
   assert.match(organizerPage, /selectedTournaments\.slice\(\(safeTournamentPage - 1\) \* TOURNAMENTS_PER_PAGE, safeTournamentPage \* TOURNAMENTS_PER_PAGE\)/)
   assert.match(hostPage, /!editingId \? <section className="card"/)
-  assert.match(lineItem, /<span>Status<\/span><strong>\{formatTournamentStatus\(tournament\.status\)\}<\/strong>/)
+  assert.match(lineItem, /tournament-management-line__badge--\$\{archived \? 'archived' : normalizedStatus/)
+  assert.match(lineItem, /formatTournamentStatus\(tournament\.status\)/)
   assert.match(lineItem, /TournamentManagementPagination/)
 })
 

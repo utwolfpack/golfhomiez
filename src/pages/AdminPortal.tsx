@@ -330,6 +330,7 @@ function RequestTable({ rows, approvingRequestId, deletingRequestId, onApprove, 
             {rows.length ? rows.map((row, index) => {
               const requestId = String(row.id ?? `request-${index}`)
               const pending = String(row.status ?? '').toLowerCase() === 'pending'
+              const routedToCourseHost = String(row.approval_route ?? 'golfhomiez_admin').toLowerCase() === 'course_primary_host'
               const busy = approvingRequestId === requestId || deletingRequestId === requestId
               return (
                 <tr key={requestId}>
@@ -337,14 +338,17 @@ function RequestTable({ rows, approvingRequestId, deletingRequestId, onApprove, 
                   <td>{`${formatValue(row.first_name)} ${formatValue(row.last_name)}`.trim()}</td>
                   <td>{formatValue(row.email)}</td>
                   <td>{formatValue(row.golf_course_name)}</td>
-                  <td>{formatValue(row.status)}</td>
                   <td>
-                    {pending ? (
+                    <div>{formatValue(row.status)}</div>
+                    {routedToCourseHost ? <div className="small">Routed to course host{row.routed_host_email ? ` — ${formatValue(row.routed_host_email)}` : ''}</div> : null}
+                  </td>
+                  <td>
+                    {pending && !routedToCourseHost ? (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button className="btn btnPrimary" type="button" disabled={busy} onClick={() => onApprove(requestId)}>{approvingRequestId === requestId ? 'Approving…' : 'Approve request'}</button>
                         <button className="btn" type="button" disabled={busy} onClick={() => onDelete(requestId)}>{deletingRequestId === requestId ? 'Deleting…' : 'Delete request'}</button>
                       </div>
-                    ) : <span className="small">No action required</span>}
+                    ) : pending && routedToCourseHost ? <span className="small">Course host approval pending</span> : <span className="small">No action required</span>}
                   </td>
                 </tr>
               )

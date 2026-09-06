@@ -243,7 +243,8 @@ export default function NavBar() {
                   <div className="navDropdown" id="app-guest-menu">
                     <NavLink className="navDropdownItem" to="/login" onClick={() => handleGuestNavigation('/login', 'user')}>User Login</NavLink>
                     <NavLink className="navDropdownItem" to="/register" onClick={() => handleGuestNavigation('/register', 'registration')}>Create account</NavLink>
-                    <NavLink className="navDropdownItem" to="/host/login" onClick={() => handleGuestNavigation('/host/login', 'host')}>Host Login</NavLink>
+                    <NavLink className="navDropdownItem" to="/host/login" onClick={() => handleGuestNavigation('/host/login', 'host')}>Golf Course Login</NavLink>
+                    <NavLink className="navDropdownItem" to="/host/register" onClick={() => handleGuestNavigation('/host/register', 'registration')}>Create Golf Course Account</NavLink>
                     <NavLink className="navDropdownItem" to="/organizer/login" onClick={() => handleGuestNavigation('/organizer/login', 'organizer')}>Organizer Login</NavLink>
                   </div>
                 ) : null}

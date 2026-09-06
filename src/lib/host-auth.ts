@@ -29,12 +29,30 @@ export type HostAccountRequestPayload = {
   password: string
 }
 
+export type HostPendingAccountRequest = {
+  id: string
+  firstName: string
+  lastName: string
+  email: string
+  stateCode: string
+  stateName: string
+  golfCourseId?: string | null
+  golfCourseName: string
+  representativeDetails: string
+  status: string
+  approvalRoute: string
+  routedHostAccountId?: string | null
+  routedHostEmail?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
 export async function getHostSession() {
   return requestJson<{ hostAccount: HostAccount | null }>('/api/host/session')
 }
 
 export async function requestHostAccount(payload: HostAccountRequestPayload) {
-  return requestJson<{ request: { id: string; status: string } }>('/api/host/account-requests', {
+  return requestJson<{ request: { id: string; status: string; approvalRoute?: string; routedHostAccountId?: string | null; routedHostEmail?: string | null; primaryHostName?: string | null } }>('/api/host/account-requests', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
@@ -67,7 +85,20 @@ export async function resetHostPassword(token: string, password: string) {
 }
 
 export async function fetchHostPortal() {
-  return requestJson<{ account: HostAccount & { createdAt?: string | null; updatedAt?: string | null }; hostAccounts: Array<HostAccount & { createdAt?: string | null; updatedAt?: string | null }>; invites: Array<{ id: string; email: string; inviteeName: string | null; golfCourseName: string | null; createdAt: string | null; consumedAt: string | null; expiresAt: string | null }>; tournaments: Array<{ id: string; name: string; tournamentIdentifier?: string | null; organizerEmail?: string | null; inviteStatus?: string | null; inviteUrl?: string | null; startDate?: string | null; endDate?: string | null; status?: string | null }> }>('/api/host/portal')
+  return requestJson<{
+    account: HostAccount & { createdAt?: string | null; updatedAt?: string | null }
+    hostAccounts: Array<HostAccount & { createdAt?: string | null; updatedAt?: string | null }>
+    invites: Array<{ id: string; email: string; inviteeName: string | null; golfCourseName: string | null; createdAt: string | null; consumedAt: string | null; expiresAt: string | null }>
+    tournaments: Array<{ id: string; name: string; tournamentIdentifier?: string | null; organizerEmail?: string | null; inviteStatus?: string | null; inviteUrl?: string | null; startDate?: string | null; endDate?: string | null; status?: string | null }>
+    pendingHostAccountRequests: HostPendingAccountRequest[]
+  }>('/api/host/portal')
+}
+
+export async function reviewHostAccountRequest(requestId: string, decision: 'approve' | 'deny') {
+  return requestJson<{ approved: boolean; denied: boolean; decision: 'approve' | 'deny'; hostAccountId?: string | null }>(`/api/host/account-requests/${encodeURIComponent(requestId)}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  })
 }
 
 

@@ -131,3 +131,28 @@ export async function loadTournamentFinalLeaderboard(pool, tournamentId, registr
   )
   return buildTournamentFinalLeaderboardRows(registrations, scoreRows)
 }
+
+export function buildTournamentLiveLeaderboardRows(registrations = [], scoreRows = []) {
+  return buildTournamentFinalLeaderboardRows(registrations, scoreRows).map((row) => ({
+    position: row.position,
+    teamKey: row.teamKey,
+    teamId: row.teamId,
+    teamName: row.teamName,
+    totalScore: row.totalScore,
+    relativeToPar: row.relativeToPar,
+    roundLabel: row.relativeToPar === 0 ? 'Par' : row.roundLabel,
+    holesCompleted: row.holesCompleted,
+    thru: row.thru,
+    updatedAt: row.updatedAt,
+  }))
+}
+
+export async function loadTournamentLiveLeaderboard(pool, tournamentId, registrations = []) {
+  const [scoreRows] = await pool.execute(
+    `SELECT id, tournament_id, team_key, team_id, team_name, total_score, holes_json, tee_color, updated_at
+       FROM tournament_team_scores
+      WHERE tournament_id = ?`,
+    [tournamentId],
+  )
+  return buildTournamentLiveLeaderboardRows(registrations, scoreRows)
+}

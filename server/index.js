@@ -24,7 +24,7 @@ import { searchGolfHomiezCourses } from './lib/golf-course-search.js'
 import { v4 as uuidv4 } from 'uuid'
 import { authenticateHostLogin, clearHostSessionCookie, createAdditionalHostAccount, createHostPasswordReset, createHostSession, deleteHostCourseAccount, destroyHostSession, ensureHostAuthSchema, getHostAccountBySession, getHostPortalData, hostAuthMiddleware, resetHostPassword, serializeHostSessionCookie, transferHostCourseAdmin } from './lib/host-auth.js'
 import { authenticateOrganizerLogin, clearOrganizerSessionCookie, createOrganizerPasswordReset, createOrganizerSession, destroyOrganizerSession, ensureOrganizerAuthSchema, getOrganizerAccountBySession, organizerAuthMiddleware, registerOrganizerAccount, resetOrganizerPassword, serializeOrganizerSessionCookie } from './lib/organizer-auth.js'
-import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, consumeAdminResetToken, deleteAdminUser, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listPortalData, verifyPassword } from './lib/admin-portal.js'
+import { approveHostAccountRequest, authenticateAdminRequest, clearAdminSessionCookie, createAdminResetToken, createAdminSessionCookie, refreshAdminSessionCookie, createAdminUser, createHostAccountRequest, consumeAdminResetToken, deleteAdminUser, deleteHostAccountRequest, getAdminUserByUsername, listAdminUsers, listHostAccountRequestsForHost, listPortalData, reviewHostAccountRequestByHost, verifyPassword } from './lib/admin-portal.js'
 import { buildOrganizerInviteDetails, createHostManagedTournament, createTournament, createTournamentOrganizerInvite, ensureTournamentInviteSchema, listHostAccounts, listOrganizerTournaments, sanitizeOrganizerTournamentInvitePayload, sanitizeTournamentTemplateData } from './lib/rbac.js'
 import { findTournamentDateConflict, formatTournamentScheduleDate, normalizeTournamentScheduleDate } from './lib/tournament-schedule-conflicts.js'
 import { requestUserTimeZone } from './lib/time-zone.js'
@@ -37,7 +37,7 @@ import { loadProfileSummary } from './lib/profile-summary.js'
 import { createGolfCoursePublicPageForApprovedHost, getGolfCoursePublicPageByHostAccount, getGolfCoursePublicPageBySlug, syncGolfCoursePublicPageCatalogDefaults, updateGolfCoursePublicPageForHost } from './lib/golf-course-public-pages.js'
 import { createCourseEvent, deleteCourseEvent, listCourseEventsForPage, updateCourseEvent } from './lib/course-events.js'
 import { buildSuggestedTournamentStartAssignments, listTournamentStartAssignmentsForTournaments, normalizeTeeTimeIntervalMinutes, normalizeTournamentStartTime, normalizeTournamentStartType, replaceTournamentStartAssignments } from './lib/tournament-start-schedule.js'
-import { loadTournamentFinalLeaderboard } from './lib/tournament-final-leaderboard.js'
+import { loadTournamentFinalLeaderboard, loadTournamentLiveLeaderboard } from './lib/tournament-final-leaderboard.js'
 import { setTournamentArchiveState } from './lib/tournament-archive.js'
 import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarketingSettings, listMarketingVideoSections, normalizeMarketingVideoAudience, updateHomeMarketingSettings } from './lib/marketing-settings.js'
 import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
@@ -2862,7 +2862,17 @@ app.post('/api/host/account-requests', async (req, res) => {
       representativeDetails,
       password,
     })
-    logApi('host_account_request_created', { ...requestContext(req), email, golfCourseId: matchedCourse.id, golfCourseName: matchedCourse.name, stateCode, requestId: request.id })
+    logApi('host_account_request_created', {
+      ...requestContext(req),
+      email,
+      golfCourseId: matchedCourse.id,
+      golfCourseName: matchedCourse.name,
+      stateCode,
+      requestId: request.id,
+      approvalRoute: request.approvalRoute || 'golfhomiez_admin',
+      routedHostAccountId: request.routedHostAccountId || null,
+      primaryHostName: request.primaryHostName || null,
+    })
     return res.status(201).json({ request })
   } catch (error) {
     logRouteError('Host account request error', req, error)
@@ -2951,17 +2961,55 @@ app.get('/api/host/portal', hostAuthMiddleware, async (req, res) => {
       defaultTournamentLocation: defaultTournamentLocation || account.golfCourseName || null,
     }
     const tournaments = await listHostPortalTournaments(db, portalAccount, req)
+    const pendingHostAccountRequests = await listHostAccountRequestsForHost({ hostAccountId: req.hostAccount.id })
     logApi('host_portal_loaded', {
       ...requestContext(req),
       hostAccountId: portalAccount.id || req.hostAccount.id,
       tournamentCount: tournaments.length,
+      pendingHostAccountRequestCount: pendingHostAccountRequests.length,
       defaultTournamentLocationAvailable: Boolean(portalAccount.defaultTournamentLocation),
     })
     const hostAccounts = (data.hostAccounts || []).map((host) => normalizeHostPortalAccount(host))
-    res.json({ ...data, account: portalAccount, host: portalAccount, hostAccounts, tournaments })
+    res.json({ ...data, account: portalAccount, host: portalAccount, hostAccounts, tournaments, pendingHostAccountRequests })
   } catch (error) {
     logRouteError('Host portal load error', req, error)
     res.status(500).json({ message: 'Could not load golf-course portal' })
+  }
+})
+
+app.post('/api/host/account-requests/:id/review', hostAuthMiddleware, async (req, res) => {
+  const requestId = String(req.params.id || '').trim()
+  const decision = String(req.body?.decision || '').trim().toLowerCase()
+  if (!requestId) return res.status(400).json({ message: 'Golf-course account request id is required.' })
+  if (!['approve', 'deny'].includes(decision)) return res.status(400).json({ message: 'Decision must be approve or deny.' })
+
+  try {
+    logApi('host_account_request_review_started', {
+      ...requestContext(req),
+      requestId,
+      decision,
+      reviewerHostAccountId: req.hostAccount.id,
+    })
+    const result = await reviewHostAccountRequestByHost({
+      requestId,
+      hostAccountId: req.hostAccount.id,
+      decision,
+    })
+    logApi('host_account_request_review_completed', {
+      ...requestContext(req),
+      requestId,
+      decision,
+      reviewerHostAccountId: req.hostAccount.id,
+      approvedHostAccountId: result.hostAccountId || null,
+    })
+    return res.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not review golf-course account request.'
+    if (/not found/i.test(message)) return res.status(404).json({ message })
+    if (/already been reviewed/i.test(message)) return res.status(409).json({ message })
+    if (/not available|not.*for this host account/i.test(message)) return res.status(403).json({ message })
+    logRouteError('Host account request review error', req, error, { requestId, decision, reviewerHostAccountId: req.hostAccount.id })
+    return res.status(500).json({ message: 'Could not review golf-course account request.' })
   }
 })
 
@@ -4106,6 +4154,45 @@ app.get('/api/tournament-portals/:id/qr-code.svg', requireStorage, async (req, r
   } catch (error) {
     logRouteError('Tournament portal QR code error', req, error)
     return res.status(500).type('text/plain').send('Could not generate tournament QR code')
+  }
+})
+
+app.get('/api/tournament-portals/:id/leaderboard', requireStorage, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    const pool = getPool()
+    const portal = await getTournamentPortalById(pool, id, req)
+    if (!portal) return res.status(404).json({ message: 'Tournament not found' })
+
+    const portalStatus = String(portal.tournament.status || '').toLowerCase()
+    if (portal.tournament.archivedAt || !['published', 'completed'].includes(portalStatus)) {
+      return res.status(404).json({ message: 'Tournament not found' })
+    }
+
+    const leaderboard = await loadTournamentLiveLeaderboard(pool, portal.tournament.id, portal.registrations || [])
+    const tournament = publicTournamentPortalResponse(portal, null).tournament
+    const refreshedAt = new Date().toISOString()
+    res.setHeader('Cache-Control', 'no-store')
+    logApi('tournament_live_leaderboard_loaded', {
+      ...requestContext(req),
+      tournamentId: portal.tournament.id,
+      tournamentIdentifier: portal.tournament.tournamentIdentifier || null,
+      tournamentStatus: portalStatus,
+      teamCount: leaderboard.length,
+      scoredTeamCount: leaderboard.filter((row) => row.totalScore != null).length,
+      refreshIntervalSeconds: 30,
+      holeByHoleIncluded: false,
+    })
+    return res.json({
+      tournament,
+      leaderboard,
+      refreshedAt,
+      refreshIntervalSeconds: 30,
+      holeByHoleIncluded: false,
+    })
+  } catch (error) {
+    logRouteError('Tournament live leaderboard error', req, error, { tournamentId: String(req.params.id || '').trim() })
+    return res.status(500).json({ message: 'Could not load tournament leaderboard' })
   }
 })
 
