@@ -3264,6 +3264,34 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
       return loadMigrationSql('20260903_084_course_calendar_events.sql')
     },
   },
+  {
+    version: '20260904_085',
+    name: 'host_course_account_request_approval',
+    filename: '20260904_085_host_course_account_request_approval.sql',
+    async isSatisfied(db) {
+      return (
+        await columnExists(db, 'host_account_requests', 'approval_route') &&
+        await columnExists(db, 'host_account_requests', 'routed_host_account_id') &&
+        await columnExists(db, 'host_account_requests', 'routed_host_email') &&
+        await columnExists(db, 'host_account_requests', 'reviewed_by_host_account_id') &&
+        await indexExists(db, 'host_account_requests', 'idx_host_account_requests_route_status') &&
+        await indexExists(db, 'host_account_requests', 'idx_host_account_requests_routed_host')
+      )
+    },
+    async getSql(db) {
+      if (!(await tableExists(db, 'host_account_requests'))) {
+        return `${loadMigrationSql('20260422_016_host_account_requests.sql')}\n${loadMigrationSql('20260904_085_host_course_account_request_approval.sql')}`
+      }
+      const statements = []
+      if (!(await columnExists(db, 'host_account_requests', 'approval_route'))) statements.push(`ALTER TABLE host_account_requests ADD COLUMN approval_route VARCHAR(32) NOT NULL DEFAULT 'golfhomiez_admin' AFTER status`)
+      if (!(await columnExists(db, 'host_account_requests', 'routed_host_account_id'))) statements.push(`ALTER TABLE host_account_requests ADD COLUMN routed_host_account_id VARCHAR(191) NULL AFTER approval_route`)
+      if (!(await columnExists(db, 'host_account_requests', 'routed_host_email'))) statements.push(`ALTER TABLE host_account_requests ADD COLUMN routed_host_email VARCHAR(191) NULL AFTER routed_host_account_id`)
+      if (!(await columnExists(db, 'host_account_requests', 'reviewed_by_host_account_id'))) statements.push(`ALTER TABLE host_account_requests ADD COLUMN reviewed_by_host_account_id VARCHAR(191) NULL AFTER reviewed_by_admin_id`)
+      if (!(await indexExists(db, 'host_account_requests', 'idx_host_account_requests_route_status'))) statements.push(`CREATE INDEX idx_host_account_requests_route_status ON host_account_requests (approval_route, status, created_at)`)
+      if (!(await indexExists(db, 'host_account_requests', 'idx_host_account_requests_routed_host'))) statements.push(`CREATE INDEX idx_host_account_requests_routed_host ON host_account_requests (routed_host_account_id, status)`)
+      return statements.join(';\n')
+    },
+  },
 
 ]
 

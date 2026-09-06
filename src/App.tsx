@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from 'react'
+import { Suspense, lazy, useEffect, type ReactElement } from 'react'
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router'
 import NavBar from './components/NavBar'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -42,6 +42,7 @@ import Inbox from './pages/Inbox'
 import Challenges from './pages/Challenges'
 import InviteHomie from './pages/InviteHomie'
 import TournamentPortal from './pages/TournamentPortal'
+import TournamentLeaderboard from './pages/TournamentLeaderboard'
 import GolfCoursePage from './pages/GolfCoursePage'
 import GolfCourseCalendarPage from './pages/GolfCourseCalendarPage'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -81,7 +82,7 @@ function AccountSetupGate() {
   return null
 }
 
-function LoginEntryRoute({ mode, children }: { mode: 'user' | 'host' | 'organizer'; children: JSX.Element }) {
+function LoginEntryRoute({ mode, children }: { mode: 'user' | 'host' | 'organizer'; children: ReactElement }) {
   const { user, loading, roles } = useAuth()
   const { hostAccount, loading: hostLoading } = useHostAuth()
   const { adminUser, loading: adminLoading } = useAdminAuth()
@@ -96,14 +97,14 @@ function LoginEntryRoute({ mode, children }: { mode: 'user' | 'host' | 'organize
 }
 
 
-function OrganizerProtectedRoute({ children }: { children: JSX.Element }) {
+function OrganizerProtectedRoute({ children }: { children: ReactElement }) {
   const { organizerAccount, loading } = useOrganizerAuth()
   if (loading) return <LoadingCard />
   if (!organizerAccount) return <Navigate to="/organizer/login" replace />
   return children
 }
 
-function AdminEntryRoute({ children }: { children: JSX.Element }) {
+function AdminEntryRoute({ children }: { children: ReactElement }) {
   const { user, loading, roles } = useAuth()
   const { hostAccount, loading: hostLoading } = useHostAuth()
   const { adminUser, loading: adminLoading } = useAdminAuth()
@@ -118,7 +119,7 @@ function AdminEntryRoute({ children }: { children: JSX.Element }) {
   return children
 }
 
-function SupportAccessRoute({ children }: { children: JSX.Element }) {
+function SupportAccessRoute({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth()
   const { hostAccount, loading: hostLoading } = useHostAuth()
   const { organizerAccount, loading: organizerLoading } = useOrganizerAuth()
@@ -129,6 +130,9 @@ function SupportAccessRoute({ children }: { children: JSX.Element }) {
 }
 
 export default function App() {
+  const location = useLocation()
+  const tournamentLeaderboardDisplay = /^\/tournaments\/[^/]+\/leaderboard\/?$/.test(location.pathname)
+
   useEffect(() => {
     emitFrontendStage('app_mounted')
   }, [])
@@ -139,9 +143,9 @@ export default function App() {
         <OrganizerAuthProvider>
           <HostAuthProvider>
             <RouteDiagnostics />
-            <AccountSetupGate />
-            <a className="skipLink" href="#main-content">Skip to main content</a>
-            <NavBar />
+            {!tournamentLeaderboardDisplay ? <AccountSetupGate /> : null}
+            {!tournamentLeaderboardDisplay ? <a className="skipLink" href="#main-content">Skip to main content</a> : null}
+            {!tournamentLeaderboardDisplay ? <NavBar /> : null}
             <main id="main-content" className="appMain" tabIndex={-1}>
               <Routes>
               <Route path="/" element={<Home />} />
@@ -177,6 +181,7 @@ export default function App() {
               <Route path="/organizer/reset-password" element={<OrganizerResetPassword />} />
               <Route path="/organizer/portal" element={<OrganizerProtectedRoute><OrganizerTournaments /></OrganizerProtectedRoute>} />
               <Route path="/organizer/portal/profile" element={<OrganizerProtectedRoute><OrganizerProfile /></OrganizerProtectedRoute>} />
+              <Route path="/tournaments/:id/leaderboard" element={<TournamentLeaderboard />} />
               <Route path="/tournaments/:id" element={<TournamentPortal />} />
               <Route path="/golfadmin" element={<AdminEntryRoute><AdminPortal /></AdminEntryRoute>} />
               <Route path="/golfadmin/forgot-password" element={<AdminResetPassword />} />

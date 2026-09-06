@@ -327,6 +327,27 @@ export type TournamentFinalLeaderboardRow = {
   updatedAt?: string | null
 }
 
+export type TournamentLiveLeaderboardRow = {
+  position: number
+  teamKey: string
+  teamId?: string | null
+  teamName: string
+  totalScore?: number | null
+  relativeToPar?: number | null
+  roundLabel: string
+  holesCompleted: number
+  thru?: number | null
+  updatedAt?: string | null
+}
+
+export type TournamentLiveLeaderboardResponse = {
+  tournament: Tournament
+  leaderboard: TournamentLiveLeaderboardRow[]
+  refreshedAt: string
+  refreshIntervalSeconds: number
+  holeByHoleIncluded: false
+}
+
 export type TournamentPortal = {
   tournament: Tournament
   registrationCount?: number
@@ -717,6 +738,10 @@ export function updateTournamentTeamScore(tournamentId: string, input: { holes: 
 
 export function fetchTournamentPortal(id: string) {
   return api<TournamentPortal>(`/api/tournament-portals/${encodeURIComponent(id)}`)
+}
+
+export function fetchTournamentLiveLeaderboard(id: string) {
+  return api<TournamentLiveLeaderboardResponse>(`/api/tournament-portals/${encodeURIComponent(id)}/leaderboard`)
 }
 
 export function registerForTournament(id: string, input: { teamId?: string | null; teamName?: string | null; teamMembers?: Array<{ id?: string | null; name: string; email: string; registered?: boolean; verified?: boolean; registrationId?: string | null; registrationAuthUserId?: string | null; registeredAt?: string | null }> } = {}) {

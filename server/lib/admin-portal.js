@@ -115,6 +115,10 @@ async function ensureHostAccountRequestTableCompatibility() {
   await addColumnIfMissing('host_account_requests', 'reviewed_by_email', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'reviewed_at', 'DATETIME NULL', { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'approved_host_account_id', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
+  await addColumnIfMissing('host_account_requests', 'approval_route', "VARCHAR(32) NOT NULL DEFAULT 'golfhomiez_admin'", { ignoreDuplicate: true })
+  await addColumnIfMissing('host_account_requests', 'routed_host_account_id', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
+  await addColumnIfMissing('host_account_requests', 'routed_host_email', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
+  await addColumnIfMissing('host_account_requests', 'reviewed_by_host_account_id', 'VARCHAR(191) NULL', { ignoreDuplicate: true })
   await addColumnIfMissing('host_account_requests', 'updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP', { ignoreDuplicate: true })
 
   if (!await indexExists('host_account_requests', 'idx_host_account_requests_status_created')) {
@@ -122,6 +126,12 @@ async function ensureHostAccountRequestTableCompatibility() {
   }
   if (!await indexExists('host_account_requests', 'idx_host_account_requests_email')) {
     await pool().query('CREATE INDEX idx_host_account_requests_email ON host_account_requests (email)')
+  }
+  if (!await indexExists('host_account_requests', 'idx_host_account_requests_route_status')) {
+    await pool().query('CREATE INDEX idx_host_account_requests_route_status ON host_account_requests (approval_route, status, created_at)')
+  }
+  if (!await indexExists('host_account_requests', 'idx_host_account_requests_routed_host')) {
+    await pool().query('CREATE INDEX idx_host_account_requests_routed_host ON host_account_requests (routed_host_account_id, status)')
   }
 }
 
@@ -182,6 +192,111 @@ async function sendHostAccountRequestNotification({ firstName, lastName, email, 
   })
 }
 
+
+async function findPrimaryHostAccountForCourse({ golfCourseId = null, golfCourseName = '' }) {
+  await ensureHostAuthSchema(pool())
+  const columns = await getTableColumns('host_accounts')
+  const normalizedGolfCourseId = String(golfCourseId || '').trim()
+  const normalizedGolfCourseName = String(golfCourseName || '').trim()
+  const nameColumn = ['golf_course_name', 'account_name', 'course_name', 'name'].find((columnName) => columns.has(columnName)) || null
+  const contactNameSelect = columns.has('contact_name') ? 'contact_name' : 'NULL AS contact_name'
+
+  if (normalizedGolfCourseId && columns.has('golf_course_id')) {
+    const [rows] = await pool().execute(
+      `SELECT id, email, ${contactNameSelect}
+         FROM host_accounts
+        WHERE golf_course_id = ?
+          AND is_validated = 1
+          AND is_course_admin = 1
+        ORDER BY validated_at ASC, created_at ASC, id ASC
+        LIMIT 1`,
+      [normalizedGolfCourseId],
+    )
+    if (rows[0]) return rows[0]
+  }
+
+  if (nameColumn && normalizedGolfCourseName) {
+    const [rows] = await pool().execute(
+      `SELECT id, email, ${contactNameSelect}
+         FROM host_accounts
+        WHERE LOWER(TRIM(COALESCE(${escapeIdentifier(nameColumn)}, ''))) = LOWER(?)
+          AND is_validated = 1
+          AND is_course_admin = 1
+        ORDER BY validated_at ASC, created_at ASC, id ASC
+        LIMIT 1`,
+      [normalizedGolfCourseName],
+    )
+    if (rows[0]) return rows[0]
+  }
+
+  return null
+}
+
+function primaryHostDisplayName(host = {}) {
+  return String(host.contact_name || '').trim() || String(host.email || '').trim() || 'the current golf-course account admin'
+}
+
+async function sendHostAccountRequestRoutedEmail({ email, firstName, golfCourseName, primaryHostName }) {
+  const greetingName = String(firstName || '').trim() || 'there'
+  const subject = `Your Golf Homiez golf-course account request for ${golfCourseName}`
+  const text = [
+    `Hello ${greetingName},`,
+    '',
+    `Your request to create a Golf Homiez account for ${golfCourseName} has been routed to the current primary golf-course account admin, ${primaryHostName}, for review.`,
+    'The golf-course host team can approve or deny the request from its Golf Homiez host portal.',
+    'You will receive another email after the request is reviewed.',
+  ].join('\n')
+  const html = `
+    <p>Hello ${greetingName},</p>
+    <p>Your request to create a Golf Homiez account for <strong>${golfCourseName}</strong> has been routed to the current primary golf-course account admin, <strong>${primaryHostName}</strong>, for review.</p>
+    <p>The golf-course host team can approve or deny the request from its Golf Homiez host portal. You will receive another email after the request is reviewed.</p>
+  `
+  await sendMail({ to: email, subject, text, html })
+}
+
+async function sendPrimaryHostAccountRequestNotification({ primaryHost, firstName, lastName, email, golfCourseName, representativeDetails }) {
+  const hostLoginUrl = buildHostLoginUrl()
+  const primaryHostName = primaryHostDisplayName(primaryHost)
+  const subject = `New Golf Homiez host account request for ${golfCourseName}`
+  const text = [
+    `Hello ${primaryHostName},`,
+    '',
+    `A new host account has been requested for ${golfCourseName}.`,
+    `Requester: ${firstName} ${lastName}`.trim(),
+    `Email: ${email}`,
+    `Representative details: ${representativeDetails}`,
+    '',
+    'Sign in to the Golf Homiez host portal to approve or deny this request:',
+    hostLoginUrl,
+  ].join('\n')
+  const html = `
+    <p>Hello ${primaryHostName},</p>
+    <p>A new host account has been requested for <strong>${golfCourseName}</strong>.</p>
+    <p><strong>Requester:</strong> ${firstName} ${lastName}<br />
+    <strong>Email:</strong> ${email}<br />
+    <strong>Representative details:</strong> ${representativeDetails}</p>
+    <p><a href="${hostLoginUrl}">Sign in to the Golf Homiez host portal</a> to approve or deny this request.</p>
+  `
+  await sendMail({ to: primaryHost.email, subject, text, html })
+}
+
+async function sendHostAccountDeniedEmail({ email, firstName, golfCourseName }) {
+  const greetingName = String(firstName || '').trim() || 'there'
+  const subject = `Golf Homiez golf-course account request for ${golfCourseName}`
+  const text = [
+    `Hello ${greetingName},`,
+    '',
+    `Your request for a Golf Homiez host account for ${golfCourseName} was not approved by the golf-course host team.`,
+    'Contact the golf course directly if you believe the request should be reconsidered.',
+  ].join('\n')
+  const html = `
+    <p>Hello ${greetingName},</p>
+    <p>Your request for a Golf Homiez host account for <strong>${golfCourseName}</strong> was not approved by the golf-course host team.</p>
+    <p>Contact the golf course directly if you believe the request should be reconsidered.</p>
+  `
+  await sendMail({ to: email, subject, text, html })
+}
+
 async function sendHostAccountApprovalEmail({ email, firstName, golfCourseName }) {
   const hostLoginUrl = buildHostLoginUrl()
   const greetingName = String(firstName || '').trim() || 'there'
@@ -209,12 +324,13 @@ async function sendHostAccountApprovalEmail({ email, firstName, golfCourseName }
   })
 }
 
-async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCourseId = null, passwordHash = null }) {
+async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCourseId = null, passwordHash = null, contactName = '' }) {
   await ensureHostAuthSchema(pool())
   const db = pool()
   const normalizedEmail = normalizeEmail(email)
   const normalizedGolfCourseName = String(golfCourseName || '').trim()
   const normalizedGolfCourseId = String(golfCourseId || '').trim() || null
+  const normalizedContactName = String(contactName || '').replace(/\s+/g, ' ').trim()
   const [existingRows] = await db.execute('SELECT id FROM host_accounts WHERE email = ? LIMIT 1', [normalizedEmail])
   const existing = existingRows[0]
   const columns = await getTableColumns('host_accounts')
@@ -250,6 +366,10 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCo
     if (columns.has('password_hash') && passwordHash) {
       assignments.push('password_hash = ?')
       params.push(passwordHash)
+    }
+    if (columns.has('contact_name') && normalizedContactName) {
+      assignments.push('contact_name = ?')
+      params.push(normalizedContactName)
     }
     if (columns.has('is_validated')) assignments.push('is_validated = 1')
     if (columns.has('is_course_admin') && shouldBeCourseAdmin) assignments.push('is_course_admin = 1')
@@ -296,6 +416,11 @@ async function createOrUpdateApprovedHostAccount({ email, golfCourseName, golfCo
     insertColumns.push('reset_email')
     insertValues.push('?')
     insertParams.push(normalizedEmail)
+  }
+  if (columns.has('contact_name') && normalizedContactName) {
+    insertColumns.push('contact_name')
+    insertValues.push('?')
+    insertParams.push(normalizedContactName)
   }
   if (columns.has('invite_id')) {
     insertColumns.push('invite_id')
@@ -368,14 +493,20 @@ await db.query(`
     golf_course_id VARCHAR(64) NULL,
     representative_details TEXT NOT NULL,
     status VARCHAR(64) NOT NULL DEFAULT 'pending',
+    approval_route VARCHAR(32) NOT NULL DEFAULT 'golfhomiez_admin',
+    routed_host_account_id VARCHAR(191) NULL,
+    routed_host_email VARCHAR(191) NULL,
     reviewed_by_admin_id VARCHAR(191) NULL,
+    reviewed_by_host_account_id VARCHAR(191) NULL,
     reviewed_by_email VARCHAR(191) NULL,
     reviewed_at DATETIME NULL,
     approved_host_account_id VARCHAR(191) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_host_account_requests_status_created (status, created_at),
-    INDEX idx_host_account_requests_email (email)
+    INDEX idx_host_account_requests_email (email),
+    INDEX idx_host_account_requests_route_status (approval_route, status, created_at),
+    INDEX idx_host_account_requests_routed_host (routed_host_account_id, status)
   )
 `)
   await ensureHostAccountRequestTableCompatibility()
@@ -668,6 +799,8 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
   if (!normalizedRepresentativeDetails) throw new Error('Representative details are required.')
   assertPasswordPolicy(normalizedPassword)
 
+  const primaryHost = await findPrimaryHostAccountForCourse({ golfCourseId: normalizedGolfCourseId, golfCourseName: normalizedGolfCourseName })
+  const approvalRoute = primaryHost ? 'course_primary_host' : 'golfhomiez_admin'
   const id = crypto.randomUUID().replace(/-/g, '')
   const requestColumns = await getTableColumns('host_account_requests')
   const insertMap = new Map()
@@ -683,6 +816,9 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
   if (requestColumns.has('representative_details')) insertMap.set('representative_details', normalizedRepresentativeDetails)
   if (requestColumns.has('requested_password_hash')) insertMap.set('requested_password_hash', hashHostAccountPassword(normalizedPassword))
   if (requestColumns.has('status')) insertMap.set('status', 'pending')
+  if (requestColumns.has('approval_route')) insertMap.set('approval_route', approvalRoute)
+  if (requestColumns.has('routed_host_account_id')) insertMap.set('routed_host_account_id', primaryHost?.id || null)
+  if (requestColumns.has('routed_host_email')) insertMap.set('routed_host_email', primaryHost?.email || null)
 
   const insertColumns = [...insertMap.keys()]
   const placeholders = insertColumns.map(() => '?')
@@ -691,19 +827,41 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
     [...insertMap.values()],
   )
 
-  await sendHostAccountRequestNotification({
-    firstName: normalizedFirstName,
-    lastName: normalizedLastName,
-    email: normalizedEmail,
-    stateName: normalizedStateName,
-    golfCourseName: normalizedGolfCourseName,
-    golfCourseId: normalizedGolfCourseId,
-    representativeDetails: normalizedRepresentativeDetails,
-  })
+  if (primaryHost) {
+    const primaryHostName = primaryHostDisplayName(primaryHost)
+    await sendHostAccountRequestRoutedEmail({
+      email: normalizedEmail,
+      firstName: normalizedFirstName,
+      golfCourseName: normalizedGolfCourseName,
+      primaryHostName,
+    })
+    await sendPrimaryHostAccountRequestNotification({
+      primaryHost,
+      firstName: normalizedFirstName,
+      lastName: normalizedLastName,
+      email: normalizedEmail,
+      golfCourseName: normalizedGolfCourseName,
+      representativeDetails: normalizedRepresentativeDetails,
+    })
+  } else {
+    await sendHostAccountRequestNotification({
+      firstName: normalizedFirstName,
+      lastName: normalizedLastName,
+      email: normalizedEmail,
+      stateName: normalizedStateName,
+      golfCourseName: normalizedGolfCourseName,
+      golfCourseId: normalizedGolfCourseId,
+      representativeDetails: normalizedRepresentativeDetails,
+    })
+  }
 
   return {
     id,
     status: 'pending',
+    approvalRoute,
+    routedHostAccountId: primaryHost?.id || null,
+    routedHostEmail: primaryHost?.email || null,
+    primaryHostName: primaryHost ? primaryHostDisplayName(primaryHost) : null,
     firstName: normalizedFirstName,
     lastName: normalizedLastName,
     email: normalizedEmail,
@@ -712,6 +870,127 @@ export async function createHostAccountRequest({ firstName, lastName, email, sta
     golfCourseName: normalizedGolfCourseName,
     golfCourseId: normalizedGolfCourseId,
     representativeDetails: normalizedRepresentativeDetails,
+  }
+}
+
+
+export async function listHostAccountRequestsForHost({ hostAccountId }) {
+  await ensureAdminPortalSchema()
+  await ensureHostAuthSchema(pool())
+  const hostColumns = await getTableColumns('host_accounts')
+  const nameColumn = ['golf_course_name', 'account_name', 'course_name', 'name'].find((columnName) => hostColumns.has(columnName)) || null
+  const selectName = nameColumn ? `${escapeIdentifier(nameColumn)} AS golf_course_name` : `NULL AS golf_course_name`
+  const [hostRows] = await pool().execute(
+    `SELECT id, email, golf_course_id, is_validated, ${selectName}
+       FROM host_accounts
+      WHERE id = ?
+      LIMIT 1`,
+    [hostAccountId],
+  )
+  const host = hostRows[0]
+  if (!host || !host.is_validated) throw new Error('Host account is not available.')
+
+  const params = []
+  let coursePredicate = '1 = 0'
+  if (String(host.golf_course_id || '').trim()) {
+    coursePredicate = 'golf_course_id = ?'
+    params.push(String(host.golf_course_id).trim())
+  } else if (String(host.golf_course_name || '').trim()) {
+    coursePredicate = 'LOWER(TRIM(COALESCE(golf_course_name, \'\'))) = LOWER(?)'
+    params.push(String(host.golf_course_name).trim())
+  }
+  const [rows] = await pool().execute(
+    `SELECT id, first_name, last_name, email, state_code, state_name, golf_course_id, golf_course_name,
+            representative_details, status, approval_route, routed_host_account_id, routed_host_email,
+            reviewed_by_host_account_id, reviewed_by_email, reviewed_at, approved_host_account_id, created_at, updated_at
+       FROM host_account_requests
+      WHERE approval_route = 'course_primary_host'
+        AND status = 'pending'
+        AND ${coursePredicate}
+      ORDER BY created_at ASC`,
+    params,
+  )
+  return rows.map((row) => ({
+    id: row.id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    email: row.email,
+    stateCode: row.state_code,
+    stateName: row.state_name,
+    golfCourseId: row.golf_course_id,
+    golfCourseName: row.golf_course_name,
+    representativeDetails: row.representative_details,
+    status: row.status,
+    approvalRoute: row.approval_route,
+    routedHostAccountId: row.routed_host_account_id,
+    routedHostEmail: row.routed_host_email,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }))
+}
+
+export async function reviewHostAccountRequestByHost({ requestId, hostAccountId, decision }) {
+  await ensureAdminPortalSchema()
+  const normalizedDecision = String(decision || '').trim().toLowerCase()
+  if (!['approve', 'deny'].includes(normalizedDecision)) throw new Error('Decision must be approve or deny.')
+
+  const pendingRequests = await listHostAccountRequestsForHost({ hostAccountId })
+  const requestSummary = pendingRequests.find((item) => item.id === requestId)
+  if (!requestSummary) throw new Error('Pending golf-course account request was not found for this host account.')
+
+  const [requestRows] = await pool().execute('SELECT * FROM host_account_requests WHERE id = ? LIMIT 1', [requestId])
+  const request = requestRows[0]
+  if (!request || String(request.status || '').toLowerCase() !== 'pending') throw new Error('Golf-course account request has already been reviewed.')
+
+  const [hostRows] = await pool().execute('SELECT id, email FROM host_accounts WHERE id = ? AND is_validated = 1 LIMIT 1', [hostAccountId])
+  const actingHost = hostRows[0]
+  if (!actingHost) throw new Error('Host account is not available.')
+
+  let hostAccountIdCreated = null
+  let publicPage = null
+  if (normalizedDecision === 'approve') {
+    hostAccountIdCreated = await createOrUpdateApprovedHostAccount({
+      email: request.email,
+      golfCourseName: request.golf_course_name,
+      golfCourseId: request.golf_course_id || null,
+      passwordHash: request.requested_password_hash || null,
+      contactName: `${request.first_name || ''} ${request.last_name || ''}`.trim(),
+    })
+    publicPage = await createGolfCoursePublicPageForApprovedHost(pool(), {
+      hostAccountId: hostAccountIdCreated,
+      golfCourseId: request.golf_course_id || null,
+      golfCourseName: request.golf_course_name,
+      stateCode: request.state_code,
+      baseUrl: getAppBaseUrl(),
+    })
+  }
+
+  await pool().execute(
+    `UPDATE host_account_requests
+        SET status = ?,
+            reviewed_by_host_account_id = ?,
+            reviewed_by_email = ?,
+            reviewed_at = UTC_TIMESTAMP(),
+            approved_host_account_id = ?,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`,
+    [normalizedDecision === 'approve' ? 'approved' : 'denied', actingHost.id, actingHost.email, hostAccountIdCreated, requestId],
+  )
+
+  if (normalizedDecision === 'approve') {
+    await sendHostAccountApprovalEmail({ email: request.email, firstName: request.first_name, golfCourseName: request.golf_course_name })
+  } else {
+    await sendHostAccountDeniedEmail({ email: request.email, firstName: request.first_name, golfCourseName: request.golf_course_name })
+  }
+
+  const [updatedRows] = await pool().execute('SELECT * FROM host_account_requests WHERE id = ? LIMIT 1', [requestId])
+  return {
+    request: updatedRows[0] || null,
+    decision: normalizedDecision,
+    approved: normalizedDecision === 'approve',
+    denied: normalizedDecision === 'deny',
+    hostAccountId: hostAccountIdCreated,
+    publicPage,
   }
 }
 
@@ -729,12 +1008,16 @@ export async function approveHostAccountRequest({ requestId, adminUserId, adminE
   if (String(request.status || '').toLowerCase() !== 'pending') {
     throw new Error('Golf-course account request has already been reviewed.')
   }
+  if (String(request.approval_route || 'golfhomiez_admin').toLowerCase() === 'course_primary_host') {
+    throw new Error('Golf-course account request is routed to the current course host for approval.')
+  }
 
   const hostAccountId = await createOrUpdateApprovedHostAccount({
     email: request.email,
     golfCourseName: request.golf_course_name,
     golfCourseId: request.golf_course_id || null,
     passwordHash: request.requested_password_hash || null,
+    contactName: `${request.first_name || ''} ${request.last_name || ''}`.trim(),
   })
 
   const publicPage = await createGolfCoursePublicPageForApprovedHost(pool(), {
@@ -819,7 +1102,7 @@ export async function listPortalData() {
   const [[{ hostCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS hostCount FROM host_accounts')
   const [[{ organizerCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS organizerCount FROM organizer_role_accounts')
   const [[{ tournamentCount = 0 } = {}]] = await db.query('SELECT COUNT(*) AS tournamentCount FROM tournaments')
-  const [[{ hostAccountRequestCount = 0 } = {}]] = await db.query("SELECT COUNT(*) AS hostAccountRequestCount FROM host_account_requests WHERE status = 'pending'")
+  const [[{ hostAccountRequestCount = 0 } = {}]] = await db.query("SELECT COUNT(*) AS hostAccountRequestCount FROM host_account_requests WHERE status = 'pending' AND COALESCE(approval_route, 'golfhomiez_admin') = 'golfhomiez_admin'")
   const billingCustomers = await listBillingAdminCustomers(db)
   const homieTokenUsers = billingCustomers.filter((customer) => customer.accessSource === 'code_free')
   const paidHomies = billingCustomers.filter((customer) => customer.accessSource === 'stripe' && ['active', 'trialing', 'past_due'].includes(String(customer.subscriptionStatus || '')))
@@ -1038,6 +1321,9 @@ export async function listPortalData() {
     'golf_course_name',
     'representative_details',
     'status',
+    requestColumns.has('approval_route') ? 'approval_route' : "'golfhomiez_admin' AS approval_route",
+    requestColumns.has('routed_host_account_id') ? 'routed_host_account_id' : 'NULL AS routed_host_account_id',
+    requestColumns.has('routed_host_email') ? 'routed_host_email' : 'NULL AS routed_host_email',
     requestReviewedByEmailColumn ? escapeIdentifier(requestReviewedByEmailColumn) + ' AS reviewed_by_email' : 'NULL AS reviewed_by_email',
     requestReviewedAtColumn ? escapeIdentifier(requestReviewedAtColumn) + ' AS reviewed_at' : 'NULL AS reviewed_at',
     requestApprovedHostAccountIdColumn ? escapeIdentifier(requestApprovedHostAccountIdColumn) + ' AS approved_host_account_id' : 'NULL AS approved_host_account_id',

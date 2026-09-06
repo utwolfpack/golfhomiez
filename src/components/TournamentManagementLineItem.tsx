@@ -41,6 +41,7 @@ export default function TournamentManagementLineItem({
   tournament,
   archived = false,
   busy = false,
+  showPublishedLeaderboard = false,
   onSelect,
   onArchive,
   onRestore,
@@ -48,13 +49,18 @@ export default function TournamentManagementLineItem({
   tournament: Tournament
   archived?: boolean
   busy?: boolean
+  showPublishedLeaderboard?: boolean
   onSelect?: (tournament: Tournament) => void
   onArchive?: (tournament: Tournament) => void
   onRestore?: (tournament: Tournament) => void
 }) {
   const counts = tournamentCounts(tournament)
-  const publicStatus = ['published', 'completed'].includes(String(tournament.status || '').toLowerCase())
+  const normalizedStatus = String(tournament.status || '').toLowerCase()
+  const publicStatus = ['published', 'completed'].includes(normalizedStatus)
+  const published = normalizedStatus === 'published'
   const tournamentUrl = !archived && publicStatus ? (tournament.registrationUrl || tournament.portalUrl || null) : null
+  const publicTournamentId = tournament.tournamentIdentifier || tournament.id
+  const leaderboardPath = !archived && published && showPublishedLeaderboard ? `/tournaments/${encodeURIComponent(publicTournamentId)}/leaderboard` : null
   const selectable = !archived && Boolean(onSelect)
 
   const selectTournament = () => {
@@ -79,6 +85,19 @@ export default function TournamentManagementLineItem({
     }
   }
 
+  const previewTournamentUrl = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (!tournamentUrl) return
+    const previewWindow = window.open(tournamentUrl, '_blank', 'noopener,noreferrer')
+    if (previewWindow) previewWindow.opener = null
+    logFrontendEvent({ category: 'host.tournaments', message: 'preview_tournament_registration_url', data: { tournamentId: tournament.id, tournamentName: tournament.name, opened: Boolean(previewWindow) } })
+  }
+
+  const openLeaderboard = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.stopPropagation()
+    logFrontendEvent({ category: 'host.tournaments', message: 'host_live_leaderboard_opened', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null } })
+  }
+
   return (
     <div
       className={`tournament-management-line${selectable ? ' tournament-management-line--selectable' : ''}${archived ? ' tournament-management-line--archived' : ''}`}
@@ -91,30 +110,33 @@ export default function TournamentManagementLineItem({
       <div className="tournament-management-line__body">
         <div className="tournament-management-line__title-row">
           <strong className="tournament-management-line__title">{tournament.name}</strong>
-          {archived ? <span className="tournament-management-line__badge">Archived</span> : null}
+          <span className={`tournament-management-line__badge tournament-management-line__badge--${archived ? 'archived' : normalizedStatus || 'draft'}`}>{archived ? 'Archived' : formatTournamentStatus(tournament.status)}</span>
         </div>
         <div className="tournament-management-line__details">
           <div><span>Tournament Date</span><strong>{tournament.startDate ? formatFriendlyDate(tournament.startDate) : 'Not set'}</strong></div>
-          <div><span>Status</span><strong>{formatTournamentStatus(tournament.status)}</strong></div>
           {tournament.organizerName || tournament.organizerEmail ? <div><span>Organizer</span><strong>{tournament.organizerName || tournament.organizerEmail}</strong></div> : null}
           <div><span>Teams Registered</span><strong>{counts.registeredTeamCount}</strong></div>
           {counts.hasTeamSlotLimit && counts.openTeamSlotCount != null ? <div><span>Team Slots Open</span><strong>{counts.openTeamSlotCount}</strong></div> : null}
           {tournamentUrl ? (
             <div className="tournament-management-line__url">
               <span>GOLFER REGISTRATION URL</span>
-              <span className="tournament-management-line__url-row">
-                <a href={tournamentUrl} onClick={stopActionClick}>{tournamentUrl}</a>
-                <button className="btn btnSmall tournament-management-line__copy" type="button" aria-label="Copy golfer registration URL" onClick={copyTournamentUrl}>⧉</button>
-              </span>
+              <div className="tournament-management-line__url-row" onClick={stopActionClick}>
+                <strong className="tournament-management-line__url-text">{tournamentUrl}</strong>
+                <span className="tournament-management-line__url-actions">
+                  <button className="btn btnSmall tournament-management-line__preview" type="button" aria-label="Preview golfer registration URL in a new tab" title="Preview golfer registration page" onClick={previewTournamentUrl}>↗</button>
+                  <button className="btn btnSmall tournament-management-line__copy" type="button" aria-label="Copy golfer registration URL" title="Copy golfer registration URL" onClick={copyTournamentUrl}>⧉</button>
+                </span>
+              </div>
             </div>
           ) : null}
         </div>
       </div>
       <div className="tournament-management-line__actions" onClick={stopActionClick}>
+        {leaderboardPath ? <a className="btn tournament-management-line__leaderboard-button" href={leaderboardPath} target="_blank" rel="noreferrer" onClick={openLeaderboard}>Leaderboard</a> : null}
         {archived ? (
           <button className="btn" type="button" disabled={busy} onClick={() => onRestore?.(tournament)}>{busy ? 'Restoring…' : 'Restore to active'}</button>
         ) : (
-          <button className="btn" type="button" disabled={busy} onClick={() => onArchive?.(tournament)}>{busy ? 'Archiving…' : 'Archive'}</button>
+          <button className="btn tournament-management-line__archive-button" type="button" disabled={busy} onClick={() => onArchive?.(tournament)}>{busy ? 'Archiving…' : 'Archive'}</button>
         )}
       </div>
     </div>
