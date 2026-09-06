@@ -43,6 +43,7 @@ import Challenges from './pages/Challenges'
 import InviteHomie from './pages/InviteHomie'
 import TournamentPortal from './pages/TournamentPortal'
 import TournamentLeaderboard from './pages/TournamentLeaderboard'
+import TournamentPictures from './pages/TournamentPictures'
 import GolfCoursePage from './pages/GolfCoursePage'
 import GolfCourseCalendarPage from './pages/GolfCourseCalendarPage'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -132,6 +133,7 @@ function SupportAccessRoute({ children }: { children: ReactElement }) {
 export default function App() {
   const location = useLocation()
   const tournamentLeaderboardDisplay = /^\/tournaments\/[^/]+\/leaderboard\/?$/.test(location.pathname)
+    || /^\/tournaments\/[^/]+\/pictures\/?$/.test(location.pathname)
 
   useEffect(() => {
     emitFrontendStage('app_mounted')
@@ -182,6 +184,7 @@ export default function App() {
               <Route path="/organizer/portal" element={<OrganizerProtectedRoute><OrganizerTournaments /></OrganizerProtectedRoute>} />
               <Route path="/organizer/portal/profile" element={<OrganizerProtectedRoute><OrganizerProfile /></OrganizerProtectedRoute>} />
               <Route path="/tournaments/:id/leaderboard" element={<TournamentLeaderboard />} />
+              <Route path="/tournaments/:id/pictures" element={<TournamentPictures />} />
               <Route path="/tournaments/:id" element={<TournamentPortal />} />
               <Route path="/golfadmin" element={<AdminEntryRoute><AdminPortal /></AdminEntryRoute>} />
               <Route path="/golfadmin/forgot-password" element={<AdminResetPassword />} />

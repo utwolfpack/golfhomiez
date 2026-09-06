@@ -52,6 +52,7 @@ export type InboxMessage = {
   challengeTeeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   challengeScoringType?: TeamChallengeScoringType | string | null
   challengePointsPerHole?: number | null
+  imageCount?: number
   proposerTeamScore?: number | null
   challengedTeamScore?: number | null
   proposerTeamHoles?: HoleScoreDetail[] | null

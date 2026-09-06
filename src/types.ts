@@ -50,6 +50,11 @@ export type TeamScoreEntry = {
   challengeStatus?: string | null
   challengeScoringType?: string | null
   challengePointsPerHole?: number | string | null
+  challengeThreadId?: string | null
+  challengeCreatorUserId?: string | null
+  challengeCreatorEmail?: string | null
+  canUploadPictures?: boolean
+  imageCount?: number
   createdAt: string
 }
 
@@ -70,6 +75,7 @@ export type SoloScoreEntry = {
   createdByUserId?: string
   createdByEmail?: string
   source?: ScoreRecordSource
+  imageCount?: number
   createdAt: string
 }
 

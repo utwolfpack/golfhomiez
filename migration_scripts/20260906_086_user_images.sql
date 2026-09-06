@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS user_images (
+  id VARCHAR(191) NOT NULL,
+  entity_type VARCHAR(32) NOT NULL,
+  entity_id VARCHAR(191) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(64) NOT NULL,
+  byte_size INT UNSIGNED NOT NULL,
+  width INT UNSIGNED NULL,
+  height INT UNSIGNED NULL,
+  original_name VARCHAR(255) NULL,
+  uploaded_by_user_id VARCHAR(191) NULL,
+  uploaded_by_email VARCHAR(191) NULL,
+  uploaded_by_host_account_id VARCHAR(191) NULL,
+  correlation_id VARCHAR(191) NULL,
+  display_order INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_user_images_file_name (file_name),
+  KEY idx_user_images_entity (entity_type, entity_id, display_order),
+  KEY idx_user_images_user (uploaded_by_user_id),
+  KEY idx_user_images_host (uploaded_by_host_account_id),
+  KEY idx_user_images_correlation (correlation_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

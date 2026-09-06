@@ -15,6 +15,7 @@ import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from '../lib/tee-colors'
 import { fetchProfile } from '../lib/profile'
 import { clearSoloScoreFlowState, loadSoloScoreFlowState, saveSoloScoreFlowState } from '../lib/score-flow-state'
+import PictureLibraryModal from '../components/PictureLibraryModal'
 
 type ExistingSoloRoundResponse = {
   score: SoloScoreEntry | null
@@ -76,6 +77,7 @@ export default function SoloLogger() {
   const [useHoles, setUseHoles] = useState(true)
   const [holes, setHoles] = useState<HoleScoreDetail[]>(() => buildClientDefaultHoleScorecard('', '', DEFAULT_TEE_COLOR))
   const [persistedSoloScoreId, setPersistedSoloScoreId] = useState<string | null>(null)
+  const [picturesOpen, setPicturesOpen] = useState(false)
   const [persistedSoloHoles, setPersistedSoloHoles] = useState<HoleScoreDetail[] | null>(null)
   const [scorecardResumeHole, setScorecardResumeHole] = useState<number | null>(null)
 
@@ -466,6 +468,12 @@ export default function SoloLogger() {
             onActiveHoleChange={(holeNumber) => setScorecardResumeHole(holeNumber)}
           />
 
+          <PictureLibraryModal
+            open={picturesOpen}
+            title={`${course || 'Round'} Pictures`}
+            target={persistedSoloScoreId ? { kind: 'score', id: persistedSoloScoreId } : null}
+            onClose={() => setPicturesOpen(false)}
+          />
           {incompleteRoundLabel ? <div className="roundIncompleteBadge soloIncompleteRoundBadge" style={{ marginTop: 10 }}>Incomplete round • {incompleteRoundLabel}</div> : null}
           {showValidation && missingFields.length ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>Missing or invalid: {missingFields.join(', ')}</div> : null}
           {error ? <div className="small" style={{ color: 'crimson', marginTop: 10 }}>{error}</div> : null}
@@ -477,6 +485,18 @@ export default function SoloLogger() {
             {useHoles ? (
               <button className="btn" type="button" disabled={saving || canceling || closing} onClick={handleCancelRound}>
                 {canceling ? 'Canceling…' : 'Cancel Round'}
+              </button>
+            ) : null}
+            {useHoles ? (
+              <button
+                className="btn"
+                style={{ marginLeft: 'auto' }}
+                type="button"
+                disabled={!persistedSoloScoreId || saving || canceling || closing}
+                title={persistedSoloScoreId ? 'View or add round pictures' : 'Save at least one hole before adding pictures'}
+                onClick={() => setPicturesOpen(true)}
+              >
+                Pictures
               </button>
             ) : null}
           </div>

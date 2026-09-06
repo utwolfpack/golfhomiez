@@ -3293,6 +3293,28 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
     },
   },
 
+  {
+    version: '20260906_086',
+    name: 'user_images',
+    filename: '20260906_086_user_images.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'user_images') &&
+        await columnExists(db, 'user_images', 'entity_type') &&
+        await columnExists(db, 'user_images', 'entity_id') &&
+        await columnExists(db, 'user_images', 'file_name') &&
+        await columnExists(db, 'user_images', 'mime_type') &&
+        await columnExists(db, 'user_images', 'byte_size') &&
+        await columnExists(db, 'user_images', 'correlation_id') &&
+        await indexExists(db, 'user_images', 'idx_user_images_entity') &&
+        await indexExists(db, 'user_images', 'idx_user_images_correlation')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260906_086_user_images.sql')
+    },
+  },
+
 ]
 
 export function sortMigrations(migrations) {

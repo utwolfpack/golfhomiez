@@ -14,6 +14,7 @@ import HoleStrokeScore from './HoleStrokeScore'
 import type { PendingHoleScoreSaveHandler } from './HoleByHoleScorecard'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import { clearRoundEditScoreFlowState, loadRoundEditScoreFlowState, saveRoundEditScoreFlowState } from '../lib/score-flow-state'
+import PictureLibraryModal from './PictureLibraryModal'
 
 type DisplayHoleScore = {
   hole: number
@@ -371,6 +372,8 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [isClosingEditScorecard, setIsClosingEditScorecard] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [picturesOpen, setPicturesOpen] = useState(false)
+  const [localImageCount, setLocalImageCount] = useState(Number((round as any)?.imageCount || 0))
   const roundId = (round as any)?.id
 
   useEffect(() => {
@@ -502,10 +505,20 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
     })
   }, [roundId, isEditing, detailView])
 
+  useEffect(() => {
+    setLocalImageCount(Number((round as any)?.imageCount || 0))
+    setPicturesOpen(false)
+  }, [roundId])
+
   if (!round) return null
 
   const displayMode = getDisplayRoundMode(round)
   const isTeamChallengeRound = (round as any).source === 'team_challenge'
+  const canUploadRoundPictures = !isTeamChallengeRound || Boolean((round as any).canUploadPictures)
+  const showPicturesButton = !isTeamChallengeRound || canUploadRoundPictures || localImageCount > 0
+  const pictureTarget = isTeamChallengeRound
+    ? { kind: 'challenge' as const, id: String((round as any).sourceMessageId || (round as any).challengeThreadId || '') }
+    : { kind: 'score' as const, id: String(round.id) }
   const roundTypeLabel = displayMode === 'solo' ? 'Solo round' : isTeamChallengeRound ? 'Team Challenge' : 'Team round'
   const teamLabel = displayName((round as any).team, 'Team')
   const opponentLabel = displayName((round as any).opponentTeam, 'Opponent Team')
@@ -1034,13 +1047,17 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
             </div>
           ) : <span className="small">Round changes save as each hole is completed.</span>}
           <button type="button" className="btn btnSmall" disabled={isClosingEditScorecard} onClick={() => { void closeActiveEditScorecard('round_detail_scorecard_close_button') }}>{isClosingEditScorecard ? 'Closing…' : 'Close'}</button>
+          {showPicturesButton ? <button type="button" className="btn btnSmall roundDetailEditPicturesButton" onClick={() => setPicturesOpen(true)}>Pictures</button> : null}
         </div>
       </div>
     </div>
   ) : null
 
   if (fullViewportEditScorecard && typeof document !== 'undefined') {
-    return createPortal(fullViewportEditScorecard, document.body)
+    return createPortal(<>
+      {fullViewportEditScorecard}
+      <PictureLibraryModal open={picturesOpen} title={`${round.course} Pictures`} target={pictureTarget.id ? pictureTarget : null} onClose={() => setPicturesOpen(false)} onImageCountChange={(count) => { setLocalImageCount(count); onRoundUpdated?.({ ...(round as any), imageCount: count } as ScoreEntry) }} />
+    </>, document.body)
   }
 
   return (
@@ -1061,10 +1078,21 @@ export default function RoundDetailModal({ round, allScores, onClose, onRoundUpd
               </>
             ) : null}
             <button type="button" className="btn btnSmall" onClick={() => { void handleParentClose() }} disabled={isSavingEdit || isClosingEditScorecard}>{isEditing && isSavingEdit ? 'Saving…' : 'Close'}</button>
+            {showPicturesButton ? <button type="button" className="btn btnSmall roundDetailPicturesButton" onClick={() => setPicturesOpen(true)}>Pictures</button> : null}
           </div>
         </div>
 
         {actionError ? <div className="roundDetailActionError" role="alert">{actionError}</div> : null}
+        <PictureLibraryModal
+          open={picturesOpen}
+          title={`${round.course} Pictures`}
+          target={pictureTarget.id ? pictureTarget : null}
+          onClose={() => setPicturesOpen(false)}
+          onImageCountChange={(count) => {
+            setLocalImageCount(count)
+            onRoundUpdated?.({ ...(round as any), imageCount: count } as ScoreEntry)
+          }}
+        />
 
         <div className={showInsightPanel ? 'detailGrid' : 'detailGrid detailGrid--single'} style={{ marginTop: 14 }}>
           <div className="card detailPanel">

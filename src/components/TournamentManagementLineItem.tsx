@@ -61,6 +61,7 @@ export default function TournamentManagementLineItem({
   const tournamentUrl = !archived && publicStatus ? (tournament.registrationUrl || tournament.portalUrl || null) : null
   const publicTournamentId = tournament.tournamentIdentifier || tournament.id
   const leaderboardPath = !archived && published && showPublishedLeaderboard ? `/tournaments/${encodeURIComponent(publicTournamentId)}/leaderboard` : null
+  const picturesPath = !archived && publicStatus && Number(tournament.imageCount || 0) > 0 ? `/tournaments/${encodeURIComponent(publicTournamentId)}/pictures` : null
   const selectable = !archived && Boolean(onSelect)
 
   const selectTournament = () => {
@@ -98,6 +99,11 @@ export default function TournamentManagementLineItem({
     logFrontendEvent({ category: 'host.tournaments', message: 'host_live_leaderboard_opened', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null } })
   }
 
+  const openPictures = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.stopPropagation()
+    logFrontendEvent({ category: 'tournament.pictures', message: 'tournament_pictures_opened', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null, imageCount: tournament.imageCount || 0 } })
+  }
+
   return (
     <div
       className={`tournament-management-line${selectable ? ' tournament-management-line--selectable' : ''}${archived ? ' tournament-management-line--archived' : ''}`}
@@ -133,6 +139,7 @@ export default function TournamentManagementLineItem({
       </div>
       <div className="tournament-management-line__actions" onClick={stopActionClick}>
         {leaderboardPath ? <a className="btn tournament-management-line__leaderboard-button" href={leaderboardPath} target="_blank" rel="noreferrer" onClick={openLeaderboard}>Leaderboard</a> : null}
+        {picturesPath ? <a className="btn tournament-management-line__pictures-button" href={picturesPath} target="_blank" rel="noreferrer" onClick={openPictures}>Pictures</a> : null}
         {archived ? (
           <button className="btn" type="button" disabled={busy} onClick={() => onRestore?.(tournament)}>{busy ? 'Restoring…' : 'Restore to active'}</button>
         ) : (

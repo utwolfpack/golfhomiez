@@ -328,6 +328,22 @@ export function holeParTotal(holes: HoleScoreDetail[]) {
   }, 0)
 }
 
+export function providedHoleRelativeToPar(holes: HoleScoreDetail[]) {
+  return holes.reduce((sum, hole) => {
+    if (!hasSavedHoleScoreValue(hole)) return sum
+    const score = Number(hole.score)
+    const par = Number(hole.par)
+    if (!Number.isFinite(score) || !Number.isFinite(par) || par <= 0) return sum
+    return sum + score - par
+  }, 0)
+}
+
+export function formatRelativeToPar(value: number) {
+  const normalized = Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0
+  if (normalized === 0) return 'Par'
+  return normalized > 0 ? `+${normalized}` : String(normalized)
+}
+
 export function holeScoreRelativeToPar(hole: Pick<HoleScoreDetail, 'par' | 'score'>) {
   const par = Number(hole.par)
   const score = Number(hole.score)

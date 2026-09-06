@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import ProtectedRoute from '../components/ProtectedRoute'
 import RoundDetailModal from '../components/RoundDetailModal'
+import PictureLibraryModal from '../components/PictureLibraryModal'
 import HandicapBreakdownModal from '../components/HandicapBreakdownModal'
 import FilteredGolfProfileSummary from '../components/FilteredGolfProfileSummary'
 import { useAuth } from '../context/AuthContext'
@@ -14,6 +15,7 @@ import { clearRoundEditScoreFlowState, loadRoundEditScoreFlowState } from '../li
 import { sortScoresNewestFirst } from '../lib/roundInsights'
 import { calculateHandicapFromScores } from '../lib/handicap'
 import type { ScoreEntry, SoloScoreEntry, TeamScoreEntry } from '../types'
+import type { PictureTarget } from '../lib/user-images'
 
 function parseScoreHoleSource(value: any) {
   if (Array.isArray(value)) return value
@@ -73,42 +75,50 @@ function scoreLineItemClass(round: ScoreEntry) {
   return `compactLineItem loggedRoundLineItem ${round.won === true ? 'rowWin' : round.won === false ? 'rowLoss' : 'rowTie'}`
 }
 
-function ScoreButton({ round, onClick }: { round: ScoreEntry; onClick: () => void }) {
+function ScoreButton({ round, onClick, onPictures }: { round: ScoreEntry; onClick: () => void; onPictures: () => void }) {
   const incompleteStatus = getIncompleteRoundStatus(round)
   const incompleteBadge = incompleteStatus.incomplete ? <span className="roundIncompleteBadge">Incomplete round • {incompleteStatus.label}</span> : null
+  const hasPictures = Number((round as any).imageCount || 0) > 0
+  const rowClass = `${scoreLineItemClass(round)} loggedRoundLineItemComposite`
 
   if (round.mode === 'solo') {
     return (
-      <button type="button" className={scoreLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.course} solo round details`}>
-        <span className="compactLineItemMain">
-          <strong className="compactLineItemTitle">{round.course}</strong>
-          <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo Round</span>
-          {incompleteBadge}
-        </span>
-        <span className="compactLineItemSummary">
-          <strong className="compactLineItemValue">{round.roundScore}</strong>
-          <span>Score</span>
-        </span>
+      <div className={rowClass}>
+        <button type="button" className="loggedRoundLineItemOpenButton" onClick={onClick} aria-label={`Open ${round.course} solo round details`}>
+          <span className="compactLineItemMain">
+            <strong className="compactLineItemTitle">{round.course}</strong>
+            <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo Round</span>
+            {incompleteBadge}
+          </span>
+          <span className="compactLineItemSummary">
+            <strong className="compactLineItemValue">{round.roundScore}</strong>
+            <span>Score</span>
+          </span>
+        </button>
+        {hasPictures ? <button type="button" className="btn btnSmall loggedRoundPicturesButton" onClick={onPictures}>Pictures</button> : null}
         <span className="compactLineItemChevron" aria-hidden="true">›</span>
-      </button>
+      </div>
     )
   }
 
   const result = teamResultLabel(round)
   const rowType = 'Team Challenge'
   return (
-    <button type="button" className={scoreLineItemClass(round)} onClick={onClick} aria-label={`Open ${round.team} versus ${round.opponentTeam} Team Challenge details`}>
-      <span className="compactLineItemMain">
-        <strong className="compactLineItemTitle">{round.course}</strong>
-        <span className="compactLineItemMeta">{round.date} • {rowType} • {round.team} vs {round.opponentTeam}</span>
-        {incompleteBadge}
-      </span>
-      <span className="compactLineItemSummary">
-        <strong className="compactLineItemValue">{formatTeamScoreValue(round)}</strong>
-        <span>{result}</span>
-      </span>
+    <div className={rowClass}>
+      <button type="button" className="loggedRoundLineItemOpenButton" onClick={onClick} aria-label={`Open ${round.team} versus ${round.opponentTeam} Team Challenge details`}>
+        <span className="compactLineItemMain">
+          <strong className="compactLineItemTitle">{round.course}</strong>
+          <span className="compactLineItemMeta">{round.date} • {rowType} • {round.team} vs {round.opponentTeam}</span>
+          {incompleteBadge}
+        </span>
+        <span className="compactLineItemSummary">
+          <strong className="compactLineItemValue">{formatTeamScoreValue(round)}</strong>
+          <span>{result}</span>
+        </span>
+      </button>
+      {hasPictures ? <button type="button" className="btn btnSmall loggedRoundPicturesButton" onClick={onPictures}>Pictures</button> : null}
       <span className="compactLineItemChevron" aria-hidden="true">›</span>
-    </button>
+    </div>
   )
 }
 
@@ -127,6 +137,7 @@ function MyGolfScoresInner() {
   const [error, setError] = useState<string | null>(null)
   const [selectedRound, setSelectedRound] = useState<ScoreEntry | null>(null)
   const [showHandicapModal, setShowHandicapModal] = useState(false)
+  const [picturesTarget, setPicturesTarget] = useState<{ target: PictureTarget; title: string } | null>(null)
 
   const [view, setView] = useState<'all' | 'team' | 'solo'>('all')
   const [stateFilter, setStateFilter] = useState('all')
@@ -304,6 +315,18 @@ function MyGolfScoresInner() {
     setSelectedRound(null)
   }
 
+  function handleRoundPictures(round: ScoreEntry) {
+    const target: PictureTarget = isTeamChallengeScore(round)
+      ? { kind: 'challenge', id: String((round as any).challengeThreadId || (round as any).sourceMessageId || round.id) }
+      : { kind: 'score', id: String(round.id) }
+    setPicturesTarget({ target, title: `${round.course} Pictures` })
+    logFrontendEvent({
+      category: 'myGolfScores.pictures',
+      message: 'logged_round_pictures_opened',
+      data: { roundId: round.id, targetKind: target.kind, targetId: target.id, imageCount: Number((round as any).imageCount || 0) },
+    })
+  }
+
   function handleRoundSelected(round: ScoreEntry) {
     setSelectedRound(round)
     logFrontendEvent({
@@ -388,7 +411,7 @@ function MyGolfScoresInner() {
         {error ? <div className="small" style={{ marginTop: 12, color: 'crimson' }}>{error}</div> : null}
 
         <div className="compactLineItemList loggedRoundLineItemList" style={{ marginTop: 14 }}>
-          {pagedScores.map((round) => <ScoreButton key={round.id} round={round} onClick={() => handleRoundSelected(round)} />)}
+          {pagedScores.map((round) => <ScoreButton key={round.id} round={round} onClick={() => handleRoundSelected(round)} onPictures={() => handleRoundPictures(round)} />)}
           {!pagedScores.length ? <div className="small">No rounds match the current filters.</div> : null}
         </div>
 
@@ -411,6 +434,7 @@ function MyGolfScoresInner() {
         onRoundUpdated={handleRoundUpdated}
         onRoundDeleted={handleRoundDeleted}
       />
+      <PictureLibraryModal open={Boolean(picturesTarget)} title={picturesTarget?.title || 'Round Pictures'} target={picturesTarget?.target || null} viewOnly onClose={() => setPicturesTarget(null)} />
       <HandicapBreakdownModal open={showHandicapModal} stats={handicapStats} onClose={() => setShowHandicapModal(false)} />
     </div>
   )
