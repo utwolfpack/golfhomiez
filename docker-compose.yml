@@ -35,6 +35,7 @@ services:
       DB_PASSWORD: change_me
       PORT: ${PORT:-5001}
       NODE_ENV: production
+      USER_IMAGES_DIR: /app/userimages
       SMTP_HOST: smtp-relay.brevo.com
       SMTP_PORT: 465
       SMTP_SECURE: "true"
@@ -43,6 +44,8 @@ services:
       SMTP_FROM: no-reply@golfhomiez.com
     ports:
       - "${PORT:-5001}:${PORT:-5001}"
+    volumes:
+      - ./userimages:/app/userimages
     command: sh -c "npm run build && npm start"
 
 volumes:

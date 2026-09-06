@@ -164,6 +164,20 @@ export default function MyTournaments() {
                       >
                         {teamScore != null ? `Team Score: ${teamScore}` : 'Team Score'}
                       </button>
+                      {Number(tournament.imageCount || 0) > 0 ? (
+                        <Link
+                          className="btn btnSmall tournamentPicturesButton"
+                          to={`/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}/pictures`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            logFrontendEvent({ category: 'tournament.pictures', message: 'user_tournament_pictures_opened', data: { tournamentId: tournament.id, imageCount: tournament.imageCount || 0 } })
+                          }}
+                        >
+                          Pictures
+                        </Link>
+                      ) : null}
                     </span>
                     <span>{formatDateTime(tournament.registration.registeredAt)}</span>
                   </span>

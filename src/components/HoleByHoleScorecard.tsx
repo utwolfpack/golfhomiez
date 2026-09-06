@@ -5,6 +5,8 @@ import {
   getHoleScoreSavePresentation,
   hasSavedHoleScoreValue,
   holeParTotal,
+  formatRelativeToPar,
+  providedHoleRelativeToPar,
   providedHoleScoreTotal,
   mergeProvidedHoleScores,
   missingHoleScoreNumbers,
@@ -270,7 +272,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     providedHoleNumbers: [] as number[],
   })
 
-  const parTotal = useMemo(() => holeParTotal(holes), [holes])
+  const relativeToPar = useMemo(() => providedHoleRelativeToPar(holes), [holes])
   const currentScoreTotal = useMemo(() => providedHoleScoreTotal(holes), [holes])
   const activeHole = getSafeHoleByNumber(holes, activeHoleNumber, stateCode, course, selectedTeeColor)
   const activeHoleCount = useMemo(() => getScorecardHoleCount(holes), [holes])
@@ -836,8 +838,7 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
 
       <div className="holeInputPageTotals" aria-label="Round totals">
         <div>
-          <span>Course par</span>
-          <strong>{loading ? '…' : parTotal}</strong>
+          <strong aria-label="Score relative to par">{loading ? '…' : formatRelativeToPar(relativeToPar)}</strong>
         </div>
         <div>
           <span>Current score</span>

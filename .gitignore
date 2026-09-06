@@ -8,3 +8,6 @@ mysql_dumps/*.sql
 !mysql_dumps/.gitkeep
 
 .env*
+
+# Persisted user-uploaded pictures are runtime data and must never be committed.
+userimages/

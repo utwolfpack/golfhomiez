@@ -42,11 +42,13 @@ import { setTournamentArchiveState } from './lib/tournament-archive.js'
 import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarketingSettings, listMarketingVideoSections, normalizeMarketingVideoAudience, updateHomeMarketingSettings } from './lib/marketing-settings.js'
 import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
 import { completeCheckout, createAccessCode, createCheckout, createPaymentMethodCheckout, createPortal, getBillingStatus, listAccessCodes, processStripeWebhook, redeemAccessCode, requireBillingAccess, setCancellation, updateAccessCode } from './lib/billing.js'
+import { ROUND_IMAGE_LIMIT, TOURNAMENT_IMAGE_LIMIT, USER_IMAGE_ENTITY_TYPES, deleteUserImage, ensureUserImagesDirectory, getUserImage, getUserImageCounts, listUserImages, safeImageFilePath, saveUserImage } from './lib/user-images.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
+ensureUserImagesDirectory()
 app.set('trust proxy', 1)
 const PORT = Number(process.env.PORT)
 let cancelledTournamentCleanupScheduler = null
@@ -1148,6 +1150,7 @@ function mapTournamentPortalRow(row, req = null) {
     registrationCount: Number(row.registration_count || 0),
     registeredTeamCount: Number(row.registered_team_count || row.registration_count || 0),
     verifiedUserCount: Number(row.verified_user_count || 0),
+    imageCount: Number(row.image_count || row.imageCount || 0),
     teamSlotLimit: normalizeTournamentTeamSlotLimit(row.team_slot_limit),
     openTeamSlotCount: Math.max(normalizeTournamentTeamSlotLimit(row.team_slot_limit) - Number(row.registered_team_count || row.registration_count || 0), 0),
     registrations: Array.isArray(row.registrations) ? row.registrations : [],
@@ -1467,10 +1470,11 @@ async function attachTournamentRegistrations(pool, tournaments = []) {
   const tournamentIds = tournaments.map((item) => item.id)
   const registrationsByTournament = await listTournamentRegistrations(pool, tournamentIds)
   const startAssignmentsByTournament = await loadTournamentStartAssignmentsSafely(pool, tournamentIds)
+  const imageCounts = await getUserImageCounts(pool, USER_IMAGE_ENTITY_TYPES.TOURNAMENT, tournamentIds)
   return Promise.all(tournaments.map(async (item) => {
     const registrations = registrationsByTournament.get(String(item.id)) || []
     const withStats = await attachTournamentCapacityStats(pool, item, registrations)
-    return { ...withStats, registrations, startAssignments: startAssignmentsByTournament.get(String(item.id)) || [] }
+    return { ...withStats, imageCount: imageCounts.get(String(item.id)) || 0, registrations, startAssignments: startAssignmentsByTournament.get(String(item.id)) || [] }
   }))
 }
 
@@ -1596,7 +1600,8 @@ async function getTournamentPortalById(pool, tournamentId, req = null) {
   const startAssignmentsByTournament = await loadTournamentStartAssignmentsSafely(pool, [row.id])
   const startAssignments = startAssignmentsByTournament.get(String(row.id)) || []
   const capacityStats = await buildTournamentCapacityStats(pool, row, registrations)
-  const mappedRow = await resolveTournamentGolfCourseAddress({ ...row, registrations, registration_count: registrations.length, registered_team_count: capacityStats.registeredTeamCount, verified_user_count: capacityStats.verifiedUserCount }, req)
+  const imageCounts = await getUserImageCounts(pool, USER_IMAGE_ENTITY_TYPES.TOURNAMENT, [row.id])
+  const mappedRow = await resolveTournamentGolfCourseAddress({ ...row, image_count: imageCounts.get(String(row.id)) || 0, registrations, registration_count: registrations.length, registered_team_count: capacityStats.registeredTeamCount, verified_user_count: capacityStats.verifiedUserCount }, req)
   const tournament = { ...mapTournamentPortalRow(mappedRow, req), tournamentIdentifier: row.tournament_identifier || null, ...capacityStats, startAssignments }
   const finalLeaderboard = String(tournament.status || '').toLowerCase() === 'completed'
     ? await loadTournamentFinalLeaderboard(pool, tournament.id, registrations)
@@ -3652,6 +3657,73 @@ app.put('/api/host/tournaments/:id/start-schedule', hostAuthMiddleware, async (r
 })
 
 
+app.get('/api/host/tournaments/:id/images', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournament = await getHostEditableTournament(getPool(), req.hostAccount, String(req.params.id || '').trim())
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const images = await listUserImages(getPool(), USER_IMAGE_ENTITY_TYPES.TOURNAMENT, tournament.id)
+    logApi('host_tournament_pictures_loaded', { ...requestContext(req), tournamentId: tournament.id, imageCount: images.length })
+    return res.json({ images: images.map((image) => imageApiRecord(image, correlatedImageUrl(`/api/host/tournament-images/${encodeURIComponent(image.id)}/file`, req))), maxImages: TOURNAMENT_IMAGE_LIMIT, canUpload: true })
+  } catch (error) {
+    logRouteError('Host tournament pictures load error', req, error, { tournamentId: req.params.id })
+    return res.status(500).json({ message: 'Could not load tournament pictures.' })
+  }
+})
+
+app.post('/api/host/tournaments/:id/images', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournament = await getHostEditableTournament(getPool(), req.hostAccount, String(req.params.id || '').trim())
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    if (tournament.archived_at) return res.status(409).json({ message: 'Restore the archived tournament before changing its pictures.' })
+    const image = await saveUserImage(getPool(), {
+      entityType: USER_IMAGE_ENTITY_TYPES.TOURNAMENT,
+      entityId: tournament.id,
+      dataUrl: req.body?.dataUrl,
+      originalName: req.body?.originalName,
+      width: req.body?.width,
+      height: req.body?.height,
+      uploadedByHostAccountId: req.hostAccount.id,
+      correlationId: req.correlationId,
+      maxImages: TOURNAMENT_IMAGE_LIMIT,
+    })
+    const imageCount = (await listUserImages(getPool(), USER_IMAGE_ENTITY_TYPES.TOURNAMENT, tournament.id)).length
+    logApi('host_tournament_picture_uploaded', { ...requestContext(req), tournamentId: tournament.id, imageId: image.id, byteSize: image.byteSize, imageCount })
+    return res.status(201).json({ image: imageApiRecord(image, correlatedImageUrl(`/api/host/tournament-images/${encodeURIComponent(image.id)}/file`, req)), imageCount, maxImages: TOURNAMENT_IMAGE_LIMIT })
+  } catch (error) {
+    const status = Number(error?.statusCode || 0) || (/maximum|too large|image/i.test(String(error?.message || '')) ? 400 : 500)
+    logRouteError('Host tournament picture upload error', req, error, { tournamentId: req.params.id })
+    return res.status(status).json({ message: error?.message || 'Could not upload tournament picture.' })
+  }
+})
+
+app.delete('/api/host/tournaments/:id/images/:imageId', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournament = await getHostEditableTournament(getPool(), req.hostAccount, String(req.params.id || '').trim())
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const image = await getUserImage(getPool(), req.params.imageId)
+    if (!image || image.entityType !== USER_IMAGE_ENTITY_TYPES.TOURNAMENT || image.entityId !== String(tournament.id)) return res.status(404).json({ message: 'Picture not found.' })
+    await deleteUserImage(getPool(), image.id)
+    logApi('host_tournament_picture_deleted', { ...requestContext(req), tournamentId: tournament.id, imageId: image.id })
+    return res.status(204).end()
+  } catch (error) {
+    logRouteError('Host tournament picture delete error', req, error, { tournamentId: req.params.id, imageId: req.params.imageId })
+    return res.status(500).json({ message: 'Could not delete tournament picture.' })
+  }
+})
+
+app.get('/api/host/tournament-images/:imageId/file', hostAuthMiddleware, async (req, res) => {
+  try {
+    const image = await getUserImage(getPool(), req.params.imageId)
+    if (!image || image.entityType !== USER_IMAGE_ENTITY_TYPES.TOURNAMENT) return res.status(404).end()
+    const tournament = await getHostEditableTournament(getPool(), req.hostAccount, image.entityId)
+    if (!tournament) return res.status(404).end()
+    return sendStoredUserImage(res, image)
+  } catch (error) {
+    logRouteError('Host tournament picture file load error', req, error, { imageId: req.params.imageId })
+    return res.status(404).end()
+  }
+})
+
 app.post('/api/host/tournaments/:id/invite', hostAuthMiddleware, async (req, res) => {
   try {
     const tournamentId = String(req.params.id || '').trim()
@@ -4157,6 +4229,41 @@ app.get('/api/tournament-portals/:id/qr-code.svg', requireStorage, async (req, r
   }
 })
 
+app.get('/api/tournament-portals/:id/images', requireStorage, async (req, res) => {
+  try {
+    const portal = await getTournamentPortalById(getPool(), String(req.params.id || '').trim(), req)
+    if (!portal) return res.status(404).json({ message: 'Tournament not found' })
+    const portalStatus = String(portal.tournament.status || '').toLowerCase()
+    if (portal.tournament.archivedAt || !['published', 'completed'].includes(portalStatus)) return res.status(404).json({ message: 'Tournament not found' })
+    const images = await listUserImages(getPool(), USER_IMAGE_ENTITY_TYPES.TOURNAMENT, portal.tournament.id)
+    const tournament = publicTournamentPortalResponse(portal, null).tournament
+    logApi('tournament_pictures_loaded', { ...requestContext(req), tournamentId: portal.tournament.id, imageCount: images.length })
+    res.setHeader('Cache-Control', 'no-store')
+    return res.json({ tournament: { ...tournament, imageCount: images.length }, images: images.map((image) => imageApiRecord(image, correlatedImageUrl(`/api/tournament-pictures/${encodeURIComponent(image.id)}/file`, req))) })
+  } catch (error) {
+    logRouteError('Tournament pictures load error', req, error, { tournamentId: req.params.id })
+    return res.status(500).json({ message: 'Could not load tournament pictures.' })
+  }
+})
+
+app.get('/api/tournament-pictures/:imageId/file', requireStorage, async (req, res) => {
+  try {
+    const image = await getUserImage(getPool(), req.params.imageId)
+    if (!image || image.entityType !== USER_IMAGE_ENTITY_TYPES.TOURNAMENT) return res.status(404).end()
+    const portal = await getTournamentPortalById(getPool(), image.entityId, req)
+    if (!portal) return res.status(404).end()
+    const portalStatus = String(portal.tournament.status || '').toLowerCase()
+    if (portal.tournament.archivedAt || !['published', 'completed'].includes(portalStatus)) return res.status(404).end()
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+    res.setHeader('Content-Type', image.mimeType)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    return res.sendFile(safeImageFilePath(image.fileName))
+  } catch (error) {
+    logRouteError('Tournament picture file load error', req, error, { imageId: req.params.imageId })
+    return res.status(404).end()
+  }
+})
+
 app.get('/api/tournament-portals/:id/leaderboard', requireStorage, async (req, res) => {
   try {
     const id = String(req.params.id || '').trim()
@@ -4524,11 +4631,13 @@ app.get('/api/users/tournaments', requireStorage, authMiddleware, async (req, re
         })
       }
     }
+    const tournamentImageCounts = await getUserImageCounts(pool, USER_IMAGE_ENTITY_TYPES.TOURNAMENT, tournamentIds)
     const tournaments = registrationRows.map(({ row, registration }) => {
       const score = teamScoreByTournamentAndTeam.get(`${row.id}::${tournamentRegistrationTeamKey(registration)}`) || null
       return stripPrivateTournamentTemplateData({
         ...mapTournamentPortalRow(row, req),
         tournamentIdentifier: row.tournament_identifier || null,
+        imageCount: tournamentImageCounts.get(String(row.id)) || 0,
         registration,
         teamScore: score?.totalScore ?? null,
         teamScoreUpdatedAt: score?.updatedAt || null,
@@ -4796,17 +4905,22 @@ function selectLatestTeamChallengeMessage(existing, candidate) {
   return candidateTime >= existingTime ? candidate : existing
 }
 
-function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds) {
-  const byThread = new Map()
+function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds, user = null) {
+  const threads = new Map()
   for (const message of messages || []) {
     if (message?.messageType !== 'challenge_request') continue
     const threadId = String(message.threadId || message.id || '').trim()
     if (!threadId) continue
-    byThread.set(threadId, selectLatestTeamChallengeMessage(byThread.get(threadId), message))
+    const existing = threads.get(threadId) || []
+    existing.push(message)
+    threads.set(threadId, existing)
   }
 
-  return Array.from(byThread.entries()).flatMap(([threadId, message]) => {
-    if (!hasTeamChallengeScoreRecord(message)) return []
+  return Array.from(threads.entries()).flatMap(([threadId, threadMessages]) => {
+    const sorted = sortInboxMessagesByCreatedAt(threadMessages)
+    const initialMessage = sorted.find((message) => !message.parentMessageId) || sorted[0]
+    const message = sorted.reduce((latest, candidate) => selectLatestTeamChallengeMessage(latest, candidate), null)
+    if (!message || !hasTeamChallengeScoreRecord(message)) return []
     const side = userTeamChallengeSide(message, userTeamIds)
     if (!side) return []
 
@@ -4819,6 +4933,10 @@ function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds) {
       id: `team-challenge-${threadId}`,
       source: 'team_challenge',
       sourceMessageId: message.id,
+      challengeThreadId: threadId,
+      challengeCreatorUserId: initialMessage?.senderUserId || null,
+      challengeCreatorEmail: initialMessage?.senderEmail || null,
+      canUploadPictures: Boolean(user && inboxMessageCreatedByUser(initialMessage, user)),
       challengeScoringType: message.challengeScoringType || 'stroke_play',
       challengePointsPerHole: message.challengePointsPerHole ?? null,
       mode: 'team',
@@ -4834,9 +4952,9 @@ function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds) {
       holes: teamIsProposer ? (message.proposerTeamHoles || null) : (message.challengedTeamHoles || null),
       opponentHoles: teamIsProposer ? (message.challengedTeamHoles || null) : (message.proposerTeamHoles || null),
       challengeStatus: message.challengeStatus || null,
-      createdByUserId: message.senderUserId || null,
-      createdByEmail: message.senderEmail || null,
-      createdAt: message.createdAt || null,
+      createdByUserId: initialMessage?.senderUserId || null,
+      createdByEmail: initialMessage?.senderEmail || null,
+      createdAt: initialMessage?.createdAt || message.createdAt || null,
     }]
   })
 }
@@ -4953,6 +5071,21 @@ function inboxChallengeMessageType(message) {
   return message?.messageType === 'challenge_request' || message?.messageType === 'individual_challenge'
 }
 
+async function addInboxChallengeImageCounts(messages = []) {
+  const source = Array.isArray(messages) ? messages : []
+  const challengeThreadIds = source
+    .filter(inboxChallengeMessageType)
+    .map((message) => String(message?.threadId || message?.id || '').trim())
+    .filter(Boolean)
+  if (!challengeThreadIds.length) return source
+  const imageCounts = await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.CHALLENGE, challengeThreadIds)
+  return source.map((message) => {
+    if (!inboxChallengeMessageType(message)) return message
+    const threadId = String(message?.threadId || message?.id || '').trim()
+    return { ...message, imageCount: imageCounts.get(threadId) || 0 }
+  })
+}
+
 function inboxMessageCreatedByUser(message, user) {
   const userEmail = normalizeEmail(user?.email)
   return String(message?.senderUserId || '') === String(user?.id || '') || (userEmail && normalizeEmail(message?.senderEmail) === userEmail)
@@ -4962,7 +5095,7 @@ function sortInboxMessagesByCreatedAt(messages = []) {
   return [...messages].sort((a, b) => String(a?.createdAt || '').localeCompare(String(b?.createdAt || '')) || String(a?.id || '').localeCompare(String(b?.id || '')))
 }
 
-async function resolveChallengeCompletionForUser(messageId, user, action = 'complete it') {
+async function resolveChallengeThreadForUser(messageId, user) {
   const [receivedMessages, sentMessages] = await Promise.all([
     storage.listInboxMessagesForUser(user),
     storage.listSentInboxMessagesForUser(user),
@@ -4971,18 +5104,26 @@ async function resolveChallengeCompletionForUser(messageId, user, action = 'comp
   for (const message of [...(receivedMessages || []), ...(sentMessages || [])]) {
     if (message?.id) byId.set(String(message.id), message)
   }
-  const selected = byId.get(String(messageId || '')) || null
+  const requestedId = String(messageId || '')
+  const selected = byId.get(requestedId) || Array.from(byId.values()).find((message) => String(message?.threadId || message?.id || '') === requestedId) || null
   if (!selected || !inboxChallengeMessageType(selected)) return { status: 404, body: { message: 'Challenge not found' } }
   const threadId = String(selected.threadId || selected.id)
   const threadMessages = Array.from(byId.values()).filter((message) => inboxChallengeMessageType(message) && String(message.threadId || message.id) === threadId)
-  const initialMessage = sortInboxMessagesByCreatedAt(threadMessages).find((message) => !message.parentMessageId) || sortInboxMessagesByCreatedAt(threadMessages)[0] || selected
-  if (!inboxMessageCreatedByUser(initialMessage, user)) {
+  const sorted = sortInboxMessagesByCreatedAt(threadMessages)
+  const initialMessage = sorted.find((message) => !message.parentMessageId) || sorted[0] || selected
+  return { status: 200, selected, initialMessage, threadId }
+}
+
+async function resolveChallengeCompletionForUser(messageId, user, action = 'complete it') {
+  const challenge = await resolveChallengeThreadForUser(messageId, user)
+  if (challenge.status !== 200) return challenge
+  if (!inboxMessageCreatedByUser(challenge.initialMessage, user)) {
     return { status: 403, body: { message: `Only the golfer who created the challenge can ${action}.` } }
   }
-  if (String(initialMessage.challengeStatus || '').toLowerCase() === 'completed') {
+  if (String(challenge.initialMessage.challengeStatus || '').toLowerCase() === 'completed') {
     return { status: 409, body: { message: 'Challenge is already completed.' } }
   }
-  return { status: 200, message: initialMessage }
+  return { status: 200, message: challenge.initialMessage }
 }
 
 function buildIndividualChallengeParticipants(sender, users) {
@@ -5363,7 +5504,8 @@ app.get('/api/inbox/summary', requireStorage, authMiddleware, async (req, res) =
 
 app.get('/api/inbox/messages', requireStorage, authMiddleware, async (req, res) => {
   try {
-    const messages = await storage.listInboxMessagesForUser(req.user)
+    const storedMessages = await storage.listInboxMessagesForUser(req.user)
+    const messages = await addInboxChallengeImageCounts(storedMessages)
     const unreadCount = messages.filter((message) => message.messageType === 'message' && !message.readAt).length
     logApi('inbox_messages_loaded', { ...requestContext(req), messageCount: messages.length, unreadCount })
     res.json({ messages, unreadCount })
@@ -5375,7 +5517,8 @@ app.get('/api/inbox/messages', requireStorage, authMiddleware, async (req, res) 
 
 app.get('/api/inbox/sent', requireStorage, authMiddleware, async (req, res) => {
   try {
-    const messages = await storage.listSentInboxMessagesForUser(req.user)
+    const storedMessages = await storage.listSentInboxMessagesForUser(req.user)
+    const messages = await addInboxChallengeImageCounts(storedMessages)
     const sentMessages = messages.filter((message) => message.messageType === 'message')
     const sentChallenges = messages.filter((message) => message.messageType === 'challenge_request' || message.messageType === 'individual_challenge')
     logApi('inbox_sent_messages_loaded', {
@@ -5398,16 +5541,75 @@ app.get('/api/inbox/team-challenge-scores', requireStorage, authMiddleware, asyn
       storage.listSentInboxMessagesForUser(req.user),
     ])
     const userTeamIds = await resolveUserTeamIds(req.user)
-    const scores = buildTeamChallengeScoreRecordsForUser([...receivedMessages, ...sentMessages], userTeamIds)
+    const scores = buildTeamChallengeScoreRecordsForUser([...receivedMessages, ...sentMessages], userTeamIds, req.user)
+    const imageCounts = await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.CHALLENGE, scores.map((score) => score.challengeThreadId))
+    const scoresWithImages = scores.map((score) => ({ ...score, imageCount: imageCounts.get(String(score.challengeThreadId)) || 0 }))
     logApi('team_challenge_score_records_loaded', {
       ...requestContext(req),
-      teamChallengeScoreCount: scores.length,
+      teamChallengeScoreCount: scoresWithImages.length,
       participatingTeamCount: userTeamIds.size,
     })
-    res.json({ scores })
+    res.json({ scores: scoresWithImages })
   } catch (error) {
     logRouteError('Team Challenge score records load error', req, error)
     res.status(500).json({ message: 'Could not load Team Challenge score records' })
+  }
+})
+
+app.get('/api/inbox/messages/:id/images', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const challenge = await resolveChallengeThreadForUser(req.params.id, req.user)
+    if (challenge.status !== 200) return res.status(challenge.status).json(challenge.body)
+    const images = await listUserImages(getPool(), USER_IMAGE_ENTITY_TYPES.CHALLENGE, challenge.threadId)
+    const canUpload = inboxMessageCreatedByUser(challenge.initialMessage, req.user)
+    logApi('challenge_pictures_loaded', { ...requestContext(req), threadId: challenge.threadId, imageCount: images.length, canUpload })
+    return res.json({ images: images.map((image) => imageApiRecord(image, correlatedImageUrl(`/api/user-images/${encodeURIComponent(image.id)}/file`, req))), maxImages: ROUND_IMAGE_LIMIT, canUpload })
+  } catch (error) {
+    logRouteError('Challenge pictures load error', req, error, { messageId: req.params.id })
+    return res.status(500).json({ message: 'Could not load challenge pictures.' })
+  }
+})
+
+app.post('/api/inbox/messages/:id/images', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const challenge = await resolveChallengeThreadForUser(req.params.id, req.user)
+    if (challenge.status !== 200) return res.status(challenge.status).json(challenge.body)
+    if (!inboxMessageCreatedByUser(challenge.initialMessage, req.user)) return res.status(403).json({ message: 'Only the golfer who created the challenge can upload pictures.' })
+    const image = await saveUserImage(getPool(), {
+      entityType: USER_IMAGE_ENTITY_TYPES.CHALLENGE,
+      entityId: challenge.threadId,
+      dataUrl: req.body?.dataUrl,
+      originalName: req.body?.originalName,
+      width: req.body?.width,
+      height: req.body?.height,
+      uploadedByUserId: req.user.id,
+      uploadedByEmail: req.user.email,
+      correlationId: req.correlationId,
+      maxImages: ROUND_IMAGE_LIMIT,
+    })
+    const imageCount = (await listUserImages(getPool(), USER_IMAGE_ENTITY_TYPES.CHALLENGE, challenge.threadId)).length
+    logApi('challenge_picture_uploaded', { ...requestContext(req), threadId: challenge.threadId, imageId: image.id, byteSize: image.byteSize, imageCount })
+    return res.status(201).json({ image: imageApiRecord(image, correlatedImageUrl(`/api/user-images/${encodeURIComponent(image.id)}/file`, req)), imageCount, maxImages: ROUND_IMAGE_LIMIT })
+  } catch (error) {
+    const status = Number(error?.statusCode || 0) || (/maximum|too large|image/i.test(String(error?.message || '')) ? 400 : 500)
+    logRouteError('Challenge picture upload error', req, error, { messageId: req.params.id })
+    return res.status(status).json({ message: error?.message || 'Could not upload challenge picture.' })
+  }
+})
+
+app.delete('/api/inbox/messages/:id/images/:imageId', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const challenge = await resolveChallengeThreadForUser(req.params.id, req.user)
+    if (challenge.status !== 200) return res.status(challenge.status).json(challenge.body)
+    if (!inboxMessageCreatedByUser(challenge.initialMessage, req.user)) return res.status(403).json({ message: 'Only the golfer who created the challenge can delete pictures.' })
+    const image = await getUserImage(getPool(), req.params.imageId)
+    if (!image || image.entityType !== USER_IMAGE_ENTITY_TYPES.CHALLENGE || image.entityId !== challenge.threadId) return res.status(404).json({ message: 'Picture not found.' })
+    await deleteUserImage(getPool(), image.id)
+    logApi('challenge_picture_deleted', { ...requestContext(req), threadId: challenge.threadId, imageId: image.id })
+    return res.status(204).end()
+  } catch (error) {
+    logRouteError('Challenge picture delete error', req, error, { messageId: req.params.id, imageId: req.params.imageId })
+    return res.status(500).json({ message: 'Could not delete challenge picture.' })
   }
 })
 
@@ -6441,6 +6643,41 @@ async function canMutateScore(entry, user) {
   return await isUserOnTeam(entry.team, user.email) || await isUserOnTeam(entry.opponentTeam, user.email)
 }
 
+function correlatedImageUrl(fileUrl, req) {
+  const correlationId = String(req?.correlationId || '').trim()
+  return correlationId ? `${fileUrl}?cid=${encodeURIComponent(correlationId)}` : fileUrl
+}
+
+function imageApiRecord(image, fileUrl) {
+  return image ? {
+    id: image.id,
+    entityType: image.entityType,
+    entityId: image.entityId,
+    mimeType: image.mimeType,
+    byteSize: image.byteSize,
+    width: image.width,
+    height: image.height,
+    originalName: image.originalName,
+    displayOrder: image.displayOrder,
+    createdAt: image.createdAt,
+    url: fileUrl,
+  } : null
+}
+
+function sendStoredUserImage(res, image) {
+  res.setHeader('Content-Type', image.mimeType)
+  res.setHeader('Cache-Control', 'private, max-age=86400')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  return res.sendFile(safeImageFilePath(image.fileName))
+}
+
+async function getScoreImageTarget(scoreId, user) {
+  const score = await storage.getScoreById(String(scoreId || ''))
+  if (!score) return { status: 404, message: 'Round not found.' }
+  if (!(await canMutateScore(score, user))) return { status: 403, message: 'You do not have access to pictures for this round.' }
+  return { status: 200, score }
+}
+
 function coerceScoreNumber(value, fieldName) {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) throw new Error(`${fieldName} must be a number`)
@@ -6725,10 +6962,83 @@ app.get('/api/team-round-score', requireStorage, authMiddleware, async (req, res
 app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
   try {
     const scores = await storage.listScores()
-    res.json(scores)
+    const imageCounts = await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.SCORE, scores.map((score) => score.id))
+    res.json(scores.map((score) => ({ ...score, imageCount: imageCounts.get(String(score.id)) || 0 })))
   } catch (error) {
     logRouteError('List scores error', req, error)
     res.status(500).json({ message: 'Could not load scores' })
+  }
+})
+
+app.get('/api/scores/:id/images', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const target = await getScoreImageTarget(req.params.id, req.user)
+    if (target.status !== 200) return res.status(target.status).json({ message: target.message })
+    const images = await listUserImages(getPool(), USER_IMAGE_ENTITY_TYPES.SCORE, target.score.id)
+    logApi('round_pictures_loaded', { ...requestContext(req), scoreId: target.score.id, imageCount: images.length })
+    return res.json({ images: images.map((image) => imageApiRecord(image, correlatedImageUrl(`/api/user-images/${encodeURIComponent(image.id)}/file`, req))), maxImages: ROUND_IMAGE_LIMIT, canUpload: true })
+  } catch (error) {
+    logRouteError('Round pictures load error', req, error, { scoreId: req.params.id })
+    return res.status(500).json({ message: 'Could not load round pictures.' })
+  }
+})
+
+app.post('/api/scores/:id/images', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const target = await getScoreImageTarget(req.params.id, req.user)
+    if (target.status !== 200) return res.status(target.status).json({ message: target.message })
+    const image = await saveUserImage(getPool(), {
+      entityType: USER_IMAGE_ENTITY_TYPES.SCORE,
+      entityId: target.score.id,
+      dataUrl: req.body?.dataUrl,
+      originalName: req.body?.originalName,
+      width: req.body?.width,
+      height: req.body?.height,
+      uploadedByUserId: req.user.id,
+      uploadedByEmail: req.user.email,
+      correlationId: req.correlationId,
+      maxImages: ROUND_IMAGE_LIMIT,
+    })
+    const imageCount = (await listUserImages(getPool(), USER_IMAGE_ENTITY_TYPES.SCORE, target.score.id)).length
+    logApi('round_picture_uploaded', { ...requestContext(req), scoreId: target.score.id, imageId: image.id, byteSize: image.byteSize, imageCount })
+    return res.status(201).json({ image: imageApiRecord(image, correlatedImageUrl(`/api/user-images/${encodeURIComponent(image.id)}/file`, req)), imageCount, maxImages: ROUND_IMAGE_LIMIT })
+  } catch (error) {
+    const status = Number(error?.statusCode || 0) || (/maximum|too large|image/i.test(String(error?.message || '')) ? 400 : 500)
+    logRouteError('Round picture upload error', req, error, { scoreId: req.params.id })
+    return res.status(status).json({ message: error?.message || 'Could not upload round picture.' })
+  }
+})
+
+app.delete('/api/scores/:id/images/:imageId', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const target = await getScoreImageTarget(req.params.id, req.user)
+    if (target.status !== 200) return res.status(target.status).json({ message: target.message })
+    const image = await getUserImage(getPool(), req.params.imageId)
+    if (!image || image.entityType !== USER_IMAGE_ENTITY_TYPES.SCORE || image.entityId !== String(target.score.id)) return res.status(404).json({ message: 'Picture not found.' })
+    await deleteUserImage(getPool(), image.id)
+    logApi('round_picture_deleted', { ...requestContext(req), scoreId: target.score.id, imageId: image.id })
+    return res.status(204).end()
+  } catch (error) {
+    logRouteError('Round picture delete error', req, error, { scoreId: req.params.id, imageId: req.params.imageId })
+    return res.status(500).json({ message: 'Could not delete round picture.' })
+  }
+})
+
+app.get('/api/user-images/:imageId/file', requireStorage, authMiddleware, async (req, res) => {
+  try {
+    const image = await getUserImage(getPool(), req.params.imageId)
+    if (!image || ![USER_IMAGE_ENTITY_TYPES.SCORE, USER_IMAGE_ENTITY_TYPES.CHALLENGE].includes(image.entityType)) return res.status(404).end()
+    if (image.entityType === USER_IMAGE_ENTITY_TYPES.SCORE) {
+      const target = await getScoreImageTarget(image.entityId, req.user)
+      if (target.status !== 200) return res.status(target.status).end()
+    } else {
+      const challenge = await resolveChallengeThreadForUser(image.entityId, req.user)
+      if (challenge.status !== 200) return res.status(challenge.status).end()
+    }
+    return sendStoredUserImage(res, image)
+  } catch (error) {
+    logRouteError('User image file load error', req, error, { imageId: req.params.imageId })
+    return res.status(404).end()
   }
 })
 

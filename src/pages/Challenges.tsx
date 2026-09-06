@@ -38,6 +38,7 @@ import { DEFAULT_TEE_COLOR, normalizeTeeColor, teeColorLabel } from '../lib/tee-
 import { fetchProfile } from '../lib/profile'
 import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType, teamChallengeScoringTypeLabel, type TeamChallengeScoringType } from '../lib/team-challenge-scoring'
 import { clearChallengeScoreFlowState, loadChallengeScoreFlowState, saveChallengeScoreFlowState } from '../lib/score-flow-state'
+import PictureLibraryModal from '../components/PictureLibraryModal'
 
 type TeamChallengeLeaderboardSide = 'proposer' | 'challenged'
 type ChallengeDetailSection = 'settings' | 'score' | 'discussion'
@@ -294,6 +295,8 @@ export default function Challenges() {
   const [individualChallengeScorecards, setIndividualChallengeScorecards] = useState<Record<string, HoleScoreDetail[]>>({})
   const [activeTeamChallengeScorecard, setActiveTeamChallengeScorecard] = useState<TeamChallengeScorecardTarget | null>(null)
   const [activeIndividualChallengeScorecard, setActiveIndividualChallengeScorecard] = useState<IndividualChallengeScorecardTarget | null>(null)
+  const [challengePicturesMessage, setChallengePicturesMessage] = useState<InboxMessage | null>(null)
+  const [challengePicturesViewOnly, setChallengePicturesViewOnly] = useState(false)
   const [individualCoursePicker, setIndividualCoursePicker] = useState<IndividualChallengeCoursePickerTarget | null>(null)
   const [individualCourseState, setIndividualCourseState] = useState('')
   const [individualCourseName, setIndividualCourseName] = useState('')
@@ -526,6 +529,8 @@ export default function Challenges() {
   function currentUserCreatedInitialChallenge(thread: InboxThread) {
     return sentByCurrentUser(getInitialChallengeMessage(thread))
   }
+
+
 
   function getTeamChallengeUserSide(message: InboxMessage): 'proposer' | 'challenged' | null {
     if (message.messageType !== 'challenge_request') return null
@@ -2443,6 +2448,7 @@ export default function Challenges() {
                   {updatingChallengeScoreKey === key ? 'Saving score…' : 'Save Team Challenge Score'}
                 </button>
                 <button type="button" className="btn btnSmall" onClick={() => void closeTeamChallengeScorecard(message, side, editable)}>Close</button>
+                <button type="button" className="btn btnSmall inboxChallengePicturesButton" onClick={() => { setChallengePicturesViewOnly(false); setChallengePicturesMessage(message) }}>Pictures</button>
                 <button
                   type="button"
                   className="btn btnSmall inboxLeaderboardButton"
@@ -2472,6 +2478,7 @@ export default function Challenges() {
               {renderTeamChallengeSummaryView(message)}
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
                 <button type="button" className="btn btnSmall" onClick={() => void closeTeamChallengeScorecard(message, side, editable)}>Close</button>
+                <button type="button" className="btn btnSmall inboxChallengePicturesButton" onClick={() => { setChallengePicturesViewOnly(false); setChallengePicturesMessage(message) }}>Pictures</button>
                 <button
                   type="button"
                   className="btn btnSmall inboxLeaderboardButton"
@@ -2520,6 +2527,7 @@ export default function Challenges() {
               <div className="small holeInputModalHint">Enter each hole score; each completed hole saves automatically.</div>
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
                 <button type="button" className="btn btnSmall" onClick={() => closeIndividualChallengeScorecard(message, participant, 'button')}>Close</button>
+                <button type="button" className="btn btnSmall inboxChallengePicturesButton" onClick={() => { setChallengePicturesViewOnly(false); setChallengePicturesMessage(message) }}>Pictures</button>
                 <button
                   type="button"
                   className="btn btnSmall inboxLeaderboardButton"
@@ -2547,6 +2555,7 @@ export default function Challenges() {
               {renderReadonlyIndividualChallengeHoles(holes)}
               <div className="pageHeroActions inboxMessageActions inboxTeamChallengeScorecardActions">
                 <button type="button" className="btn btnSmall" onClick={() => closeIndividualChallengeScorecard(message, participant, 'button')}>Close</button>
+                <button type="button" className="btn btnSmall inboxChallengePicturesButton" onClick={() => { setChallengePicturesViewOnly(false); setChallengePicturesMessage(message) }}>Pictures</button>
                 <button
                   type="button"
                   className="btn btnSmall inboxLeaderboardButton"
@@ -2940,21 +2949,36 @@ export default function Challenges() {
 
     return (
       <article key={thread.threadId} className={`inboxChallengeLineItem ${thread.unreadCount > 0 ? 'inboxChallengeLineItem--unread' : 'inboxChallengeLineItem--read'} ${isExpanded ? 'inboxChallengeLineItem--expanded' : ''}`}>
-        <button
-          type="button"
-          className="inboxChallengeLineItemButton"
-          aria-expanded={isExpanded}
-          aria-controls={`challenge-details-${thread.threadId}`}
-          onClick={() => toggleThreadExpansion(thread, source)}
-        >
-          <span className="inboxChallengeLineItemType">{messageTypeLabel(challengeMessage.messageType)}</span>
-          <span className="inboxChallengeLineItemMain">
-            <span>{challengeMetadata || getMessagePreview(latestMessage.body)}</span>
-          </span>
-          {thread.unreadCount > 0 ? <span className="inboxChallengeLineItemActivity"><strong>{unreadText}</strong></span> : null}
+        <div className="inboxChallengeLineItemTopRow">
+          <button
+            type="button"
+            className="inboxChallengeLineItemButton"
+            aria-expanded={isExpanded}
+            aria-controls={`challenge-details-${thread.threadId}`}
+            onClick={() => toggleThreadExpansion(thread, source)}
+          >
+            <span className="inboxChallengeLineItemType">{messageTypeLabel(challengeMessage.messageType)}</span>
+            <span className="inboxChallengeLineItemMain">
+              <span>{challengeMetadata || getMessagePreview(latestMessage.body)}</span>
+            </span>
+            {thread.unreadCount > 0 ? <span className="inboxChallengeLineItemActivity"><strong>{unreadText}</strong></span> : null}
+            <span className="inboxChallengeLineItemChevron" aria-hidden="true">{isExpanded ? '⌃' : '›'}</span>
+          </button>
+          {source === 'team-challenges' && Number(challengeMessage.imageCount || 0) > 0 ? (
+            <button
+              type="button"
+              className="btn btnSmall btnLightBlue inboxChallengeLineItemPicturesButton"
+              onClick={() => {
+                setChallengePicturesViewOnly(true)
+                setChallengePicturesMessage(challengeMessage)
+                logFrontendEvent({ category: 'inbox.challenge.pictures', message: 'challenge_pictures_view_opened', data: { messageId: challengeMessage.id, threadId: messageThreadId(challengeMessage), imageCount: Number(challengeMessage.imageCount || 0) } })
+              }}
+            >
+              Pictures
+            </button>
+          ) : null}
           <span className={`inboxChallengeLineItemStatus inboxChallengeLineItemStatus--${challengeStatusClass}`}>{challengeStatusLabel}</span>
-          <span className="inboxChallengeLineItemChevron" aria-hidden="true">{isExpanded ? '⌃' : '›'}</span>
-        </button>
+        </div>
         {isTeamChallengeMessage ? (
           <div className="teamChallengeMembersLinkBar">
             <button
@@ -3434,6 +3458,13 @@ export default function Challenges() {
       {renderTeamChallengeMembersModal()}
       {renderIndividualChallengeCoursePickerModal()}
       {renderIndividualChallengeScorecardModal()}
+      <PictureLibraryModal
+        open={Boolean(challengePicturesMessage)}
+        title="Challenge Pictures"
+        target={challengePicturesMessage ? { kind: 'challenge', id: challengePicturesMessage.id } : null}
+        viewOnly={challengePicturesViewOnly}
+        onClose={() => { setChallengePicturesMessage(null); setChallengePicturesViewOnly(false) }}
+      />
       {renderTeamChallengeLeaderboardModal()}
       {renderIndividualChallengeLeaderboardModal()}
       {renderIndividualChallengeParticipantsModal()}

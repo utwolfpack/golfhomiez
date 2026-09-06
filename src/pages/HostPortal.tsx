@@ -10,6 +10,7 @@ import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistra
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
 import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
+import TournamentPicturesField from '../components/TournamentPicturesField'
 import { createAdditionalHostAccount as createAdditionalHostLogin, deleteHostAccount as deleteHostLogin, fetchHostPortal, reviewHostAccountRequest, transferHostAdmin, type HostPendingAccountRequest } from '../lib/host-auth'
 import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_CHECK_IN_TIME, DEFAULT_TOURNAMENT_TEE_TIME, emptyTournamentTemplateData } from '../lib/tournament-templates'
 import { getFriendlyTournamentError, validateTournamentForSave } from '../lib/tournament-errors'
@@ -18,6 +19,8 @@ import { assertPasswordPolicy } from '../lib/password-policy'
 
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
 const TOURNAMENTS_PER_PAGE = 10
+
+type HostPortalSection = 'course-events' | 'tournaments' | 'host-accounts'
 
 type HostPortalState = {
   account?: {
@@ -314,6 +317,15 @@ export default function HostPortal() {
   const [createCourseEventOpen, setCreateCourseEventOpen] = useState(false)
   const [courseEventForm, setCourseEventForm] = useState<CourseEventInput>(() => createEmptyCourseEventForm())
   const [editingCourseEventId, setEditingCourseEventId] = useState<string | null>(null)
+  const [openPortalSection, setOpenPortalSection] = useState<HostPortalSection | null>(null)
+
+  function toggleHostPortalSection(section: HostPortalSection) {
+    setOpenPortalSection((current) => {
+      const next = current === section ? null : section
+      logFrontendEvent({ category: 'host.portal.sections', message: next ? 'host_portal_section_expanded' : 'host_portal_section_collapsed', data: { section, nextOpenSection: next } })
+      return next
+    })
+  }
 
   async function loadPortal() {
     const result = await fetchHostPortal()
@@ -807,10 +819,16 @@ export default function HostPortal() {
 
         {portalData?.account ? (
           <div className="formStack" style={{ maxWidth: 1100 }}>
-            {!editingId && !createTournamentOpen ? <section className="card hostCourseEventSection" style={{ padding: 16 }} data-testid="host-course-event-section">
+            <section className="card hostPortalAccordionSection" data-testid="host-course-event-section">
+              <button type="button" className="hostPortalAccordionHeader" aria-expanded={openPortalSection === 'course-events'} aria-controls="host-course-events-accordion" onClick={() => toggleHostPortalSection('course-events')}>
+                <span><strong>Course Calendar Events</strong><span className="small">Public golf-course calendar events.</span></span>
+                <span className="hostPortalAccordionIndicator" aria-hidden="true">{openPortalSection === 'course-events' ? '−' : '+'}</span>
+              </button>
+              {openPortalSection === 'course-events' ? (
+                <div id="host-course-events-accordion" className="hostPortalAccordionBody">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div>
-                  <strong>Course calendar events</strong>
+                  <strong>Calendar event management</strong>
                   <div className="small">Add public course events that are not tournaments. Use the date, time, and notes to tell golfers what they need to know.</div>
                 </div>
                 <button
@@ -880,9 +898,17 @@ export default function HostPortal() {
                   </div>
                 ))}
               </div>
-            </section> : null}
+                </div>
+              ) : null}
+            </section>
 
-
+            <section className="card hostPortalAccordionSection" data-testid="host-tournaments-section">
+              <button type="button" className="hostPortalAccordionHeader" aria-expanded={openPortalSection === 'tournaments'} aria-controls="host-tournaments-accordion" onClick={() => toggleHostPortalSection('tournaments')}>
+                <span><strong>Tournaments</strong><span className="small">Create, manage, publish, and archive tournaments.</span></span>
+                <span className="hostPortalAccordionIndicator" aria-hidden="true">{openPortalSection === 'tournaments' ? '−' : '+'}</span>
+              </button>
+              {openPortalSection === 'tournaments' ? (
+                <div id="host-tournaments-accordion" className="hostPortalAccordionBody">
             {!editingId ? <section className="card" style={{ padding: 16 }} data-testid="host-create-tournament-section">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div>
@@ -1015,104 +1041,6 @@ export default function HostPortal() {
               ) : null}
             </section> : null}
 
-            {!createTournamentOpen && !editingId && (portalData.pendingHostAccountRequests || []).length ? (
-              <section className="card" style={{ padding: 16 }} data-testid="host-pending-account-requests-section">
-                <div>
-                  <strong>Pending golf-course account requests</strong>
-                  <div className="small">These people requested host access for this golf course. Any existing host for this course can approve or deny a request.</div>
-                </div>
-                <div className="formStack" style={{ marginTop: 12 }}>
-                  {(portalData.pendingHostAccountRequests || []).map((request) => {
-                    const requestBusy = hostAccountRequestBusyId === request.id
-                    return (
-                      <div key={request.id} className="card" style={{ padding: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                          <div>
-                            <strong>{request.firstName} {request.lastName}</strong>
-                            <div className="small">{request.email}</div>
-                            <div className="small" style={{ marginTop: 6 }}>{request.representativeDetails}</div>
-                            {request.createdAt ? <div className="small" style={{ marginTop: 6 }}>Requested {formatFriendlyDateTime(request.createdAt)}</div> : null}
-                          </div>
-                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            <button className="btn btnPrimary" type="button" disabled={requestBusy} onClick={() => void onReviewHostAccountRequest(request, 'approve')}>{requestBusy ? 'Working…' : 'Approve'}</button>
-                            <button className="btn" type="button" disabled={requestBusy} onClick={() => void onReviewHostAccountRequest(request, 'deny')}>{requestBusy ? 'Working…' : 'Deny'}</button>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </section>
-            ) : null}
-
-            {!createTournamentOpen && !editingId ? <section className="card" style={{ padding: 16 }} data-testid="host-admin-section">
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div>
-                  <strong>Golf-course host accounts</strong>
-                  <div className="small">Every host can update the course profile and create or modify tournaments. The course admin can also transfer admin access and delete other host accounts.</div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btnPrimary" type="button" onClick={() => setHostAccountFormOpen((open) => !open)}>{hostAccountFormOpen ? 'Cancel add host' : 'Add host account'}</button>
-                </div>
-              </div>
-
-              <div className="formStack" style={{ marginTop: 12 }}>
-                {(portalData.hostAccounts || []).map((account) => (
-                  <div key={account.id} className="card" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div>
-                      <strong>{account.contactName || account.email}</strong>{account.isCourseAdmin ? ' — Admin' : ''}
-                      <div className="small">{account.email}</div>
-                    </div>
-                    {portalData.account?.isCourseAdmin && account.id !== portalData.account.id ? (
-                      <button className="btn" type="button" disabled={hostAccountBusy} onClick={() => void onDeleteHostAccount(account.id)}>Delete host</button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-
-              {hostAccountFormOpen ? (
-                <form className="formStack" style={{ marginTop: 12 }} onSubmit={onCreateHostAccount}>
-                  <div className="formRow formRow--split">
-                    <div>
-                      <label className="label">Host name</label>
-                      <input className="input" value={newHostAccount.contactName} onChange={(event) => setNewHostAccount((current) => ({ ...current, contactName: event.target.value }))} required />
-                    </div>
-                    <div>
-                      <label className="label">Host email</label>
-                      <input className="input" type="email" autoComplete="email" value={newHostAccount.email} onChange={(event) => setNewHostAccount((current) => ({ ...current, email: event.target.value }))} required />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="label">Initial password</label>
-                    <input className="input" type="password" autoComplete="new-password" minLength={10} value={newHostAccount.password} onChange={(event) => setNewHostAccount((current) => ({ ...current, password: event.target.value }))} required />
-                    <PasswordCriteria password={newHostAccount.password} />
-                    <div className="small">Share this password securely with the new host.</div>
-                  </div>
-                  <button className="btn btnPrimary" disabled={hostAccountBusy}>{hostAccountBusy ? 'Creating…' : 'Create host account'}</button>
-                </form>
-              ) : null}
-
-              {portalData.account?.isCourseAdmin && (portalData.hostAccounts || []).some((account) => account.id !== portalData.account?.id) ? (
-                <div className="formStack" style={{ marginTop: 16 }}>
-                  <div>
-                    <strong>Transfer course admin</strong>
-                    <div className="small">Choose an existing host account. No email confirmation is required.</div>
-                  </div>
-                  <select className="input" value={transferTargetHostAccountId} onChange={(event) => setTransferTargetHostAccountId(event.target.value)}>
-                    <option value="">Select a host</option>
-                    {(portalData.hostAccounts || []).filter((account) => account.id !== portalData.account?.id).map((account) => (
-                      <option key={account.id} value={account.id}>{account.contactName || account.email} — {account.email}</option>
-                    ))}
-                  </select>
-                  <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="checkbox" checked={deleteCurrentAdminAfterTransfer} onChange={(event) => setDeleteCurrentAdminAfterTransfer(event.target.checked)} />
-                    Delete my current admin account after the transfer
-                  </label>
-                  <button className="btn" type="button" disabled={hostAccountBusy || !transferTargetHostAccountId} onClick={() => void onTransferHostAdmin()}>{hostAccountBusy ? 'Working…' : 'Transfer admin'}</button>
-                </div>
-              ) : null}
-            </section> : null}
-
             {!createTournamentOpen ? (
               <div>
                 {!editingId ? (
@@ -1238,6 +1166,13 @@ export default function HostPortal() {
                                                       />
                                                       <TournamentSummaryField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
                                                       <TournamentCourseMiscField value={editForm} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, ...next }) : prev)} />
+                                                      <TournamentPicturesField
+                                                        tournamentId={tournament.id}
+                                                        onImageCountChange={(imageCount) => setPortalData((previous) => previous ? {
+                                                          ...previous,
+                                                          tournaments: (previous.tournaments || []).map((item) => item.id === tournament.id ? { ...item, imageCount } : item),
+                                                        } : previous)}
+                                                      />
                                                       <div className="card" style={{ padding: 12, background: '#f8fafc' }}>
                                                         <div style={{ fontWeight: 700 }}>Organizer</div>
                                                         {tournament.organizerEmail ? (
@@ -1315,6 +1250,119 @@ export default function HostPortal() {
             ) : (
               <div className="small" role="status">Existing tournaments are hidden while the create tournament flow is open.</div>
             )}
+                </div>
+              ) : null}
+            </section>
+
+            {!createTournamentOpen && !editingId ? (
+            <section className="card hostPortalAccordionSection" data-testid="host-accounts-accordion-section">
+              <button type="button" className="hostPortalAccordionHeader" aria-expanded={openPortalSection === 'host-accounts'} aria-controls="host-accounts-accordion" onClick={() => toggleHostPortalSection('host-accounts')}>
+                <span><strong>Golf-course Host Accounts</strong><span className="small">Manage access for this golf course.</span></span>
+                <span className="hostPortalAccordionIndicator" aria-hidden="true">{openPortalSection === 'host-accounts' ? '−' : '+'}</span>
+              </button>
+              {openPortalSection === 'host-accounts' ? (
+                <div id="host-accounts-accordion" className="hostPortalAccordionBody">
+            {(portalData.pendingHostAccountRequests || []).length ? (
+              <section className="card" style={{ padding: 16 }} data-testid="host-pending-account-requests-section">
+                <div>
+                  <strong>Pending golf-course account requests</strong>
+                  <div className="small">These people requested host access for this golf course. Any existing host for this course can approve or deny a request.</div>
+                </div>
+                <div className="formStack" style={{ marginTop: 12 }}>
+                  {(portalData.pendingHostAccountRequests || []).map((request) => {
+                    const requestBusy = hostAccountRequestBusyId === request.id
+                    return (
+                      <div key={request.id} className="card" style={{ padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                          <div>
+                            <strong>{request.firstName} {request.lastName}</strong>
+                            <div className="small">{request.email}</div>
+                            <div className="small" style={{ marginTop: 6 }}>{request.representativeDetails}</div>
+                            {request.createdAt ? <div className="small" style={{ marginTop: 6 }}>Requested {formatFriendlyDateTime(request.createdAt)}</div> : null}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button className="btn btnPrimary" type="button" disabled={requestBusy} onClick={() => void onReviewHostAccountRequest(request, 'approve')}>{requestBusy ? 'Working…' : 'Approve'}</button>
+                            <button className="btn" type="button" disabled={requestBusy} onClick={() => void onReviewHostAccountRequest(request, 'deny')}>{requestBusy ? 'Working…' : 'Deny'}</button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            ) : null}
+
+            <section className="card" style={{ padding: 16 }} data-testid="host-admin-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div>
+                  <strong>Golf-course host accounts</strong>
+                  <div className="small">Every host can update the course profile and create or modify tournaments. The course admin can also transfer admin access and delete other host accounts.</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn btnPrimary" type="button" onClick={() => setHostAccountFormOpen((open) => !open)}>{hostAccountFormOpen ? 'Cancel add host' : 'Add host account'}</button>
+                </div>
+              </div>
+
+              <div className="formStack" style={{ marginTop: 12 }}>
+                {(portalData.hostAccounts || []).map((account) => (
+                  <div key={account.id} className="card" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div>
+                      <strong>{account.contactName || account.email}</strong>{account.isCourseAdmin ? ' — Admin' : ''}
+                      <div className="small">{account.email}</div>
+                    </div>
+                    {portalData.account?.isCourseAdmin && account.id !== portalData.account.id ? (
+                      <button className="btn" type="button" disabled={hostAccountBusy} onClick={() => void onDeleteHostAccount(account.id)}>Delete host</button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+
+              {hostAccountFormOpen ? (
+                <form className="formStack" style={{ marginTop: 12 }} onSubmit={onCreateHostAccount}>
+                  <div className="formRow formRow--split">
+                    <div>
+                      <label className="label">Host name</label>
+                      <input className="input" value={newHostAccount.contactName} onChange={(event) => setNewHostAccount((current) => ({ ...current, contactName: event.target.value }))} required />
+                    </div>
+                    <div>
+                      <label className="label">Host email</label>
+                      <input className="input" type="email" autoComplete="email" value={newHostAccount.email} onChange={(event) => setNewHostAccount((current) => ({ ...current, email: event.target.value }))} required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Initial password</label>
+                    <input className="input" type="password" autoComplete="new-password" minLength={10} value={newHostAccount.password} onChange={(event) => setNewHostAccount((current) => ({ ...current, password: event.target.value }))} required />
+                    <PasswordCriteria password={newHostAccount.password} />
+                    <div className="small">Share this password securely with the new host.</div>
+                  </div>
+                  <button className="btn btnPrimary" disabled={hostAccountBusy}>{hostAccountBusy ? 'Creating…' : 'Create host account'}</button>
+                </form>
+              ) : null}
+
+              {portalData.account?.isCourseAdmin && (portalData.hostAccounts || []).some((account) => account.id !== portalData.account?.id) ? (
+                <div className="formStack" style={{ marginTop: 16 }}>
+                  <div>
+                    <strong>Transfer course admin</strong>
+                    <div className="small">Choose an existing host account. No email confirmation is required.</div>
+                  </div>
+                  <select className="input" value={transferTargetHostAccountId} onChange={(event) => setTransferTargetHostAccountId(event.target.value)}>
+                    <option value="">Select a host</option>
+                    {(portalData.hostAccounts || []).filter((account) => account.id !== portalData.account?.id).map((account) => (
+                      <option key={account.id} value={account.id}>{account.contactName || account.email} — {account.email}</option>
+                    ))}
+                  </select>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input type="checkbox" checked={deleteCurrentAdminAfterTransfer} onChange={(event) => setDeleteCurrentAdminAfterTransfer(event.target.checked)} />
+                    Delete my current admin account after the transfer
+                  </label>
+                  <button className="btn" type="button" disabled={hostAccountBusy || !transferTargetHostAccountId} onClick={() => void onTransferHostAdmin()}>{hostAccountBusy ? 'Working…' : 'Transfer admin'}</button>
+                </div>
+              ) : null}
+            </section>
+                </div>
+              ) : null}
+            </section>
+            ) : null}
           </div>
         ) : null}
 

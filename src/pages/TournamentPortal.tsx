@@ -828,6 +828,20 @@ export default function TournamentPortal() {
       <div className="card pageCardShell">
         <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           {tournament ? <button type="button" className="btn btnPrimary" onClick={() => window.print()}>Print flyer</button> : null}
+          {tournament && Number(tournament.imageCount || 0) > 0 ? (
+            <Link
+              className="btn tournamentFlyerPicturesButton"
+              to={`/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}/pictures`}
+              onClick={() => logFrontendEvent({ category: 'tournament.portal', message: 'tournament_flyer_pictures_opened', data: { tournamentId: tournament.id, imageCount: Number(tournament.imageCount || 0) } })}
+            >Pictures</Link>
+          ) : null}
+          {tournament ? (
+            <Link
+              className="btn tournamentFlyerLeaderboardButton"
+              to={`/tournaments/${encodeURIComponent(tournament.tournamentIdentifier || tournament.id)}/leaderboard`}
+              onClick={() => logFrontendEvent({ category: 'tournament.portal', message: 'tournament_flyer_leaderboard_opened', data: { tournamentId: tournament.id } })}
+            >Leaderboard</Link>
+          ) : null}
           {canCloseToPreviousPage ? <button className="btn" type="button" onClick={closeTournamentPortal} aria-label="Close tournament portal and return to the previous page">Close</button> : null}
         </div>
         <style>{TOURNAMENT_FLYER_PRINT_STYLES}</style>

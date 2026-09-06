@@ -196,6 +196,7 @@ export type Tournament = {
   portalUrl?: string | null
   registrationUrl?: string | null
   registrationCount?: number
+  imageCount?: number
   registrations?: TournamentRegistration[]
   inviteId?: string | null
   inviteStatus?: string | null

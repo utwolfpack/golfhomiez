@@ -468,7 +468,9 @@ test('hole-by-hole scorecard uses dedicated hole pages, persisted draft scores, 
   assert.doesNotMatch(component, /Update Hole Score/)
   assert.match(component, /Decrease score/)
   assert.match(component, /Increase score/)
-  assert.match(component, /Course par/)
+  assert.match(component, /aria-label="Score relative to par"/)
+  assert.match(component, /formatRelativeToPar\(relativeToPar\)/)
+  assert.doesNotMatch(component, />Course par</)
   assert.match(component, /Current score/)
   assert.match(component, /providedHoleScoreTotal/)
   assert.doesNotMatch(component, /Cumulative score/)
@@ -1124,10 +1126,12 @@ test('scorecard draft helpers normalize context and hole payloads for per-hole p
 test('score history logged event rows remain clickable compact line items for round detail access', () => {
   const scoresPage = fs.readFileSync(new URL('../src/pages/MyGolfScores.tsx', import.meta.url), 'utf8')
 
-  assert.match(scoresPage, /function ScoreButton\({ round, onClick }/)
+  assert.match(scoresPage, /function ScoreButton\({ round, onClick, onPictures }/)
   assert.match(scoresPage, /function scoreLineItemClass\(round: ScoreEntry\)/)
-  assert.match(scoresPage, /<button type="button" className=\{scoreLineItemClass\(round\)\} onClick=\{onClick\}/)
+  assert.match(scoresPage, /className="loggedRoundLineItemOpenButton" onClick=\{onClick\}/)
   assert.match(scoresPage, /compactLineItem loggedRoundLineItem/)
+  assert.match(scoresPage, /loggedRoundPicturesButton/)
+  assert.match(scoresPage, /Number\(\(round as any\)\.imageCount \|\| 0\) > 0/)
   assert.match(scoresPage, /logged_round_line_item_selected/)
   assert.match(scoresPage, /<RoundDetailModal round=\{selectedRound\}/)
 })
@@ -1636,7 +1640,7 @@ test('challenge hole scorecards preserve the selected challenge tee color instea
 
 test('the package test script targets the maintained test suite files', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.scripts.test, 'node --test test/billing.test.js test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/golf-course-emails.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js')
+  assert.equal(pkg.scripts.test, 'node --test test/billing.test.js test/app.test.js test/migration-compatibility.test.js test/schema-backup.test.js test/schema-rollback.test.js test/dependency-security.test.js test/tournament-discovery.test.js test/golf-course-public-pages.test.js test/golf-course-emails.test.js test/tournament-start-schedule.test.js test/tournament-final-leaderboard.test.js test/tournament-archive.test.js test/account-data-reset.test.js test/demo-data-scripts.test.js test/host-portal-account-management.test.js test/find-course.test.js test/team-challenge-scoring.test.js test/tournament-time-zone.test.js test/notifications.test.js test/challenge-enhancements.test.js test/golfhomiez-tournament-scrub.test.js test/home-marketing.test.js test/latest-requirements.test.js test/auth-password-policy.test.js test/user-images.test.js')
 })
 
 test('auth session lifetime is set to 24 hours and registration signs the user out until verification', () => {
@@ -4681,9 +4685,14 @@ test('challenges page uses compact clickable line items instead of clickable car
   assert.doesNotMatch(challengesPage, /Close details/)
   assert.doesNotMatch(challengesPage, />\{isExpanded \? 'Collapse' : 'Expand'\}<\/button>/)
   assert.match(css, /\.inboxChallengeLineItemButton\{/)
-  assert.match(css, /grid-template-columns:minmax\(112px,auto\) minmax\(0,1fr\) auto auto 24px/)
+  assert.match(css, /grid-template-columns:minmax\(112px,auto\) minmax\(0,1fr\) auto 24px/)
+  assert.match(challengesPage, /inboxChallengeLineItemPicturesButton/)
+  assert.match(challengesPage, /btn btnSmall btnLightBlue inboxChallengeLineItemPicturesButton/)
+  assert.match(challengesPage, /Number\(challengeMessage\.imageCount \|\| 0\) > 0/)
   assert.match(css, /@media \(max-width:700px\)/)
   assert.match(css, /\.inboxChallengeLineItemButton\{[\s\S]*grid-template-columns:minmax\(0,1fr\) auto/)
+  assert.match(css, /\.inboxChallengeLineItemButton\{[\s\S]*padding:8px 12px/)
+  assert.match(css, /\.inboxChallengeLineItemStatus\{[\s\S]*border:0;[\s\S]*background:transparent/)
 })
 
 test('Challenges page separates active, completed, and per-user deleted challenge views', () => {
@@ -4883,7 +4892,7 @@ test('round review popup opens hole-by-hole editing, restores the solo hole revi
   assert.match(modal, /const showInsightPanel = !isTeamChallengeRound/)
   assert.match(modal, /import \{ createPortal \} from 'react-dom'/)
   assert.match(modal, /fullViewportEditScorecard/)
-  assert.match(modal, /return createPortal\(fullViewportEditScorecard, document\.body\)/)
+  assert.match(modal, /return createPortal\(<\>[\s\S]*\{fullViewportEditScorecard\}[\s\S]*<PictureLibraryModal[\s\S]*document\.body\)/)
   assert.match(modal, /data-round-edit-viewport="full"/)
   assert.match(modal, /full_viewport_scorecard_mounted/)
   assert.match(modal, /portalTarget: 'document\.body'/)
