@@ -45,6 +45,18 @@ test('skins-push only creates rollover points after a tied hole', async () => {
   assert.equal(twoPushesThenWin.carryoverPoints, 0)
 })
 
+test('skins-push does not repeat the current push value on future pending holes', async () => {
+  const { calculateTeamChallengePoints } = await loadScoringModule()
+
+  const tiedOpeningHole = calculateTeamChallengePoints(holes([4]), holes([4]), 'skins_push', 1)
+  assert.equal(tiedOpeningHole.holeResults[0].winner, 'tie')
+  assert.equal(tiedOpeningHole.holeResults[0].carryoverAfterHole, 1)
+  assert.equal(tiedOpeningHole.holeResults[1].winner, 'pending')
+  assert.equal(tiedOpeningHole.holeResults[1].carryoverAfterHole, 0)
+  assert.equal(tiedOpeningHole.holeResults.at(-1)?.carryoverAfterHole, 0)
+  assert.equal(tiedOpeningHole.carryoverPoints, 1)
+})
+
 test('skins-push follows the requested one-point examples for stroke differential', async () => {
   const { calculateTeamChallengePoints } = await loadScoringModule()
 

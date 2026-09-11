@@ -78,6 +78,26 @@ type ChallengeSettingsDraft = {
   challengeCourse: string
 }
 
+type TeamChallengeCreateReturnDraft = {
+  challengedTeamIdentifier: string
+  teamChallengeDate: string
+  teamChallengeState: string
+  teamChallengeCourse: string
+  teamChallengeCourseSearch: string
+  teamChallengeTeeColor: TeeColorSelection
+  teamChallengeScoringType: TeamChallengeScoringType
+  teamChallengePointsPerHole: string
+  challengeBody: string
+}
+
+type ChallengesLocationState = {
+  resumeTeamChallenge?: {
+    draft: TeamChallengeCreateReturnDraft
+    proposerTeamId?: string
+    createdTeamName?: string
+  }
+}
+
 function makeChallengeMemberDraft(email = ''): IndividualChallengeMemberDraft {
   let id = ''
   try {
@@ -318,6 +338,7 @@ export default function Challenges() {
   const teamChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const individualChallengePendingHoleSaveRef = useRef<PendingHoleScoreSaveHandler | null>(null)
   const challengeScoreFlowRestoreAttemptedRef = useRef(false)
+  const teamChallengeCreateReturnHandledRef = useRef(false)
   const [completingChallengeThreadId, setCompletingChallengeThreadId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -1195,6 +1216,51 @@ export default function Challenges() {
   }, [])
 
   useEffect(() => {
+    if (loading || teamChallengeCreateReturnHandledRef.current) return
+    const resume = (location.state as ChallengesLocationState | null)?.resumeTeamChallenge
+    if (!resume?.draft) return
+
+    teamChallengeCreateReturnHandledRef.current = true
+    const requestedTeamId = String(resume.proposerTeamId || '').trim()
+    const restoredTeamId = requestedTeamId && myTeams.some((team) => String(team.id) === requestedTeamId)
+      ? requestedTeamId
+      : (myTeams[0]?.id || '')
+
+    setChallengeType('team')
+    setChallengesComposeOpen(true)
+    setExpandedThreadId(null)
+    setProposerTeamId(restoredTeamId)
+    setChallengedTeamIdentifier(String(resume.draft.challengedTeamIdentifier || ''))
+    setTeamChallengeDate(String(resume.draft.teamChallengeDate || getUserTodayISO()))
+    setTeamChallengeState(String(resume.draft.teamChallengeState || '').trim().toUpperCase())
+    setTeamChallengeCourse(String(resume.draft.teamChallengeCourse || ''))
+    setTeamChallengeCourseSearch(String(resume.draft.teamChallengeCourseSearch || resume.draft.teamChallengeCourse || ''))
+    const restoredTeeColor = String(resume.draft.teamChallengeTeeColor || '').trim()
+    setTeamChallengeTeeColor(restoredTeeColor ? normalizeTeeColor(restoredTeeColor) : '')
+    setTeamChallengeScoringType(normalizeTeamChallengeScoringType(resume.draft.teamChallengeScoringType))
+    setTeamChallengePointsPerHole(String(resume.draft.teamChallengePointsPerHole || '1'))
+    setChallengeBody(String(resume.draft.challengeBody || ''))
+    setError(null)
+    setStatus(resume.createdTeamName
+      ? `Team ${resume.createdTeamName} was created. Continue setting up your Team Challenge.`
+      : 'Continue setting up your Team Challenge after creating or joining a team.')
+
+    logFrontendEvent({
+      category: 'inbox.teamChallenge.teamSetup',
+      message: 'team_challenge_setup_resumed_after_team_page',
+      data: {
+        correlationId: getCorrelationId(),
+        requestedTeamId: requestedTeamId || null,
+        restoredTeamId: restoredTeamId || null,
+        createdTeamName: resume.createdTeamName || null,
+        availableTeamCount: myTeams.length,
+      },
+    })
+
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+  }, [loading, location.pathname, location.search, location.state, myTeams, navigate])
+
+  useEffect(() => {
     if (!user?.id || loading || challengeScoreFlowRestoreAttemptedRef.current) return
 
     const restored = loadChallengeScoreFlowState(user.id)
@@ -1517,6 +1583,40 @@ export default function Challenges() {
       logFrontendEvent({ category: 'inbox.individualChallenge.members', level: 'error', message: 'individual_challenge_golfhomiez_invite_send_failed', data: { correlationId, email, mode: target.challengeMessageId ? 'existing_challenge' : 'create_challenge', challengeMessageId: target.challengeMessageId || null, error: errorMessage } })
       throw err
     }
+  }
+
+  function continueTeamChallengeThroughTeamCreation() {
+    const draft: TeamChallengeCreateReturnDraft = {
+      challengedTeamIdentifier,
+      teamChallengeDate,
+      teamChallengeState,
+      teamChallengeCourse,
+      teamChallengeCourseSearch,
+      teamChallengeTeeColor,
+      teamChallengeScoringType,
+      teamChallengePointsPerHole,
+      challengeBody,
+    }
+    const correlationId = getCorrelationId()
+    logFrontendEvent({
+      category: 'inbox.teamChallenge.teamSetup',
+      message: 'team_challenge_missing_team_create_selected',
+      data: {
+        correlationId,
+        challengedTeamIdentifier: challengedTeamIdentifier.trim() || null,
+        challengeDate: teamChallengeDate || null,
+        challengeState: teamChallengeState || null,
+        challengeCourse: teamChallengeCourse || null,
+      },
+    })
+    navigate('/teams', {
+      state: {
+        teamChallengeReturn: {
+          returnTo: '/challenges',
+          draft,
+        },
+      },
+    })
   }
 
   async function handleChallengeSubmit(event: FormEvent<HTMLFormElement>) {
@@ -3166,6 +3266,21 @@ export default function Challenges() {
                     {myTeams.length === 0 ? <option value="">Create or join a team first</option> : null}
                     {myTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
                   </select>
+                  {myTeams.length === 0 ? (
+                    <div className="challengeTeamSetupNotice" role="status">
+                      <div>
+                        <strong>You need a team before you can send a Team Challenge.</strong>
+                        <span>Create a team now and GolfHomiez will bring you back here with your challenge setup preserved.</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btnSmall"
+                        onClick={continueTeamChallengeThroughTeamCreation}
+                      >
+                        Create Team &amp; Continue
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div>

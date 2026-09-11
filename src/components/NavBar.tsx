@@ -42,6 +42,17 @@ function TournamentTrophyIcon({ className = '' }: NavIconProps) {
   )
 }
 
+function TeamsIcon({ className = '' }: NavIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="3" />
+      <circle cx="16.5" cy="9" r="2.5" />
+      <path d="M3.5 19c.5-3.5 2-5.3 4.5-5.3s4 1.8 4.5 5.3" />
+      <path d="M13 18.4c.5-2.7 1.7-4.1 3.7-4.1 1.9 0 3.1 1.3 3.8 3.9" />
+    </svg>
+  )
+}
+
 function NotificationBellIcon({ className = '' }: NavIconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -67,6 +78,7 @@ const mobileGolferLinks = [
   { to: '/challenges', label: 'Challenges', event: 'mobile_challenges_selected', Icon: ChallengesIcon },
   { to: '/my-golf-scores', label: 'My Scores', event: 'mobile_add_score_selected', Icon: AddScoreIcon },
   { to: '/my-tournaments', label: 'My Tournaments', event: 'mobile_tournaments_selected', Icon: TournamentTrophyIcon },
+  { to: '/teams', label: 'Teams', event: 'mobile_teams_selected', Icon: TeamsIcon },
 ]
 
 export default function NavBar() {
@@ -191,18 +203,6 @@ export default function NavBar() {
         </Link>
 
         <div className="navActions">
-          {showMobileGolferLinks && unreadNotificationCount > 0 ? (
-            <Link
-              to="/inbox"
-              className="navNotificationBell"
-              aria-label={`${unreadNotificationCount} unread notification${unreadNotificationCount === 1 ? '' : 's'}`}
-              title="Notifications"
-              onClick={() => logFrontendEvent({ category: 'app.nav.notifications', message: 'notification_bell_selected', data: { unreadCount: unreadNotificationCount, destination: '/inbox', correlationId: getCorrelationId() } })}
-            >
-              <NotificationBellIcon className="navNotificationBellIcon" />
-              <span className="navNotificationBellCount">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>
-            </Link>
-          ) : null}
           {showMobileGolferLinks ? (
             <nav className="navMobileQuickLinks" aria-label="Golfer shortcuts">
               {mobileGolferLinks.map(({ to, label, event, Icon }) => (
@@ -218,6 +218,17 @@ export default function NavBar() {
                   <span className="visuallyHidden">{label}</span>
                 </NavLink>
               ))}
+              <NavLink
+                to="/inbox"
+                className={({ isActive }) => `navMobileQuickLink navMobileQuickLink--notification${isActive ? ' active' : ''}`}
+                aria-label={unreadNotificationCount > 0 ? `${unreadNotificationCount} unread notification${unreadNotificationCount === 1 ? '' : 's'}` : 'Notifications'}
+                title="Notifications"
+                onClick={() => logFrontendEvent({ category: 'app.nav.notifications', message: 'notification_bell_selected', data: { unreadCount: unreadNotificationCount, destination: '/inbox', correlationId: getCorrelationId() } })}
+              >
+                <NotificationBellIcon className="navMobileQuickLinkIcon" />
+                {unreadNotificationCount > 0 ? <span className="navMobileQuickLinkNotificationCount">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span> : null}
+                <span className="visuallyHidden">Notifications</span>
+              </NavLink>
             </nav>
           ) : null}
 
@@ -292,6 +303,7 @@ export default function NavBar() {
                       <>
                         <NavLink className="navDropdownItem" to="/my-golf-scores" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'my_scores_selected', data: { destination: '/my-golf-scores', correlationId: getCorrelationId() } }) }}>My Scores</NavLink>
                         <NavLink className="navDropdownItem" to="/my-tournaments" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'my_tournaments_selected', data: { destination: '/my-tournaments', correlationId: getCorrelationId() } }) }}>My Tournaments</NavLink>
+                        <NavLink className="navDropdownItem" to="/teams" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'teams_selected', data: { destination: '/teams', correlationId: getCorrelationId() } }) }}>Teams</NavLink>
                         <NavLink className="navDropdownItem" to="/challenges" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'challenges_selected', data: { destination: '/challenges', correlationId: getCorrelationId() } }) }}>Challenges</NavLink>
                         <NavLink className="navDropdownItem" to="/find-tournament" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'find_tournament_selected', data: { destination: '/find-tournament', correlationId: getCorrelationId() } }) }}>Find a Tournament</NavLink>
                         <NavLink className="navDropdownItem" to="/find-course" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.golfer', message: 'find_golf_course_selected', data: { destination: '/find-course', correlationId: getCorrelationId() } }) }}>Find a Golf Course</NavLink>

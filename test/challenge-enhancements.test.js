@@ -197,6 +197,37 @@ test('challenge detail areas are sibling collapsed disclosures with completion r
   assert.match(css, /\.teamChallengeMembersModal/)
 })
 
+test('team challenge setup can create a missing team and return with the draft preserved', () => {
+  const challenges = read('src/pages/Challenges.tsx')
+  const teams = read('src/pages/Teams.tsx')
+  const styles = read('src/index.css')
+  const apiClient = read('src/lib/api.ts')
+  const server = read('server/index.js')
+
+  assert.match(challenges, /You need a team before you can send a Team Challenge\./)
+  assert.match(challenges, /Create Team &amp; Continue/)
+  assert.match(challenges, /continueTeamChallengeThroughTeamCreation/)
+  assert.match(challenges, /teamChallengeReturn:/)
+  assert.match(challenges, /team_challenge_missing_team_create_selected/)
+  assert.match(challenges, /resumeTeamChallenge/)
+  assert.match(challenges, /team_challenge_setup_resumed_after_team_page/)
+  assert.match(teams, /Create your team to continue the Team Challenge\./)
+  assert.match(teams, /team_create_opened_from_team_challenge/)
+  assert.match(teams, /team_created_returning_to_team_challenge/)
+  assert.match(teams, /proposerTeamId: created\.id/)
+  assert.match(teams, /Return to Challenge/)
+  assert.match(styles, /\.challengeTeamSetupNotice/)
+
+  // The existing API client and team endpoint keep the same correlation id
+  // across frontend.log, access.log, and api.log for this create/return flow.
+  assert.match(apiClient, /attachRequestMetadata/)
+  assert.match(apiClient, /X-Correlation-Id/)
+  assert.match(server, /app\.post\('\/api\/teams'/)
+  assert.match(server, /team_create_started/)
+  assert.match(server, /team_created/)
+  assert.match(server, /requestContext\(req\)/)
+})
+
 test('solo logger defaults state from the logged-in profile and does not use nearest-device location', () => {
   const soloLogger = read('src/pages/SoloLogger.tsx')
 

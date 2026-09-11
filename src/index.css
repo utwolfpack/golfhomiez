@@ -189,6 +189,7 @@ button.card{
 }
 .navMobileQuickLinks{display:none;}
 .navMobileQuickLink{
+  position:relative;
   display:inline-flex;
   align-items:center;
   justify-content:center;
@@ -201,6 +202,24 @@ button.card{
   text-decoration:none;
   box-shadow:0 5px 12px rgba(9,46,24,.12);
   backdrop-filter:blur(6px);
+}
+.navMobileQuickLinkNotificationCount{
+  position:absolute;
+  top:-5px;
+  right:-5px;
+  min-width:18px;
+  height:18px;
+  padding:0 4px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:#b91c1c;
+  color:#fff;
+  border:2px solid #fff;
+  font-size:9px;
+  font-weight:800;
+  line-height:1;
 }
 .navMobileQuickLink:hover,
 .navMobileQuickLink.active{
@@ -468,13 +487,13 @@ button.card{
 @media (max-width: 360px){
   .nav{padding-left:7px;padding-right:7px;}
   .navBrandImg{height:39px;max-width:92px;}
-  .navActions,.navMobileQuickLinks{gap:3px;}
+  .navActions,.navMobileQuickLinks{gap:2px;}
   .navMobileQuickLink,
   .navMenuTrigger--account{
-    width:34px;
-    min-width:34px;
-    height:34px;
-    min-height:34px;
+    width:33px;
+    min-width:33px;
+    height:33px;
+    min-height:33px;
   }
   .navMobileQuickLinkIcon,
   .navMenuAccountIcon{width:20px;height:20px;}
@@ -484,6 +503,19 @@ button.card{
 
 .formRow{display:grid;gap:12px;}
 .formRow--split{grid-template-columns:repeat(2,minmax(0,1fr));}
+.challengeTeamSetupNotice{
+  display:grid;
+  gap:8px;
+  margin-top:8px;
+  padding:10px;
+  border:1px solid #bbf7d0;
+  border-radius:10px;
+  background:#f0fdf4;
+  color:#14532d;
+}
+.challengeTeamSetupNotice>div{display:grid;gap:3px;}
+.challengeTeamSetupNotice span{font-size:12px;line-height:1.35;color:#166534;}
+.challengeTeamSetupNotice .btn{justify-self:start;}
 .locationBox{position:relative;}
 .locationBoxControl{display:flex;gap:10px;align-items:flex-start;}
 .locationBoxControl .input{flex:1;}
@@ -8426,12 +8458,18 @@ button.navDropdownItem{font:inherit;}
 
 /* 2026 UI modernization: clearer hierarchy, faster guest onboarding, and responsive learning cards. */
 .homeDashboard{gap:22px;padding-bottom:28px;}
-.homeMissionBanner{min-height:420px;grid-template-columns:minmax(0,1.25fr) minmax(250px,.75fr);gap:40px;padding:clamp(28px,5vw,64px);border:1px solid rgba(255,255,255,.22);background-color:#c0ddc6;background-image:radial-gradient(circle at 84% 22%,rgba(255,255,255,.13),transparent 28%),linear-gradient(135deg,#123d26 0%,#1d6539 58%,#2b7d47 100%);box-shadow:var(--shadowStrong);}
+.homeMissionBanner{position:relative;min-height:420px;grid-template-columns:minmax(0,1.25fr) minmax(250px,.75fr);gap:40px;padding:clamp(28px,5vw,64px);border:1px solid rgba(255,255,255,.22);background-color:#c0ddc6;background-image:radial-gradient(circle at 84% 22%,rgba(255,255,255,.13),transparent 28%),linear-gradient(135deg,#123d26 0%,#1d6539 58%,#2b7d47 100%);box-shadow:var(--shadowStrong);}
 .homeMissionContent{color:#fff;}
 .homeMissionEyebrow{color:#d8edb5;}
 .homeMissionContent h1{max-width:720px;font-size:clamp(2.2rem,5.8vw,4.6rem);line-height:.98;letter-spacing:-.045em;}
 .homeMissionContent p{max-width:720px;font-size:clamp(1rem,1.8vw,1.16rem);font-weight:500;color:rgba(255,255,255,.83);}
 .homeMissionEmblem{max-width:310px;filter:drop-shadow(0 22px 30px rgba(0,0,0,.24));}
+.homeMissionAside{min-width:0;align-self:stretch;display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:24px;}
+.homeMissionSocial{display:flex;align-items:center;justify-content:flex-end;gap:9px;margin-top:auto;}
+.homeMissionSocialLink{width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.28);border-radius:50%;background:rgba(255,255,255,.1);color:#fff;box-shadow:0 8px 18px rgba(0,0,0,.14);transition:transform .14s ease,background .14s ease,border-color .14s ease;}
+.homeMissionSocialLink:hover,.homeMissionSocialLink:focus-visible{transform:translateY(-2px);background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.5);outline:none;}
+.homeMissionSocialLink:focus-visible{box-shadow:0 0 0 3px rgba(242,198,111,.45),0 8px 18px rgba(0,0,0,.14);}
+.homeMissionSocialLink svg{width:22px;height:22px;display:block;fill:currentColor;}
 .homeMissionActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px;}
 .homeMissionActions .btn{min-height:44px;padding:10px 16px;font-weight:800;transition:transform .14s ease,box-shadow .14s ease,background .14s ease;}
 .homeMissionActions .btn:hover{transform:translateY(-1px);box-shadow:0 10px 22px rgba(0,0,0,.16);}
@@ -8453,8 +8491,11 @@ button.navDropdownItem{font:inherit;}
   .container{padding:14px 12px 20px;}
   .homeDashboard{gap:14px;padding-bottom:20px;}
   .homeMissionBanner{grid-template-columns:1fr;gap:24px;padding:26px 20px 22px;}
+  .homeMissionAside{min-height:44px;align-self:stretch;justify-content:flex-end;}
   .homeMissionEmblemWrap{position:absolute;right:14px;top:14px;opacity:.18;}
   .homeMissionEmblem{max-width:150px;}
+  .homeMissionSocial{position:relative;z-index:1;width:100%;justify-content:flex-end;gap:8px;}
+  .homeMissionSocialLink{width:40px;height:40px;}
   .homeMissionActions .btn{flex:1 1 140px;}
   .homeBenefitList{gap:8px 14px;margin-top:18px;}
   .homeCommercialStack{grid-template-columns:1fr;gap:12px;}

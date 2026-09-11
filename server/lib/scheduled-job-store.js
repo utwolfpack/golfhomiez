@@ -70,6 +70,24 @@ function serializeJobRow(row, definition = null) {
   }
 }
 
+
+function serializeRunRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    triggeredBy: row.triggered_by,
+    status: row.status,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    durationMs: durationMs(row.started_at, row.completed_at),
+    output: parseJson(row.output_json),
+    error: row.error_message || null,
+    correlationId: row.correlation_id || null,
+    adminUserEmail: row.admin_user_email || null,
+  }
+}
+
 export async function ensureScheduledJobsSchema(db) {
   await db.query(`
     CREATE TABLE IF NOT EXISTS scheduled_jobs (
@@ -292,4 +310,26 @@ export async function listScheduledJobRecords(db, definitions, now = new Date())
   return rows
     .filter((row) => definitionsById.has(row.id))
     .map((row) => serializeJobRow(row, definitionsById.get(row.id)))
+}
+
+
+export async function getLatestSuccessfulScheduledJobRuns(db, jobIds = []) {
+  await ensureScheduledJobsSchema(db)
+  const ids = [...new Set((Array.isArray(jobIds) ? jobIds : []).map((value) => String(value || '').trim()).filter(Boolean))]
+  const result = new Map()
+  if (!ids.length) return result
+  const placeholders = ids.map(() => '?').join(', ')
+  const [rows] = await db.execute(
+    `SELECT id, job_id, triggered_by, status, correlation_id, admin_user_email, started_at, completed_at, output_json, error_message
+       FROM scheduled_job_runs
+      WHERE job_id IN (${placeholders})
+        AND status = 'success'
+        AND output_json IS NOT NULL
+      ORDER BY completed_at DESC, started_at DESC`,
+    ids,
+  )
+  for (const row of rows || []) {
+    if (!result.has(row.job_id)) result.set(row.job_id, serializeRunRow(row))
+  }
+  return result
 }

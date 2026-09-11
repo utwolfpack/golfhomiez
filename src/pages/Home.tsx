@@ -3,6 +3,45 @@ import { Link } from 'react-router'
 import bannerImg from '../assets/GolfHomiezEmblem.png'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { DEFAULT_HOME_MARKETING_SETTINGS, fetchHomeMarketingSettings, toYouTubeEmbedUrl, type HomeMarketingSettings } from '../lib/marketing'
+import { useAuth } from '../context/AuthContext'
+
+
+type SocialPlatform = 'facebook' | 'instagram' | 'youtube' | 'linkedin'
+
+const GOLFHOMIEZ_SOCIAL_LINKS: Array<{ platform: SocialPlatform; label: string; href: string }> = [
+  { platform: 'facebook', label: 'Facebook', href: 'https://www.facebook.com/profile.php?id=61594389986881' },
+  { platform: 'instagram', label: 'Instagram', href: 'https://www.instagram.com/golfhomiez/' },
+  { platform: 'youtube', label: 'YouTube', href: 'https://www.youtube.com/@GolfHomiez' },
+  { platform: 'linkedin', label: 'LinkedIn', href: 'https://www.linkedin.com/company/14374197' },
+]
+
+function SocialPlatformIcon({ platform }: { platform: SocialPlatform }) {
+  if (platform === 'facebook') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.1 8.2V6.5c0-.9.6-1.1 1.2-1.1h1.9V2.2h-2.8c-3.1 0-4.8 1.8-4.8 5v1H7v3.6h2.6V22h4.1V11.8h3l.5-3.6h-3.1Z" /></svg>
+  }
+  if (platform === 'instagram') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="2" />
+        <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="2" />
+        <circle cx="17.5" cy="6.5" r="1.1" />
+      </svg>
+    )
+  }
+  if (platform === 'youtube') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="2.5" y="5.2" width="19" height="13.6" rx="4" fill="none" stroke="currentColor" strokeWidth="2" />
+        <path d="m10 9 5 3-5 3V9Z" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M6.6 8.3H3.2V21h3.4V8.3ZM4.9 3A2 2 0 1 0 4.9 7a2 2 0 0 0 0-4ZM9.1 8.3h3.3V10h.1c.5-.9 1.7-2 3.5-2 3.7 0 4.4 2.4 4.4 5.6V21H17v-6.6c0-1.6 0-3.6-2.2-3.6s-2.5 1.7-2.5 3.5V21H9.1V8.3Z" />
+    </svg>
+  )
+}
 
 function HomeVideoSection({ title, url, logKey, pagePath }: { title: string; url: string; logKey: string; pagePath: string }) {
   const embedUrl = toYouTubeEmbedUrl(url)
@@ -51,6 +90,7 @@ function HomeVideoSection({ title, url, logKey, pagePath }: { title: string; url
 }
 
 export default function Home() {
+  const { user, loading: authLoading } = useAuth()
   const [marketingSettings, setMarketingSettings] = useState<HomeMarketingSettings>(DEFAULT_HOME_MARKETING_SETTINGS)
 
   useEffect(() => {
@@ -87,24 +127,45 @@ export default function Home() {
           <div className="homeMissionEyebrow">GolfHomiez Mission</div>
           <h1 id="golfhomiez-mission-title">Built by golfers, for golfers.</h1>
           <p>GolfHomiez makes golf simple, social, and fun. Log solo rounds or team challenges with your homiez, then create, register for, and follow seamless golf-course tournaments through dedicated GolfHomiez course pages that showcase every hosted event.</p>
-          <div className="homeMissionActions" aria-label="Get started with GolfHomiez">
-            <Link className="btn homeMissionPrimaryAction" to="/register" onClick={() => logFrontendEvent({ category: 'home.hero', message: 'create_account_selected', data: { destination: '/register' } })}>Join GolfHomiez</Link>
-            <Link className="btn homeMissionSecondaryAction" to="/login" onClick={() => logFrontendEvent({ category: 'home.hero', message: 'sign_in_selected', data: { destination: '/login' } })}>Sign in</Link>
-          </div>
+          {!authLoading && !user ? (
+            <div className="homeMissionActions" aria-label="Get started with GolfHomiez">
+              <Link className="btn homeMissionPrimaryAction" to="/register" onClick={() => logFrontendEvent({ category: 'home.hero', message: 'create_account_selected', data: { destination: '/register' } })}>Join GolfHomiez</Link>
+              <Link className="btn homeMissionSecondaryAction" to="/login" onClick={() => logFrontendEvent({ category: 'home.hero', message: 'sign_in_selected', data: { destination: '/login' } })}>Sign in</Link>
+            </div>
+          ) : null}
           <ul className="homeBenefitList" aria-label="GolfHomiez highlights">
             <li>Track rounds</li>
             <li>Challenge friends</li>
             <li>Play tournaments</li>
           </ul>
         </div>
-        <div className="homeMissionEmblemWrap" aria-hidden="true">
-          <img
-            className="homeMissionEmblem"
-            src={bannerImg}
-            alt=""
-            onLoad={() => logFrontendEvent({ category: 'home.banner', message: 'app_banner_emblem_loaded' })}
-            onError={() => logFrontendEvent({ category: 'home.banner', level: 'error', message: 'app_banner_emblem_load_failed' })}
-          />
+        <div className="homeMissionAside">
+          <div className="homeMissionEmblemWrap" aria-hidden="true">
+            <img
+              className="homeMissionEmblem"
+              src={bannerImg}
+              alt=""
+              onLoad={() => logFrontendEvent({ category: 'home.banner', message: 'app_banner_emblem_loaded' })}
+              onError={() => logFrontendEvent({ category: 'home.banner', level: 'error', message: 'app_banner_emblem_load_failed' })}
+            />
+          </div>
+          <nav className="homeMissionSocial" aria-label="Follow GolfHomiez">
+            {GOLFHOMIEZ_SOCIAL_LINKS.map((social) => (
+              <a
+                key={social.platform}
+                className={`homeMissionSocialLink homeMissionSocialLink--${social.platform}`}
+                href={social.href}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`GolfHomiez on ${social.label}`}
+                title={social.label}
+                onClick={() => logFrontendEvent({ category: 'home.social', message: 'social_link_selected', data: { platform: social.platform, destination: social.href } })}
+              >
+                <SocialPlatformIcon platform={social.platform} />
+                <span className="visuallyHidden">{social.label}</span>
+              </a>
+            ))}
+          </nav>
         </div>
       </section>
 

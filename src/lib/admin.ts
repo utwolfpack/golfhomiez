@@ -148,6 +148,51 @@ export type ScheduledJobSchedule = {
   dayOfMonth?: number | null
 }
 
+
+export type PexelsQuotaMetadata = {
+  limit?: number | null
+  remaining?: number | null
+  used?: number | null
+  resetUnix?: number | null
+  resetAt?: string | null
+  capturedAt?: string | null
+  jobId?: string | null
+  endpoint?: string | null
+}
+
+export type SocialPublicationMetadata = {
+  platform: 'facebook' | 'instagram' | 'linkedin' | 'youtube' | string
+  status?: string | null
+  attemptCount?: number | null
+  platformUrl?: string | null
+  errorMessage?: string | null
+  publishedAt?: string | null
+  nextAttemptAt?: string | null
+}
+
+export type ScheduledJobCommercialMetadata = {
+  pexelsConfigured?: boolean
+  pexelsQuota?: PexelsQuotaMetadata | null
+  socialAutoPublishEnabled?: boolean
+  socialProviderConfiguration?: Record<string, SocialProviderConfiguration>
+  socialPublications?: SocialPublicationMetadata[]
+  latestOutput?: {
+    runId?: string | null
+    completedAt?: string | null
+    fileName: string
+    relativePath: string
+    durationSeconds?: number | null
+    resolution?: string | null
+    bytes?: number | null
+    downloadUrl: string
+  } | null
+  latestSuccessfulRun?: {
+    id: string
+    completedAt?: string | null
+    output?: Record<string, unknown> | null
+  } | null
+}
+
 export type ScheduledJob = {
   id: string
   name: string
@@ -162,6 +207,31 @@ export type ScheduledJob = {
   lastRun?: ScheduledJobLastRun | null
   canCancel?: boolean
   activeRunId?: string | null
+  commercialMetadata?: ScheduledJobCommercialMetadata | null
+}
+
+export type SocialProviderConfiguration = {
+  platform: string
+  label: string
+  enabled: boolean
+  configured: boolean
+  missing: string[]
+  credentialSource?: string | null
+  accountId?: string | null
+  accountName?: string | null
+}
+
+export type SocialPublishingStatus = {
+  autoPublishEnabled: boolean
+  providers: Record<'facebook' | 'instagram' | 'linkedin' | 'youtube', SocialProviderConfiguration>
+}
+
+export async function fetchSocialPublishingStatus() {
+  return api<SocialPublishingStatus>('/api/admin/social-publishing/connections')
+}
+
+export async function retrySocialPublications(runId: string) {
+  return api<{ runId: string; publications: SocialPublicationMetadata[]; jobs: ScheduledJob[] }>(`/api/admin/social-publishing/publications/${encodeURIComponent(runId)}/retry`, { method: 'POST' })
 }
 
 export async function fetchScheduledJobs() {

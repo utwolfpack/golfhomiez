@@ -33,13 +33,16 @@ test('demo data plan matches requested sample users and counts', () => {
   assert.equal(plan.emails.user, 'utwolfpack+golfhomiezuser@gmail.com')
   assert.equal(plan.emails.host, 'utwolfpack+golfhomiezhost@gmail.com')
   assert.equal(plan.emails.organizer, 'utwolfpack+golfhomiezorganizer@gmail.com')
-  assert.equal(summary.user.soloRounds, 40)
-  assert.equal(summary.user.teamChallenges, 15)
-  assert.equal(summary.user.individualChallenges, 10)
+  assert.equal(summary.user.soloRounds, 72)
+  assert.equal(summary.user.teamChallenges, 24)
+  assert.equal(summary.user.individualChallenges, 16)
   assert.deepEqual(summary.user.individualChallengeParticipantRange, [5, 25])
   assert.equal(summary.host.tournaments, 50)
   assert.equal(summary.host.futureTournaments, 35)
   assert.equal(summary.host.pastTournaments, 15)
+  assert.equal(summary.host.courseEvents, 42)
+  assert.equal(summary.host.futureCourseEvents, 36)
+  assert.equal(summary.host.pastCourseEvents, 6)
   assert.equal(summary.organizer.tournaments, 10)
   assert.equal(summary.organizer.futureTournaments, 7)
   assert.equal(summary.organizer.pastTournaments, 3)
@@ -109,8 +112,11 @@ test('demo data plan spans the requested dates and uses all templates/start type
   const plan = buildDemoDataPlan()
   const soloDates = plan.user.soloRounds.map((round) => round.date)
 
-  assert.ok(Math.min(...soloDates.map((date) => Date.parse(date))) >= Date.parse('2025-01-01'))
-  assert.ok(Math.max(...soloDates.map((date) => Date.parse(date))) <= Date.parse('2026-08-31'))
+  const newestSoloRound = Math.max(...soloDates.map((date) => Date.parse(date)))
+  const oldestSoloRound = Math.min(...soloDates.map((date) => Date.parse(date)))
+  assert.ok(oldestSoloRound >= Date.now() - (550 * 24 * 60 * 60 * 1000))
+  assert.ok(newestSoloRound <= Date.now())
+  assert.ok(newestSoloRound >= Date.now() - (7 * 24 * 60 * 60 * 1000))
 
   for (const tournamentPlan of [plan.host.tournaments, plan.organizer.tournaments]) {
     assert.deepEqual([...new Set(tournamentPlan.map((tournament) => tournament.templateKey))].sort(), [...TOURNAMENT_TEMPLATE_KEYS].sort())
@@ -119,12 +125,28 @@ test('demo data plan spans the requested dates and uses all templates/start type
   }
 })
 
+test('host showcase data fills the public golf-course calendar with varied course events', () => {
+  const plan = buildDemoDataPlan()
+  const summary = summarizeDemoPlan(plan)
+  const eventTitles = new Set(plan.host.courseEvents.map((event) => event.title))
+  const eventDates = plan.host.courseEvents.map((event) => Date.parse(event.eventDate))
+
+  assert.equal(summary.host.courseEvents, 42)
+  assert.equal(summary.host.futureCourseEvents, 36)
+  assert.equal(summary.host.pastCourseEvents, 6)
+  assert.ok(eventTitles.size >= 10)
+  assert.ok(Math.min(...eventDates) < Date.now())
+  assert.ok(Math.max(...eventDates) > Date.now() + (150 * 24 * 60 * 60 * 1000))
+  assert.ok(plan.host.courseEvents.every((event) => event.startTime && event.endTime && event.details))
+})
+
 test('sample data avoids generated-data wording in user-visible records', () => {
   const plan = buildDemoDataPlan()
   const visibleValues = [
     ...plan.user.teamChallenges.flatMap((challenge) => [challenge.proposerTeamName, challenge.challengedTeamName]),
     ...plan.user.individualChallenges.flatMap((challenge) => challenge.participants.map((participant) => participant.name)),
     ...plan.host.tournaments.flatMap((tournament) => [tournament.name, tournament.title, tournament.description, tournament.templateData.hostOrganization, tournament.templateData.charityMessage, tournament.templateData.contactPerson, tournament.templateData.miscNotes, tournament.templateData.tournamentSummary]),
+    ...plan.host.courseEvents.flatMap((event) => [event.title, event.details]),
     ...plan.organizer.tournaments.flatMap((tournament) => [tournament.name, tournament.title, tournament.description, tournament.templateData.hostOrganization, tournament.templateData.charityMessage, tournament.templateData.contactPerson, tournament.templateData.miscNotes, tournament.templateData.tournamentSummary]),
   ].filter(Boolean)
 
@@ -176,6 +198,30 @@ test('population script creates tournament registrations, start assignments, and
   assert.match(script, /tournament_team_scores/)
   assert.match(script, /String\(tournament\.status \|\| ''\)\.trim\(\)\.toLowerCase\(\) !== 'completed'/)
   assert.match(script, /populateTournamentOperationalRows/)
+})
+
+test('user and host population remove prior showcase content before rebuilding the commercial dataset', async () => {
+  const script = await read('server/scripts/populate-demo-data.js')
+
+  assert.match(script, /async function deletePriorUserDemoData/)
+  assert.match(script, /DELETE FROM .*scores.*created_by_user_id/s)
+  assert.match(script, /LOWER\(created_by_email\) = LOWER\(\?\)/)
+  assert.match(script, /SELECT DISTINCT team_id AS id FROM team_members/)
+  assert.match(script, /async function findTournamentIdsCreatedByAuthUser/)
+  assert.match(script, /SELECT id FROM tournaments WHERE created_by_auth_user_id = \?/)
+  assert.match(script, /manual_demo_user_prior_data_deleted/)
+  assert.match(script, /manual_demo_host_prior_data_deleted/)
+})
+
+test('host population creates and refreshes public course calendar events for the showcase course', async () => {
+  const script = await read('server/scripts/populate-demo-data.js')
+
+  assert.match(script, /async function populateDemoCourseEvents/)
+  assert.match(script, /golf_course_events/)
+  assert.match(script, /golf_course_public_page_id: publicPageId/)
+  assert.match(script, /created_by_host_account_id: host\.accountId/)
+  assert.match(script, /correlation_id: `demo-population:\$\{correlationId\}`/)
+  assert.match(script, /const courseEvents = await populateDemoCourseEvents/)
 })
 
 test('demo population scripts are manual-only and not part of postinstall', async () => {
@@ -244,10 +290,11 @@ test('manual demo and user delete documentation lives in docs', async () => {
 
   assert.match(demoDocs, /# Manual Sample Data Population Scripts/)
   assert.match(demoDocs, /utwolfpack\+golfhomiezuser@gmail\.com/)
-  assert.match(demoDocs, /40 individual golf rounds/)
-  assert.match(demoDocs, /25 challenges/)
+  assert.match(demoDocs, /72 individual golf rounds/)
+  assert.match(demoDocs, /40 challenges/)
   assert.match(demoDocs, /50 host-owned tournaments/)
   assert.match(demoDocs, /35 future-dated host tournaments/)
+  assert.match(demoDocs, /42 course calendar events/)
   assert.match(demoDocs, /15 past-dated host tournaments/)
   assert.match(demoDocs, /10 organizer-owned tournaments/)
   assert.match(demoDocs, /7 future-dated organizer tournaments/)
@@ -259,6 +306,7 @@ test('manual demo and user delete documentation lives in docs', async () => {
   assert.match(demoDocs, /not part of `npm install`/)
   assert.match(demoDocs, /Host account schema compatibility/)
   assert.match(demoDocs, /legacy `password_hash` placeholder/)
+  assert.match(demoDocs, /replaces the prior showcase content/)
   assert.match(demoDocs, /logging\/api\.log/)
 
   assert.match(deleteDocs, /# Manual User Delete Script/)
@@ -276,7 +324,7 @@ test('user demo population reuses actual team ids before inserting team members 
   assert.match(script, /async function findTeamIdsByNames/)
   assert.match(script, /const deterministicTeamIds = teamNames\.map\(\(name\) => stableDemoId\('demo-team', name\)\)/)
   assert.match(script, /const existingTeamIds = await findTeamIdsByNames\(db, teamNames\)/)
-  assert.match(script, /const teamIds = \[\.\.\.new Set\(\[\.\.\.deterministicTeamIds, \.\.\.existingTeamIds\]\)\]/)
+  assert.match(script, /const teamIds = \[\.\.\.new Set\(\[\.\.\.deterministicTeamIds, \.\.\.existingTeamIds, \.\.\.memberTeamIds\]\)\]/)
   assert.match(script, /const teamIdByName = new Map\(\)/)
   assert.match(script, /teamIdByName\.set\(team\.name, team\.id\)/)
   assert.match(script, /team_id: id/)
