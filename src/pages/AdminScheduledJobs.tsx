@@ -4,10 +4,13 @@ import PageHero from '../components/PageHero'
 import {
   cancelScheduledJob,
   fetchScheduledJobs,
+  fetchSocialPublishingStatus,
+  retrySocialPublications,
   runScheduledJob,
   updateScheduledJobSchedule,
   type ScheduledJob,
   type ScheduledJobSchedule,
+  type SocialPublishingStatus,
 } from '../lib/admin'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDateTime } from '../lib/time-format'
@@ -47,6 +50,162 @@ function statusClass(status?: string | null) {
   return 'statusMessage'
 }
 
+
+function formatBytes(value?: number | null) {
+  if (value == null || !Number.isFinite(value) || value < 0) return '—'
+  if (value < 1024) return `${Math.round(value)} B`
+  const kb = value / 1024
+  if (kb < 1024) return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`
+  const mb = kb / 1024
+  return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`
+}
+
+function formatCount(value?: number | null) {
+  return value == null || !Number.isFinite(value) ? '—' : Math.max(0, Math.round(value)).toLocaleString()
+}
+
+function latestCommercialOutput(job: ScheduledJob) {
+  const output = job.commercialMetadata?.latestSuccessfulRun?.output
+  return output && typeof output === 'object' ? output : null
+}
+
+function outputNumber(output: Record<string, unknown> | null, key: string) {
+  const value = output?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function outputString(output: Record<string, unknown> | null, key: string) {
+  const value = output?.[key]
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function CommercialJobMetadata({ job, onRetrySocial, retryingRunId }: { job: ScheduledJob; onRetrySocial: (job: ScheduledJob) => void; retryingRunId: string | null }) {
+  const metadata = job.commercialMetadata
+  if (!metadata) return null
+  const quota = metadata.pexelsQuota
+  const latest = metadata.latestOutput
+  const output = latestCommercialOutput(job)
+  const videos = Array.isArray(output?.videos) ? output.videos.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object')) : []
+  const pexelsVideoCount = outputNumber(output, 'pexelsVideoCount') ?? videos.filter((video) => video.provider === 'Pexels').length
+  const pexelsVisualCount = outputNumber(output, 'pexelsVisualCount') ?? 0
+  const pexelsPhotoCount = outputNumber(output, 'pexelsPhotoCount') ?? 0
+  const isGreatShots = job.id === 'createShortFormGreatShotsSmall'
+  const isFunnyShots = job.id === 'createShortFormFunnyShotsSmall'
+  const isCurrentEvents = job.id === 'createShortFormCurrentEventsSmall'
+  const socialPublications = Array.isArray(metadata.socialPublications) ? metadata.socialPublications : []
+  const retryableSocial = socialPublications.some((publication) => ['failed', 'retry_pending'].includes(String(publication.status || '').toLowerCase()))
+
+  return (
+    <div className="small" style={{ marginTop: 10, padding: 10, border: '1px solid rgba(15, 23, 42, 0.14)', borderRadius: 8, minWidth: 260, maxWidth: 390, background: 'rgba(248, 250, 252, 0.82)' }}>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>Commercial metadata</div>
+      {metadata.pexelsConfigured ? (
+        quota?.remaining != null || quota?.limit != null ? (
+          <>
+            <div><strong>Pexels:</strong> {formatCount(quota.remaining)} / {formatCount(quota.limit)} requests remaining</div>
+            {quota.used != null ? <div>{formatCount(quota.used)} requests used in the current monthly period.</div> : null}
+            {quota.resetAt ? <div>Quota resets {formatDate(quota.resetAt)}.</div> : null}
+            {quota.capturedAt ? <div>Usage checked {formatDate(quota.capturedAt)}.</div> : null}
+          </>
+        ) : <div><strong>Pexels:</strong> configured; usage will appear after the next successful Pexels API request.</div>
+      ) : <div><strong>Pexels:</strong> not configured. Add <code>PEXELS_API_KEY</code> to the server .env file.</div>}
+
+      {latest ? (
+        <div style={{ marginTop: 8 }}>
+          <div><strong>Latest MP4:</strong> {latest.fileName}</div>
+          <div>{latest.durationSeconds ? `${latest.durationSeconds}s` : 'Duration —'}{latest.resolution ? ` · ${latest.resolution}` : ''}{latest.bytes ? ` · ${formatBytes(latest.bytes)}` : ''}</div>
+          {latest.completedAt ? <div>Generated {formatDate(latest.completedAt)}.</div> : null}
+          <a
+            className="btn btnSmall"
+            href={latest.downloadUrl}
+            style={{ display: 'inline-block', marginTop: 7 }}
+            onClick={() => logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_job_latest_mp4_download_clicked', data: { jobId: job.id, jobName: job.name, runId: latest.runId || null, fileName: latest.fileName } })}
+          >
+            Download latest MP4
+          </a>
+        </div>
+      ) : <div style={{ marginTop: 8 }}><strong>Latest MP4:</strong> none generated successfully yet.</div>}
+
+      {(isGreatShots || isFunnyShots) && output ? (
+        <div style={{ marginTop: 8 }}>
+          <div><strong>Selection:</strong> {outputString(output, 'selectionMode') || '—'}</div>
+          <div><strong>Pexels clips:</strong> {formatCount(pexelsVideoCount)}</div>
+          {isFunnyShots ? <div><strong>Content:</strong> funny golf shots</div> : null}
+          {output?.backgroundMusic && typeof output.backgroundMusic === 'object' ? <div><strong>Music:</strong> Golf Homiez for Golf Courses</div> : null}
+          {videos.length ? <div><strong>Providers:</strong> {[...new Set(videos.map((video) => String(video.provider || '')).filter(Boolean))].join(', ')}</div> : null}
+        </div>
+      ) : null}
+
+      {isCurrentEvents && output ? (
+        <div style={{ marginTop: 8 }}>
+          <div><strong>Topic:</strong> {outputString(output, 'topic') || 'GolfHomiez golf theme'}</div>
+          <div><strong>Pexels visuals:</strong> {formatCount(pexelsVisualCount)} ({formatCount(pexelsPhotoCount)} photo, {formatCount(outputNumber(output, 'pexelsVideoCount') ?? 0)} video)</div>
+          <div><strong>News sources:</strong> {formatCount(outputNumber(output, 'successfulSourceCount'))} successful</div>
+        </div>
+      ) : null}
+
+      <div style={{ marginTop: 8 }}>
+        <div><strong>Social publishing:</strong> {metadata.socialAutoPublishEnabled ? 'automatic (.env credentials)' : 'disabled'}</div>
+        {Object.values(metadata.socialProviderConfiguration || {}).map((provider) => (
+          <div key={provider.platform}>
+            <strong>{provider.label} config:</strong>{' '}
+            {provider.enabled ? (provider.configured ? `configured (${provider.credentialSource || 'server .env'})` : `missing ${provider.missing.join(', ')}`) : 'disabled'}
+          </div>
+        ))}
+        {socialPublications.length ? socialPublications.map((publication) => (
+          <div key={publication.platform} style={{ marginTop: 3 }}>
+            <strong>{publication.platform.charAt(0).toUpperCase() + publication.platform.slice(1)}:</strong>{' '}
+            {publication.status || 'pending'}
+            {publication.platformUrl ? <> · <a href={publication.platformUrl} target="_blank" rel="noreferrer">View post</a></> : null}
+            {publication.nextAttemptAt ? <> · retry {formatDate(publication.nextAttemptAt)}</> : null}
+            {publication.errorMessage ? <div style={{ color: '#b91c1c' }}>{publication.errorMessage}</div> : null}
+          </div>
+        )) : metadata.socialAutoPublishEnabled && latest ? <div>Waiting for connected social accounts or the first publish attempt.</div> : null}
+        {retryableSocial && latest?.runId ? (
+          <button className="btn btnSmall" type="button" style={{ marginTop: 6 }} onClick={() => onRetrySocial(job)} disabled={retryingRunId === latest.runId}>
+            {retryingRunId === latest.runId ? 'Retrying…' : 'Retry failed social posts'}
+          </button>
+        ) : null}
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        <a href="https://www.pexels.com" target="_blank" rel="noreferrer">Media provided by Pexels</a>
+      </div>
+    </div>
+  )
+}
+
+function SocialPublishingConfiguration({ status }: { status: SocialPublishingStatus | null }) {
+  if (!status) return null
+  const rows = Object.values(status.providers)
+
+  return (
+    <section className="card" style={{ padding: 18, marginBottom: 16 }}>
+      <div>
+        <h2 style={{ margin: 0 }}>Social publishing configuration</h2>
+        <div className="small">
+          Automatic publishing is <strong>{status.autoPublishEnabled ? 'enabled' : 'disabled'}</strong>. Credentials are read from the server .env file and secret values are never returned to this page.
+        </div>
+      </div>
+      <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
+        {rows.map((row) => {
+          return (
+            <div key={row.platform} style={{ borderTop: '1px solid rgba(15, 23, 42, 0.10)', paddingTop: 10 }}>
+              <div>
+                <strong>{row.label}</strong>{' '}
+                <span className="small">{!row.enabled ? 'Disabled' : row.configured ? 'Configured' : 'Configuration incomplete'}</span>
+                {row.accountName ? <div className="small">{row.accountName}</div> : null}
+                {row.accountId ? <div className="small">Account ID: {row.accountId}</div> : null}
+                {row.configured && row.credentialSource ? <div className="small">Credential source: {row.credentialSource}</div> : null}
+                {!row.configured ? <div className="small">Missing server .env value: {row.missing.join(', ') || 'provider credentials'}</div> : null}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function initialSchedule(job: ScheduledJob): ScheduledJobSchedule {
   if (job.schedule) return job.schedule
   return { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null }
@@ -65,6 +224,8 @@ export default function AdminScheduledJobs() {
   const [scrubValues, setScrubValues] = useState<string[]>([])
   const [scrubValueInput, setScrubValueInput] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
+  const [socialStatus, setSocialStatus] = useState<SocialPublishingStatus | null>(null)
+  const [retryingSocialRunId, setRetryingSocialRunId] = useState<string | null>(null)
 
   const sortedJobs = useMemo(() => [...jobs].sort((a, b) => a.name.localeCompare(b.name)), [jobs])
 
@@ -72,9 +233,10 @@ export default function AdminScheduledJobs() {
     setError(null)
     try {
       logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_jobs_load_started', data: { route: '/golfadmin/scheduled-jobs' } })
-      const result = await fetchScheduledJobs()
+      const [result, social] = await Promise.all([fetchScheduledJobs(), fetchSocialPublishingStatus()])
       setJobs(result.jobs || [])
-      logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_jobs_load_completed', data: { jobCount: result.jobs?.length || 0 } })
+      setSocialStatus(social)
+      logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_jobs_load_completed', data: { jobCount: result.jobs?.length || 0, socialAutoPublishEnabled: social.autoPublishEnabled } })
     } catch (err) {
       const text = err instanceof Error ? err.message : 'Could not load scheduled jobs.'
       setError(text)
@@ -87,6 +249,26 @@ export default function AdminScheduledJobs() {
   useEffect(() => {
     void loadJobs()
   }, [])
+
+  async function onRetrySocial(job: ScheduledJob) {
+    const runId = job.commercialMetadata?.latestOutput?.runId
+    if (!runId) return
+    setRetryingSocialRunId(runId)
+    setError(null)
+    try {
+      logFrontendEvent({ category: 'admin.social_publishing', message: 'social_retry_started', data: { jobId: job.id, runId } })
+      const result = await retrySocialPublications(runId)
+      setJobs(result.jobs || [])
+      setMessage(`Social publishing retry completed for ${job.name}.`)
+    } catch (err) {
+      const text = err instanceof Error ? err.message : 'Could not retry social publications.'
+      setError(text)
+      logFrontendEvent({ category: 'admin.social_publishing', level: 'error', message: 'social_retry_failed', data: { jobId: job.id, runId, error: text } })
+    } finally {
+      setRetryingSocialRunId(null)
+      void loadJobs()
+    }
+  }
 
   async function onRunJob(job: ScheduledJob) {
     const confirmed = typeof window === 'undefined' ? true : window.confirm(`Run scheduled job now: ${job.name}?`)
@@ -204,6 +386,7 @@ export default function AdminScheduledJobs() {
         </div>
         {message ? <p className="statusMessage statusSuccess">{message}</p> : null}
         {error ? <p className="statusMessage statusError">{error}</p> : null}
+        <SocialPublishingConfiguration status={socialStatus} />
         <section className="card" style={{ padding: 18, overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
             <h2 style={{ margin: 0 }}>All scheduled jobs</h2>
@@ -242,6 +425,7 @@ export default function AdminScheduledJobs() {
                             <div className="small">Target: ~{String(job.jobConfig?.targetRunHours || 12)} hours. A full US run needs roughly two REST calls per course plus state validation, so use an OpenGolfAPI key with enough daily quota; the run output reports the exact estimate.</div>
                           </>
                         ) : null}
+                        {job.commercialMetadata ? <CommercialJobMetadata job={job} onRetrySocial={(selected) => void onRetrySocial(selected)} retryingRunId={retryingSocialRunId} /> : null}
                       </td>
                       <td data-label="Actions" className="scheduledJobsActionsCell">
                         <div className="scheduledJobsActions">

@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { randomUUID } from 'crypto'
 import {
   CANCELLED_TOURNAMENT_CLEANUP_TIME_ZONE,
@@ -17,7 +18,14 @@ import { nextRunForSchedule, normalizeScheduleConfig, scheduleLabel } from './sc
 import { reconcileStripeSubscriptions } from './billing.js'
 import { runBuildGolfCourseEmails } from './golf-course-emails.js'
 import { normalizeGolfCourseEmailScrubValues, runScrubGolfCourseEmails } from './golf-course-email-scrub.js'
+import { CURRENT_EVENTS_COMMERCIAL_JOB_ID, CURRENT_EVENTS_COMMERCIAL_JOB_NAME, runCreateShortFormCurrentEventsSmall } from './current-events-commercial.js'
+import { GREAT_SHOTS_COMMERCIAL_JOB_ID, GREAT_SHOTS_COMMERCIAL_JOB_NAME, runCreateShortFormGreatShotsSmall } from './great-shots-commercial.js'
+import { FUNNY_SHOTS_COMMERCIAL_JOB_ID, FUNNY_SHOTS_COMMERCIAL_JOB_NAME, runCreateShortFormFunnyShotsSmall } from './funny-shots-commercial.js'
+import { getLatestPexelsQuota, pexelsApiKey } from './pexels-api.js'
+import { getSocialPublishingConfiguration, publishCommercialToSocialPlatforms } from './social-publisher.js'
+import { listSocialPublicationsForRuns } from './social-publishing-store.js'
 import {
+  getLatestSuccessfulScheduledJobRuns,
   getScheduledJobRecord,
   listScheduledJobRecords,
   recordScheduledJobRunCancellationRequested,
@@ -78,6 +86,74 @@ function normalizeJobConfig(definition, input) {
 }
 
 export const SCHEDULED_JOB_DEFINITIONS = [
+  {
+    id: GREAT_SHOTS_COMMERCIAL_JOB_ID,
+    name: GREAT_SHOTS_COMMERCIAL_JOB_NAME,
+    description: 'Builds a vertical GolfHomiez Great Shots MP4 from unused free licensed golf-shot footage, prioritizing Pexels when configured and retaining source/license metadata and no-reuse history.',
+    scheduleLabel: 'Manual',
+    defaultScheduleLabel: 'Manual',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: {},
+    backgroundManualRun: true,
+    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal }) {
+      return runCreateShortFormGreatShotsSmall({
+        pool,
+        correlationId,
+        triggeredBy,
+        logApi,
+        logError,
+        logScheduledJob,
+        signal,
+      })
+    },
+  },
+  {
+    id: FUNNY_SHOTS_COMMERCIAL_JOB_ID,
+    name: FUNNY_SHOTS_COMMERCIAL_JOB_NAME,
+    description: 'Builds a vertical GolfHomiez Funny Shots MP4 from unused Pexels videos of funny golf shots, misses, reactions, and trick shots. Uses the full qualifying source video up to 30 seconds and adds subtle Golf Homiez for Golf Courses background music.',
+    scheduleLabel: 'Manual',
+    defaultScheduleLabel: 'Manual',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: {},
+    backgroundManualRun: true,
+    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal }) {
+      return runCreateShortFormFunnyShotsSmall({
+        pool,
+        correlationId,
+        triggeredBy,
+        logApi,
+        logError,
+        logScheduledJob,
+        signal,
+      })
+    },
+  },
+  {
+    id: CURRENT_EVENTS_COMMERCIAL_JOB_ID,
+    name: CURRENT_EVENTS_COMMERCIAL_JOB_NAME,
+    description: 'Fetches current headlines from the configured golf-news sources, detects a topic shared by multiple publishers when available, and creates a six-second vertical GolfHomiez MP4 in jobs/commercials. Falls back to app-derived GolfHomiez theme copy when no common topic is found.',
+    scheduleLabel: 'Manual',
+    defaultScheduleLabel: 'Manual',
+    scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
+    defaultSchedule: { type: 'manual', time: null, dayOfWeek: null, dayOfMonth: null },
+    getDefaultNextRunAt: () => null,
+    defaultJobConfig: {},
+    backgroundManualRun: true,
+    async run({ correlationId, triggeredBy, logApi, logError, logScheduledJob, signal }) {
+      return runCreateShortFormCurrentEventsSmall({
+        correlationId,
+        triggeredBy,
+        logApi,
+        logError,
+        logScheduledJob,
+        signal,
+      })
+    },
+  },
   {
     id: 'reconcileStripeSubscriptions',
     name: 'Reconcile Stripe subscriptions',
@@ -284,14 +360,83 @@ async function resolveNextRun(pool, definition, now = new Date()) {
   return getNextRunForDefinition(definition, record.schedule, now)
 }
 
+
+const COMMERCIAL_JOB_IDS = new Set([GREAT_SHOTS_COMMERCIAL_JOB_ID, FUNNY_SHOTS_COMMERCIAL_JOB_ID, CURRENT_EVENTS_COMMERCIAL_JOB_ID])
+
+function quotaTimestamp(quota) {
+  const value = new Date(quota?.capturedAt || 0).getTime()
+  return Number.isFinite(value) ? value : 0
+}
+
+function latestQuota(...values) {
+  return values.filter((value) => value && typeof value === 'object').sort((a, b) => quotaTimestamp(b) - quotaTimestamp(a))[0] || null
+}
+
+function commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota, socialPublications = []) {
+  if (!COMMERCIAL_JOB_IDS.has(job.id)) return null
+  const output = latestSuccessfulRun?.output && typeof latestSuccessfulRun.output === 'object' ? latestSuccessfulRun.output : null
+  const latestOutput = output?.relativePath && output?.fileName ? {
+    runId: latestSuccessfulRun.id,
+    completedAt: latestSuccessfulRun.completedAt || null,
+    fileName: output.fileName,
+    relativePath: output.relativePath,
+    durationSeconds: Number(output.durationSeconds || 0) || null,
+    resolution: output.resolution || null,
+    bytes: Number(output.bytes || 0) || null,
+    downloadUrl: `/api/admin/scheduled-jobs/${encodeURIComponent(job.id)}/latest-output`,
+  } : null
+  return {
+    pexelsConfigured: Boolean(pexelsApiKey()),
+    pexelsQuota: pexelsQuota || null,
+    latestOutput,
+    latestSuccessfulRun: latestSuccessfulRun ? {
+      id: latestSuccessfulRun.id,
+      completedAt: latestSuccessfulRun.completedAt || null,
+      output,
+    } : null,
+    socialAutoPublishEnabled: String(process.env.SOCIAL_AUTO_PUBLISH || '').toLowerCase() === 'true',
+    socialProviderConfiguration: getSocialPublishingConfiguration().providers,
+    socialPublications: Array.isArray(socialPublications) ? socialPublications.map((publication) => ({
+      platform: publication.platform,
+      status: publication.status,
+      attemptCount: publication.attemptCount,
+      platformUrl: publication.platformUrl || null,
+      errorMessage: publication.errorMessage || null,
+      publishedAt: publication.publishedAt || null,
+      nextAttemptAt: publication.nextAttemptAt || null,
+    })) : [],
+  }
+}
+
+export async function getLatestScheduledJobCommercialOutput(pool, jobId) {
+  const normalized = String(jobId || '').trim()
+  if (!COMMERCIAL_JOB_IDS.has(normalized)) return null
+  const runs = await getLatestSuccessfulScheduledJobRuns(pool, [normalized])
+  const run = runs.get(normalized) || null
+  const output = run?.output && typeof run.output === 'object' ? run.output : null
+  if (!output?.relativePath || !output?.fileName) return null
+  return { run, output }
+}
+
 export async function listScheduledJobs(pool, now = new Date()) {
   const jobs = await listScheduledJobRecords(pool, SCHEDULED_JOB_DEFINITIONS, now)
+  const commercialIds = jobs.filter((job) => COMMERCIAL_JOB_IDS.has(job.id)).map((job) => job.id)
+  const latestSuccessfulRuns = await getLatestSuccessfulScheduledJobRuns(pool, commercialIds)
+  const persistedQuotas = jobs.flatMap((job) => [
+    job.lastRun?.output?.pexelsQuota,
+    latestSuccessfulRuns.get(job.id)?.output?.pexelsQuota,
+  ])
+  const pexelsQuota = latestQuota(getLatestPexelsQuota(), ...persistedQuotas)
+  const latestRunIds = [...latestSuccessfulRuns.values()].map((run) => run?.id).filter(Boolean)
+  const socialPublicationsByRun = await listSocialPublicationsForRuns(pool, latestRunIds)
   return jobs.map((job) => {
     const active = activeJobRuns.get(job.id)
+    const latestSuccessfulRun = latestSuccessfulRuns.get(job.id) || null
     return {
       ...job,
       canCancel: Boolean(active && !active.controller.signal.aborted),
       activeRunId: active?.runId || null,
+      commercialMetadata: commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota, latestSuccessfulRun?.id ? (socialPublicationsByRun.get(latestSuccessfulRun.id) || []) : []),
     }
   })
 }
@@ -405,11 +550,32 @@ export async function runScheduledJob(pool, jobId, {
     throwIfJobCancelled(controller.signal)
     const output = await definition.run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal: controller.signal, jobConfig })
     throwIfJobCancelled(controller.signal)
+    let completedOutput = output
+    if (COMMERCIAL_JOB_IDS.has(definition.id) && output?.relativePath) {
+      try {
+        const socialPublishing = await publishCommercialToSocialPlatforms({
+          db: pool,
+          runId,
+          jobId: definition.id,
+          jobName: definition.name,
+          output,
+          correlationId,
+          logApi,
+          logError,
+          logScheduledJob,
+        })
+        completedOutput = { ...output, socialPublishing }
+      } catch (socialError) {
+        logError('Commercial social publishing orchestration failed without failing MP4 generation', { correlationId, jobId: definition.id, jobName: definition.name, runId, error: socialError })
+        logScheduledJob('commercial_social_publishing_orchestration_failed', { correlationId, jobId: definition.id, jobName: definition.name, runId, level: 'error', error: socialError?.message || String(socialError) })
+        completedOutput = { ...output, socialPublishing: { enabled: true, orchestrationError: socialError?.message || String(socialError), publications: [] } }
+      }
+    }
     const nextRunAt = await resolveNextRun(pool, definition)
-    await recordScheduledJobRunCompleted(pool, definition, { runId, status: 'success', output, nextRunAt })
-    logScheduledJob('scheduled_job_run_completed', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, status: 'success', output, nextRunAt: nextRunAt?.toISOString?.() || null })
+    await recordScheduledJobRunCompleted(pool, definition, { runId, status: 'success', output: completedOutput, nextRunAt })
+    logScheduledJob('scheduled_job_run_completed', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, status: 'success', output: completedOutput, nextRunAt: nextRunAt?.toISOString?.() || null })
     logApi('scheduled_job_run_completed', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, status: 'success' })
-    return { job: definition, runId, status: 'success', output, nextRunAt }
+    return { job: definition, runId, status: 'success', output: completedOutput, nextRunAt }
   } catch (error) {
     const nextRunAt = await resolveNextRun(pool, definition).catch(() => null)
     if (isScheduledJobCancellation(error, controller.signal)) {

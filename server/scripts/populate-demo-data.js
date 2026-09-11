@@ -475,8 +475,9 @@ async function associateHostToDemoCourse(db, host, course) {
 }
 
 async function ensureDemoGolfCoursePublicPage(db, host, course) {
+  const id = stableDemoId('demo-golf-course-public-page', host.accountId, course.id)
   await upsertRow(db, 'golf_course_public_pages', {
-    id: stableDemoId('demo-golf-course-public-page', host.accountId, course.id),
+    id,
     host_account_id: host.accountId,
     golf_course_id: course.id,
     slug: course.publicPageSlug || cleanCompactSlug(`${course.name}${course.stateCode}`),
@@ -496,6 +497,7 @@ async function ensureDemoGolfCoursePublicPage(db, host, course) {
     created_at: new Date(),
     updated_at: new Date(),
   }, ['golf_course_id', 'slug', 'golf_course_name', 'summary', 'banner_image_url', 'banner_image_data', 'website_url', 'contact_phone', 'address_line1', 'city', 'state_code', 'postal_code', 'source_website_url', 'source_last_synced_at', 'is_published', 'updated_at'])
+  return { id, slug: course.publicPageSlug || cleanCompactSlug(`${course.name}${course.stateCode}`) }
 }
 
 async function syncDemoTournamentSearchRecord(db, tournament, course, correlationId) {
@@ -652,54 +654,130 @@ function demoTeamMembers(owner, seed, size = 4) {
   })
 }
 
-async function deletePriorUserDemoData(db, targetUser, plan) {
+async function deletePriorUserDemoData(db, targetUser, plan, correlationId) {
   const challengeIds = [...plan.teamChallenges, ...plan.individualChallenges].map((challenge) => challenge.id)
   const teamNames = [...new Set(plan.teamChallenges.flatMap((challenge) => [challenge.proposerTeamName, challenge.challengedTeamName]))]
   const deterministicTeamIds = teamNames.map((name) => stableDemoId('demo-team', name))
   const existingTeamIds = await findTeamIdsByNames(db, teamNames)
-  const teamIds = [...new Set([...deterministicTeamIds, ...existingTeamIds])]
+  const memberTeamIds = []
+  const deleted = { challengeState: 0, inboxMessages: 0, scoreDrafts: 0, scores: 0, teamMembers: 0, teams: 0 }
 
-  if (await tableExists(db, 'inbox_challenge_user_state') && challengeIds.length) {
-    await db.query(
-      `DELETE FROM inbox_challenge_user_state WHERE thread_id IN (${challengeIds.map(() => '?').join(', ')})`,
-      challengeIds,
-    )
-  }
-  if (await tableExists(db, 'inbox_messages')) {
-    await db.execute(
-      `DELETE FROM inbox_messages
-        WHERE sender_email = ?
-           OR recipient_email = ?
-           OR message_body LIKE ?`,
-      [targetUser.email, targetUser.email, `%${DEMO_SEED_TAG}%`],
-    )
-  }
-  const soloRoundIds = plan.soloRounds.map((round) => round.id)
-  if (await tableExists(db, 'scorecard_hole_drafts')) {
-    await db.execute('DELETE FROM scorecard_hole_drafts WHERE created_by_email = ? AND (course LIKE ? OR state IS NOT NULL)', [targetUser.email, `%${DEMO_SEED_TAG}%`])
-  }
-  if (await tableExists(db, 'scores')) {
-    const predicates = ['(created_by_email = ? AND course LIKE ?)']
-    const params = [targetUser.email, `%${DEMO_SEED_TAG}%`]
-    if (soloRoundIds.length) {
-      predicates.push(`id IN (${soloRoundIds.map(() => '?').join(', ')})`)
-      params.push(...soloRoundIds)
+  if (await tableExists(db, 'team_members')) {
+    const memberColumns = await columnsFor(db, 'team_members')
+    const identityPredicates = []
+    const identityParams = []
+    if (hasColumn(memberColumns, 'id')) {
+      identityPredicates.push('id = ?')
+      identityParams.push(targetUser.id)
     }
-    await db.query(`DELETE FROM scores WHERE ${predicates.join(' OR ')}`, params)
+    if (hasColumn(memberColumns, 'email')) {
+      identityPredicates.push('LOWER(email) = LOWER(?)')
+      identityParams.push(targetUser.email)
+    }
+    if (identityPredicates.length && hasColumn(memberColumns, 'team_id')) {
+      const [rows] = await db.query(`SELECT DISTINCT team_id AS id FROM team_members WHERE ${identityPredicates.join(' OR ')}`, identityParams)
+      memberTeamIds.push(...rows.map((row) => String(row.id || '')).filter(Boolean))
+    }
   }
+
+  const teamIds = [...new Set([...deterministicTeamIds, ...existingTeamIds, ...memberTeamIds])]
+  const threadIds = [...challengeIds]
+
+  if (await tableExists(db, 'inbox_messages')) {
+    const inboxColumns = await columnsFor(db, 'inbox_messages')
+    const identityPredicates = []
+    const identityParams = []
+    for (const column of ['sender_user_id', 'recipient_user_id']) {
+      if (hasColumn(inboxColumns, column)) {
+        identityPredicates.push(`${quoteIdentifier(column)} = ?`)
+        identityParams.push(targetUser.id)
+      }
+    }
+    for (const column of ['sender_email', 'recipient_email']) {
+      if (hasColumn(inboxColumns, column)) {
+        identityPredicates.push(`LOWER(${quoteIdentifier(column)}) = LOWER(?)`)
+        identityParams.push(targetUser.email)
+      }
+    }
+    if (hasColumn(inboxColumns, 'message_body')) {
+      identityPredicates.push('message_body LIKE ?')
+      identityParams.push(`%${DEMO_SEED_TAG}%`)
+    }
+    if (identityPredicates.length) {
+      const idExpression = hasColumn(inboxColumns, 'thread_id')
+        ? `COALESCE(thread_id, ${hasColumn(inboxColumns, 'id') ? 'id' : "''"})`
+        : (hasColumn(inboxColumns, 'id') ? 'id' : null)
+      if (idExpression) {
+        const [rows] = await db.query(`SELECT DISTINCT ${idExpression} AS thread_id FROM inbox_messages WHERE ${identityPredicates.join(' OR ')}`, identityParams)
+        threadIds.push(...rows.map((row) => String(row.thread_id || '')).filter(Boolean))
+      }
+      const [result] = await db.query(`DELETE FROM inbox_messages WHERE ${identityPredicates.join(' OR ')}`, identityParams)
+      deleted.inboxMessages = Number(result?.affectedRows || 0)
+    }
+  }
+
+  const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))]
+  if (await tableExists(db, 'inbox_challenge_user_state')) {
+    const stateColumns = await columnsFor(db, 'inbox_challenge_user_state')
+    const predicates = []
+    const params = []
+    if (uniqueThreadIds.length && hasColumn(stateColumns, 'thread_id')) {
+      predicates.push(`thread_id IN (${uniqueThreadIds.map(() => '?').join(', ')})`)
+      params.push(...uniqueThreadIds)
+    }
+    if (hasColumn(stateColumns, 'user_key')) {
+      predicates.push('(user_key = ? OR LOWER(user_key) = LOWER(?) OR LOWER(user_key) = LOWER(?))')
+      params.push(targetUser.id, targetUser.email, `${targetUser.id}|${targetUser.email}`)
+    }
+    if (predicates.length) {
+      const [result] = await db.query(`DELETE FROM inbox_challenge_user_state WHERE ${predicates.join(' OR ')}`, params)
+      deleted.challengeState = Number(result?.affectedRows || 0)
+    }
+  }
+
+  for (const [tableName, countKey] of [['scorecard_hole_drafts', 'scoreDrafts'], ['scores', 'scores']]) {
+    if (!(await tableExists(db, tableName))) continue
+    const columns = await columnsFor(db, tableName)
+    const predicates = []
+    const params = []
+    if (hasColumn(columns, 'created_by_user_id')) {
+      predicates.push('created_by_user_id = ?')
+      params.push(targetUser.id)
+    }
+    if (hasColumn(columns, 'created_by_email')) {
+      predicates.push('LOWER(created_by_email) = LOWER(?)')
+      params.push(targetUser.email)
+    }
+    if (predicates.length) {
+      const [result] = await db.query(`DELETE FROM ${quoteIdentifier(tableName)} WHERE ${predicates.join(' OR ')}`, params)
+      deleted[countKey] = Number(result?.affectedRows || 0)
+    }
+  }
+
   if (await tableExists(db, 'team_members') && teamIds.length) {
-    await db.query(`DELETE FROM team_members WHERE team_id IN (${teamIds.map(() => '?').join(', ')})`, teamIds)
+    const [result] = await db.query(`DELETE FROM team_members WHERE team_id IN (${teamIds.map(() => '?').join(', ')})`, teamIds)
+    deleted.teamMembers = Number(result?.affectedRows || 0)
   }
   if (await tableExists(db, 'teams') && teamIds.length) {
-    await db.query(`DELETE FROM teams WHERE id IN (${teamIds.map(() => '?').join(', ')})`, teamIds)
+    const [result] = await db.query(`DELETE FROM teams WHERE id IN (${teamIds.map(() => '?').join(', ')})`, teamIds)
+    deleted.teams = Number(result?.affectedRows || 0)
   }
+
+  logApi('manual_demo_user_prior_data_deleted', {
+    correlationId,
+    accountEmail: targetUser.email,
+    deleted,
+    teamCount: teamIds.length,
+    challengeThreadCount: uniqueThreadIds.length,
+  })
+  return deleted
 }
 
-async function populateUserDemoData(db, plan) {
+async function populateUserDemoData(db, plan, correlationId) {
   const targetUser = await ensureAuthUser(db, plan.email, displayNameFromEmail(plan.email))
   await ensureAppUser(db, targetUser)
   await ensureRoleAssignment(db, targetUser, 'user')
-  await deletePriorUserDemoData(db, targetUser, plan)
+  await deletePriorUserDemoData(db, targetUser, plan, correlationId)
 
   const teamIdByName = new Map()
   const proposerTeamNames = [...new Set(plan.teamChallenges.map((challenge) => challenge.proposerTeamName).filter(Boolean))]
@@ -894,10 +972,21 @@ async function ensureOrganizerAccount(db, email) {
   return { ...authUser, accountId }
 }
 
-async function deleteTournamentRows(db, tournaments) {
-  const ids = tournaments.map((tournament) => tournament.id)
-  if (!ids.length) return
+async function findTournamentIdsCreatedByAuthUser(db, authUserId, fallbackTournaments = []) {
+  const ids = new Set((fallbackTournaments || []).map((tournament) => String(tournament?.id || tournament || '')).filter(Boolean))
+  if (!authUserId || !(await tableExists(db, 'tournaments'))) return [...ids]
+  const columns = await columnsFor(db, 'tournaments')
+  if (!hasColumn(columns, 'id') || !hasColumn(columns, 'created_by_auth_user_id')) return [...ids]
+  const [rows] = await db.execute('SELECT id FROM tournaments WHERE created_by_auth_user_id = ?', [authUserId])
+  for (const row of rows || []) if (row?.id) ids.add(String(row.id))
+  return [...ids]
+}
+
+async function deleteTournamentRows(db, tournamentsOrIds) {
+  const ids = [...new Set((tournamentsOrIds || []).map((tournament) => String(tournament?.id || tournament || '')).filter(Boolean))]
+  if (!ids.length) return 0
   const placeholders = ids.map(() => '?').join(', ')
+  let deleted = 0
   for (const [tableName, columns] of [
     ['tournament_team_start_assignments', ['tournament_id']],
     ['tournament_team_scores', ['tournament_id']],
@@ -910,11 +999,59 @@ async function deleteTournamentRows(db, tournaments) {
     const matchedColumns = columns.filter((column) => hasColumn(tableColumns, column))
     const predicates = matchedColumns.map((column) => `${quoteIdentifier(column)} IN (${placeholders})`)
     const params = matchedColumns.flatMap(() => ids)
-    if (predicates.length) await db.query(`DELETE FROM ${quoteIdentifier(tableName)} WHERE ${predicates.join(' OR ')}`, params)
+    if (predicates.length) {
+      const [result] = await db.query(`DELETE FROM ${quoteIdentifier(tableName)} WHERE ${predicates.join(' OR ')}`, params)
+      deleted += Number(result?.affectedRows || 0)
+    }
   }
   if (await tableExists(db, 'tournaments')) {
-    await db.query(`DELETE FROM tournaments WHERE id IN (${placeholders})`, ids)
+    const [result] = await db.query(`DELETE FROM tournaments WHERE id IN (${placeholders})`, ids)
+    deleted += Number(result?.affectedRows || 0)
   }
+  return deleted
+}
+
+async function deletePriorHostCourseEvents(db, host, correlationId) {
+  if (!(await tableExists(db, 'golf_course_events'))) return 0
+  const columns = await columnsFor(db, 'golf_course_events')
+  const predicates = []
+  const params = []
+  const hostAccountIds = [...new Set([host.accountId, host.hostAccountId, host.hostRoleAccountId].filter(Boolean))]
+  if (hostAccountIds.length && hasColumn(columns, 'created_by_host_account_id')) {
+    predicates.push(`created_by_host_account_id IN (${hostAccountIds.map(() => '?').join(', ')})`)
+    params.push(...hostAccountIds)
+  } else if (hasColumn(columns, 'correlation_id')) {
+    predicates.push('correlation_id LIKE ?')
+    params.push('demo-population:%')
+  }
+  if (!predicates.length) return 0
+  const [result] = await db.query(`DELETE FROM golf_course_events WHERE ${predicates.join(' OR ')}`, params)
+  const count = Number(result?.affectedRows || 0)
+  logApi('manual_demo_host_prior_course_events_deleted', { correlationId, accountEmail: host.email, deletedCourseEvents: count })
+  return count
+}
+
+async function populateDemoCourseEvents(db, events, host, publicPageId, correlationId) {
+  if (!(await tableExists(db, 'golf_course_events'))) return 0
+  let count = 0
+  for (const event of events || []) {
+    await upsertRow(db, 'golf_course_events', {
+      id: event.id,
+      golf_course_public_page_id: publicPageId,
+      title: event.title,
+      event_date: event.eventDate,
+      start_time: event.startTime,
+      end_time: event.endTime,
+      details: event.details,
+      is_public: 1,
+      created_by_host_account_id: host.accountId,
+      correlation_id: `demo-population:${correlationId}`,
+      created_at: new Date(`${event.eventDate}T12:00:00Z`),
+      updated_at: new Date(),
+    }, ['golf_course_public_page_id', 'title', 'event_date', 'start_time', 'end_time', 'details', 'is_public', 'created_by_host_account_id', 'correlation_id', 'updated_at'])
+    count += 1
+  }
+  return count
 }
 
 
@@ -1103,9 +1240,12 @@ async function populateHostDemoData(db, plan, organizerPlan, correlationId) {
   const course = await ensureDemoGolfCourse(db)
   const host = await ensureHostAccounts(db, plan.email)
   await associateHostToDemoCourse(db, host, course)
-  await ensureDemoGolfCoursePublicPage(db, host, course)
+  const publicPage = await ensureDemoGolfCoursePublicPage(db, host, course)
   const organizer = await ensureOrganizerAccount(db, organizerPlan.email)
-  await deleteTournamentRows(db, plan.tournaments)
+  const priorTournamentIds = await findTournamentIdsCreatedByAuthUser(db, host.id, plan.tournaments)
+  const deletedTournamentRows = await deleteTournamentRows(db, priorTournamentIds)
+  const deletedCourseEvents = await deletePriorHostCourseEvents(db, host, correlationId)
+  logApi('manual_demo_host_prior_data_deleted', { correlationId, accountEmail: host.email, tournamentCount: priorTournamentIds.length, deletedTournamentRows, deletedCourseEvents })
 
   for (let index = 0; index < plan.tournaments.length; index += 1) {
     const tournament = plan.tournaments[index]
@@ -1119,6 +1259,7 @@ async function populateHostDemoData(db, plan, organizerPlan, correlationId) {
     await syncDemoTournamentSearchRecord(db, tournament, course, correlationId)
     await populateTournamentOperationalRows(db, tournament, course, correlationId)
   }
+  const courseEvents = await populateDemoCourseEvents(db, plan.courseEvents, host, publicPage.id, correlationId)
 
   return {
     authUserId: host.id,
@@ -1127,6 +1268,7 @@ async function populateHostDemoData(db, plan, organizerPlan, correlationId) {
     demoGolfCourseName: course.name,
     associatedOrganizerAccountId: organizer.accountId,
     tournaments: plan.tournaments.length,
+    courseEvents,
     organizerAssociations: plan.associatedOrganizerTournamentCount,
   }
 }
@@ -1137,7 +1279,8 @@ async function populateOrganizerDemoData(db, plan, hostPlan, correlationId) {
   const host = await ensureHostAccounts(db, hostPlan.email)
   await associateHostToDemoCourse(db, host, course)
   await ensureDemoGolfCoursePublicPage(db, host, course)
-  await deleteTournamentRows(db, plan.tournaments)
+  const priorTournamentIds = await findTournamentIdsCreatedByAuthUser(db, organizer.id, plan.tournaments)
+  await deleteTournamentRows(db, priorTournamentIds)
 
   for (const tournament of plan.tournaments) {
     await insertTournament(db, tournament, {
@@ -1167,7 +1310,7 @@ async function executePopulation(db, scope, plan, correlationId) {
   if (scope === 'all') await ensureDemoGolfCourse(db)
   if (scope === 'all' || scope === 'user') {
     await prepareUserDemoCourses(db, plan)
-    results.user = await populateUserDemoData(db, plan.user)
+    results.user = await populateUserDemoData(db, plan.user, correlationId)
   }
   if (scope === 'all' || scope === 'host') results.host = await populateHostDemoData(db, plan.host, plan.organizer, correlationId)
   if (scope === 'all' || scope === 'organizer') results.organizer = await populateOrganizerDemoData(db, plan.organizer, plan.host, correlationId)

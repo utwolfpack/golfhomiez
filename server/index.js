@@ -18,7 +18,7 @@ import { calculateHoleScoreTotal, calculateProvidedHoleScoreTotal, getHoleScorec
 import { clearScorecardDraftHoles, deleteScorecardDraftHole, listScorecardDraftHoles, normalizeDraftContext, normalizeDraftHole, upsertScorecardDraftHole } from './lib/scorecard-drafts.js'
 import { sendMail } from './mailer.js'
 import { generateQrSvg } from './lib/qr-code.js'
-import { cancelScheduledJob, configureScheduledJob, listScheduledJobs, runScheduledJob, shouldRunScheduledJobInBackground, startScheduledJobRunner } from './lib/scheduled-jobs.js'
+import { cancelScheduledJob, configureScheduledJob, getLatestScheduledJobCommercialOutput, listScheduledJobs, runScheduledJob, shouldRunScheduledJobInBackground, startScheduledJobRunner } from './lib/scheduled-jobs.js'
 import { searchGolfCourseTournaments, syncGolfHomiezTournamentSearchRecord } from './lib/tournament-discovery.js'
 import { searchGolfHomiezCourses } from './lib/golf-course-search.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -43,6 +43,8 @@ import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarket
 import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
 import { completeCheckout, createAccessCode, createCheckout, createPaymentMethodCheckout, createPortal, getBillingStatus, listAccessCodes, processStripeWebhook, redeemAccessCode, requireBillingAccess, setCancellation, updateAccessCode } from './lib/billing.js'
 import { ROUND_IMAGE_LIMIT, TOURNAMENT_IMAGE_LIMIT, USER_IMAGE_ENTITY_TYPES, deleteUserImage, ensureUserImagesDirectory, getUserImage, getUserImageCounts, listUserImages, safeImageFilePath, saveUserImage } from './lib/user-images.js'
+import { verifySignedSocialMediaToken } from './lib/social-publishing-crypto.js'
+import { getSocialPublishingConfiguration, retrySocialPublicationsForRun, startSocialPublicationRetryWorker } from './lib/social-publisher.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -52,6 +54,7 @@ ensureUserImagesDirectory()
 app.set('trust proxy', 1)
 const PORT = Number(process.env.PORT)
 let cancelledTournamentCleanupScheduler = null
+let socialPublicationRetryWorker = null
 if (!Number.isFinite(PORT) || PORT <= 0) throw new Error('PORT must be set to a valid positive number in the environment')
 let storageReady = false
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
@@ -2574,6 +2577,52 @@ app.get('/api/admin/external-api-calls', adminMiddleware, async (req, res) => {
   }
 })
 
+
+app.get('/api/admin/social-publishing/connections', adminMiddleware, async (req, res) => {
+  try {
+    const status = getSocialPublishingConfiguration()
+    logApi('admin_social_publishing_connections_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, autoPublishEnabled: status.autoPublishEnabled })
+    logScheduledJob('admin_social_publishing_connections_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, autoPublishEnabled: status.autoPublishEnabled })
+    return res.json(status)
+  } catch (error) {
+    logRouteError('Admin social publishing configuration load error', req, error)
+    return res.status(500).json({ message: error.message || 'Could not load social publishing configuration.' })
+  }
+})
+
+app.post('/api/admin/social-publishing/publications/:runId/retry', adminMiddleware, async (req, res) => {
+  try {
+    const runId = String(req.params.runId || '').trim()
+    if (!runId) return res.status(400).json({ message: 'Scheduled job run id is required.' })
+    const publications = await retrySocialPublicationsForRun(getPool(), runId, { logApi, logError, logScheduledJob })
+    logApi('admin_social_publications_retry_completed', { ...requestContext(req), adminUserId: req.adminUser.id, runId, publicationCount: publications.length })
+    return res.json({ runId, publications, jobs: await listScheduledJobs(getPool()) })
+  } catch (error) {
+    logRouteError('Admin social publication retry error', req, error)
+    return res.status(500).json({ message: error.message || 'Could not retry social publications.' })
+  }
+})
+
+app.get('/api/social-publishing/media/:token', async (req, res) => {
+  try {
+    const payload = verifySignedSocialMediaToken(req.params.token)
+    const projectRoot = path.resolve(__dirname, '..')
+    const commercialRoot = path.resolve(projectRoot, 'jobs', 'commercials')
+    const absolutePath = path.resolve(projectRoot, payload.relativePath)
+    if (!absolutePath.startsWith(`${commercialRoot}${path.sep}`) || path.extname(absolutePath).toLowerCase() !== '.mp4' || !fs.existsSync(absolutePath)) {
+      return res.status(404).json({ message: 'Signed social media file was not found.' })
+    }
+    logApi('social_signed_media_requested', { ...requestContext(req), runId: payload.runId, relativePath: payload.relativePath })
+    res.setHeader('Content-Type', 'video/mp4')
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0')
+    res.setHeader('Content-Disposition', `inline; filename="${path.basename(absolutePath).replace(/"/g, '')}"`)
+    return res.sendFile(absolutePath)
+  } catch (error) {
+    logRouteError('Signed social media request error', req, error)
+    return res.status(403).json({ message: 'Signed social media URL is invalid or expired.' })
+  }
+})
+
 app.get('/api/admin/scheduled-jobs', adminMiddleware, async (req, res) => {
   try {
     const jobs = await listScheduledJobs(getPool())
@@ -2584,6 +2633,44 @@ app.get('/api/admin/scheduled-jobs', adminMiddleware, async (req, res) => {
     logRouteError('Admin scheduled jobs load error', req, error)
     logScheduledJob('admin_scheduled_jobs_load_failed', { ...requestContext(req), adminUserId: req.adminUser?.id || null, error })
     res.status(500).json({ message: 'Could not load scheduled jobs' })
+  }
+})
+
+
+app.get('/api/admin/scheduled-jobs/:id/latest-output', adminMiddleware, async (req, res) => {
+  try {
+    const jobId = String(req.params.id || '').trim()
+    if (!jobId) return res.status(400).json({ message: 'Scheduled job id is required' })
+    const latest = await getLatestScheduledJobCommercialOutput(getPool(), jobId)
+    if (!latest) return res.status(404).json({ message: 'No generated MP4 is available for this scheduled job yet.' })
+
+    const projectRoot = path.resolve(__dirname, '..')
+    const commercialRoot = path.resolve(projectRoot, 'jobs', 'commercials')
+    const relativePath = String(latest.output.relativePath || '')
+    const absolutePath = path.resolve(projectRoot, relativePath)
+    const insideCommercialRoot = absolutePath.startsWith(`${commercialRoot}${path.sep}`)
+    if (!insideCommercialRoot || path.extname(absolutePath).toLowerCase() !== '.mp4' || !fs.existsSync(absolutePath)) {
+      logScheduledJob('admin_scheduled_job_latest_output_missing', { ...requestContext(req), adminUserId: req.adminUser.id, jobId, relativePath, level: 'warn' })
+      return res.status(404).json({ message: 'The latest generated MP4 is no longer available on this server.' })
+    }
+
+    const fileName = path.basename(String(latest.output.fileName || absolutePath))
+    const details = { ...requestContext(req), adminUserId: req.adminUser.id, jobId, runId: latest.run?.id || null, fileName, relativePath }
+    logApi('admin_scheduled_job_latest_output_download_started', details)
+    logScheduledJob('admin_scheduled_job_latest_output_download_started', details)
+    return res.download(absolutePath, fileName, (error) => {
+      if (error) {
+        logRouteError('Admin scheduled job latest output download error', req, error, { jobId, runId: latest.run?.id || null, relativePath })
+        logScheduledJob('admin_scheduled_job_latest_output_download_failed', { ...details, error: error?.message || String(error), level: 'error' })
+        if (!res.headersSent) res.status(500).json({ message: 'Could not download the generated MP4.' })
+        return
+      }
+      logApi('admin_scheduled_job_latest_output_download_completed', details)
+      logScheduledJob('admin_scheduled_job_latest_output_download_completed', details)
+    })
+  } catch (error) {
+    logRouteError('Admin scheduled job latest output download error', req, error)
+    res.status(500).json({ message: 'Could not download the generated MP4.' })
   }
 })
 
@@ -7628,6 +7715,9 @@ async function bootstrap() {
     logInfo('Storage backend initialized', { backend, storageReady, ...logPaths })
     if (!cancelledTournamentCleanupScheduler) {
       cancelledTournamentCleanupScheduler = startScheduledJobRunner(() => getPool(), { logApi, logError, logInfo, logScheduledJob })
+    }
+    if (!socialPublicationRetryWorker) {
+      socialPublicationRetryWorker = startSocialPublicationRetryWorker(() => getPool(), { logApi, logError, logScheduledJob })
     }
   } catch (error) {
     storageReady = false

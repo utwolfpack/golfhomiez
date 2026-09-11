@@ -3314,6 +3314,42 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
       return loadMigrationSql('20260906_086_user_images.sql')
     },
   },
+  {
+    version: '20260909_087',
+    name: 'social_publishing',
+    filename: '20260909_087_social_publishing.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'social_platform_connections') &&
+        await columnExists(db, 'social_platform_connections', 'platform') &&
+        await columnExists(db, 'social_platform_connections', 'access_token_ciphertext') &&
+        await columnExists(db, 'social_platform_connections', 'refresh_token_ciphertext') &&
+        await columnExists(db, 'social_platform_connections', 'metadata_json') &&
+        await indexExists(db, 'social_platform_connections', 'uq_social_platform_connections_platform') &&
+        await tableExists(db, 'social_publications') &&
+        await columnExists(db, 'social_publications', 'scheduled_job_run_id') &&
+        await columnExists(db, 'social_publications', 'platform') &&
+        await columnExists(db, 'social_publications', 'source_file_relative_path') &&
+        await columnExists(db, 'social_publications', 'next_attempt_at') &&
+        await indexExists(db, 'social_publications', 'uq_social_publications_run_platform') &&
+        await indexExists(db, 'social_publications', 'idx_social_publications_status_retry')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260909_087_social_publishing.sql')
+    },
+  },
+  {
+    version: '20260909_088',
+    name: 'remove_social_platform_connections',
+    filename: '20260909_088_remove_social_platform_connections.sql',
+    async isSatisfied(db) {
+      return !(await tableExists(db, 'social_platform_connections'))
+    },
+    async getSql() {
+      return loadMigrationSql('20260909_088_remove_social_platform_connections.sql')
+    },
+  },
 
 ]
 

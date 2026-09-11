@@ -104,7 +104,10 @@ export function calculateTeamChallengePoints(
     const proposerScore = holeScore(proposerHole)
     const challengedScore = holeScore(challengedHole)
     if (proposerScore === null || challengedScore === null) {
-      holeResults.push({ hole, winner: 'pending', proposerScore, challengedScore, pointsAwarded: 0, carryoverAfterHole: scoringType === 'skins_push' ? carryoverPoints : 0, strokeDifferential: 0, strokeDifferentialBonus: 0 })
+      // A push belongs to the hole where the tie occurred. Keep the running
+      // carryover internally for the next completed hole, but do not stamp the
+      // same push value onto every future/pending scoreboard row.
+      holeResults.push({ hole, winner: 'pending', proposerScore, challengedScore, pointsAwarded: 0, carryoverAfterHole: 0, strokeDifferential: 0, strokeDifferentialBonus: 0 })
       continue
     }
 

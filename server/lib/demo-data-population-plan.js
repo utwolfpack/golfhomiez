@@ -167,8 +167,23 @@ const BENEFICIARY_CHARITIES = Object.freeze([
   'Mountain West Family Support',
 ])
 
+const COURSE_EVENT_TEMPLATES = Object.freeze([
+  { title: 'Twilight Golf League', startTime: '17:30', endTime: '20:30', details: 'Nine-hole league play with weekly standings, closest-to-the-pin contests, and post-round social time.' },
+  { title: 'Junior Golf Skills Clinic', startTime: '09:00', endTime: '11:00', details: 'Junior instruction covering putting, chipping, full-swing fundamentals, course etiquette, and on-course confidence.' },
+  { title: 'Women on the Green Clinic', startTime: '17:00', endTime: '19:00', details: 'Welcoming clinic with range instruction, short-game stations, and an optional nine-hole social round.' },
+  { title: 'Couples Nine & Dine', startTime: '16:30', endTime: '20:30', details: 'A relaxed nine-hole couples event followed by dinner on the patio and GolfHomiez scoring highlights.' },
+  { title: 'Club Fitting & Equipment Showcase', startTime: '10:00', endTime: '15:00', details: 'Try current drivers, irons, wedges, and putters with launch-monitor fitting stations on the practice range.' },
+  { title: 'Senior Fairway League', startTime: '08:00', endTime: '12:00', details: 'Weekly senior league with team formats, rotating games, live score tracking, and season standings.' },
+  { title: 'Family Golf Night', startTime: '17:30', endTime: '20:00', details: 'Family-friendly golf activities, putting games, beginner instruction, and a short-format course experience.' },
+  { title: 'Short Game Masterclass', startTime: '11:00', endTime: '13:00', details: 'Focused instruction for wedges, bunker play, pitching, chipping, and pressure putting around the practice green.' },
+  { title: 'Men’s League Match Night', startTime: '16:00', endTime: '20:30', details: 'League match play with team pairings, skins, closest-to-the-pin contests, and GolfHomiez leaderboard tracking.' },
+  { title: 'Parent-Junior Scramble', startTime: '14:00', endTime: '18:00', details: 'Two-person parent-junior scramble with age-friendly tees, team scoring, prizes, and a casual awards gathering.' },
+  { title: 'Putting Championship', startTime: '18:00', endTime: '20:00', details: 'Open putting competition with qualifying rounds, bracket play, prizes, and a championship match under the lights.' },
+  { title: 'Fairway Food Truck Night', startTime: '17:00', endTime: '20:00', details: 'Open range and putting green, local food trucks, music, golf games, and an easy social night at the course.' },
+])
+
 const TEAM_CHALLENGE_STATUS_SEQUENCE = Object.freeze(['proposed', 'accepted', 'completed'])
-const INDIVIDUAL_PARTICIPANT_COUNTS = Object.freeze([5, 7, 9, 11, 13, 15, 17, 19, 21, 25])
+const INDIVIDUAL_PARTICIPANT_COUNTS = Object.freeze([5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 17, 19, 21, 23, 24, 25])
 
 export function normalizePopulationType(value) {
   const normalized = String(value || '').trim().toLowerCase()
@@ -342,11 +357,14 @@ export function buildSkinsPushHoleDetails(total, holes = 18, holeMetadata = DEMO
 }
 
 export function buildDemoSoloRounds(userEmail = DEMO_DATA_EMAILS.user) {
-  return Array.from({ length: 40 }, (_, index) => {
-    const score = 76 + ((index * 5) % 17)
+  const count = 72
+  const startDate = isoDateDaysFromToday(-540)
+  const endDate = isoDateDaysFromToday(-2)
+  return Array.from({ length: count }, (_, index) => {
+    const score = 74 + ((index * 5) % 20)
     return {
       id: stableDemoId('demo-score', userEmail, index),
-      date: isoDateAtOffset(index, 40),
+      date: isoDateAtOffset(index, count, startDate, endDate),
       golfCourseId: null,
       state: DEMO_STATES[index % DEMO_STATES.length],
       course: DEMO_COURSES[index % DEMO_COURSES.length],
@@ -378,12 +396,12 @@ function demoParticipant(challengeEmail, challengeIndex, participantIndex) {
 }
 
 export function buildDemoTeamChallenges(userEmail = DEMO_DATA_EMAILS.user) {
-  return Array.from({ length: 15 }, (_, index) => {
+  return Array.from({ length: 24 }, (_, index) => {
     const proposerTotal = 59 + (index % 11)
     const challengedTotal = 60 + ((index * 2) % 10)
     return {
       id: stableDemoId('demo-team-challenge', userEmail, index),
-      date: isoDateAtOffset(index, 15, '2025-02-01', '2026-07-15'),
+      date: isoDateAtOffset(index, 24, isoDateDaysFromToday(-420), isoDateDaysFromToday(-5)),
       golfCourseId: null,
       state: DEMO_STATES[index % DEMO_STATES.length],
       course: DEMO_COURSES[(index + 2) % DEMO_COURSES.length],
@@ -493,6 +511,28 @@ export function buildDemoTournaments({ ownerType, ownerEmail, associatedEmail, c
   })
 }
 
+export function buildDemoCourseEvents(hostEmail = DEMO_DATA_EMAILS.host) {
+  const pastCount = 6
+  const futureCount = 36
+  const total = pastCount + futureCount
+  return Array.from({ length: total }, (_, index) => {
+    const isFutureDated = index >= pastCount
+    const template = COURSE_EVENT_TEMPLATES[index % COURSE_EVENT_TEMPLATES.length]
+    const eventDate = isFutureDated
+      ? isoDateDaysFromToday(2 + ((index - pastCount) * 5))
+      : isoDateDaysFromToday(-42 + (index * 7))
+    return {
+      id: stableDemoId('demo-course-event', hostEmail, index),
+      title: template.title,
+      eventDate,
+      startTime: template.startTime,
+      endTime: template.endTime,
+      details: template.details,
+      isFutureDated,
+    }
+  })
+}
+
 export function buildDemoDataPlan(overrides = {}) {
   const userEmail = normalizeDemoEmail(overrides.userEmail, DEMO_DATA_EMAILS.user)
   const hostEmail = normalizeDemoEmail(overrides.hostEmail, DEMO_DATA_EMAILS.host)
@@ -509,6 +549,7 @@ export function buildDemoDataPlan(overrides = {}) {
       email: hostEmail,
       organizerEmail,
       tournaments: buildDemoTournaments({ ownerType: 'host', ownerEmail: hostEmail, associatedEmail: organizerEmail, count: 50, futureCount: 35 }),
+      courseEvents: buildDemoCourseEvents(hostEmail),
       associatedOrganizerTournamentCount: 10,
       futureTournamentCount: 35,
       pastTournamentCount: 15,
@@ -541,6 +582,9 @@ export function summarizeDemoPlan(plan = buildDemoDataPlan()) {
       tournaments: plan.host.tournaments.length,
       futureTournaments: plan.host.tournaments.filter((tournament) => tournament.isFutureDated).length,
       pastTournaments: plan.host.tournaments.filter((tournament) => !tournament.isFutureDated).length,
+      courseEvents: plan.host.courseEvents.length,
+      futureCourseEvents: plan.host.courseEvents.filter((event) => event.isFutureDated).length,
+      pastCourseEvents: plan.host.courseEvents.filter((event) => !event.isFutureDated).length,
       templates: [...new Set(plan.host.tournaments.map((tournament) => tournament.templateKey))],
       startTypes: [...new Set(plan.host.tournaments.map((tournament) => tournament.startType))],
       imageModes: [...new Set(plan.host.tournaments.map((tournament) => tournament.imageMode))],

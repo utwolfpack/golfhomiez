@@ -11,3 +11,13 @@ mysql_dumps/*.sql
 
 # Persisted user-uploaded pictures are runtime data and must never be committed.
 userimages/
+
+# Runtime-generated scheduled-job artifacts are not source-controlled.
+jobs/*
+!jobs/.gitkeep
+!jobs/commercials/
+jobs/commercials/*
+!jobs/commercials/.gitkeep
+
+# Downloaded/managed runtime tools are environment-specific and not source-controlled.
+.runtime/

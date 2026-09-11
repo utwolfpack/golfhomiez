@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import ProtectedRoute from '../components/ProtectedRoute'
 import { createTeam, deleteTeam, fetchTeams, lookupUserByEmail, sendRegistrationInvite, updateTeam } from '../lib/teams'
 import type { ScoreEntry, Team, TeamMember } from '../types'
@@ -12,6 +12,13 @@ import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 type CreateMemberValidationState = 'idle' | 'checking' | 'validated' | 'invited'
 type DraftMember = { id: string; firstName: string; lastName: string; email: string; status?: TeamMember['status']; verified?: boolean; validationState?: CreateMemberValidationState }
 type TeamNameApiError = Error & { suggestedTeamName?: string }
+type TeamChallengeReturnNavigation = {
+  returnTo?: string
+  draft: Record<string, unknown>
+}
+type TeamsLocationState = {
+  teamChallengeReturn?: TeamChallengeReturnNavigation
+}
 
 const MIN_TEAM_SIZE = 2
 const MAX_TEAM_SIZE = 4
@@ -27,7 +34,13 @@ export default function TeamsPage() {
 }
 
 function TeamsInner() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { user } = useAuth()
+  const requestedChallengeReturn = (location.state as TeamsLocationState | null)?.teamChallengeReturn
+  const challengeReturn = requestedChallengeReturn?.draft && typeof requestedChallengeReturn.draft === 'object'
+    ? requestedChallengeReturn
+    : null
   const [teams, setTeams] = useState<Team[]>([])
   const [scores, setScores] = useState<ScoreEntry[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -41,7 +54,7 @@ function TeamsInner() {
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(Boolean(challengeReturn))
   const [createName, setCreateName] = useState('')
   const [createNamePlaceholder, setCreateNamePlaceholder] = useState('e.g. Fairway Finders')
   const [createMembers, setCreateMembers] = useState<DraftMember[]>([makeBlankDraftMember()])
@@ -73,6 +86,15 @@ function TeamsInner() {
       window.removeEventListener('focus', onFocus)
     }
   }, [])
+
+  useEffect(() => {
+    if (!challengeReturn) return
+    logFrontendEvent({
+      category: 'teams.create.challengeReturn',
+      message: 'team_create_opened_from_team_challenge',
+      data: { correlationId: getCorrelationId(), returnTo: challengeReturn.returnTo || '/challenges' },
+    })
+  }, [challengeReturn])
 
   const sorted = useMemo(() => [...teams].sort((a, b) => a.name.localeCompare(b.name)), [teams])
   const myEmail = String(user?.email || '').toLowerCase()
@@ -362,6 +384,25 @@ function TeamsInner() {
       setCreateOpen(false)
       resetCreateForm()
       logFrontendEvent({ category: 'teams.create', message: 'succeeded', data: { correlationId, teamId: created.id, teamIdentifier: created.teamIdentifier, teamName: created.name, memberCount: created.members?.length || normalizedCreateMembers.length } })
+      if (challengeReturn) {
+        const returnTo = challengeReturn.returnTo || '/challenges'
+        logFrontendEvent({
+          category: 'teams.create.challengeReturn',
+          message: 'team_created_returning_to_team_challenge',
+          data: { correlationId, teamId: created.id, teamIdentifier: created.teamIdentifier, teamName: created.name, destination: returnTo },
+        })
+        navigate(returnTo, {
+          replace: true,
+          state: {
+            resumeTeamChallenge: {
+              draft: challengeReturn.draft,
+              proposerTeamId: created.id,
+              createdTeamName: created.name,
+            },
+          },
+        })
+        return
+      }
     } catch (e: any) {
       const apiError = e as TeamNameApiError
       const suggestedTeamName = apiError.suggestedTeamName || buildSuggestedTeamName(createName, teams)
@@ -456,15 +497,35 @@ function TeamsInner() {
           title="Your teams at a glance"
           subtitle="Create teams, keep rosters clean, and use each team's numeric GolfHomiez Team ID when creating a Team Challenge."
           actions={
-            <Link
-              className="btn btnLightGreen btnSmall"
-              to="/profile"
-              onClick={() => logFrontendEvent({ category: 'teams.navigation', message: 'return_to_profile_clicked', data: { teamCount: myTeams.length } })}
-            >
-              Return to Profile
-            </Link>
+            challengeReturn ? (
+              <Link
+                className="btn btnLightGreen btnSmall"
+                to={challengeReturn.returnTo || '/challenges'}
+                state={{ resumeTeamChallenge: { draft: challengeReturn.draft } }}
+                onClick={() => logFrontendEvent({ category: 'teams.navigation', message: 'return_to_team_challenge_clicked', data: { correlationId: getCorrelationId(), teamCount: myTeams.length } })}
+              >
+                Return to Challenge
+              </Link>
+            ) : (
+              <Link
+                className="btn btnLightGreen btnSmall"
+                to="/profile"
+                onClick={() => logFrontendEvent({ category: 'teams.navigation', message: 'return_to_profile_clicked', data: { teamCount: myTeams.length } })}
+              >
+                Return to Profile
+              </Link>
+            )
           }
         />
+
+        {challengeReturn ? (
+          <div className="challengeTeamSetupNotice" role="status" style={{ marginTop: 10 }}>
+            <div>
+              <strong>Create your team to continue the Team Challenge.</strong>
+              <span>Your challenge setup is being preserved. After the team is saved, you will return to Challenges automatically.</span>
+            </div>
+          </div>
+        ) : null}
 
         <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <button type="button" className="btnPrimary" onClick={toggleCreateTeam}>{createOpen ? 'Hide Create Team' : 'Create Team'}</button>

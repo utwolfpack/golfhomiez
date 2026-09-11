@@ -10,7 +10,26 @@ const FRONTEND_LOG_PATH = path.join(LOG_DIR, 'frontend.log')
 const API_LOG_PATH = path.join(LOG_DIR, 'api.log')
 const SMTP_LOG_PATH = path.join(LOG_DIR, 'smtp.log')
 const SCHEDULED_JOBS_LOG_PATH = path.join(LOG_DIR, 'scheduled-jobs.log')
-const REDACT_KEYS = new Set(['password', 'passwordhash', 'token', 'authorization', 'cookie', 'secret', 'smtp_pass', 'smtp_key'])
+const REDACT_KEYS = new Set([
+  'password', 'passwordhash', 'token', 'authorization', 'cookie', 'secret', 'smtp_pass', 'smtp_key',
+  'access_token', 'refresh_token', 'accesstoken', 'refreshtoken', 'access_token_ciphertext',
+  'refresh_token_ciphertext', 'social_token_encryption_key', 'meta_app_secret', 'linkedin_client_secret',
+  'google_client_secret', 'client_secret', 'code', 'state', 'id_token', 'code_verifier', 'appsecret_proof',
+  'social_media_signing_secret', 'facebook_page_access_token', 'instagram_access_token',
+  'linkedin_access_token', 'linkedin_refresh_token', 'youtube_refresh_token',
+])
+
+function safeRequestUrl(value) {
+  const raw = String(value || '')
+  if (!raw || !raw.includes('?')) return raw
+  const [pathname, queryString = ''] = raw.split('?', 2)
+  const params = new URLSearchParams(queryString)
+  for (const key of [...params.keys()]) {
+    if (REDACT_KEYS.has(String(key).toLowerCase())) params.set(key, '[redacted]')
+  }
+  const sanitized = params.toString()
+  return sanitized ? `${pathname}?${sanitized}` : pathname
+}
 
 function ensureLogDir() {
   fs.mkdirSync(LOG_DIR, { recursive: true })
@@ -176,7 +195,7 @@ export function requestContext(req) {
   return safeValue({
     correlationId: req?.correlationId || getCorrelationId() || null,
     method: req.method,
-    path: req.originalUrl || req.url,
+    path: safeRequestUrl(req.originalUrl || req.url),
     ip: req.ip,
     userAgent: req.headers['user-agent'] || null,
     user: req.user ? { id: req.user.id, email: req.user.email } : null,
@@ -213,7 +232,7 @@ export function accessLogMiddleware(req, res, next) {
       type: 'http_access',
       correlationId: req.correlationId || null,
       method: req.method,
-      path: req.originalUrl || req.url,
+      path: safeRequestUrl(req.originalUrl || req.url),
       statusCode: res.statusCode,
       durationMs: Number(durationMs.toFixed(2)),
       ip: req.ip,
