@@ -17,6 +17,7 @@ export type IndividualChallengeParticipant = {
   courseId?: string | null
   courseState?: string | null
   courseName?: string | null
+  roundDate?: string | null
 }
 
 export type InboxMessage = {
@@ -229,7 +230,7 @@ export async function refreshIndividualChallengeParticipants(messageId: string):
   })
 }
 
-export async function updateIndividualChallengeCourse(messageId: string, input: { state: string; course: string; courseId?: string | null }): Promise<InboxMessage> {
+export async function updateIndividualChallengeCourse(messageId: string, input: { state?: string; course?: string; courseId?: string | null; roundDate?: string | null }): Promise<InboxMessage> {
   return api<InboxMessage>(`/api/inbox/messages/${encodeURIComponent(messageId)}/individual-course`, {
     method: 'PATCH',
     body: JSON.stringify(input),

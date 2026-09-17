@@ -3,7 +3,9 @@ import type { Tournament, TournamentMessageThread, TournamentMessagesResponse } 
 import {
   fetchHostTournamentMessages,
   fetchOrganizerTournamentMessages,
+  markHostTournamentMessageThreadRead,
   markHostTournamentMessagesRead,
+  markOrganizerTournamentMessageThreadRead,
   markOrganizerTournamentMessagesRead,
   replyHostTournamentMessage,
   replyOrganizerTournamentMessage,
@@ -15,6 +17,10 @@ import { logFrontendEvent } from '../lib/frontend-logger'
 type Props = {
   tournament: Tournament
   actor: 'host' | 'organizer'
+  autoOpenMessages?: boolean
+  autoOpenThreadId?: string | null
+  autoOpenMessageId?: string | null
+  onUnreadCountChange?: (unreadCount: number) => void
 }
 
 type Recipient = { email: string; name: string }
@@ -32,11 +38,28 @@ function registeredRecipients(tournament: Tournament): Recipient[] {
   return [...byEmail.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
+function timestampMs(value?: string | null) {
+  const parsed = value ? Date.parse(value) : Number.NaN
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 function formatTimestamp(value?: string | null) {
   if (!value) return 'Date unavailable'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatMessageDate(value?: string | null) {
+  if (!value) return 'Date unavailable'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString(undefined, { dateStyle: 'medium' })
+}
+
+function threadAttendees(thread: TournamentMessageThread) {
+  const attendees = thread.recipients.map((recipient) => recipient.name || recipient.email).filter(Boolean)
+  return attendees.length ? attendees.join(', ') : 'No attendees listed'
 }
 
 function NotificationBellIcon() {
@@ -48,7 +71,7 @@ function NotificationBellIcon() {
   )
 }
 
-export default function TournamentMessagingPanel({ tournament, actor }: Props) {
+export default function TournamentMessagingPanel({ tournament, actor, autoOpenMessages = false, autoOpenThreadId = null, autoOpenMessageId = null, onUnreadCountChange }: Props) {
   const recipients = useMemo(() => registeredRecipients(tournament), [tournament])
   const [selectedEmails, setSelectedEmails] = useState<string[]>([])
   const [body, setBody] = useState('')
@@ -57,14 +80,22 @@ export default function TournamentMessagingPanel({ tournament, actor }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [messagesOpen, setMessagesOpen] = useState(false)
   const [composeOpen, setComposeOpen] = useState(false)
+  const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null)
+  const [markingReadThreadId, setMarkingReadThreadId] = useState<string | null>(null)
+  const [markingAllRead, setMarkingAllRead] = useState(false)
   const messagesModalRef = useRef<HTMLElement | null>(null)
   const [history, setHistory] = useState<TournamentMessagesResponse | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [replyBodyByThread, setReplyBodyByThread] = useState<Record<string, string>>({})
   const [replyingThreadId, setReplyingThreadId] = useState<string | null>(null)
+  const autoOpenHandledRef = useRef(false)
 
   const selectedSet = useMemo(() => new Set(selectedEmails), [selectedEmails])
   const allSelected = recipients.length > 0 && selectedEmails.length === recipients.length
+  const sortedThreads = useMemo(
+    () => [...(history?.threads || [])].sort((a, b) => timestampMs(b.createdAt) - timestampMs(a.createdAt) || String(b.id).localeCompare(String(a.id))),
+    [history?.threads],
+  )
 
   async function loadHistory(options: { quiet?: boolean } = {}) {
     if (!options.quiet) setHistoryLoading(true)
@@ -73,6 +104,7 @@ export default function TournamentMessagingPanel({ tournament, actor }: Props) {
         ? await fetchHostTournamentMessages(tournament.id)
         : await fetchOrganizerTournamentMessages(tournament.id)
       setHistory(result)
+      onUnreadCountChange?.(Number(result.unreadCount || 0))
       logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, message: 'tournament_message_history_loaded', data: { tournamentId: tournament.id, threadCount: result.totalThreads, unreadCount: result.unreadCount } })
       return result
     } catch (err) {
@@ -88,11 +120,28 @@ export default function TournamentMessagingPanel({ tournament, actor }: Props) {
   useEffect(() => {
     void loadHistory({ quiet: true })
     const refreshOnFocus = () => { void loadHistory({ quiet: true }) }
+    const intervalId = window.setInterval(() => { void loadHistory({ quiet: true }) }, 30000)
     window.addEventListener('focus', refreshOnFocus)
-    return () => window.removeEventListener('focus', refreshOnFocus)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refreshOnFocus)
+    }
     // tournament/actor changes create a new panel identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tournament.id, actor])
+
+  useEffect(() => {
+    autoOpenHandledRef.current = false
+    setExpandedThreadId(null)
+  }, [tournament.id, autoOpenThreadId, autoOpenMessageId])
+
+  useEffect(() => {
+    if (!autoOpenMessages || autoOpenHandledRef.current) return
+    autoOpenHandledRef.current = true
+    void openMessages(autoOpenThreadId, autoOpenMessageId)
+    // The auto-open request is intentionally one-shot for the selected tournament/thread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenMessages, autoOpenThreadId, autoOpenMessageId, tournament.id])
 
   useEffect(() => {
     if (!messagesOpen) return
@@ -144,18 +193,78 @@ export default function TournamentMessagingPanel({ tournament, actor }: Props) {
     }
   }
 
-  async function openMessages() {
+  async function openMessages(targetThreadId: string | null = null, targetMessageId: string | null = null) {
+    setComposeOpen(true)
     setMessagesOpen(true)
+    setExpandedThreadId(null)
     setError(null)
     const result = await loadHistory()
     if (!result) return
+    const targetThread = targetThreadId ? result.threads.find((thread) => thread.id === targetThreadId) : null
+    if (targetThread) {
+      setExpandedThreadId(targetThread.id)
+      // A top-level unread-message selection already marks only that individual message read.
+      // Do not convert that action into a thread-wide mark-read when the modal opens.
+      if (!targetMessageId && Number(targetThread.unreadCount || 0) > 0) await markThreadRead(targetThread, Number(result.unreadCount || 0))
+    }
+    logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, message: 'tournament_messages_opened', data: { tournamentId: tournament.id, threadCount: result.totalThreads, unreadCount: result.unreadCount, targetThreadId: targetThreadId || null, targetMessageId: targetMessageId || null, composeExpanded: true, individualUnreadSelection: Boolean(targetMessageId) } })
+  }
+
+  async function markThreadRead(thread: TournamentMessageThread, currentUnreadOverride?: number) {
+    const unreadToClear = Math.max(0, Number(thread.unreadCount || 0))
+    if (!unreadToClear || markingReadThreadId === thread.id) return
+    setMarkingReadThreadId(thread.id)
     try {
-      if (actor === 'host') await markHostTournamentMessagesRead(tournament.id)
-      else await markOrganizerTournamentMessagesRead(tournament.id)
-      setHistory((current) => current ? { ...current, unreadCount: 0, lastReadAt: new Date().toISOString() } : current)
-      logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, message: 'tournament_messages_opened', data: { tournamentId: tournament.id, threadCount: result.totalThreads, unreadCount: result.unreadCount } })
+      const state = actor === 'host'
+        ? await markHostTournamentMessageThreadRead(tournament.id, thread.id)
+        : await markOrganizerTournamentMessageThreadRead(tournament.id, thread.id)
+      const currentUnread = Math.max(0, Number(currentUnreadOverride ?? history?.unreadCount ?? unreadToClear))
+      const nextUnread = Math.max(0, currentUnread - unreadToClear)
+      setHistory((current) => current ? {
+        ...current,
+        unreadCount: Math.max(0, Number(current.unreadCount || 0) - unreadToClear),
+        threads: current.threads.map((item) => item.id === thread.id ? { ...item, unreadCount: 0, lastReadAt: state.lastReadAt || new Date().toISOString() } : item),
+      } : current)
+      onUnreadCountChange?.(nextUnread)
+      logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, message: 'tournament_message_thread_marked_read', data: { tournamentId: tournament.id, threadId: thread.id, unreadCleared: unreadToClear, remainingUnread: nextUnread } })
     } catch (err) {
-      logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, level: 'error', message: 'tournament_messages_mark_read_failed', data: { tournamentId: tournament.id, error: err instanceof Error ? err.message : String(err) } })
+      const message = err instanceof Error ? err.message : 'Could not update this message notification.'
+      setError(message)
+      logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, level: 'error', message: 'tournament_message_thread_mark_read_failed', data: { tournamentId: tournament.id, threadId: thread.id, error: message } })
+    } finally {
+      setMarkingReadThreadId(null)
+    }
+  }
+
+  async function toggleThread(thread: TournamentMessageThread) {
+    const opening = expandedThreadId !== thread.id
+    setExpandedThreadId(opening ? thread.id : null)
+    logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, message: opening ? 'tournament_message_thread_expanded' : 'tournament_message_thread_collapsed', data: { tournamentId: tournament.id, threadId: thread.id, unreadCount: Number(thread.unreadCount || 0) } })
+    if (opening && Number(thread.unreadCount || 0) > 0) await markThreadRead(thread)
+  }
+
+  async function markAllMessagesRead() {
+    if (!history || Number(history.unreadCount || 0) <= 0 || markingAllRead) return
+    setMarkingAllRead(true)
+    setError(null)
+    try {
+      const state = actor === 'host'
+        ? await markHostTournamentMessagesRead(tournament.id)
+        : await markOrganizerTournamentMessagesRead(tournament.id)
+      setHistory((current) => current ? {
+        ...current,
+        unreadCount: 0,
+        lastReadAt: state.lastReadAt || new Date().toISOString(),
+        threads: current.threads.map((thread) => ({ ...thread, unreadCount: 0, lastReadAt: state.lastReadAt || new Date().toISOString() })),
+      } : current)
+      onUnreadCountChange?.(0)
+      logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, message: 'tournament_messages_marked_all_read', data: { tournamentId: tournament.id } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not mark tournament messages read.'
+      setError(message)
+      logFrontendEvent({ category: `${actor}.portal.tournamentMessages`, level: 'error', message: 'tournament_messages_mark_all_read_failed', data: { tournamentId: tournament.id, error: message } })
+    } finally {
+      setMarkingAllRead(false)
     }
   }
 
@@ -247,51 +356,80 @@ export default function TournamentMessagingPanel({ tournament, actor }: Props) {
             <div className="tournamentMessagesModalHeader">
               <div>
                 <h2 id={`tournament-messages-title-${tournament.id}`}>Tournament messages</h2>
-                <p>{tournament.name}</p>
               </div>
-              <button type="button" className="button secondary small" onClick={() => setMessagesOpen(false)}>Close</button>
+              <div className="tournamentMessagesModalHeaderActions">
+                {(history?.unreadCount || 0) > 0 ? <button type="button" className="button secondary small" disabled={markingAllRead} onClick={() => void markAllMessagesRead()}>{markingAllRead ? 'Updating…' : 'Mark all read'}</button> : null}
+                <button type="button" className="button secondary small" onClick={() => setMessagesOpen(false)}>Close</button>
+              </div>
             </div>
 
             {error ? <div className="alert error" role="alert">{error}</div> : null}
             {historyLoading ? <p>Loading tournament messages…</p> : null}
-            {!historyLoading && (history?.threads.length || 0) === 0 ? <p className="emptyState">No tournament messages have been sent yet.</p> : null}
+            {!historyLoading && sortedThreads.length === 0 ? <p className="emptyState">No tournament messages have been sent yet.</p> : null}
 
             <div className="tournamentMessageThreadList">
-              {(history?.threads || []).map((thread) => (
-                <article className="tournamentMessageThread" key={thread.id}>
-                  <div className="tournamentMessageThreadHeader">
-                    <div>
-                      <strong>Sent to {thread.recipients.length} golfer{thread.recipients.length === 1 ? '' : 's'}</strong>
-                      <span>{thread.recipients.map((recipient) => recipient.name || recipient.email).join(', ')}</span>
-                    </div>
-                    <span>{formatTimestamp(thread.createdAt)}</span>
-                  </div>
+              {sortedThreads.map((thread) => {
+                const expanded = expandedThreadId === thread.id
+                const unreadCount = Math.max(0, Number(thread.unreadCount || 0))
+                const attendees = threadAttendees(thread)
+                return (
+                  <article className={`tournamentMessageThread${unreadCount > 0 ? ' tournamentMessageThread--unread' : ''}`} key={thread.id}>
+                    <button
+                      type="button"
+                      className="tournamentMessageThreadSummary"
+                      aria-expanded={expanded}
+                      aria-controls={`tournament-message-thread-${thread.id}`}
+                      onClick={() => void toggleThread(thread)}
+                    >
+                      <span className="tournamentMessageThreadSummaryDate">{formatMessageDate(thread.createdAt)}</span>
+                      <span className="tournamentMessageThreadSummaryAttendees">{attendees}</span>
+                      {!expanded && unreadCount > 0 ? (
+                        <span className="tournamentMessageThreadUnread" aria-label={`${unreadCount} unread message${unreadCount === 1 ? '' : 's'}`}>
+                          <NotificationBellIcon />
+                          <span>{unreadCount > 99 ? '99+' : unreadCount}</span>
+                        </span>
+                      ) : null}
+                      <span className="tournamentMessageThreadSummaryChevron" aria-hidden="true">⌄</span>
+                    </button>
 
-                  <div className="tournamentMessageDialogue">
-                    {thread.messages.map((message) => (
-                      <div className={`tournamentMessageDialogueEntry tournamentMessageDialogueEntry--${String(message.senderRole || 'user').toLowerCase()}`} key={message.id}>
-                        <div className="tournamentMessageDialogueMeta">
-                          <strong>{message.senderName || message.senderEmail || (message.senderRole === 'user' ? 'Registered golfer' : 'Tournament staff')}</strong>
-                          <span>{formatTimestamp(message.createdAt)}</span>
+                    {expanded ? (
+                      <div id={`tournament-message-thread-${thread.id}`} className="tournamentMessageThreadContent">
+                        <div className="tournamentMessageThreadHeader">
+                          <div>
+                            <strong>Sent to {thread.recipients.length} golfer{thread.recipients.length === 1 ? '' : 's'}</strong>
+                            <span>{attendees}</span>
+                          </div>
+                          <span>{formatTimestamp(thread.createdAt)}</span>
                         </div>
-                        <p>{message.body}</p>
-                      </div>
-                    ))}
-                  </div>
 
-                  <div className="tournamentMessageReplyBox">
-                    <textarea
-                      rows={2}
-                      maxLength={2000}
-                      aria-label={`Reply to tournament message sent ${formatTimestamp(thread.createdAt)}`}
-                      placeholder="Reply to everyone included in this message"
-                      value={replyBodyByThread[thread.id] || ''}
-                      onChange={(event) => setReplyBodyByThread((current) => ({ ...current, [thread.id]: event.target.value }))}
-                    />
-                    <button type="button" className="button primary small tournamentMessageReplyButton" disabled={replyingThreadId === thread.id || !String(replyBodyByThread[thread.id] || '').trim()} onClick={() => void sendReply(thread)}>{replyingThreadId === thread.id ? 'Sending…' : 'Reply'}</button>
-                  </div>
-                </article>
-              ))}
+                        <div className="tournamentMessageDialogue">
+                          {thread.messages.map((message) => (
+                            <div className={`tournamentMessageDialogueEntry tournamentMessageDialogueEntry--${String(message.senderRole || 'user').toLowerCase()}${autoOpenMessageId === message.id ? ' tournamentMessageDialogueEntry--selectedUnread' : ''}`} key={message.id}>
+                              <div className="tournamentMessageDialogueMeta">
+                                <strong>{message.senderName || message.senderEmail || (message.senderRole === 'user' ? 'Registered golfer' : 'Tournament staff')}</strong>
+                                <span>{formatTimestamp(message.createdAt)}</span>
+                              </div>
+                              <p>{message.body}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="tournamentMessageReplyBox">
+                          <textarea
+                            rows={2}
+                            maxLength={2000}
+                            aria-label={`Reply to tournament message sent ${formatTimestamp(thread.createdAt)}`}
+                            placeholder="Reply to everyone included in this message"
+                            value={replyBodyByThread[thread.id] || ''}
+                            onChange={(event) => setReplyBodyByThread((current) => ({ ...current, [thread.id]: event.target.value }))}
+                          />
+                          <button type="button" className="button primary small tournamentMessageReplyButton" disabled={replyingThreadId === thread.id || !String(replyBodyByThread[thread.id] || '').trim()} onClick={() => void sendReply(thread)}>{replyingThreadId === thread.id ? 'Sending…' : 'Reply'}</button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                )
+              })}
             </div>
           </section>
         </div>

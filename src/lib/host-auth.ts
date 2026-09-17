@@ -103,7 +103,7 @@ export async function reviewHostAccountRequest(requestId: string, decision: 'app
 
 
 export async function createAdditionalHostAccount(payload: { email: string; contactName: string; password: string }) {
-  return requestJson<{ hostAccount: HostAccount }>('/api/host/accounts', {
+  return requestJson<{ hostAccount: HostAccount; invitationEmailSent: boolean }>('/api/host/accounts', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

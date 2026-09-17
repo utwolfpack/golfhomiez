@@ -2,9 +2,9 @@
 
 ## Summary
 
-The Team Challenge leaderboard now uses a compact hole-by-hole comparison layout modeled on the provided `teamLeaderboard.png` reference. The leaderboard displays Hole, Par, both team scores, Winner, and Points. The Push column is rendered only when the Team Challenge scoring game is `Skins - Push`.
+The Team Challenge leaderboard uses a compact hole-by-hole comparison layout. It displays Hole, Par, both team scores, Winner, and the active wager value. Regular `Skins` displays Points. `Skins - Push` displays Dollars, and the Push column is rendered only for `Skins - Push`.
 
-For standard team stroke play, both Push and Points are hidden. For `Skins`, Points is shown and Push is hidden. For `Skins - Push`, both Points and Push are shown.
+For standard team stroke play, both Push and the wager-value column are hidden. For `Skins`, Points is shown and Push is hidden. For `Skins - Push`, Dollars and Push are shown, and leaderboard team rows show only the net-dollar winner (for example `$5 won`).
 
 Each team score uses the shared `HoleStrokeScore` component, so birdie/eagle/bogey/etc. symbols and score colors are consistent with the rest of GolfHomiez. Team-name column headings remain selectable in the leaderboard so users can open that team's detailed round summary without restoring the previous POS/TEAM/ROUND/THRU/TOTAL leaderboard layout.
 
@@ -22,7 +22,7 @@ The table has three responsive column configurations:
 
 - Standard team score: Hole / Par / Team / Team / Winner
 - Skins: Hole / Par / Team / Team / Winner / Points
-- Skins - Push: Hole / Par / Team / Team / Winner / Push / Points
+- Skins - Push: Hole / Par / Team / Team / Winner / Push / Dollars
 
 Mobile breakpoints reduce fixed column widths and gaps rather than introducing horizontal scrolling.
 

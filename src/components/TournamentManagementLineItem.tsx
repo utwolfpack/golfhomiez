@@ -117,6 +117,11 @@ export default function TournamentManagementLineItem({
         <div className="tournament-management-line__title-row">
           <strong className="tournament-management-line__title">{tournament.name}</strong>
           <span className={`tournament-management-line__badge tournament-management-line__badge--${archived ? 'archived' : normalizedStatus || 'draft'}`}>{archived ? 'Archived' : formatTournamentStatus(tournament.status)}</span>
+          {!archived && Number(tournament.unreadMessageCount || 0) > 0 ? (
+            <span className="tournament-management-line__unread-badge" aria-label={`${Number(tournament.unreadMessageCount || 0)} unread tournament message${Number(tournament.unreadMessageCount || 0) === 1 ? '' : 's'}`}>
+              {Number(tournament.unreadMessageCount || 0)} unread message{Number(tournament.unreadMessageCount || 0) === 1 ? '' : 's'}
+            </span>
+          ) : null}
         </div>
         <div className="tournament-management-line__details">
           <div><span>Tournament Date</span><strong>{tournament.startDate ? formatFriendlyDate(tournament.startDate) : 'Not set'}</strong></div>

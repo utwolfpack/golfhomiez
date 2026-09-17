@@ -119,9 +119,30 @@ function MarketingVideoLibrary({ audience, title, description }: MarketingVideoL
   return (
     <main className="container marketingVideoLibraryPage">
       <header className="card marketingVideoLibraryHero">
-        <div>
+        <div className="marketingVideoLibraryHeroContent">
           <div className="homeMissionEyebrow">GolfHomiez Videos</div>
           <h1>{title}</h1>
+          {sections.length > 0 ? (
+            <nav className="marketingVideoQuickLinks" aria-label={`${title} quick links`}>
+              <span className="marketingVideoQuickLinksLabel">Quick links</span>
+              <div className="marketingVideoQuickLinksList">
+                {sections.map((section) => (
+                  <Link
+                    key={section.id}
+                    className="marketingVideoQuickLink"
+                    to={section.relativeLink}
+                    onClick={() => logFrontendEvent({
+                      category: 'marketing.videos',
+                      message: 'helper_video_quick_link_clicked',
+                      data: { audience, sectionId: section.id, sectionName: section.name, relativeLink: section.relativeLink },
+                    })}
+                  >
+                    {section.name}
+                  </Link>
+                ))}
+              </div>
+            </nav>
+          ) : null}
           <p>{description}</p>
         </div>
         <Link className="btn" to="/">Back to home</Link>

@@ -172,6 +172,39 @@ export default function GolfCourseCalendarPage() {
     })
   }
 
+
+  function renderSelectedDetails(extraClass = '') {
+    if (!selectedItem) return null
+    if (selectedItem.kind === 'tournament') {
+      return (
+        <section className={`card golfCourseCalendarDetails ${extraClass}`.trim()} aria-live="polite">
+          <div className="golfCourseCalendarDetailsHeader"><div><div className="golfCoursePublicEyebrow">Tournament details</div><h2>{selectedItem.tournament.name}</h2></div><button className="btn" type="button" onClick={() => setSelectedItem(null)}>Close</button></div>
+          <div className="golfCourseCalendarDetailGrid">
+            <div><div className="label">Date</div><div>{formatDate(selectedItem.tournament.startDate)}</div></div>
+            <div><div className="label">Name of Course</div><div>{selectedItem.tournament.golfCourseName || page?.golfCourseName}</div></div>
+            <div><div className="label">Point of Contact</div><div className="golfCourseCalendarContact">{pointOfContact(selectedItem.tournament).map((piece) => {
+              if (piece === selectedItem.tournament.contactEmail) return <a key={piece} href={`mailto:${piece}`}>{piece}</a>
+              if (piece === selectedItem.tournament.contactPhone) return <a key={piece} href={`tel:${String(piece).replace(/\D/g, '')}`}>{piece}</a>
+              return <span key={piece}>{piece}</span>
+            })}</div></div>
+          </div>
+          <Link className="btn btnPrimary" to={selectedItem.tournament.portalPath}>View tournament</Link>
+        </section>
+      )
+    }
+    return (
+      <section className={`card golfCourseCalendarDetails golfCourseCalendarDetails--courseEvent ${extraClass}`.trim()} aria-live="polite">
+        <div className="golfCourseCalendarDetailsHeader"><div><div className="golfCoursePublicEyebrow">Course event details</div><h2>{selectedItem.event.title}</h2></div><button className="btn" type="button" onClick={() => setSelectedItem(null)}>Close</button></div>
+        <div className="golfCourseCalendarDetailGrid">
+          <div><div className="label">Date</div><div>{formatDate(selectedItem.event.eventDate)}</div></div>
+          <div><div className="label">Time</div><div>{formatTimeRange(selectedItem.event)}</div></div>
+          <div><div className="label">Golf course</div><div>{page?.golfCourseName}</div></div>
+        </div>
+        {selectedItem.event.details ? <div className="golfCourseCalendarCourseEventDetails">{selectedItem.event.details}</div> : <div className="small">No additional event details were provided.</div>}
+      </section>
+    )
+  }
+
   if (loading) return <div className="container pageStack"><div className="card pageCardShell">Loading course calendar…</div></div>
 
   if (!page || error) {
@@ -255,32 +288,13 @@ export default function GolfCourseCalendarPage() {
           </div>
         </section>
 
-        {selectedItem?.kind === 'tournament' ? (
-          <section className="card golfCourseCalendarDetails" aria-live="polite">
-            <div className="golfCourseCalendarDetailsHeader"><div><div className="golfCoursePublicEyebrow">Tournament details</div><h2>{selectedItem.tournament.name}</h2></div><button className="btn" type="button" onClick={() => setSelectedItem(null)}>Close</button></div>
-            <div className="golfCourseCalendarDetailGrid">
-              <div><div className="label">Date</div><div>{formatDate(selectedItem.tournament.startDate)}</div></div>
-              <div><div className="label">Name of Course</div><div>{selectedItem.tournament.golfCourseName || page.golfCourseName}</div></div>
-              <div><div className="label">Point of Contact</div><div className="golfCourseCalendarContact">{pointOfContact(selectedItem.tournament).map((piece) => {
-                if (piece === selectedItem.tournament.contactEmail) return <a key={piece} href={`mailto:${piece}`}>{piece}</a>
-                if (piece === selectedItem.tournament.contactPhone) return <a key={piece} href={`tel:${String(piece).replace(/\D/g, '')}`}>{piece}</a>
-                return <span key={piece}>{piece}</span>
-              })}</div></div>
+        <div className="golfCourseCalendarDetailsInline">{renderSelectedDetails()}</div>
+        {selectedItem ? (
+          <div className="golfCourseCalendarMobileModalOverlay" role="presentation" onClick={() => setSelectedItem(null)}>
+            <div className="golfCourseCalendarMobileModal" role="dialog" aria-modal="true" aria-label={`${selectedItem.name} event details`} onClick={(event) => event.stopPropagation()}>
+              {renderSelectedDetails('golfCourseCalendarDetails--mobileModal')}
             </div>
-            <Link className="btn btnPrimary" to={selectedItem.tournament.portalPath}>View tournament</Link>
-          </section>
-        ) : null}
-
-        {selectedItem?.kind === 'courseEvent' ? (
-          <section className="card golfCourseCalendarDetails golfCourseCalendarDetails--courseEvent" aria-live="polite">
-            <div className="golfCourseCalendarDetailsHeader"><div><div className="golfCoursePublicEyebrow">Course event details</div><h2>{selectedItem.event.title}</h2></div><button className="btn" type="button" onClick={() => setSelectedItem(null)}>Close</button></div>
-            <div className="golfCourseCalendarDetailGrid">
-              <div><div className="label">Date</div><div>{formatDate(selectedItem.event.eventDate)}</div></div>
-              <div><div className="label">Time</div><div>{formatTimeRange(selectedItem.event)}</div></div>
-              <div><div className="label">Golf course</div><div>{page.golfCourseName}</div></div>
-            </div>
-            {selectedItem.event.details ? <div className="golfCourseCalendarCourseEventDetails">{selectedItem.event.details}</div> : <div className="small">No additional event details were provided.</div>}
-          </section>
+          </div>
         ) : null}
       </div>
     </main>

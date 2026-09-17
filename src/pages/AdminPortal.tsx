@@ -10,9 +10,14 @@ import {
   deleteHostAccountRequest,
   fetchAdminPortal,
   fetchExternalApiCallReport,
+  fetchAdminSupportTicket,
+  fetchAdminSupportTickets,
+  replyToAdminSupportTicket,
+  closeAdminSupportTicket,
   requestAdminPasswordReset,
   type ExternalApiCallFilters,
   type ExternalApiCallReport,
+  type AdminSupportTicket,
 } from '../lib/admin'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { formatFriendlyDateTime } from '../lib/time-format'
@@ -25,7 +30,7 @@ type PortalState = Awaited<ReturnType<typeof fetchAdminPortal>>
 type RowRecord = Record<string, unknown>
 type DetailColumn = { key: string; label: string }
 type DetailModalState = { title: string; rows: RowRecord[]; columns: DetailColumn[] } | null
-type AdminPortalPage = 'golf' | 'tournaments' | 'api' | 'marketing' | 'admin'
+type AdminPortalPage = 'golf' | 'tournaments' | 'api' | 'marketing' | 'support' | 'admin'
 
 function isDateKey(key?: string) {
   return Boolean(key && /(^|_)(created|updated|expires|consumed|validated|reviewed|started|completed)_?at$|createdAt|updatedAt|expiresAt|consumedAt/i.test(key))
@@ -101,6 +106,7 @@ function AdminPortalTabs({ activePage, onSelect }: { activePage: AdminPortalPage
     { id: 'tournaments', label: 'Tournaments' },
     { id: 'api', label: 'API Usage' },
     { id: 'marketing', label: 'Marketing' },
+    { id: 'support', label: 'Support' },
     { id: 'admin', label: 'Admin' },
   ]
   return (
@@ -117,6 +123,369 @@ function AdminPortalTabs({ activePage, onSelect }: { activePage: AdminPortalPage
         </button>
       ))}
     </nav>
+  )
+}
+
+function supportAccountTypeLabel(accountType?: string) {
+  if (accountType === 'host') return 'Host'
+  if (accountType === 'organizer') return 'Organizer'
+  if (accountType === 'golf_user') return 'Golf user'
+  return accountType || 'Account'
+}
+
+const SUPPORT_TICKETS_PER_PAGE = 20
+
+type SupportAccountTypeFilter = 'all' | 'golf_user' | 'host' | 'organizer'
+
+function supportAccountTypeClass(accountType?: string) {
+  if (accountType === 'host') return 'supportAccountTypeBadge--host'
+  if (accountType === 'organizer') return 'supportAccountTypeBadge--organizer'
+  if (accountType === 'golf_user') return 'supportAccountTypeBadge--golfUser'
+  return 'supportAccountTypeBadge--other'
+}
+
+function supportTicketDateKey(value?: string | null) {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function SupportTicketPagination({ currentPage, totalItems, onPageChange }: { currentPage: number; totalItems: number; onPageChange: (page: number) => void }) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / SUPPORT_TICKETS_PER_PAGE))
+  if (totalItems <= SUPPORT_TICKETS_PER_PAGE) return null
+  const safePage = Math.min(Math.max(currentPage, 1), totalPages)
+  const firstItem = ((safePage - 1) * SUPPORT_TICKETS_PER_PAGE) + 1
+  const lastItem = Math.min(safePage * SUPPORT_TICKETS_PER_PAGE, totalItems)
+  return (
+    <div className="adminSupportPagination" aria-label="Support ticket pagination">
+      <span className="small">Showing {firstItem}–{lastItem} of {totalItems}</span>
+      <div className="adminSupportPaginationControls">
+        <button className="btn btnSmall" type="button" disabled={safePage <= 1} onClick={() => onPageChange(safePage - 1)}>Previous</button>
+        <span className="small">Page {safePage} of {totalPages}</span>
+        <button className="btn btnSmall" type="button" disabled={safePage >= totalPages} onClick={() => onPageChange(safePage + 1)}>Next</button>
+      </div>
+    </div>
+  )
+}
+
+function SupportDashboardSection() {
+  const [tickets, setTickets] = useState<AdminSupportTicket[]>([])
+  const [selectedTicket, setSelectedTicket] = useState<AdminSupportTicket | null>(null)
+  const [replyMessage, setReplyMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [ticketLoading, setTicketLoading] = useState(false)
+  const [replying, setReplying] = useState(false)
+  const [closing, setClosing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [accountTypeFilter, setAccountTypeFilter] = useState<SupportAccountTypeFilter>('all')
+  const [startDateFilter, setStartDateFilter] = useState('')
+  const [endDateFilter, setEndDateFilter] = useState('')
+  const [openPage, setOpenPage] = useState(1)
+  const [closedPage, setClosedPage] = useState(1)
+
+  const filteredTickets = useMemo(() => tickets.filter((ticket) => {
+    if (accountTypeFilter !== 'all' && ticket.accountType !== accountTypeFilter) return false
+    const createdDate = supportTicketDateKey(ticket.createdAt)
+    if (startDateFilter && (!createdDate || createdDate < startDateFilter)) return false
+    if (endDateFilter && (!createdDate || createdDate > endDateFilter)) return false
+    return true
+  }), [tickets, accountTypeFilter, startDateFilter, endDateFilter])
+
+  const openTickets = useMemo(() => filteredTickets.filter((ticket) => ticket.status === 'open'), [filteredTickets])
+  const closedTickets = useMemo(() => filteredTickets.filter((ticket) => ticket.status === 'closed'), [filteredTickets])
+  const unreadCount = useMemo(() => openTickets.filter((ticket) => ticket.adminUnread).length, [openTickets])
+  const openPageCount = Math.max(1, Math.ceil(openTickets.length / SUPPORT_TICKETS_PER_PAGE))
+  const closedPageCount = Math.max(1, Math.ceil(closedTickets.length / SUPPORT_TICKETS_PER_PAGE))
+  const safeOpenPage = Math.min(Math.max(openPage, 1), openPageCount)
+  const safeClosedPage = Math.min(Math.max(closedPage, 1), closedPageCount)
+  const visibleOpenTickets = useMemo(() => openTickets.slice((safeOpenPage - 1) * SUPPORT_TICKETS_PER_PAGE, safeOpenPage * SUPPORT_TICKETS_PER_PAGE), [openTickets, safeOpenPage])
+  const visibleClosedTickets = useMemo(() => closedTickets.slice((safeClosedPage - 1) * SUPPORT_TICKETS_PER_PAGE, safeClosedPage * SUPPORT_TICKETS_PER_PAGE), [closedTickets, safeClosedPage])
+
+  async function loadTickets() {
+    setLoading(true)
+    setError(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_list_load_started' })
+      const result = await fetchAdminSupportTickets()
+      setTickets(result.tickets || [])
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_list_loaded', data: { ticketCount: result.tickets?.length || 0, openTicketCount: (result.tickets || []).filter((ticket) => ticket.status === 'open').length, unreadTicketCount: (result.tickets || []).filter((ticket) => ticket.adminUnread).length } })
+    } catch (err) {
+      const loadError = err instanceof Error ? err.message : 'Could not load support tickets.'
+      setError(loadError)
+      logFrontendEvent({ category: 'admin.portal.support', level: 'error', message: 'admin_support_ticket_list_load_failed', data: { error: loadError } })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadTickets()
+  }, [])
+
+  useEffect(() => {
+    setOpenPage(1)
+    setClosedPage(1)
+    if (selectedTicket && !filteredTickets.some((ticket) => ticket.id === selectedTicket.id)) setSelectedTicket(null)
+    logFrontendEvent({
+      category: 'admin.portal.support',
+      message: 'admin_support_ticket_filters_changed',
+      data: { accountType: accountTypeFilter, startDate: startDateFilter || null, endDate: endDateFilter || null },
+    })
+  }, [accountTypeFilter, startDateFilter, endDateFilter])
+
+  useEffect(() => {
+    if (openPage > openPageCount) setOpenPage(openPageCount)
+  }, [openPage, openPageCount])
+
+  useEffect(() => {
+    if (closedPage > closedPageCount) setClosedPage(closedPageCount)
+  }, [closedPage, closedPageCount])
+
+  async function openTicket(ticket: AdminSupportTicket) {
+    setTicketLoading(true)
+    setError(null)
+    setMessage(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_selected', data: { ticketId: ticket.id, status: ticket.status, accountType: ticket.accountType, adminUnread: ticket.adminUnread } })
+      const result = await fetchAdminSupportTicket(ticket.id)
+      setSelectedTicket(result.ticket)
+      setTickets((current) => current.map((entry) => entry.id === result.ticket.id ? { ...entry, ...result.ticket, adminUnread: false } : entry))
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_detail_loaded', data: { ticketId: ticket.id, status: result.ticket.status, accountType: result.ticket.accountType, messageCount: result.ticket.messages?.length || 0 } })
+    } catch (err) {
+      const loadError = err instanceof Error ? err.message : 'Could not load support ticket.'
+      setError(loadError)
+      logFrontendEvent({ category: 'admin.portal.support', level: 'error', message: 'admin_support_ticket_detail_load_failed', data: { ticketId: ticket.id, error: loadError } })
+    } finally {
+      setTicketLoading(false)
+    }
+  }
+
+  async function onReply(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedTicket || selectedTicket.status !== 'open') return
+    const trimmedMessage = replyMessage.trim()
+    if (!trimmedMessage) {
+      setError('Reply message is required.')
+      return
+    }
+    setReplying(true)
+    setError(null)
+    setMessage(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_reply_started', data: { ticketId: selectedTicket.id, accountType: selectedTicket.accountType, messageLength: trimmedMessage.length } })
+      const result = await replyToAdminSupportTicket(selectedTicket.id, trimmedMessage)
+      setSelectedTicket(result.ticket)
+      setTickets((current) => current.map((ticket) => ticket.id === result.ticket.id ? { ...ticket, ...result.ticket } : ticket))
+      setReplyMessage('')
+      setMessage('Reply sent to the support ticket.')
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_reply_saved', data: { ticketId: selectedTicket.id, accountType: selectedTicket.accountType, messageCount: result.ticket.messages?.length || 0 } })
+    } catch (err) {
+      const replyError = err instanceof Error ? err.message : 'Could not send support reply.'
+      setError(replyError)
+      logFrontendEvent({ category: 'admin.portal.support', level: 'error', message: 'admin_support_ticket_reply_failed', data: { ticketId: selectedTicket.id, error: replyError } })
+    } finally {
+      setReplying(false)
+    }
+  }
+
+  async function onCloseTicket() {
+    if (!selectedTicket || selectedTicket.status !== 'open') return
+    if (typeof window !== 'undefined' && !window.confirm(`Close support ticket "${selectedTicket.subject}"? The requester will still be able to view it, but no additional replies can be added.`)) return
+    setClosing(true)
+    setError(null)
+    setMessage(null)
+    try {
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_close_started', data: { ticketId: selectedTicket.id, accountType: selectedTicket.accountType } })
+      const result = await closeAdminSupportTicket(selectedTicket.id)
+      setSelectedTicket(result.ticket)
+      setTickets((current) => current.map((ticket) => ticket.id === result.ticket.id ? { ...ticket, ...result.ticket } : ticket))
+      setReplyMessage('')
+      setMessage('Support ticket closed. The requester can still view the conversation, but it is now read-only.')
+      logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_ticket_closed', data: { ticketId: selectedTicket.id, accountType: selectedTicket.accountType } })
+    } catch (err) {
+      const closeError = err instanceof Error ? err.message : 'Could not close support ticket.'
+      setError(closeError)
+      logFrontendEvent({ category: 'admin.portal.support', level: 'error', message: 'admin_support_ticket_close_failed', data: { ticketId: selectedTicket.id, error: closeError } })
+    } finally {
+      setClosing(false)
+    }
+  }
+
+  function clearFilters() {
+    setAccountTypeFilter('all')
+    setStartDateFilter('')
+    setEndDateFilter('')
+  }
+
+  const lineItem = (ticket: AdminSupportTicket) => {
+    const hostCourseName = ticket.accountType === 'host' && ticket.metadata && typeof ticket.metadata.golfCourseName === 'string'
+      ? ticket.metadata.golfCourseName
+      : ''
+    const organizerOrganizationName = ticket.accountType === 'organizer' && ticket.metadata && typeof ticket.metadata.organizationName === 'string'
+      ? ticket.metadata.organizationName
+      : ''
+    return (
+      <button
+        key={ticket.id}
+        className={`adminSupportTicketLine adminSupportTicketLine--${ticket.accountType || 'other'}${selectedTicket?.id === ticket.id ? ' adminSupportTicketLine--selected' : ''}`}
+        type="button"
+        onClick={() => void openTicket(ticket)}
+      >
+        <span className="adminSupportTicketLineMain">
+          <span className="adminSupportTicketSubjectRow">
+            <strong>{ticket.subject}</strong>
+            <span className={`supportAccountTypeBadge ${supportAccountTypeClass(ticket.accountType)}`}>{supportAccountTypeLabel(ticket.accountType)}</span>
+            {ticket.adminUnread ? <span className="supportTicketAlertIcon" title="Unread requester message" aria-label="Unread requester message">!</span> : null}
+          </span>
+          <span className="small">{ticket.requesterName || ticket.requesterEmail || 'Unknown requester'} · {ticket.requesterEmail || 'No email'}</span>
+          {hostCourseName ? <span className="small adminSupportHostCourse">Golf course: {hostCourseName}</span> : null}
+          {organizerOrganizationName ? <span className="small adminSupportOrganizerOrganization">Organizer: {organizerOrganizationName}</span> : null}
+          <span className="small">Opened {formatFriendlyDateTime(ticket.createdAt || '')} · Updated {formatFriendlyDateTime(ticket.lastMessageAt || ticket.updatedAt || ticket.createdAt || '')} · {ticket.messageCount || 1} message{Number(ticket.messageCount || 1) === 1 ? '' : 's'}</span>
+        </span>
+        <span className="pill">{ticket.status}</span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="adminPageContent" data-admin-page="support">
+      <section className="adminPageIntro">
+        <h2>Support</h2>
+        <p className="small">Review golf-user, host, and organizer support tickets, respond to open tickets, and close resolved tickets.</p>
+      </section>
+      {message ? <p className="statusMessage statusSuccess">{message}</p> : null}
+      {error ? <p className="statusMessage statusError">{error}</p> : null}
+
+      <section className="card adminPanel adminSupportFilterPanel" aria-label="Support ticket filters">
+        <div className="adminSectionHeader">
+          <div>
+            <h2 style={{ margin: 0 }}>Ticket filters</h2>
+            <p className="small" style={{ margin: '6px 0 0' }}>Filter the current lists by requester type and the date the ticket was opened.</p>
+          </div>
+          <button className="btn btnSmall" type="button" onClick={clearFilters} disabled={accountTypeFilter === 'all' && !startDateFilter && !endDateFilter}>Clear filters</button>
+        </div>
+        <div className="adminSupportFilterGrid">
+          <div>
+            <label className="label" htmlFor="admin-support-type-filter">Type</label>
+            <select id="admin-support-type-filter" className="input" value={accountTypeFilter} onChange={(event) => setAccountTypeFilter(event.target.value as SupportAccountTypeFilter)}>
+              <option value="all">All ticket types</option>
+              <option value="golf_user">Golf user</option>
+              <option value="host">Host</option>
+              <option value="organizer">Organizer</option>
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="admin-support-start-date">Opened from</label>
+            <input id="admin-support-start-date" className="input" type="date" value={startDateFilter} max={endDateFilter || undefined} onChange={(event) => setStartDateFilter(event.target.value)} />
+          </div>
+          <div>
+            <label className="label" htmlFor="admin-support-end-date">Opened through</label>
+            <input id="admin-support-end-date" className="input" type="date" value={endDateFilter} min={startDateFilter || undefined} onChange={(event) => setEndDateFilter(event.target.value)} />
+          </div>
+        </div>
+        <div className="adminSupportTypeLegend" aria-label="Support ticket type legend">
+          <span className="supportAccountTypeBadge supportAccountTypeBadge--golfUser">Golf user</span>
+          <span className="supportAccountTypeBadge supportAccountTypeBadge--host">Host</span>
+          <span className="supportAccountTypeBadge supportAccountTypeBadge--organizer">Organizer</span>
+        </div>
+      </section>
+
+      <div className="adminSupportSummaryGrid">
+        <MetricCard label="Open tickets" value={openTickets.length} detail={filteredTickets.length !== tickets.length ? 'Current filters' : undefined} />
+        <MetricCard label="Unread updates" value={unreadCount} detail={filteredTickets.length !== tickets.length ? 'Current filters' : undefined} />
+        <MetricCard label="Closed tickets" value={closedTickets.length} detail={filteredTickets.length !== tickets.length ? 'Current filters' : undefined} />
+      </div>
+
+      <section className="card adminPanel adminSupportPanel">
+        <div className="adminSectionHeader">
+          <div>
+            <h2 style={{ margin: 0 }}>Open support tickets</h2>
+            <p className="small" style={{ margin: '6px 0 0' }}>Select a ticket to review the conversation, reply, or close it.</p>
+          </div>
+          <button className="btn btnSmall" type="button" disabled={loading} onClick={() => void loadTickets()}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+        </div>
+        {loading ? <div className="small">Loading support tickets…</div> : visibleOpenTickets.length ? <div className="adminSupportTicketList">{visibleOpenTickets.map(lineItem)}</div> : <div className="small supportEmptyState">No open support tickets match the current filters.</div>}
+        <SupportTicketPagination
+          currentPage={safeOpenPage}
+          totalItems={openTickets.length}
+          onPageChange={(page) => {
+            setOpenPage(page)
+            logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_open_page_selected', data: { page, totalItems: openTickets.length } })
+          }}
+        />
+      </section>
+
+      {selectedTicket ? (
+        <section className="card adminPanel adminSupportDetail">
+          <div className="adminSectionHeader">
+            <div>
+              <div className="adminSupportDetailTitleRow">
+                <h2 style={{ margin: 0 }}>{selectedTicket.subject}</h2>
+                <span className={`supportAccountTypeBadge ${supportAccountTypeClass(selectedTicket.accountType)}`}>{supportAccountTypeLabel(selectedTicket.accountType)}</span>
+                <span className="pill">{selectedTicket.status}</span>
+              </div>
+              <p className="small" style={{ margin: '6px 0 0' }}>{selectedTicket.requesterName || selectedTicket.requesterEmail || 'Unknown requester'} · {selectedTicket.requesterEmail || 'No email'}</p>
+              {selectedTicket.accountType === 'host' && selectedTicket.metadata && typeof selectedTicket.metadata.golfCourseName === 'string' ? <p className="small" style={{ margin: '4px 0 0' }}>Golf course: {selectedTicket.metadata.golfCourseName}</p> : null}
+              {selectedTicket.accountType === 'organizer' && selectedTicket.metadata && typeof selectedTicket.metadata.organizationName === 'string' ? <p className="small" style={{ margin: '4px 0 0' }}>Organizer: {selectedTicket.metadata.organizationName}</p> : null}
+              <p className="small" style={{ margin: '4px 0 0' }}>Opened {formatFriendlyDateTime(selectedTicket.createdAt || '')}</p>
+            </div>
+            <button className="btn btnSmall" type="button" onClick={() => setSelectedTicket(null)}>Close view</button>
+          </div>
+
+          {ticketLoading ? <div className="small">Loading conversation…</div> : (
+            <div className="supportConversation adminSupportConversation">
+              {(selectedTicket.messages || []).map((entry) => (
+                <article key={entry.id} className={`supportMessageBubble supportMessageBubble--${entry.senderType}`}>
+                  <div className="supportMessageMeta">
+                    <strong>{entry.senderType === 'admin' ? 'GolfHomiez admin' : selectedTicket.requesterName || 'Requester'}</strong>
+                    <span>{formatFriendlyDateTime(entry.createdAt || '')}</span>
+                  </div>
+                  <div className="supportMessageText">{entry.message}</div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {selectedTicket.status === 'open' ? (
+            <form className="formStack adminSupportReplyForm" onSubmit={onReply}>
+              <div>
+                <label className="label" htmlFor="admin-support-reply">Respond to ticket</label>
+                <textarea id="admin-support-reply" className="input" rows={5} maxLength={5000} value={replyMessage} onChange={(event) => setReplyMessage(event.target.value)} placeholder="Enter a response for the requester." />
+              </div>
+              <div className="adminSupportActions">
+                <button className="btn btnPrimary" type="submit" disabled={replying || closing}>{replying ? 'Sending…' : 'Send response'}</button>
+                <button className="btn" type="button" disabled={replying || closing} onClick={() => void onCloseTicket()}>{closing ? 'Closing…' : 'Close ticket'}</button>
+              </div>
+            </form>
+          ) : <div className="supportClosedNotice">This ticket is closed and read-only. The requester can continue to view this conversation.</div>}
+        </section>
+      ) : null}
+
+      {closedTickets.length ? (
+        <section className="card adminPanel adminSupportPanel">
+          <div className="adminSectionHeader">
+            <div>
+              <h2 style={{ margin: 0 }}>Closed support tickets</h2>
+              <p className="small" style={{ margin: '6px 0 0' }}>Closed tickets remain available for review but cannot be edited.</p>
+            </div>
+          </div>
+          <div className="adminSupportTicketList adminSupportTicketList--closed">{visibleClosedTickets.map(lineItem)}</div>
+          <SupportTicketPagination
+            currentPage={safeClosedPage}
+            totalItems={closedTickets.length}
+            onPageChange={(page) => {
+              setClosedPage(page)
+              logFrontendEvent({ category: 'admin.portal.support', message: 'admin_support_closed_page_selected', data: { page, totalItems: closedTickets.length } })
+            }}
+          />
+        </section>
+      ) : null}
+    </div>
   )
 }
 
@@ -1237,7 +1606,7 @@ export default function AdminPortal() {
     <div className="container pageStack adminPortalContainer">
       <div className="card pageCardShell adminPortalShell">
         <div className="adminPortalHeader">
-          <PageHero eyebrow="Administration" title="GolfHomiez admin portal" subtitle="Golf usage, tournament operations, API usage, and administration are separated into focused pages." />
+          <PageHero eyebrow="Administration" title="GolfHomiez admin portal" subtitle="Golf usage, tournament operations, API usage, marketing, support, and administration are separated into focused pages." />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div className="small">Signed in as <strong>{adminUser.username}</strong> ({adminUser.email})</div>
             <button className="btn" type="button" onClick={onLogout}>Sign out</button>
@@ -1282,6 +1651,7 @@ export default function AdminPortal() {
               onDeleteSection={onDeleteMarketingSection}
             />
           ) : null}
+          {activePage === 'support' ? <SupportDashboardSection /> : null}
           {activePage === 'admin' ? (
             <AdminDashboardSection
               portal={portal}

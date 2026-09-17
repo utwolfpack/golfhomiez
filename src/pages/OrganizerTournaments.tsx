@@ -4,7 +4,7 @@ import { useLocation } from 'react-router'
 import PageHero from '../components/PageHero'
 import { archiveOrganizerTournamentRecord, fetchOrganizerPortal, restoreOrganizerTournamentRecord, updateOrganizerTournamentRecord, type OrganizerPortalSummary, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
-import { formatFriendlyDateTime } from '../lib/time-format'
+import { formatFriendlyDate, formatFriendlyDateTime } from '../lib/time-format'
 import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
@@ -71,6 +71,10 @@ function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   }
   return (
     <div className="card tournamentBuilderCollapsibleCard">
+      <div className="tournamentWorkingContext" aria-label="Tournament currently being managed">
+        <strong>{tournament.name || 'Tournament'}</strong>
+        <span>{tournament.startDate ? formatFriendlyDate(tournament.startDate) : 'Tournament date not set'}</span>
+      </div>
       <button
         type="button"
         className="tournamentSectionToggleLink"

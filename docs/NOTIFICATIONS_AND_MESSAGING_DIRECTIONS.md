@@ -139,7 +139,7 @@ Individual Challenge creation now follows the validated-member flow used by Crea
 
 After an Individual Challenge is created, its creator can see the invited-golfer list and continue validating/adding golfers until the challenge is completed. Existing GolfHomiez users added to the challenge receive challenge inbox activity through the shared Individual Challenge thread. Pending invitees are represented by email so they can participate after registering with the same address.
 
-Individual Challenges use a start and end date with a maximum one-month range. The challenge creator can edit the date range and tee selection until completion. Team Challenge creators can edit tee selection, Team Challenge game, and points per hole until completion. Completion locks these settings and the add-golfer flow.
+Individual Challenges use a start and end date with a maximum one-month range. The challenge creator can edit the date range and tee selection until completion. Team Challenge creators can edit tee selection, Team Challenge game, and the per-hole value until completion. Regular Skins uses points; Skins - Push uses dollars. Completion locks these settings and the add-golfer flow.
 
 Opening **Create Challenge** hides all other challenge line items until the create form is closed. Opening an existing challenge continues to isolate that challenge. Individual Challenge leaderboards exclude invited golfers who have not entered any score/hole data; a no-participation message is shown until at least one golfer participates.
 

@@ -3350,6 +3350,144 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
       return loadMigrationSql('20260909_088_remove_social_platform_connections.sql')
     },
   },
+  {
+    version: '20260916_089',
+    name: 'remove_social_publishing_implementation',
+    filename: '20260916_089_remove_social_publishing_implementation.sql',
+    async isSatisfied(db) {
+      const socialTablesRemoved =
+        !(await tableExists(db, 'social_platform_connections')) &&
+        !(await tableExists(db, 'social_publications'))
+
+      let obsoleteOutputRows = 0
+      if (
+        await tableExists(db, 'scheduled_jobs') &&
+        await columnExists(db, 'scheduled_jobs', 'last_run_output_json')
+      ) {
+        const [[row = {}] = []] = await db.execute(
+          `SELECT COUNT(*) AS obsoleteCount
+             FROM scheduled_jobs
+            WHERE last_run_output_json IS NOT NULL
+              AND last_run_output_json LIKE '%"socialPublishing"%'`,
+        )
+        obsoleteOutputRows += Number(row.obsoleteCount || 0)
+      }
+
+      if (
+        await tableExists(db, 'scheduled_job_runs') &&
+        await columnExists(db, 'scheduled_job_runs', 'output_json')
+      ) {
+        const [[row = {}] = []] = await db.execute(
+          `SELECT COUNT(*) AS obsoleteCount
+             FROM scheduled_job_runs
+            WHERE output_json IS NOT NULL
+              AND output_json LIKE '%"socialPublishing"%'`,
+        )
+        obsoleteOutputRows += Number(row.obsoleteCount || 0)
+      }
+
+      return socialTablesRemoved && obsoleteOutputRows === 0
+    },
+    async getSql() {
+      return loadMigrationSql('20260916_089_remove_social_publishing_implementation.sql')
+    },
+  },
+  {
+    version: '20260916_090',
+    name: 'support_ticket_management',
+    filename: '20260916_090_support_ticket_management.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'support_tickets') &&
+        await columnExists(db, 'support_tickets', 'account_type') &&
+        await columnExists(db, 'support_tickets', 'account_id') &&
+        await columnExists(db, 'support_tickets', 'status') &&
+        await columnExists(db, 'support_tickets', 'user_unread') &&
+        await columnExists(db, 'support_tickets', 'admin_unread') &&
+        await columnExists(db, 'support_tickets', 'last_message_at') &&
+        await columnExists(db, 'support_tickets', 'closed_at') &&
+        await indexExists(db, 'support_tickets', 'idx_support_tickets_requester_status') &&
+        await indexExists(db, 'support_tickets', 'idx_support_tickets_admin_queue') &&
+        await tableExists(db, 'support_ticket_messages') &&
+        await columnExists(db, 'support_ticket_messages', 'ticket_id') &&
+        await columnExists(db, 'support_ticket_messages', 'sender_type') &&
+        await columnExists(db, 'support_ticket_messages', 'message') &&
+        await indexExists(db, 'support_ticket_messages', 'idx_support_ticket_messages_ticket_created')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260916_090_support_ticket_management.sql')
+    },
+  },
+
+  {
+    version: '20260916_091',
+    name: 'oquirrh_hills_hole_data_correction',
+    filename: '20260916_091_oquirrh_hills_hole_data_correction.sql',
+    async isSatisfied(db) {
+      if (!(await tableExists(db, 'golf_courses')) || !(await tableExists(db, 'golf_course_holes'))) return false
+      const [[course] = []] = await db.execute(
+        `SELECT id, holes_count, par_total, total_yardage
+           FROM golf_courses
+          WHERE external_course_id = '9e7dfbad-41a3-43b8-a47b-1740c11cf3db'
+             OR (state_code = 'UT' AND LOWER(name) = 'oquirrh hills golf course')
+          ORDER BY CASE WHEN external_course_id = '9e7dfbad-41a3-43b8-a47b-1740c11cf3db' THEN 0 ELSE 1 END
+          LIMIT 1`,
+      )
+      if (!course || Number(course.holes_count) !== 18 || Number(course.par_total) !== 72) return false
+      const [[holeState] = []] = await db.execute(
+        `SELECT COUNT(*) AS correctedCount, SUM(par) AS parTotal
+           FROM golf_course_holes
+          WHERE course_id = ? AND source = 'tooele-city-correction' AND tee_name = 'default' AND active = 1`,
+        [course.id],
+      )
+      return Number(holeState?.correctedCount || 0) === 18 && Number(holeState?.parTotal || 0) === 72
+    },
+    async getSql() {
+      return loadMigrationSql('20260916_091_oquirrh_hills_hole_data_correction.sql')
+    },
+  },
+
+  {
+    version: '20260917_092',
+    name: 'tournament_message_thread_read_state',
+    filename: '20260917_092_tournament_message_thread_read_state.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'tournament_message_thread_portal_state') &&
+        await columnExists(db, 'tournament_message_thread_portal_state', 'viewer_key') &&
+        await columnExists(db, 'tournament_message_thread_portal_state', 'tournament_id') &&
+        await columnExists(db, 'tournament_message_thread_portal_state', 'thread_id') &&
+        await columnExists(db, 'tournament_message_thread_portal_state', 'last_read_at') &&
+        await indexExists(db, 'tournament_message_thread_portal_state', 'idx_tournament_message_thread_portal_tournament') &&
+        await indexExists(db, 'tournament_message_thread_portal_state', 'idx_tournament_message_thread_portal_thread')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260917_092_tournament_message_thread_read_state.sql')
+    },
+  },
+  {
+    version: '20260917_093',
+    name: 'tournament_message_entry_read_state',
+    filename: '20260917_093_tournament_message_entry_read_state.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'tournament_message_entry_portal_state') &&
+        await columnExists(db, 'tournament_message_entry_portal_state', 'viewer_key') &&
+        await columnExists(db, 'tournament_message_entry_portal_state', 'tournament_id') &&
+        await columnExists(db, 'tournament_message_entry_portal_state', 'thread_id') &&
+        await columnExists(db, 'tournament_message_entry_portal_state', 'message_id') &&
+        await columnExists(db, 'tournament_message_entry_portal_state', 'read_at') &&
+        await indexExists(db, 'tournament_message_entry_portal_state', 'idx_tournament_message_entry_portal_tournament') &&
+        await indexExists(db, 'tournament_message_entry_portal_state', 'idx_tournament_message_entry_portal_thread') &&
+        await indexExists(db, 'tournament_message_entry_portal_state', 'idx_tournament_message_entry_portal_message')
+      )
+    },
+    async getSql() {
+      return loadMigrationSql('20260917_093_tournament_message_entry_read_state.sql')
+    },
+  },
 
 ]
 

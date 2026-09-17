@@ -120,7 +120,3 @@ Searching one correlation ID across these logs shows the full request-to-backgro
 ## Database migrations
 
 No schema change is required. The existing generic `scheduled_jobs` and `scheduled_job_runs` tables already support this job and its schedule configuration. Existing schema migrations remain part of `npm install` through the unchanged `postinstall -> db:migrate -> build` flow.
-
-## Automated social publishing
-
-When `SOCIAL_AUTO_PUBLISH=true`, a successful MP4 is handed to the shared social publisher for Facebook, Instagram, LinkedIn, and YouTube. Credentials come from the server `.env` file, transient failures retry automatically, and a social-network failure does not turn a successfully generated MP4 run into a failed scheduled job. See `docs/SOCIAL_COMMERCIAL_PUBLISHING.md` for provider setup and token lifecycle details.

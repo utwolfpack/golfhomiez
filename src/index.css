@@ -369,6 +369,25 @@ button.card{
 .pageHeroTitle{margin:0;font-size:clamp(1.4rem,2vw,2rem);line-height:1.1;}
 .pageHeroSubtitle{margin-top:6px;color:var(--muted);max-width:780px;line-height:1.45;}
 .pageHeroActions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+.challengeCreateActions{align-items:flex-start;}
+.challengeSubmitFeedback{
+  flex-basis:100%;
+  max-width:680px;
+  padding:9px 11px;
+  border:1px solid #fecaca;
+  border-radius:10px;
+  background:#fff7f7;
+  color:#991b1b;
+  font-size:.86rem;
+  font-weight:700;
+}
+.individualChallengeFixedRoundDetail{
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  background:#f8fafc;
+  color:#334155;
+}
 
 .photoStrip{display:grid;gap:12px;}
 .photoStrip--full{grid-template-columns:repeat(3,minmax(0,1fr));}
@@ -4155,31 +4174,61 @@ button.navDropdownItem{font:inherit;}
 
 .holeInputPageStepper,
 .scoreStepper.holeInputPageStepper{
-  grid-template-columns:56px minmax(0, 1fr) 56px;
-  gap:10px;
+  grid-template-columns:48px 72px 48px;
+  justify-content:center;
+  gap:12px;
   align-items:center;
 }
 
 .holeInputStepperButton,
 .holeInputPageStepper > .btn{
-  min-height:30px;
-  border-radius:10px;
-  padding:4px 8px;
-  border-color:rgba(188, 226, 202, .95);
-  background:#fff;
-  color:#0b2b16;
+  width:48px;
+  min-width:48px;
+  height:48px;
+  min-height:48px;
+  display:grid;
+  place-items:center;
+  border-radius:14px;
+  padding:0;
+  border:1px solid #0b4fae;
+  background:linear-gradient(180deg, #3f92ff 0%, #1670ea 48%, #0752bf 100%);
+  color:#fff;
   font-weight:900;
+  font-size:32px;
+  line-height:1;
+  text-shadow:0 1px 1px rgba(0,0,0,.24);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.35), inset 0 -2px 0 rgba(0,39,111,.28), 0 3px 7px rgba(15,65,145,.24);
+}
+
+.holeInputStepperButton:hover,
+.holeInputPageStepper > .btn:hover{
+  background:linear-gradient(180deg, #55a0ff 0%, #237cf2 48%, #0a5acb 100%);
+}
+
+.holeInputStepperButton:active,
+.holeInputPageStepper > .btn:active{
+  transform:translateY(1px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,39,111,.28), 0 1px 3px rgba(15,65,145,.2);
+}
+
+.holeInputStepperButton > span{
+  display:block;
+  transform:translateY(-1px);
 }
 
 .holeInputScoreValueBlock{
   display:grid;
+  width:72px;
   gap:8px;
+  justify-self:center;
 }
 
 .scoreStepperValue{
-  min-height:58px;
+  width:72px;
+  min-width:72px;
+  min-height:52px;
   border-color:rgba(188, 226, 202, .95);
-  border-radius:14px;
+  border-radius:12px;
   background:#fff;
   color:#064e20;
   font-size:30px;
@@ -4352,7 +4401,22 @@ button.navDropdownItem{font:inherit;}
 
   .holeInputPageStepper,
   .scoreStepper.holeInputPageStepper{
-    grid-template-columns:56px minmax(0, 1fr) 56px;
+    grid-template-columns:46px 68px 46px;
+    gap:10px;
+  }
+
+  .holeInputStepperButton,
+  .holeInputPageStepper > .btn{
+    width:46px;
+    min-width:46px;
+    height:46px;
+    min-height:46px;
+  }
+
+  .holeInputScoreValueBlock,
+  .scoreStepperValue{
+    width:68px;
+    min-width:68px;
   }
 
   .holeInputMetadata{
@@ -5222,6 +5286,21 @@ button.navDropdownItem{font:inherit;}
   border:1px solid rgba(215,234,220,.92);
   border-radius:14px;
   background:#fff;
+}
+
+.inboxChallengeLineItem--team{
+  border-color:rgba(147,197,253,.72);
+  background:#f3f8ff;
+}
+
+.inboxChallengeLineItem--team .inboxChallengeLineItemButton:hover,
+.inboxChallengeLineItem--team .inboxChallengeLineItemButton:focus-visible{
+  background:#eaf3ff;
+}
+
+.inboxChallengeLineItem--team .inboxChallengeLineItemDetails{
+  border-top-color:rgba(147,197,253,.56);
+  background:#f8fbff;
 }
 
 .inboxChallengeLineItem--unread{
@@ -6895,6 +6974,19 @@ button.navDropdownItem{font:inherit;}
   color: #31533a;
 }
 
+.tournament-management-line__unread-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid #f0b8b8;
+  border-radius: 999px;
+  background: #fff2f2;
+  color: #9b1c1c;
+  font-size: .72rem;
+  font-weight: 850;
+}
+
 .tournament-management-line__details {
   display: flex;
   align-items: flex-start;
@@ -7680,6 +7772,9 @@ button.navDropdownItem{font:inherit;}
 .tournamentSectionToggleLink::after{content:' ▾';display:inline-block;text-decoration:none;transition:transform .16s ease}
 .tournamentSectionToggleLink[aria-expanded="true"]::after{transform:rotate(180deg)}
 
+.tournamentWorkingContext{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}
+.tournamentWorkingContext strong{color:#0b3d1d;font-size:1rem}
+.tournamentWorkingContext span{color:#64748b;font-size:.82rem;font-weight:750}
 .tournamentMessagingHeaderMeta{display:grid;justify-items:end;gap:5px;margin-left:auto;text-align:right}
 .tournamentMessagesLink{
   display:inline-flex;
@@ -7707,8 +7802,20 @@ button.navDropdownItem{font:inherit;}
 .tournamentMessagesModalHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid #e2e8f0;padding-bottom:12px;margin-bottom:14px}
 .tournamentMessagesModalHeader h2{margin:0}
 .tournamentMessagesModalHeader p{margin:4px 0 0;color:#64748b}
-.tournamentMessageThreadList{display:grid;gap:14px}
-.tournamentMessageThread{border:1px solid #dbe3ea;border-radius:14px;background:#f8fafc;padding:14px}
+.tournamentMessagesModalHeaderActions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.tournamentMessageThreadList{display:grid;gap:9px}
+.tournamentMessageThread{overflow:hidden;border:1px solid #dbe3ea;border-radius:12px;background:#fff;padding:0}
+.tournamentMessageThread--unread{border-color:#9ec9aa;box-shadow:0 0 0 1px rgba(22,101,52,.05)}
+.tournamentMessageThreadSummary{width:100%;display:grid;grid-template-columns:minmax(118px,.45fr) minmax(0,1.55fr) auto auto;gap:10px;align-items:center;padding:11px 12px;border:0;background:#f8fafc;color:#0f172a;text-align:left;font:inherit;cursor:pointer}
+.tournamentMessageThreadSummary:hover,.tournamentMessageThreadSummary:focus-visible{background:#f0f7f2;outline:none}
+.tournamentMessageThreadSummary[aria-expanded="true"]{background:#edf7ef;border-bottom:1px solid #d5e5d9}
+.tournamentMessageThreadSummaryDate{font-size:.8rem;font-weight:900;color:#31533a;white-space:nowrap}
+.tournamentMessageThreadSummaryAttendees{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem;font-weight:750;color:#334155}
+.tournamentMessageThreadUnread{display:inline-flex;align-items:center;gap:4px;min-height:24px;padding:2px 7px;border:1px solid #f0b8b8;border-radius:999px;background:#fff2f2;color:#9b1c1c;font-size:.72rem;font-weight:900}
+.tournamentMessageThreadUnread .tournamentMessagesBellIcon{width:15px;height:15px}
+.tournamentMessageThreadSummaryChevron{font-size:1.05rem;font-weight:900;color:#587262;transition:transform .15s ease}
+.tournamentMessageThreadSummary[aria-expanded="true"] .tournamentMessageThreadSummaryChevron{transform:rotate(180deg)}
+.tournamentMessageThreadContent{padding:12px 14px 14px;background:#f8fafc}
 .tournamentMessageThreadHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:10px;color:#475569;font-size:12px}
 .tournamentMessageThreadHeader>div{display:grid;gap:3px;min-width:0}
 .tournamentMessageThreadHeader strong{color:#0f172a;font-size:14px}
@@ -7728,6 +7835,14 @@ button.navDropdownItem{font:inherit;}
   .tournamentMessageSendButton{width:100%}
   .tournamentMessagesModal{width:min(96vw,920px);padding:14px}
   .tournamentMessagesModalHeader,.tournamentMessageThreadHeader{align-items:stretch;flex-direction:column}
+  .tournamentMessagesModalHeaderActions{width:100%;justify-content:stretch}
+  .tournamentMessagesModalHeaderActions .button{flex:1 1 140px}
+  .tournamentMessageThreadSummary{grid-template-columns:1fr auto auto;padding:10px}
+  .tournamentMessageThreadSummaryDate{grid-column:1}
+  .tournamentMessageThreadSummaryAttendees{grid-column:1;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .tournamentMessageThreadUnread{grid-column:2;grid-row:1 / span 2;align-self:center}
+  .tournamentMessageThreadSummaryChevron{grid-column:3;grid-row:1 / span 2;justify-self:end}
+  .tournamentMessageThreadContent{padding:11px}
   .tournamentMessageDialogueEntry{max-width:95%}
   .tournamentMessageReplyBox{grid-template-columns:1fr}
   .tournamentMessageReplyButton{width:100%}
@@ -8518,14 +8633,61 @@ button.navDropdownItem{font:inherit;}
 }
 .marketingVideoLibraryHero p{
   max-width:760px;
-  margin:8px 0 0;
+  margin:10px 0 0;
   line-height:1.5;
+}
+.marketingVideoLibraryHeroContent{
+  min-width:0;
+  flex:1 1 auto;
+}
+.marketingVideoQuickLinks{
+  display:grid;
+  gap:7px;
+  margin-top:12px;
+  padding:10px 12px;
+  border:1px solid #d9e5dc;
+  border-radius:12px;
+  background:#f7fbf8;
+}
+.marketingVideoQuickLinksLabel{
+  color:#42624b;
+  font-size:.72rem;
+  font-weight:900;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+}
+.marketingVideoQuickLinksList{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+}
+.marketingVideoQuickLink{
+  display:inline-flex;
+  align-items:center;
+  min-height:32px;
+  padding:5px 10px;
+  border:1px solid #b9d2c0;
+  border-radius:999px;
+  background:#fff;
+  color:#14532d;
+  font-size:.8rem;
+  font-weight:800;
+  line-height:1.2;
+  text-decoration:none;
+}
+.marketingVideoQuickLink:hover,.marketingVideoQuickLink:focus-visible{
+  border-color:#6ea27a;
+  background:#edf7ef;
+  outline:none;
 }
 .marketingVideoLibraryStack{
   display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
   gap:14px;
+  align-items:start;
 }
 .marketingVideoLibrarySection{
+  min-width:0;
   scroll-margin-top:92px;
   padding:14px;
 }
@@ -8559,7 +8721,7 @@ button.navDropdownItem{font:inherit;}
   aspect-ratio:16 / 9;
 }
 .marketingVideoLibraryFrameWrap--short{
-  width:min(100%,420px);
+  width:min(100%,280px);
   margin:0 auto;
   aspect-ratio:9 / 16;
 }
@@ -8659,8 +8821,24 @@ button.navDropdownItem{font:inherit;}
   .marketingVideoLibraryHero .btn{
     width:100%;
   }
+  .marketingVideoLibraryStack{
+    grid-template-columns:1fr;
+    gap:10px;
+  }
   .marketingVideoLibrarySection{
     padding:10px;
+  }
+  .marketingVideoQuickLinks{
+    margin-top:10px;
+    padding:9px;
+  }
+  .marketingVideoQuickLinksList{
+    gap:6px;
+  }
+  .marketingVideoQuickLink{
+    flex:1 1 140px;
+    justify-content:center;
+    text-align:center;
   }
   .marketingVideoLibrarySectionHeader{
     display:grid;
@@ -9192,6 +9370,128 @@ button.navDropdownItem{font:inherit;}
   padding-top:16px;
 }
 
+.hostPortalAccordionHeader--composite{
+  padding:0;
+  cursor:default;
+}
+
+.hostPortalAccordionHeader--composite:hover{
+  background:transparent;
+}
+
+.hostPortalAccordionMainButton{
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  padding:15px 16px;
+  border:0;
+  background:transparent;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
+}
+
+.hostPortalAccordionMainButton > span{
+  min-width:0;
+  display:grid;
+  gap:3px;
+}
+
+.hostPortalAccordionMainButton strong{
+  color:#0b3d1d;
+  font-size:16px;
+}
+
+.hostPortalAccordionMainButton:hover,
+.hostPortalAccordionMainButton:focus-visible{
+  background:#f4faf6;
+  outline:none;
+}
+
+.hostPortalAccordionHeaderActions{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding-right:16px;
+}
+
+.hostPortalAccordionIndicatorButton{
+  padding:0;
+  background:#fff;
+  color:#0b3d1d;
+  cursor:pointer;
+}
+
+.hostTournamentUnreadButton{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:32px;
+  padding:5px 9px;
+  border:1px solid #efb2b2;
+  border-radius:999px;
+  background:#fff4f4;
+  color:#9b1c1c;
+  font:inherit;
+  font-size:.76rem;
+  font-weight:850;
+  cursor:pointer;
+}
+
+.hostTournamentUnreadButton:hover,
+.hostTournamentUnreadButton:focus-visible{
+  border-color:#d76767;
+  background:#ffe8e8;
+  outline:none;
+}
+
+.hostTournamentUnreadModalOverlay{z-index:1250}
+.hostTournamentUnreadModal{width:min(760px,calc(100vw - 32px));max-height:min(84vh,860px);overflow:auto;padding:20px}
+.hostTournamentUnreadModalHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid #e2e8f0}
+.hostTournamentUnreadModalHeader h2{margin:0;color:#0b3d1d}
+.hostTournamentUnreadModalHeader p{margin:4px 0 0;color:#64748b}
+.hostTournamentUnreadMessageList{display:grid;gap:9px}
+.hostTournamentUnreadMessageLine{width:100%;display:grid;grid-template-columns:minmax(140px,.9fr) minmax(150px,1fr) minmax(190px,1.4fr) minmax(130px,.9fr);gap:12px;align-items:start;padding:12px 14px;border:1px solid #efb2b2;border-radius:12px;background:#fffafa;color:#0f172a;text-align:left;font:inherit;cursor:pointer}
+.hostTournamentUnreadMessageLine:hover,.hostTournamentUnreadMessageLine:focus-visible{background:#fff1f1;border-color:#d76767;outline:none;box-shadow:0 0 0 3px rgba(220,38,38,.08)}
+.hostTournamentUnreadMessageLine>span{display:grid;gap:3px;min-width:0}
+.hostTournamentUnreadMessageLine>span>span{font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.04em;color:#7f1d1d}
+.hostTournamentUnreadMessageLine strong{overflow-wrap:anywhere;color:#1f2937}
+.hostTournamentUnreadMessagePreview{grid-column:1/-1;padding-top:8px;border-top:1px solid #fee2e2}
+.hostTournamentUnreadMessagePreview strong{font-weight:650;line-height:1.4}
+
+.hostTournamentUnreadDot{
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:#dc2626;
+  box-shadow:0 0 0 3px rgba(220,38,38,.12);
+}
+
+.hostTournamentUnreadFilterNotice{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:12px;
+  padding:10px 12px;
+  border:1px solid #f2c7c7;
+  border-radius:12px;
+  background:#fff8f8;
+  color:#7f1d1d;
+  font-weight:700;
+}
+
+@media (max-width:640px){
+  .hostPortalAccordionHeaderActions{padding-right:10px;gap:6px}
+  .hostTournamentUnreadButton{padding-inline:8px}
+  .hostPortalAccordionMainButton{padding-left:12px;padding-right:8px}
+  .hostTournamentUnreadModal{width:min(96vw,760px);padding:14px}
+  .hostTournamentUnreadModalHeader{align-items:stretch;flex-direction:column}
+  .hostTournamentUnreadMessageLine{grid-template-columns:1fr;gap:8px}
+}
+
 .tournamentFlyerPicturesButton{
   border-color:#93c5fd;
   background:#dbeafe;
@@ -9222,3 +9522,124 @@ button.navDropdownItem{font:inherit;}
   from{opacity:.2;transform:scale(.995);}
   to{opacity:1;transform:scale(1);}
 }
+
+/* Support ticket management */
+.supportPageShell{overflow:visible}
+.supportWorkspace{display:flex;flex-direction:column;gap:18px}
+.supportTicketSection{border-top:1px solid #dce7df;padding-top:16px}
+.supportSectionHeading{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}
+.supportSectionHeading h2,.supportSectionHeading h3{margin:0;font-size:1.1rem}
+.supportSectionHeading p{margin:5px 0 0}
+.supportTicketLineList,.supportClosedHistory,.adminSupportTicketList{display:flex;flex-direction:column;gap:8px}
+.supportTicketLineItem,.supportClosedHistoryItem,.adminSupportTicketLine{width:100%;border:1px solid #d6e3dc;background:#fff;border-radius:12px;padding:12px 14px;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;color:inherit;font:inherit}
+.supportTicketLineItem:hover,.supportClosedHistoryItem:hover,.adminSupportTicketLine:hover{border-color:#87ad97;background:#f7fbf8}
+.supportTicketLineItem--selected,.adminSupportTicketLine--selected{border-color:#2f7d4a;box-shadow:0 0 0 2px rgba(47,125,74,.12);background:#f5fbf7}
+.supportTicketLineMain,.adminSupportTicketLineMain,.supportClosedHistoryItem>span:first-child{min-width:0;display:flex;flex-direction:column;gap:4px}
+.supportTicketSubject{font-weight:750;overflow-wrap:anywhere}
+.supportTicketLineMeta{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.supportTicketAlertIcon{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:50%;background:#f59e0b;color:#1f2937;font-size:13px;font-weight:900;line-height:1;box-shadow:0 0 0 1px rgba(120,78,0,.18)}
+.supportTicketDetail{padding:16px;border-color:#cbded2}
+.supportTicketDetailTitleRow,.adminSupportDetailTitleRow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.supportTicketDetailTitleRow h2{margin:0;font-size:1.12rem}
+.supportTicketStatusOpen{background:#e8f7ed;color:#146233}
+.supportTicketStatusClosed{background:#edf0f2;color:#4b5563}
+.supportConversation{display:flex;flex-direction:column;gap:10px;margin:12px 0 16px}
+.supportMessageBubble{border:1px solid #dbe4df;border-radius:12px;padding:11px 12px;max-width:92%}
+.supportMessageBubble--user{align-self:flex-end;background:#eef8f1}
+.supportMessageBubble--admin{align-self:flex-start;background:#eef5ff;border-color:#cbdcf3}
+.supportMessageMeta{display:flex;justify-content:space-between;gap:14px;align-items:center;font-size:12px;color:#5d6b63;margin-bottom:5px}
+.supportMessageText{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
+.supportReplyForm,.supportNewTicketForm,.adminSupportReplyForm{max-width:760px}
+.supportClosedNotice{border:1px solid #d7dee1;background:#f6f8f9;border-radius:10px;padding:11px 12px;color:#4b5563;font-size:.92rem}
+.supportClosedHistoryItem{background:#f9fafb}
+.supportClosedHistoryItem>span:last-child{font-size:.85rem;font-weight:700}
+.supportEmptyState{border:1px dashed #cbd8d0;border-radius:10px;padding:13px;background:#fafcfb}
+.adminSupportSummaryGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.adminSupportPanel,.adminSupportDetail{padding:14px;overflow:hidden}
+.adminSupportTicketSubjectRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.adminSupportTicketLine{border-radius:10px}
+.adminSupportTicketLine--selected{background:#f3faf5}
+.adminSupportConversation{max-height:460px;overflow:auto;padding-right:4px}
+.adminSupportActions{display:flex;gap:9px;flex-wrap:wrap}
+.adminSupportTicketList--closed .adminSupportTicketLine{background:#f8faf9}
+.hostPortalSupportSection{padding:16px;margin-top:14px;overflow:visible}
+.hostPortalSupportHeading{padding-bottom:4px}
+.adminSupportFilterPanel{padding:14px}
+.adminSupportFilterGrid{display:grid;grid-template-columns:minmax(180px,1fr) minmax(160px,.75fr) minmax(160px,.75fr);gap:12px;align-items:end}
+.adminSupportTypeLegend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px}
+.supportAccountTypeBadge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800;line-height:1.25;border:1px solid transparent}
+.supportAccountTypeBadge--golfUser{background:#e8f7ed;color:#166534;border-color:#b9dfc5}
+.supportAccountTypeBadge--host{background:#eaf3ff;color:#1d4f91;border-color:#bad3f4}
+.supportAccountTypeBadge--organizer{background:#f3ecff;color:#6b3aa6;border-color:#dac5f2}
+.supportAccountTypeBadge--other{background:#f1f3f5;color:#4b5563;border-color:#d8dde2}
+.adminSupportTicketLine--host{border-left:5px solid #6aa5e6;background:#f8fbff}
+.adminSupportTicketLine--golf_user{border-left:5px solid #72b98a;background:#f9fcfa}
+.adminSupportTicketLine--organizer{border-left:5px solid #a786d0;background:#fcfaff}
+.adminSupportTicketLine--selected{border-color:#2f7d4a;box-shadow:0 0 0 2px rgba(47,125,74,.12);background:#f3faf5}
+.adminSupportHostCourse{color:#335f92;font-weight:650}
+.adminSupportPagination{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #e1e8e4}
+.adminSupportPaginationControls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+@media (max-width:720px){
+  .supportSectionHeading{align-items:stretch;flex-direction:column}
+  .supportTicketLineItem,.supportClosedHistoryItem,.adminSupportTicketLine{align-items:flex-start}
+  .supportMessageBubble{max-width:100%}
+  .supportMessageMeta{align-items:flex-start;flex-direction:column;gap:2px}
+  .adminSupportSummaryGrid{grid-template-columns:1fr}
+  .adminSupportFilterGrid{grid-template-columns:1fr}
+  .adminSupportPagination{align-items:stretch;flex-direction:column}
+  .adminSupportPaginationControls{justify-content:space-between}
+  .hostPortalSupportSection{padding:13px}
+}
+
+/* 2026-09-16 mobile team/member, notifications, and course-calendar usability refinements. */
+.teamCreateMemberControls{
+  display:grid;
+  grid-template-columns:minmax(280px,1fr) 44px 44px;
+  gap:10px;
+  align-items:end;
+}
+.teamCreateMemberEmailField{min-width:0;}
+.teamMemberValidateIconButton,.teamMemberRemoveIconButton{
+  width:44px;
+  height:44px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:10px;
+  background:#f3f4f6;
+  border:1px solid #cbd5e1;
+  color:#64748b;
+  cursor:pointer;
+}
+.teamMemberValidateIconButton svg,.teamMemberRemoveIconButton svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.teamMemberValidateIconButton.validated{background:#dcfce7;border-color:#86efac;color:#15803d;}
+.teamMemberValidateIconButton:disabled{cursor:default;opacity:1;}
+.teamMemberRemoveIconButton{color:#b91c1c;background:#fff;}
+.teamMemberValidationProgress{font-size:22px;line-height:1;font-weight:800;}
+.notificationSendMessageButton,.notificationBackToMessagesButton{min-height:46px;padding:11px 18px;font-size:1rem;font-weight:800;}
+.golfCourseCalendarMobileModalOverlay{display:none;}
+
+@media (max-width:760px){
+  .teamCreateMemberControls{grid-template-columns:minmax(0,1fr) 46px 46px;gap:8px;}
+  .teamCreateMemberEmailField{grid-column:1/-1;}
+  .teamCreateMemberEmailField .input{width:100%;font-size:16px;min-height:46px;}
+  .teamMemberValidateIconButton{grid-column:2;}
+  .teamMemberRemoveIconButton{grid-column:3;}
+  .notificationSendMessageButton,.notificationBackToMessagesButton{width:100%;justify-content:center;min-height:50px;font-size:1.02rem;}
+  .golfCourseCalendarDetailsInline{display:none;}
+  .golfCourseCalendarMobileModalOverlay{
+    position:fixed;
+    inset:0;
+    z-index:1200;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+    background:rgba(15,23,42,.64);
+  }
+  .golfCourseCalendarMobileModal{width:min(100%,560px);max-height:88vh;overflow:auto;}
+  .golfCourseCalendarDetails--mobileModal{margin:0;box-shadow:0 24px 70px rgba(15,23,42,.3);}
+}
+
+.tournamentMessageDialogueEntry--selectedUnread{box-shadow:0 0 0 2px rgba(220,38,38,.22);border-color:#dc2626;background:#fff7f7}

@@ -51,6 +51,7 @@ function normalizeScoreEntry(raw: any): ScoreEntry {
 
 function isTeamScore(s: ScoreEntry): s is TeamScoreEntry { return (s as any).mode !== 'solo' }
 function isSoloScore(s: ScoreEntry): s is SoloScoreEntry { return (s as any).mode === 'solo' }
+function isIndividualChallengeScore(s: ScoreEntry): s is SoloScoreEntry { return isSoloScore(s) && (s as any).source === 'individual_challenge' }
 function isTeamChallengeScore(s: ScoreEntry): s is TeamScoreEntry { return isTeamScore(s) && (s as any).source === 'team_challenge' }
 function scoreMatchesState(score: ScoreEntry, stateFilter: string) {
   if (stateFilter === 'all') return true
@@ -82,12 +83,13 @@ function ScoreButton({ round, onClick, onPictures }: { round: ScoreEntry; onClic
   const rowClass = `${scoreLineItemClass(round)} loggedRoundLineItemComposite`
 
   if (round.mode === 'solo') {
+    const roundType = isIndividualChallengeScore(round) ? 'Individual Challenge' : 'Solo Round'
     return (
       <div className={rowClass}>
-        <button type="button" className="loggedRoundLineItemOpenButton" onClick={onClick} aria-label={`Open ${round.course} solo round details`}>
+        <button type="button" className="loggedRoundLineItemOpenButton" onClick={onClick} aria-label={`Open ${round.course} ${roundType} details`}>
           <span className="compactLineItemMain">
             <strong className="compactLineItemTitle">{round.course}</strong>
-            <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • Solo Round</span>
+            <span className="compactLineItemMeta">{round.date} • {String((round as any).state || '').toUpperCase()} • {roundType}</span>
             {incompleteBadge}
           </span>
           <span className="compactLineItemSummary">
@@ -191,6 +193,7 @@ function MyGolfScoresInner() {
         }
 
         logFrontendEvent({ category: 'myGolfScores.teamChallengeScores', message: 'team_challenge_score_records_loaded', data: { count: normalizedTeamChallenges.length } })
+        logFrontendEvent({ category: 'myGolfScores.individualChallengeScores', message: 'individual_challenge_score_records_loaded', data: { count: normalizedSoloScores.filter(isIndividualChallengeScore).length } })
       } catch (e: any) {
         setError(e?.message || null)
         setScores([])
@@ -316,7 +319,8 @@ function MyGolfScoresInner() {
   }
 
   function handleRoundPictures(round: ScoreEntry) {
-    const target: PictureTarget = isTeamChallengeScore(round)
+    const isChallengeRound = (round as any).source === 'team_challenge' || (round as any).source === 'individual_challenge'
+    const target: PictureTarget = isChallengeRound
       ? { kind: 'challenge', id: String((round as any).challengeThreadId || (round as any).sourceMessageId || round.id) }
       : { kind: 'score', id: String(round.id) }
     setPicturesTarget({ target, title: `${round.course} Pictures` })

@@ -699,6 +699,7 @@ export async function addInboxIndividualChallengeParticipant(messageId, user, pa
     score: null,
     holes: [],
     soloScoreId: null,
+    roundDate: null,
   }]
   await db.execute('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?', [JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge'])
   const [rows] = await db.execute('SELECT * FROM inbox_messages WHERE id = ? LIMIT 1', [String(messageId || '')])
@@ -732,12 +733,12 @@ export async function updateInboxIndividualChallengeCourse(messageId, user, cour
     const isCurrentParticipant = String(participant.userId || '') === String(user?.id || '') || normalizeEmail(participant.email) === normalizedEmail
     if (!isCurrentParticipant) return participant
     userCanEditOwnCourse = true
-    return {
-      ...participant,
-      courseId: course?.courseId || null,
-      courseState: course?.courseState || null,
-      courseName: course?.courseName || null,
-    }
+    const nextParticipant = { ...participant }
+    if (Object.prototype.hasOwnProperty.call(course || {}, 'courseId')) nextParticipant.courseId = course?.courseId || null
+    if (Object.prototype.hasOwnProperty.call(course || {}, 'courseState')) nextParticipant.courseState = course?.courseState || null
+    if (Object.prototype.hasOwnProperty.call(course || {}, 'courseName')) nextParticipant.courseName = course?.courseName || null
+    if (Object.prototype.hasOwnProperty.call(course || {}, 'roundDate')) nextParticipant.roundDate = course?.roundDate || null
+    return nextParticipant
   })
   if (!userCanEditOwnCourse) return null
   await db.execute('UPDATE inbox_messages SET individual_participants_json = ? WHERE thread_id = ? AND message_type = ?', [JSON.stringify(participants), existing.threadId || existing.id, 'individual_challenge'])

@@ -22,8 +22,6 @@ import { CURRENT_EVENTS_COMMERCIAL_JOB_ID, CURRENT_EVENTS_COMMERCIAL_JOB_NAME, r
 import { GREAT_SHOTS_COMMERCIAL_JOB_ID, GREAT_SHOTS_COMMERCIAL_JOB_NAME, runCreateShortFormGreatShotsSmall } from './great-shots-commercial.js'
 import { FUNNY_SHOTS_COMMERCIAL_JOB_ID, FUNNY_SHOTS_COMMERCIAL_JOB_NAME, runCreateShortFormFunnyShotsSmall } from './funny-shots-commercial.js'
 import { getLatestPexelsQuota, pexelsApiKey } from './pexels-api.js'
-import { getSocialPublishingConfiguration, publishCommercialToSocialPlatforms } from './social-publisher.js'
-import { listSocialPublicationsForRuns } from './social-publishing-store.js'
 import {
   getLatestSuccessfulScheduledJobRuns,
   getScheduledJobRecord,
@@ -372,7 +370,7 @@ function latestQuota(...values) {
   return values.filter((value) => value && typeof value === 'object').sort((a, b) => quotaTimestamp(b) - quotaTimestamp(a))[0] || null
 }
 
-function commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota, socialPublications = []) {
+function commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota) {
   if (!COMMERCIAL_JOB_IDS.has(job.id)) return null
   const output = latestSuccessfulRun?.output && typeof latestSuccessfulRun.output === 'object' ? latestSuccessfulRun.output : null
   const latestOutput = output?.relativePath && output?.fileName ? {
@@ -394,17 +392,6 @@ function commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota, socialP
       completedAt: latestSuccessfulRun.completedAt || null,
       output,
     } : null,
-    socialAutoPublishEnabled: String(process.env.SOCIAL_AUTO_PUBLISH || '').toLowerCase() === 'true',
-    socialProviderConfiguration: getSocialPublishingConfiguration().providers,
-    socialPublications: Array.isArray(socialPublications) ? socialPublications.map((publication) => ({
-      platform: publication.platform,
-      status: publication.status,
-      attemptCount: publication.attemptCount,
-      platformUrl: publication.platformUrl || null,
-      errorMessage: publication.errorMessage || null,
-      publishedAt: publication.publishedAt || null,
-      nextAttemptAt: publication.nextAttemptAt || null,
-    })) : [],
   }
 }
 
@@ -427,8 +414,6 @@ export async function listScheduledJobs(pool, now = new Date()) {
     latestSuccessfulRuns.get(job.id)?.output?.pexelsQuota,
   ])
   const pexelsQuota = latestQuota(getLatestPexelsQuota(), ...persistedQuotas)
-  const latestRunIds = [...latestSuccessfulRuns.values()].map((run) => run?.id).filter(Boolean)
-  const socialPublicationsByRun = await listSocialPublicationsForRuns(pool, latestRunIds)
   return jobs.map((job) => {
     const active = activeJobRuns.get(job.id)
     const latestSuccessfulRun = latestSuccessfulRuns.get(job.id) || null
@@ -436,7 +421,7 @@ export async function listScheduledJobs(pool, now = new Date()) {
       ...job,
       canCancel: Boolean(active && !active.controller.signal.aborted),
       activeRunId: active?.runId || null,
-      commercialMetadata: commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota, latestSuccessfulRun?.id ? (socialPublicationsByRun.get(latestSuccessfulRun.id) || []) : []),
+      commercialMetadata: commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota),
     }
   })
 }
@@ -550,27 +535,7 @@ export async function runScheduledJob(pool, jobId, {
     throwIfJobCancelled(controller.signal)
     const output = await definition.run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal: controller.signal, jobConfig })
     throwIfJobCancelled(controller.signal)
-    let completedOutput = output
-    if (COMMERCIAL_JOB_IDS.has(definition.id) && output?.relativePath) {
-      try {
-        const socialPublishing = await publishCommercialToSocialPlatforms({
-          db: pool,
-          runId,
-          jobId: definition.id,
-          jobName: definition.name,
-          output,
-          correlationId,
-          logApi,
-          logError,
-          logScheduledJob,
-        })
-        completedOutput = { ...output, socialPublishing }
-      } catch (socialError) {
-        logError('Commercial social publishing orchestration failed without failing MP4 generation', { correlationId, jobId: definition.id, jobName: definition.name, runId, error: socialError })
-        logScheduledJob('commercial_social_publishing_orchestration_failed', { correlationId, jobId: definition.id, jobName: definition.name, runId, level: 'error', error: socialError?.message || String(socialError) })
-        completedOutput = { ...output, socialPublishing: { enabled: true, orchestrationError: socialError?.message || String(socialError), publications: [] } }
-      }
-    }
+    const completedOutput = output
     const nextRunAt = await resolveNextRun(pool, definition)
     await recordScheduledJobRunCompleted(pool, definition, { runId, status: 'success', output: completedOutput, nextRunAt })
     logScheduledJob('scheduled_job_run_completed', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, status: 'success', output: completedOutput, nextRunAt: nextRunAt?.toISOString?.() || null })
