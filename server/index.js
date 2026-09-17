@@ -29,7 +29,7 @@ import { buildOrganizerInviteDetails, createHostManagedTournament, createTournam
 import { findTournamentDateConflict, formatTournamentScheduleDate, normalizeTournamentScheduleDate } from './lib/tournament-schedule-conflicts.js'
 import { requestUserTimeZone } from './lib/time-zone.js'
 import { normalizeChallengeStatus, normalizeInboxMessagePayload, normalizeTeamChallengeScore, normalizeIndividualChallengeScore, normalizeTeamChallengeHoles, normalizeIndividualChallengeParticipantEmails, normalizeTeamChallengeScoringType, normalizeTeamChallengePointsPerHole, validateIndividualChallengeDateRange, validateOptionalChallengeState, validateOptionalChallengeCourse } from './lib/inbox-service.js'
-import { addMessageGroupMember, appendTournamentPortalMessage, createMessageGroup, deleteMessageGroup, createTournamentMessageThread, createTournamentNotification, getTournamentMessageConversationForUser, getUserNotificationSummary, listMessageGroups, listTournamentMessageThreads, loadUserNotificationPage, markTournamentMessagesRead, removeMessageGroupMember, sendMessageGroupMessage, setNotificationThreadState, startTournamentUserConversationFromNotification, validateNotificationMessageBody } from './lib/notification-service.js'
+import { addMessageGroupMember, appendTournamentPortalMessage, createMessageGroup, deleteMessageGroup, createTournamentMessageThread, createTournamentNotification, getTournamentMessageConversationForUser, getTournamentMessageUnreadSummary, getUserNotificationSummary, listMessageGroups, listTournamentMessageThreads, listTournamentUnreadMessageItems, loadUserNotificationPage, markTournamentMessageRead, markTournamentMessageThreadRead, markTournamentMessagesRead, removeMessageGroupMember, sendMessageGroupMessage, setNotificationThreadState, startTournamentUserConversationFromNotification, validateNotificationMessageBody } from './lib/notification-service.js'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor } from './lib/tee-colors.js'
 import { getExternalApiCallSummary } from './lib/external-api-metrics.js'
 import { getFeatureFlags, featureFlagDefinitionsForApi, isFeatureEnabled } from './lib/feature-flags.js'
@@ -43,8 +43,7 @@ import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarket
 import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
 import { completeCheckout, createAccessCode, createCheckout, createPaymentMethodCheckout, createPortal, getBillingStatus, listAccessCodes, processStripeWebhook, redeemAccessCode, requireBillingAccess, setCancellation, updateAccessCode } from './lib/billing.js'
 import { ROUND_IMAGE_LIMIT, TOURNAMENT_IMAGE_LIMIT, USER_IMAGE_ENTITY_TYPES, deleteUserImage, ensureUserImagesDirectory, getUserImage, getUserImageCounts, listUserImages, safeImageFilePath, saveUserImage } from './lib/user-images.js'
-import { verifySignedSocialMediaToken } from './lib/social-publishing-crypto.js'
-import { getSocialPublishingConfiguration, retrySocialPublicationsForRun, startSocialPublicationRetryWorker } from './lib/social-publisher.js'
+import { addAdminSupportMessage, addRequesterSupportMessage, closeSupportTicket, createSupportTicket, getSupportTicketForAdmin, getSupportTicketForRequester, listSupportTicketsForAdmin, listSupportTicketsForRequester } from './lib/support-tickets.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -54,7 +53,6 @@ ensureUserImagesDirectory()
 app.set('trust proxy', 1)
 const PORT = Number(process.env.PORT)
 let cancelledTournamentCleanupScheduler = null
-let socialPublicationRetryWorker = null
 if (!Number.isFinite(PORT) || PORT <= 0) throw new Error('PORT must be set to a valid positive number in the environment')
 let storageReady = false
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
@@ -415,6 +413,52 @@ app.post(['/api/client-logs', '/api/client-log'], (req, res) => {
 
 
 
+app.get('/api/support/tickets', async (req, res) => {
+  try {
+    const requester = await getSupportRequester(req)
+    if (!requester) {
+      logApi('support_ticket_list_rejected_unauthenticated', { ...requestContext(req) })
+      return res.status(401).json({ message: 'Sign in before viewing support tickets.' })
+    }
+    if (requester.sessionCookie) res.setHeader('Set-Cookie', requester.sessionCookie)
+    const tickets = await listSupportTicketsForRequester(getPool(), requester)
+    logApi('support_ticket_list_loaded', {
+      ...requestContext(req),
+      accountType: requester.accountType,
+      accountId: requester.accountId,
+      ticketCount: tickets.length,
+      openTicketCount: tickets.filter((ticket) => ticket.status === 'open').length,
+      unreadTicketCount: tickets.filter((ticket) => ticket.userUnread).length,
+    })
+    return res.json({ tickets })
+  } catch (error) {
+    logRouteError('Support ticket list error', req, error)
+    return res.status(500).json({ message: 'Could not load support tickets.' })
+  }
+})
+
+app.get('/api/support/tickets/:ticketId', async (req, res) => {
+  try {
+    const requester = await getSupportRequester(req)
+    if (!requester) return res.status(401).json({ message: 'Sign in before viewing support tickets.' })
+    if (requester.sessionCookie) res.setHeader('Set-Cookie', requester.sessionCookie)
+    const ticket = await getSupportTicketForRequester(getPool(), requester, String(req.params.ticketId || ''), { markRead: true })
+    if (!ticket) return res.status(404).json({ message: 'Support ticket not found.' })
+    logApi('support_ticket_viewed', {
+      ...requestContext(req),
+      ticketId: ticket.id,
+      accountType: requester.accountType,
+      accountId: requester.accountId,
+      status: ticket.status,
+      messageCount: ticket.messages?.length || 0,
+    })
+    return res.json({ ticket })
+  } catch (error) {
+    logRouteError('Support ticket detail error', req, error, { ticketId: req.params.ticketId })
+    return res.status(500).json({ message: 'Could not load support ticket.' })
+  }
+})
+
 app.post('/api/support/messages', async (req, res) => {
   try {
     const requester = await getSupportRequester(req)
@@ -429,9 +473,8 @@ app.post('/api/support/messages', async (req, res) => {
     if (!message) return res.status(400).json({ message: 'Support message is required.' })
 
     if (requester.sessionCookie) res.setHeader('Set-Cookie', requester.sessionCookie)
-    logApi('support_message_submit_started', {
+    logApi('support_ticket_create_started', {
       ...requestContext(req),
-      supportDestination: SUPPORT_DESTINATION_EMAIL,
       accountType: requester.accountType,
       accountId: requester.accountId,
       accountEmail: requester.email,
@@ -439,26 +482,134 @@ app.post('/api/support/messages', async (req, res) => {
       messageLength: message.length,
     })
 
-    const supportEmail = buildSupportEmail(req, requester, subject, message)
-    await sendMail({
-      to: SUPPORT_DESTINATION_EMAIL,
-      subject: supportEmail.subject,
-      text: supportEmail.text,
-      html: supportEmail.html,
+    const ticket = await createSupportTicket(getPool(), {
+      requester,
+      subject,
+      message,
+      correlationId: req.correlationId || null,
     })
 
-    logApi('support_message_email_sent', {
+    try {
+      const supportEmail = buildSupportEmail(req, requester, subject, message)
+      await sendMail({
+        to: SUPPORT_DESTINATION_EMAIL,
+        subject: supportEmail.subject,
+        text: supportEmail.text,
+        html: supportEmail.html,
+      })
+      logApi('support_message_email_sent', {
+        ...requestContext(req),
+        ticketId: ticket.id,
+        supportDestination: SUPPORT_DESTINATION_EMAIL,
+        accountType: requester.accountType,
+        accountId: requester.accountId,
+        accountEmail: requester.email,
+        emailSubject: supportEmail.subject,
+      })
+    } catch (emailError) {
+      logRouteError('Support ticket notification email error', req, emailError, { ticketId: ticket.id, supportDestination: SUPPORT_DESTINATION_EMAIL })
+    }
+
+    logApi('support_ticket_created', {
       ...requestContext(req),
-      supportDestination: SUPPORT_DESTINATION_EMAIL,
+      ticketId: ticket.id,
       accountType: requester.accountType,
       accountId: requester.accountId,
-      accountEmail: requester.email,
-      emailSubject: supportEmail.subject,
+      status: ticket.status,
     })
-    return res.json({ ok: true })
+    return res.status(201).json({ ok: true, ticket })
   } catch (error) {
-    logRouteError('Support message send error', req, error)
-    return res.status(500).json({ message: 'Could not send support message.' })
+    const status = /required/i.test(String(error?.message || '')) ? 400 : 500
+    if (status >= 500) logRouteError('Support ticket create error', req, error)
+    return res.status(status).json({ message: error?.message || 'Could not send support message.' })
+  }
+})
+
+app.post('/api/support/tickets/:ticketId/messages', async (req, res) => {
+  try {
+    const requester = await getSupportRequester(req)
+    if (!requester) return res.status(401).json({ message: 'Sign in before responding to support tickets.' })
+    if (requester.sessionCookie) res.setHeader('Set-Cookie', requester.sessionCookie)
+    const ticketId = String(req.params.ticketId || '').trim()
+    logApi('support_ticket_user_reply_started', { ...requestContext(req), ticketId, accountType: requester.accountType, accountId: requester.accountId })
+    const ticket = await addRequesterSupportMessage(getPool(), {
+      requester,
+      ticketId,
+      message: req.body?.message,
+      correlationId: req.correlationId || null,
+    })
+    if (!ticket) return res.status(404).json({ message: 'Support ticket not found.' })
+    logApi('support_ticket_user_reply_saved', { ...requestContext(req), ticketId, accountType: requester.accountType, accountId: requester.accountId, messageCount: ticket.messages?.length || 0 })
+    return res.json({ ticket })
+  } catch (error) {
+    const status = Number(error?.statusCode) || (/required/i.test(String(error?.message || '')) ? 400 : 500)
+    if (status >= 500) logRouteError('Support ticket user reply error', req, error, { ticketId: req.params.ticketId })
+    else logApi('support_ticket_user_reply_rejected', { ...requestContext(req), ticketId: req.params.ticketId, status, reason: error?.message || 'validation_failed' })
+    return res.status(status).json({ message: error?.message || 'Could not save support reply.' })
+  }
+})
+
+app.get('/api/admin/support/tickets', adminMiddleware, async (req, res) => {
+  try {
+    const tickets = await listSupportTicketsForAdmin(getPool())
+    logApi('admin_support_ticket_list_loaded', {
+      ...requestContext(req),
+      adminUserId: req.adminUser.id,
+      ticketCount: tickets.length,
+      openTicketCount: tickets.filter((ticket) => ticket.status === 'open').length,
+      unreadTicketCount: tickets.filter((ticket) => ticket.adminUnread).length,
+    })
+    return res.json({ tickets })
+  } catch (error) {
+    logRouteError('Admin support ticket list error', req, error, { adminUserId: req.adminUser?.id || null })
+    return res.status(500).json({ message: 'Could not load support tickets.' })
+  }
+})
+
+app.get('/api/admin/support/tickets/:ticketId', adminMiddleware, async (req, res) => {
+  try {
+    const ticketId = String(req.params.ticketId || '').trim()
+    const ticket = await getSupportTicketForAdmin(getPool(), ticketId, { markRead: true })
+    if (!ticket) return res.status(404).json({ message: 'Support ticket not found.' })
+    logApi('admin_support_ticket_viewed', { ...requestContext(req), adminUserId: req.adminUser.id, ticketId, status: ticket.status, messageCount: ticket.messages?.length || 0 })
+    return res.json({ ticket })
+  } catch (error) {
+    logRouteError('Admin support ticket detail error', req, error, { adminUserId: req.adminUser?.id || null, ticketId: req.params.ticketId })
+    return res.status(500).json({ message: 'Could not load support ticket.' })
+  }
+})
+
+app.post('/api/admin/support/tickets/:ticketId/messages', adminMiddleware, async (req, res) => {
+  try {
+    const ticketId = String(req.params.ticketId || '').trim()
+    logApi('admin_support_ticket_reply_started', { ...requestContext(req), adminUserId: req.adminUser.id, ticketId })
+    const ticket = await addAdminSupportMessage(getPool(), {
+      ticketId,
+      adminUser: req.adminUser,
+      message: req.body?.message,
+      correlationId: req.correlationId || null,
+    })
+    if (!ticket) return res.status(404).json({ message: 'Support ticket not found.' })
+    logApi('admin_support_ticket_reply_saved', { ...requestContext(req), adminUserId: req.adminUser.id, ticketId, messageCount: ticket.messages?.length || 0 })
+    return res.json({ ticket })
+  } catch (error) {
+    const status = Number(error?.statusCode) || (/required/i.test(String(error?.message || '')) ? 400 : 500)
+    if (status >= 500) logRouteError('Admin support ticket reply error', req, error, { adminUserId: req.adminUser?.id || null, ticketId: req.params.ticketId })
+    else logApi('admin_support_ticket_reply_rejected', { ...requestContext(req), adminUserId: req.adminUser?.id || null, ticketId: req.params.ticketId, status, reason: error?.message || 'validation_failed' })
+    return res.status(status).json({ message: error?.message || 'Could not save support reply.' })
+  }
+})
+
+app.post('/api/admin/support/tickets/:ticketId/close', adminMiddleware, async (req, res) => {
+  try {
+    const ticketId = String(req.params.ticketId || '').trim()
+    const ticket = await closeSupportTicket(getPool(), { ticketId, adminUser: req.adminUser, correlationId: req.correlationId || null })
+    if (!ticket) return res.status(404).json({ message: 'Support ticket not found.' })
+    logApi('admin_support_ticket_closed', { ...requestContext(req), adminUserId: req.adminUser.id, ticketId, status: ticket.status })
+    return res.json({ ticket })
+  } catch (error) {
+    logRouteError('Admin support ticket close error', req, error, { adminUserId: req.adminUser?.id || null, ticketId: req.params.ticketId })
+    return res.status(500).json({ message: 'Could not close support ticket.' })
   }
 })
 
@@ -2302,7 +2453,7 @@ async function proxyClientApp(req, res, next) {
   }
 }
 
-app.get(['/register', '/login', '/verify-contact', '/support', '/find-tournament', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/login', '/organizer/forgot-password', '/organizer/reset-password', '/organizer/portal/profile'], async (req, res, next) => {
+app.get(['/register', '/login', '/verify-contact', '/support', '/find-tournament', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/login', '/organizer/forgot-password', '/organizer/reset-password', '/organizer/portal/profile', '/organizer/portal/support'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
 
@@ -2577,51 +2728,6 @@ app.get('/api/admin/external-api-calls', adminMiddleware, async (req, res) => {
   }
 })
 
-
-app.get('/api/admin/social-publishing/connections', adminMiddleware, async (req, res) => {
-  try {
-    const status = getSocialPublishingConfiguration()
-    logApi('admin_social_publishing_connections_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, autoPublishEnabled: status.autoPublishEnabled })
-    logScheduledJob('admin_social_publishing_connections_loaded', { ...requestContext(req), adminUserId: req.adminUser.id, autoPublishEnabled: status.autoPublishEnabled })
-    return res.json(status)
-  } catch (error) {
-    logRouteError('Admin social publishing configuration load error', req, error)
-    return res.status(500).json({ message: error.message || 'Could not load social publishing configuration.' })
-  }
-})
-
-app.post('/api/admin/social-publishing/publications/:runId/retry', adminMiddleware, async (req, res) => {
-  try {
-    const runId = String(req.params.runId || '').trim()
-    if (!runId) return res.status(400).json({ message: 'Scheduled job run id is required.' })
-    const publications = await retrySocialPublicationsForRun(getPool(), runId, { logApi, logError, logScheduledJob })
-    logApi('admin_social_publications_retry_completed', { ...requestContext(req), adminUserId: req.adminUser.id, runId, publicationCount: publications.length })
-    return res.json({ runId, publications, jobs: await listScheduledJobs(getPool()) })
-  } catch (error) {
-    logRouteError('Admin social publication retry error', req, error)
-    return res.status(500).json({ message: error.message || 'Could not retry social publications.' })
-  }
-})
-
-app.get('/api/social-publishing/media/:token', async (req, res) => {
-  try {
-    const payload = verifySignedSocialMediaToken(req.params.token)
-    const projectRoot = path.resolve(__dirname, '..')
-    const commercialRoot = path.resolve(projectRoot, 'jobs', 'commercials')
-    const absolutePath = path.resolve(projectRoot, payload.relativePath)
-    if (!absolutePath.startsWith(`${commercialRoot}${path.sep}`) || path.extname(absolutePath).toLowerCase() !== '.mp4' || !fs.existsSync(absolutePath)) {
-      return res.status(404).json({ message: 'Signed social media file was not found.' })
-    }
-    logApi('social_signed_media_requested', { ...requestContext(req), runId: payload.runId, relativePath: payload.relativePath })
-    res.setHeader('Content-Type', 'video/mp4')
-    res.setHeader('Cache-Control', 'private, no-store, max-age=0')
-    res.setHeader('Content-Disposition', `inline; filename="${path.basename(absolutePath).replace(/"/g, '')}"`)
-    return res.sendFile(absolutePath)
-  } catch (error) {
-    logRouteError('Signed social media request error', req, error)
-    return res.status(403).json({ message: 'Signed social media URL is invalid or expired.' })
-  }
-})
 
 app.get('/api/admin/scheduled-jobs', adminMiddleware, async (req, res) => {
   try {
@@ -3206,8 +3312,33 @@ app.post('/api/host/accounts', hostAuthMiddleware, async (req, res) => {
       password,
     })
     const normalized = normalizeHostPortalAccount(hostAccount)
-    logApi('host_additional_account_created', { ...requestContext(req), hostAccountId: req.hostAccount.id, createdHostAccountId: normalized.id, email: normalized.email })
-    return res.status(201).json({ hostAccount: normalized })
+    let invitationEmailSent = false
+    try {
+      const invitingHost = normalizeHostPortalAccount(req.hostAccount)
+      const invitingHostName = invitingHost.contactName || invitingHost.golfCourseName || invitingHost.email || 'an existing golf-course host'
+      const subject = `${invitingHostName} added you as a GolfHomiez golf-course host`
+      const text = [
+        `Hello ${normalized.contactName || normalized.email},`,
+        '',
+        `${invitingHostName} invited you to represent ${normalized.golfCourseName || invitingHost.golfCourseName || 'their golf course'} as an existing GolfHomiez golf-course host.`,
+        `Host name: ${normalized.contactName || 'Not provided'}`,
+        `Host email: ${normalized.email}`,
+        '',
+        'You can sign in to the GolfHomiez Host Portal using the host email and password supplied by the existing host.',
+      ].join('\n')
+      const html = `
+        <p>Hello ${escapeHtml(normalized.contactName || normalized.email)},</p>
+        <p><strong>${escapeHtml(invitingHostName)}</strong> invited you to represent <strong>${escapeHtml(normalized.golfCourseName || invitingHost.golfCourseName || 'their golf course')}</strong> as an existing GolfHomiez golf-course host.</p>
+        <p><strong>Host name:</strong> ${escapeHtml(normalized.contactName || 'Not provided')}<br><strong>Host email:</strong> ${escapeHtml(normalized.email)}</p>
+        <p>You can sign in to the GolfHomiez Host Portal using the host email and password supplied by the existing host.</p>`
+      await sendMail({ to: normalized.email, subject, text, html })
+      invitationEmailSent = true
+      logApi('host_additional_account_invitation_email_sent', { ...requestContext(req), hostAccountId: req.hostAccount.id, createdHostAccountId: normalized.id, email: normalized.email, invitingHostName })
+    } catch (emailError) {
+      logRouteError('Additional host invitation email error', req, emailError, { createdHostAccountId: normalized.id, invitedHostEmail: normalized.email })
+    }
+    logApi('host_additional_account_created', { ...requestContext(req), hostAccountId: req.hostAccount.id, createdHostAccountId: normalized.id, email: normalized.email, invitationEmailSent })
+    return res.status(201).json({ hostAccount: normalized, invitationEmailSent })
   } catch (error) {
     if (error instanceof Error && /valid email|host name|Password must|already uses|not available/i.test(error.message)) {
       logApi('host_additional_account_create_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, reason: error.message })
@@ -3615,6 +3746,53 @@ app.post('/api/host/tournaments/:id/archive', hostAuthMiddleware, async (req, re
 app.post('/api/host/tournaments/:id/restore', hostAuthMiddleware, async (req, res) => handleHostTournamentArchiveState(req, res, false))
 
 
+app.get('/api/host/tournament-messages/unread-summary', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const tournaments = await listHostPortalTournaments(db, req.hostAccount, req)
+    const activeTournaments = tournaments.filter((tournament) => !tournament.archivedAt)
+    const host = normalizeHostPortalAccount(req.hostAccount)
+    const summary = await getTournamentMessageUnreadSummary(
+      db,
+      activeTournaments.map((tournament) => tournament.id),
+      { role: 'host', id: host.authUserId || host.id || null, email: host.email },
+    )
+    const tournamentUnread = activeTournaments
+      .map((tournament) => ({
+        tournamentId: tournament.id,
+        tournamentName: tournament.name || 'Tournament',
+        unreadCount: Number(summary.byTournament[tournament.id] || 0),
+      }))
+      .filter((entry) => entry.unreadCount > 0)
+    const unreadItems = await listTournamentUnreadMessageItems(
+      db,
+      activeTournaments.map((tournament) => tournament.id),
+      { role: 'host', id: host.authUserId || host.id || null, email: host.email },
+    )
+    const tournamentsById = new Map(activeTournaments.map((tournament) => [String(tournament.id), tournament]))
+    const unreadMessages = unreadItems.map((item) => {
+      const tournament = tournamentsById.get(String(item.tournamentId))
+      return {
+        ...item,
+        tournamentName: tournament?.name || 'Tournament',
+        tournamentDate: tournament?.startDate || null,
+      }
+    })
+    logApi('host_tournament_unread_summary_loaded', {
+      ...requestContext(req),
+      hostAccountId: req.hostAccount.id,
+      tournamentCount: activeTournaments.length,
+      tournamentsWithUnread: tournamentUnread.length,
+      totalUnread: summary.totalUnread,
+      unreadMessageItems: unreadMessages.length,
+    })
+    return res.json({ totalUnread: summary.totalUnread, byTournament: summary.byTournament, tournaments: tournamentUnread, unreadMessages })
+  } catch (error) {
+    logRouteError('Host tournament unread summary load error', req, error)
+    return res.status(500).json({ message: 'Tournament message notifications could not be loaded.' })
+  }
+})
+
 app.get('/api/host/tournaments/:id/messages', hostAuthMiddleware, async (req, res) => {
   try {
     const tournamentId = String(req.params.id || '').trim()
@@ -3644,6 +3822,46 @@ app.patch('/api/host/tournaments/:id/messages/read', hostAuthMiddleware, async (
   } catch (error) {
     logRouteError('Host tournament messages mark-read error', req, error)
     return res.status(500).json({ message: 'Tournament message notifications could not be marked read.' })
+  }
+})
+
+app.patch('/api/host/tournaments/:id/message-threads/:threadId/read', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const threadId = String(req.params.threadId || '').trim()
+    const db = getPool()
+    const tournament = await getHostEditableTournament(db, req.hostAccount, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const host = normalizeHostPortalAccount(req.hostAccount)
+    const state = await markTournamentMessageThreadRead(db, tournament.id, threadId, { role: 'host', id: host.authUserId || host.id || null, email: host.email })
+    if (!state) return res.status(404).json({ message: 'Tournament message thread not found.' })
+    logApi('host_tournament_message_thread_marked_read', { ...requestContext(req), tournamentId: tournament.id, threadId })
+    return res.json({ ok: true, ...state })
+  } catch (error) {
+    logRouteError('Host tournament message thread mark-read error', req, error)
+    return res.status(500).json({ message: 'Tournament message notification could not be marked read.' })
+  }
+})
+
+app.patch('/api/host/tournaments/:id/message-threads/:threadId/messages/:messageId/read', hostAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const threadId = String(req.params.threadId || '').trim()
+    const messageId = String(req.params.messageId || '').trim()
+    const db = getPool()
+    const tournament = await getHostEditableTournament(db, req.hostAccount, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this golf-course account.' })
+    const host = normalizeHostPortalAccount(req.hostAccount)
+    const viewer = { role: 'host', id: host.authUserId || host.id || null, email: host.email }
+    const state = await markTournamentMessageRead(db, tournament.id, threadId, messageId, viewer)
+    if (!state) return res.status(404).json({ message: 'Tournament message not found.' })
+    const remainingSummary = await getTournamentMessageUnreadSummary(db, [tournament.id], viewer)
+    const remainingUnread = Math.max(0, Number(remainingSummary.byTournament[tournament.id] || 0))
+    logApi('host_tournament_message_marked_read', { ...requestContext(req), tournamentId: tournament.id, threadId, messageId, remainingUnread })
+    return res.json({ ok: true, ...state, remainingUnread })
+  } catch (error) {
+    logRouteError('Host tournament message mark-read error', req, error)
+    return res.status(500).json({ message: 'Tournament message notification could not be marked read.' })
   }
 })
 
@@ -3986,6 +4204,23 @@ app.patch('/api/organizer/tournaments/:id/messages/read', requireStorage, organi
   } catch (error) {
     logRouteError('Organizer tournament messages mark-read error', req, error)
     return res.status(500).json({ message: 'Tournament message notifications could not be marked read.' })
+  }
+})
+
+app.patch('/api/organizer/tournaments/:id/message-threads/:threadId/read', requireStorage, organizerAuthMiddleware, async (req, res) => {
+  try {
+    const tournamentId = String(req.params.id || '').trim()
+    const threadId = String(req.params.threadId || '').trim()
+    const db = getPool()
+    const tournament = await getOrganizerEditableTournament(db, req.organizerUser, tournamentId)
+    if (!tournament) return res.status(404).json({ message: 'Tournament not found for this organizer invitation.' })
+    const state = await markTournamentMessageThreadRead(db, tournament.id, threadId, { role: 'organizer', id: req.organizerUser?.id || null, email: req.organizerUser?.email || '' })
+    if (!state) return res.status(404).json({ message: 'Tournament message thread not found.' })
+    logApi('organizer_tournament_message_thread_marked_read', { ...requestContext(req), tournamentId: tournament.id, threadId })
+    return res.json({ ok: true, ...state })
+  } catch (error) {
+    logRouteError('Organizer tournament message thread mark-read error', req, error)
+    return res.status(500).json({ message: 'Tournament message notification could not be marked read.' })
   }
 })
 
@@ -4985,11 +5220,145 @@ function teamChallengeRecordDate(message) {
   return createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)
 }
 
+function individualChallengeDateWindow(message) {
+  const startDate = String(message?.challengeDate || '').trim().slice(0, 10)
+  const endDate = String(message?.challengeEndDate || message?.challengeDate || '').trim().slice(0, 10)
+  return {
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? startDate : '',
+    endDate: /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate : '',
+  }
+}
+
+function resolveIndividualChallengeRoundDate(message, requestedRoundDate, timeZone) {
+  const { startDate, endDate } = individualChallengeDateWindow(message)
+  const hasDateRange = Boolean(startDate && endDate && startDate !== endDate)
+  const requested = String(requestedRoundDate || '').trim().slice(0, 10)
+  if (hasDateRange && !requested) throw new Error('Select the date you played this Individual Challenge round.')
+  const roundDate = requested || startDate || teamChallengeRecordDate(message)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(roundDate)) throw new Error('Individual Challenge round date is invalid.')
+  if (startDate && roundDate < startDate) throw new Error(`Round date must be between ${startDate} and ${endDate || startDate} for this Individual Challenge.`)
+  if (endDate && roundDate > endDate) throw new Error(`Round date must be between ${startDate || endDate} and ${endDate} for this Individual Challenge.`)
+  if (!isValidPastOrTodayDate(roundDate, timeZone)) throw new Error('Round date must be today or earlier in your local time zone.')
+  return roundDate
+}
+
 function selectLatestTeamChallengeMessage(existing, candidate) {
   if (!existing) return candidate
   const existingTime = existing.createdAt ? new Date(existing.createdAt).getTime() : 0
   const candidateTime = candidate.createdAt ? new Date(candidate.createdAt).getTime() : 0
   return candidateTime >= existingTime ? candidate : existing
+}
+
+function deriveTeamChallengeCoursePar(...holeSets) {
+  const parsByHole = new Map()
+  for (const holes of holeSets) {
+    if (!Array.isArray(holes)) continue
+    holes.forEach((hole, index) => {
+      const holeNumber = Number(hole?.hole ?? hole?.holeNumber ?? hole?.hole_number ?? index + 1)
+      const par = Number(hole?.par)
+      if (!Number.isFinite(holeNumber) || holeNumber < 1 || holeNumber > 18 || !Number.isFinite(par) || par <= 0) return
+      if (!parsByHole.has(Math.trunc(holeNumber))) parsByHole.set(Math.trunc(holeNumber), Math.trunc(par))
+    })
+  }
+
+  // Do not mistake a partially entered scorecard for the par of the full course.
+  if (parsByHole.size < 9) return null
+  return Array.from(parsByHole.values()).reduce((sum, par) => sum + par, 0)
+}
+
+async function attachTeamChallengeCoursePars(scores, req) {
+  const lookupPromises = new Map()
+  let catalogLookupCount = 0
+  let catalogResolvedCount = 0
+  let holeScorecardResolvedCount = 0
+
+  async function lookupCoursePar(score) {
+    const state = String(score?.state || '').trim().toUpperCase()
+    const course = String(score?.course || '').trim()
+    if (!state || !course || course === 'Team Challenge') return null
+    const cacheKey = `${state}\u0000${course.toLowerCase()}`
+    if (!lookupPromises.has(cacheKey)) {
+      catalogLookupCount += 1
+      lookupPromises.set(cacheKey, (async () => {
+        try {
+          const matchedCourse = await findGolfCourseForState(state, course)
+          const coursePar = Number(matchedCourse?.par ?? matchedCourse?.course_par ?? matchedCourse?.coursePar ?? matchedCourse?.parTotal)
+          return Number.isFinite(coursePar) && coursePar > 0 ? Math.trunc(coursePar) : null
+        } catch (error) {
+          logWarn('team_challenge_course_par_catalog_lookup_failed', {
+            ...requestContext(req),
+            state,
+            course,
+            error,
+          })
+          return null
+        }
+      })())
+    }
+    return lookupPromises.get(cacheKey)
+  }
+
+  const enrichedScores = await Promise.all((scores || []).map(async (score) => {
+    const existingCoursePar = Number(score?.coursePar)
+    if (Number.isFinite(existingCoursePar) && existingCoursePar > 0) return score
+
+    const catalogCoursePar = await lookupCoursePar(score)
+    if (catalogCoursePar != null) {
+      catalogResolvedCount += 1
+      return { ...score, coursePar: catalogCoursePar }
+    }
+
+    const scorecardCoursePar = deriveTeamChallengeCoursePar(score?.holes, score?.opponentHoles)
+    if (scorecardCoursePar != null) {
+      holeScorecardResolvedCount += 1
+      return { ...score, coursePar: scorecardCoursePar }
+    }
+    return score
+  }))
+
+  logApi('team_challenge_score_course_par_enrichment_completed', {
+    ...requestContext(req),
+    scoreCount: enrichedScores.length,
+    catalogLookupCount,
+    catalogResolvedCount,
+    holeScorecardResolvedCount,
+    unresolvedCount: enrichedScores.filter((score) => !(Number(score?.coursePar) > 0)).length,
+  })
+  return enrichedScores
+}
+
+function enrichIndividualChallengeScoreRecordsForUser(scores, messages, user) {
+  const threads = new Map()
+  for (const message of messages || []) {
+    if (message?.messageType !== 'individual_challenge') continue
+    const threadId = String(message.threadId || message.id || '').trim()
+    if (!threadId) continue
+    const existing = threads.get(threadId) || []
+    existing.push(message)
+    threads.set(threadId, existing)
+  }
+
+  const sourceByScoreId = new Map()
+  for (const [threadId, threadMessages] of threads.entries()) {
+    const sorted = sortInboxMessagesByCreatedAt(threadMessages)
+    const initialMessage = sorted.find((message) => !message.parentMessageId) || sorted[0] || null
+    for (const message of [...sorted].reverse()) {
+      const participant = individualChallengeParticipantForUser(message, user)
+      const soloScoreId = String(participant?.soloScoreId || '').trim()
+      if (!soloScoreId || sourceByScoreId.has(soloScoreId)) continue
+      sourceByScoreId.set(soloScoreId, {
+        source: 'individual_challenge',
+        sourceMessageId: threadId,
+        challengeThreadId: threadId,
+        canUploadPictures: Boolean(initialMessage && inboxMessageCreatedByUser(initialMessage, user)),
+      })
+    }
+  }
+
+  return (scores || []).map((score) => {
+    const source = sourceByScoreId.get(String(score?.id || ''))
+    return source ? { ...score, ...source } : score
+  })
 }
 
 function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds, user = null) {
@@ -5038,6 +5407,7 @@ function buildTeamChallengeScoreRecordsForUser(messages, userTeamIds, user = nul
       won,
       holes: teamIsProposer ? (message.proposerTeamHoles || null) : (message.challengedTeamHoles || null),
       opponentHoles: teamIsProposer ? (message.challengedTeamHoles || null) : (message.proposerTeamHoles || null),
+      coursePar: deriveTeamChallengeCoursePar(message.proposerTeamHoles, message.challengedTeamHoles),
       challengeStatus: message.challengeStatus || null,
       createdByUserId: initialMessage?.senderUserId || null,
       createdByEmail: initialMessage?.senderEmail || null,
@@ -5224,6 +5594,7 @@ function buildIndividualChallengeParticipants(sender, users) {
       name: record?.name || null,
       score: null,
       holes: [],
+      roundDate: null,
     })
   }
   addUser(sender)
@@ -5244,6 +5615,10 @@ async function resolveIndividualChallengeForNewMessage(req, payload) {
     }
   }
   const participants = buildIndividualChallengeParticipants(req.user, resolvedParticipants)
+  if (participants.length < 2) {
+    logApi('individual_challenge_too_few_golfers', { ...requestContext(req), participantCount: participants.length })
+    return { status: 400, body: { message: 'An Individual Challenge must have at least two participants. Add at least one other golfer.' } }
+  }
   if (participants.length > 25) {
     logApi('individual_challenge_too_many_golfers', { ...requestContext(req), participantCount: participants.length })
     return { status: 400, body: { message: 'Individual Challenge supports up to 25 golfers.' } }
@@ -5267,7 +5642,7 @@ async function resolveIndividualChallengeForNewMessage(req, payload) {
 }
 
 
-async function createOrUpdateIndividualChallengeSoloScore(message, user, score, holes, participant = null) {
+async function createOrUpdateIndividualChallengeSoloScore(message, user, score, holes, participant = null, timeZone = null) {
   const normalizedHoles = Array.isArray(holes) && holes.length ? holes : null
   const existingSoloScoreId = String(participant?.soloScoreId || '').trim()
 
@@ -5302,9 +5677,10 @@ async function createOrUpdateIndividualChallengeSoloScore(message, user, score, 
   if (!matchedCourse) throw new Error('Select a golf course from the database catalog before entering an Individual Challenge score.')
   const scoreCourse = matchedCourse.name || requestedCourse
   const courseMetadata = resolveScoreCourseMetadata(scoreState, matchedCourse)
+  const roundDate = resolveIndividualChallengeRoundDate(message, participant?.roundDate, timeZone)
   const scoreEntry = {
     mode: 'solo',
-    date: teamChallengeRecordDate(message),
+    date: roundDate,
     state: scoreState,
     course: scoreCourse,
     roundScore: score,
@@ -5335,6 +5711,7 @@ async function createOrUpdateIndividualChallengeSoloScore(message, user, score, 
         courseState: scoreState,
         courseName: scoreCourse,
         golfCourseId: courseMetadata.golfCourseId || null,
+        roundDate,
       })
       return updatedScore || { id: existingSoloScoreId }
     }
@@ -5352,6 +5729,7 @@ async function createOrUpdateIndividualChallengeSoloScore(message, user, score, 
     courseState: scoreState,
     courseName: scoreCourse,
     golfCourseId: courseMetadata.golfCourseId || null,
+    roundDate,
   })
   return createdScore
 }
@@ -5628,7 +6006,8 @@ app.get('/api/inbox/team-challenge-scores', requireStorage, authMiddleware, asyn
       storage.listSentInboxMessagesForUser(req.user),
     ])
     const userTeamIds = await resolveUserTeamIds(req.user)
-    const scores = buildTeamChallengeScoreRecordsForUser([...receivedMessages, ...sentMessages], userTeamIds, req.user)
+    const builtScores = buildTeamChallengeScoreRecordsForUser([...receivedMessages, ...sentMessages], userTeamIds, req.user)
+    const scores = await attachTeamChallengeCoursePars(builtScores, req)
     const imageCounts = await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.CHALLENGE, scores.map((score) => score.challengeThreadId))
     const scoresWithImages = scores.map((score) => ({ ...score, imageCount: imageCounts.get(String(score.challengeThreadId)) || 0 }))
     logApi('team_challenge_score_records_loaded', {
@@ -6015,53 +6394,62 @@ app.patch('/api/inbox/messages/:id/individual-course', requireStorage, authMiddl
       logApi('individual_challenge_course_update_locked', { ...requestContext(req), messageId: message.id, threadId: message.threadId || message.id })
       return res.status(409).json({ message: 'This challenge is complete, so the golf course is locked.' })
     }
-    if (String(message.challengeCourse || '').trim()) {
-      logApi('individual_challenge_course_update_creator_assigned', { ...requestContext(req), messageId: message.id, threadId: message.threadId || message.id, challengeCourse: message.challengeCourse })
-      return res.status(409).json({ message: 'The challenge creator selected the golf course for this Individual Challenge.' })
-    }
     const participant = individualChallengeParticipantForUser(message, req.user)
     if (!participant) {
       logApi('individual_challenge_course_update_forbidden', { ...requestContext(req), messageId: message.id })
-      return res.status(403).json({ message: 'Only golfers in this Individual Challenge can choose their round course.' })
+      return res.status(403).json({ message: 'Only golfers in this Individual Challenge can choose their round details.' })
     }
 
-    const state = validateOptionalChallengeState(req.body?.state)
-    const courseName = validateOptionalChallengeCourse(req.body?.course)
-    const courseId = String(req.body?.courseId || '').trim().slice(0, 191)
-    if (!state || !courseName) return res.status(400).json({ message: 'Select a state and golf course before logging your Individual Challenge round.' })
+    const creatorAssignedCourse = String(message.challengeCourse || '').trim()
+    const selectedRoundDate = resolveIndividualChallengeRoundDate(message, req.body?.roundDate ?? participant.roundDate, req.headers['x-user-timezone'])
+    const update = { roundDate: selectedRoundDate }
+    let matchedCourse = null
+    let state = String(message.challengeState || '').trim().toUpperCase()
+    let courseName = creatorAssignedCourse
+    let courseId = ''
+
+    if (!creatorAssignedCourse) {
+      state = validateOptionalChallengeState(req.body?.state)
+      courseName = validateOptionalChallengeCourse(req.body?.course)
+      courseId = String(req.body?.courseId || '').trim().slice(0, 191)
+      if (!state || !courseName) return res.status(400).json({ message: 'Select a state and golf course before logging your Individual Challenge round.' })
+      matchedCourse = await resolveGolfCourseForState(state, courseName, courseId)
+      if (!matchedCourse) {
+        logApi('individual_challenge_course_update_invalid_course', { ...requestContext(req), messageId: message.id, requestedState: state, requestedCourse: courseName, requestedCourseId: courseId || null, roundDate: selectedRoundDate })
+        return res.status(400).json({ message: 'Select a golf course from the database catalog for the selected state.' })
+      }
+      update.courseId = matchedCourse.id || null
+      update.courseState = matchedCourse.state || state
+      update.courseName = matchedCourse.name || courseName
+    }
 
     logApi('individual_challenge_course_update_started', {
       ...requestContext(req),
       messageId: message.id,
       threadId: message.threadId || message.id,
       participantEmail: normalizeEmail(participant.email),
-      requestedState: state,
-      requestedCourse: courseName,
+      creatorAssignedCourse: Boolean(creatorAssignedCourse),
+      requestedState: state || null,
+      requestedCourse: courseName || null,
       requestedCourseId: courseId || null,
+      roundDate: selectedRoundDate,
     })
-    const matchedCourse = await resolveGolfCourseForState(state, courseName, courseId)
-    if (!matchedCourse) {
-      logApi('individual_challenge_course_update_invalid_course', { ...requestContext(req), messageId: message.id, requestedState: state, requestedCourse: courseName, requestedCourseId: courseId || null })
-      return res.status(400).json({ message: 'Select a golf course from the database catalog for the selected state.' })
-    }
-    const updated = await storage.updateInboxIndividualChallengeCourse(message.id, req.user, {
-      courseId: matchedCourse.id || null,
-      courseState: matchedCourse.state || state,
-      courseName: matchedCourse.name || courseName,
-    })
-    if (!updated) return res.status(409).json({ message: 'The Individual Challenge golf course could not be updated.' })
+    const updated = await storage.updateInboxIndividualChallengeCourse(message.id, req.user, update)
+    if (!updated) return res.status(409).json({ message: 'The Individual Challenge round details could not be updated.' })
     logApi('individual_challenge_course_update_succeeded', {
       ...requestContext(req),
       messageId: updated.id,
       threadId: updated.threadId || updated.id,
       participantEmail: normalizeEmail(participant.email),
-      courseId: matchedCourse.id || null,
-      courseState: matchedCourse.state || state,
-      courseName: matchedCourse.name || courseName,
+      creatorAssignedCourse: Boolean(creatorAssignedCourse),
+      courseId: matchedCourse?.id || participant.courseId || null,
+      courseState: matchedCourse?.state || state || participant.courseState || null,
+      courseName: matchedCourse?.name || courseName || participant.courseName || null,
+      roundDate: selectedRoundDate,
     })
     res.json(updated)
   } catch (error) {
-    if (error instanceof Error && /challenge|state|course/i.test(error.message)) {
+    if (error instanceof Error && /challenge|state|course|date|today|round/i.test(error.message)) {
       logApi('individual_challenge_course_update_validation_failed', { ...requestContext(req), messageId: req.params.id, validationError: error.message })
       return res.status(400).json({ message: error.message })
     }
@@ -6266,7 +6654,7 @@ app.patch('/api/inbox/messages/:id/individual-score', requireStorage, authMiddle
       logApi('individual_challenge_score_update_forbidden', { ...requestContext(req), messageId: req.params.id })
       return res.status(403).json({ message: 'Only golfers in an Individual Challenge can update their own score.' })
     }
-    const soloScore = await createOrUpdateIndividualChallengeSoloScore(participantMessage, req.user, score, holes, participant)
+    const soloScore = await createOrUpdateIndividualChallengeSoloScore(participantMessage, req.user, score, holes, participant, req.headers['x-user-timezone'])
     const message = await storage.updateInboxIndividualChallengeScore(req.params.id, req.user, score, holes, { soloScoreId: soloScore?.id || null })
     if (!message) {
       logApi('individual_challenge_score_update_missing', { ...requestContext(req), messageId: req.params.id, score })
@@ -6282,10 +6670,11 @@ app.patch('/api/inbox/messages/:id/individual-score', requireStorage, authMiddle
       enteredStrokeTotal: holeScoreSummary.enteredStrokeTotal,
       participantCount: message.individualChallengeParticipants?.length || 0,
       soloScoreId: soloScore?.id || null,
+      roundDate: participant?.roundDate || participantMessage.challengeDate || null,
     })
     res.json(message)
   } catch (error) {
-    if (error instanceof Error && /score|number|zero|holes|hole|course|state/i.test(error.message)) {
+    if (error instanceof Error && /score|number|zero|holes|hole|course|state|date|today|round/i.test(error.message)) {
       logApi('individual_challenge_score_validation_failed', { ...requestContext(req), validationError: error.message })
       return res.status(400).json({ message: error.message })
     }
@@ -7048,9 +7437,32 @@ app.get('/api/team-round-score', requireStorage, authMiddleware, async (req, res
 
 app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
   try {
-    const scores = await storage.listScores()
-    const imageCounts = await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.SCORE, scores.map((score) => score.id))
-    res.json(scores.map((score) => ({ ...score, imageCount: imageCounts.get(String(score.id)) || 0 })))
+    const [scores, receivedMessages, sentMessages] = await Promise.all([
+      storage.listScores(),
+      storage.listInboxMessagesForUser(req.user),
+      storage.listSentInboxMessagesForUser(req.user),
+    ])
+    const uniqueMessages = Array.from(new Map([...(receivedMessages || []), ...(sentMessages || [])].map((message) => [String(message.id), message])).values())
+    const sourcedScores = enrichIndividualChallengeScoreRecordsForUser(scores, uniqueMessages, req.user)
+    const scoreImageCounts = await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.SCORE, sourcedScores.map((score) => score.id))
+    const individualChallengeThreadIds = sourcedScores
+      .filter((score) => score.source === 'individual_challenge' && score.challengeThreadId)
+      .map((score) => String(score.challengeThreadId))
+    const challengeImageCounts = individualChallengeThreadIds.length
+      ? await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.CHALLENGE, individualChallengeThreadIds)
+      : new Map()
+    const responseScores = sourcedScores.map((score) => ({
+      ...score,
+      imageCount: score.source === 'individual_challenge'
+        ? (challengeImageCounts.get(String(score.challengeThreadId || '')) || 0)
+        : (scoreImageCounts.get(String(score.id)) || 0),
+    }))
+    logApi('score_records_loaded', {
+      ...requestContext(req),
+      scoreCount: responseScores.length,
+      individualChallengeScoreCount: responseScores.filter((score) => score.source === 'individual_challenge').length,
+    })
+    res.json(responseScores)
   } catch (error) {
     logRouteError('List scores error', req, error)
     res.status(500).json({ message: 'Could not load scores' })
@@ -7715,9 +8127,6 @@ async function bootstrap() {
     logInfo('Storage backend initialized', { backend, storageReady, ...logPaths })
     if (!cancelledTournamentCleanupScheduler) {
       cancelledTournamentCleanupScheduler = startScheduledJobRunner(() => getPool(), { logApi, logError, logInfo, logScheduledJob })
-    }
-    if (!socialPublicationRetryWorker) {
-      socialPublicationRetryWorker = startSocialPublicationRetryWorker(() => getPool(), { logApi, logError, logScheduledJob })
     }
   } catch (error) {
     storageReady = false

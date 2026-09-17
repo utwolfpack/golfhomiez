@@ -557,13 +557,13 @@ export default function Inbox() {
             </button>
             <button
               type="button"
-              className="button secondary small"
+              className="button primary notificationSendMessageButton"
               onClick={() => {
                 setComposeOpen((current) => !current)
                 if (!composeOpen) logFrontendEvent({ category: 'inbox.message', message: 'send_message_button_opened' })
               }}
             >
-              {composeOpen ? 'Close' : 'Send a Message'}
+              {composeOpen ? 'Close message form' : 'Send a message'}
             </button>
           </div>
         </div>
@@ -586,7 +586,7 @@ export default function Inbox() {
             <h2>{deletedView ? 'Deleted notifications' : 'Recent notifications'}</h2>
             <p>{expandedThread ? 'One conversation is open. Return to the list to view other notifications.' : `Showing up to ${PAGE_SIZE} conversations per page, newest activity first.`}</p>
           </div>
-          {expandedThread ? <button type="button" className="button secondary small" onClick={() => { setExpandedThreadId(null); setReplyBody(''); setTournamentConversation(null); setCanMessageTournamentHost(false) }}>Back to notifications</button> : null}
+          {expandedThread ? <button type="button" className="button secondary notificationBackToMessagesButton" onClick={() => { setExpandedThreadId(null); setReplyBody(''); setTournamentConversation(null); setCanMessageTournamentHost(false) }}>Back to messages</button> : null}
         </div>
 
         {loading ? <p>Loading notifications…</p> : null}

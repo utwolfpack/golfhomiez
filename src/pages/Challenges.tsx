@@ -120,6 +120,12 @@ function maxIndividualChallengeEndDate(startDate: string) {
   return date.toISOString().slice(0, 10)
 }
 
+function latestAllowedIndividualChallengeRoundDate(endDate: string) {
+  const today = getUserTodayISO()
+  const normalizedEndDate = /^\d{4}-\d{2}-\d{2}$/.test(String(endDate || '').trim()) ? String(endDate).trim() : ''
+  return normalizedEndDate && normalizedEndDate < today ? normalizedEndDate : today
+}
+
 function resolveProfileStateCode(primaryState: string, options: Array<{ abbr: string; name: string }>) {
   const normalized = String(primaryState || '').trim()
   if (!normalized) return ''
@@ -322,6 +328,7 @@ export default function Challenges() {
   const [individualCourseName, setIndividualCourseName] = useState('')
   const [individualCourseSearch, setIndividualCourseSearch] = useState('')
   const [individualCourseId, setIndividualCourseId] = useState('')
+  const [individualRoundDate, setIndividualRoundDate] = useState('')
   const [savingIndividualCourse, setSavingIndividualCourse] = useState(false)
   const [activeIndividualChallengeLeaderboard, setActiveIndividualChallengeLeaderboard] = useState<InboxMessage | null>(null)
   const [activeIndividualLeaderboardParticipant, setActiveIndividualLeaderboardParticipant] = useState<IndividualChallengeParticipant | null>(null)
@@ -342,6 +349,7 @@ export default function Challenges() {
   const [completingChallengeThreadId, setCompletingChallengeThreadId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [challengeSubmitFeedback, setChallengeSubmitFeedback] = useState<string | null>(null)
   const { states: individualCourseStateOptions, loading: individualCourseStatesLoading, error: individualCourseStatesError } = useGolfCourseStates(Boolean(individualCoursePicker))
 
   const currentUserEmail = useMemo(() => String(user?.email || '').trim().toLowerCase(), [user?.email])
@@ -360,7 +368,7 @@ export default function Challenges() {
   const individualChallengeLocationValid = !individualLocationEnabled || Boolean(teamChallengeState && teamChallengeCourse)
   const canSubmitChallenge = isTeamChallenge
     ? Boolean(teamChallengeDate && teamChallengeLocationValid && proposerTeamId && /^\d+$/.test(challengedTeamIdentifier.trim()))
-    : Boolean(individualChallengeDateRangeValid && individualChallengeLocationValid && parsedIndividualParticipantEmails.length > 0 && parsedIndividualParticipantEmails.length <= 24)
+    : Boolean(individualChallengeDateRangeValid && individualChallengeLocationValid && parsedIndividualParticipantEmails.length <= 24)
   const teamChallengeMessages = useMemo(() => uniqueInboxMessages([...messages, ...sentChallenges].filter((message) => isChallengeMessage(message) && currentUserCanViewChallenge(message))), [messages, sentChallenges, teams, currentUserEmail, user?.id])
   const teamChallengeThreads = useMemo(() => sortChallengeThreadsByStatusAndDate(buildInboxThreads(teamChallengeMessages).map((thread) => {
     const unreadMessages = thread.unreadMessages.filter((message) => currentUserShouldSeeUnreadNotification(message))
@@ -589,8 +597,10 @@ export default function Challenges() {
   }
 
   function getTeamChallengeScoringLabel(message: InboxMessage) {
-    const label = teamChallengeScoringTypeLabel(getTeamChallengeScoringType(message))
-    return isSkinsTeamChallenge(getTeamChallengeScoringType(message)) ? `${label} · ${formatPointNumber(getTeamChallengePointsPerHole(message))} pts/hole` : label
+    const scoringType = getTeamChallengeScoringType(message)
+    const label = teamChallengeScoringTypeLabel(scoringType)
+    if (scoringType === 'skins_push') return `${label} · ${formatDollarAmount(getTeamChallengePointsPerHole(message))} / hole`
+    return scoringType === 'skins' ? `${label} · ${formatPointNumber(getTeamChallengePointsPerHole(message))} pts/hole` : label
   }
 
   function getTeamChallengePointSummary(message: InboxMessage) {
@@ -643,11 +653,16 @@ export default function Challenges() {
     if (proposerPoints === challengedPoints) return '—'
     const leader = proposerPoints > challengedPoints ? 'proposer' : 'challenged'
     const difference = Math.abs(proposerPoints - challengedPoints)
-    return `${getTeamChallengeSideInitial(message, leader)} +${formatPointNumber(difference)}`
+    const value = getTeamChallengeScoringType(message) === 'skins_push' ? formatDollarAmount(difference) : formatPointNumber(difference)
+    return `${getTeamChallengeSideInitial(message, leader)} +${value}`
   }
 
   function formatPointNumber(value: number) {
     return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+  }
+
+  function formatDollarAmount(value: number) {
+    return `$${formatPointNumber(value)}`
   }
 
   function formatPointTotal(value: number) {
@@ -656,6 +671,11 @@ export default function Challenges() {
 
   function formatOpponentAdjustedPointLabel(ownPoints: number, opponentPoints: number) {
     return `${formatPointTotal(ownPoints)} won • ${formatPointTotal(opponentPoints)} opponent`
+  }
+
+  function formatSkinsPushNetWinnerLabel(ownDollars: number, opponentDollars: number) {
+    const netWon = ownDollars - opponentDollars
+    return netWon > 0 ? `${formatDollarAmount(netWon)} won` : ''
   }
 
   function getStoredTeamChallengeHoles(message: InboxMessage, side: 'proposer' | 'challenged') {
@@ -743,8 +763,10 @@ export default function Challenges() {
           points,
           ownPoints,
           opponentPoints,
-          pointsLabel: isSkinsTeamChallenge(pointSummary.scoringType) ? formatPointTotal(points) : '—',
-          pointsRelativeLabel: isSkinsTeamChallenge(pointSummary.scoringType) ? formatOpponentAdjustedPointLabel(ownPoints, opponentPoints) : 'Stroke play',
+          pointsLabel: pointSummary.scoringType === 'skins_push' ? formatDollarAmount(points) : isSkinsTeamChallenge(pointSummary.scoringType) ? formatPointTotal(points) : '—',
+          pointsRelativeLabel: pointSummary.scoringType === 'skins_push'
+            ? formatSkinsPushNetWinnerLabel(ownPoints, opponentPoints)
+            : isSkinsTeamChallenge(pointSummary.scoringType) ? formatOpponentAdjustedPointLabel(ownPoints, opponentPoints) : 'Stroke play',
           roundLabel: formatLeaderboardRelative(relativeScore),
           totalLabel: score == null ? 'Pending' : String(score),
         }
@@ -827,11 +849,12 @@ export default function Challenges() {
     const pointSummary = getTeamChallengePointSummary(currentMessage)
     const showPushColumn = pointSummary.scoringType === 'skins_push'
     const pointsScoringActive = isSkinsTeamChallenge(pointSummary.scoringType)
-    const displayOrder = ['Hole', 'Par', getTeamChallengeDisplayName(currentMessage, 'proposer'), getTeamChallengeDisplayName(currentMessage, 'challenged'), 'Winner', ...(showPushColumn ? ['Push'] : []), 'Points']
+    const valueColumnLabel = pointSummary.scoringType === 'skins_push' ? 'Dollars' : 'Points'
+    const displayOrder = ['Hole', 'Par', getTeamChallengeDisplayName(currentMessage, 'proposer'), getTeamChallengeDisplayName(currentMessage, 'challenged'), 'Winner', ...(showPushColumn ? ['Push'] : []), valueColumnLabel]
     setTeamChallengeLeaderboardReturnTarget(returnTarget)
     setActiveTeamLeaderboardSide(null)
     setActiveTeamChallengeLeaderboard(currentMessage)
-    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: currentMessage.threadId || currentMessage.id, proposerTeamId: currentMessage.proposerTeamId, challengedTeamId: currentMessage.challengedTeamId, displayOrder, totalDisplayMode: 'hole_by_hole_team_comparison', pointsDisplayMode: pointsScoringActive ? 'running_team_point_lead' : 'not_applicable', rowCount: pointSummary.holeResults.length, completedCount: pointSummary.completedHoles, pointsColumnVisible: true, pointsScoringActive, summaryViewVisible: true, summaryViewMode: 'team_leaderboard_hole_grid', opponentReadOnlyScoreTileRemoved: true, pushColumnVisible: showPushColumn, holeScoreDisplayFormat: 'golf_score_symbols_v1', skinsPushDifferentialHoleCount: pointSummary.holeResults.filter((hole) => hole.strokeDifferentialBonus > 0).length, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
+    logFrontendEvent({ category: 'inbox.teamChallenge.leaderboard', message: 'team_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: currentMessage.threadId || currentMessage.id, proposerTeamId: currentMessage.proposerTeamId, challengedTeamId: currentMessage.challengedTeamId, displayOrder, totalDisplayMode: 'hole_by_hole_team_comparison', pointsDisplayMode: pointSummary.scoringType === 'skins_push' ? 'running_team_dollar_lead' : pointsScoringActive ? 'running_team_point_lead' : 'not_applicable', rowCount: pointSummary.holeResults.length, completedCount: pointSummary.completedHoles, pointsColumnVisible: true, pointsScoringActive, summaryViewVisible: true, summaryViewMode: 'team_leaderboard_hole_grid', opponentReadOnlyScoreTileRemoved: true, pushColumnVisible: showPushColumn, holeScoreDisplayFormat: 'golf_score_symbols_v1', skinsPushDifferentialHoleCount: pointSummary.holeResults.filter((hole) => hole.strokeDifferentialBonus > 0).length, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
     return currentMessage
   }
 
@@ -908,6 +931,25 @@ export default function Challenges() {
   function getIndividualChallengeParticipantCourseName(message: InboxMessage, participant: IndividualChallengeParticipant) {
     if (String(message.challengeCourse || '').trim()) return String(message.challengeCourse || '').trim()
     return String(participant.courseName || '').trim()
+  }
+
+  function getIndividualChallengeDateBounds(message: InboxMessage) {
+    const startDate = String(message.challengeDate || '').trim().slice(0, 10)
+    const endDate = String(message.challengeEndDate || message.challengeDate || '').trim().slice(0, 10)
+    return { startDate, endDate }
+  }
+
+  function isIndividualChallengeDateRange(message: InboxMessage) {
+    const { startDate, endDate } = getIndividualChallengeDateBounds(message)
+    return Boolean(startDate && endDate && startDate !== endDate)
+  }
+
+  function getIndividualChallengeParticipantRoundDate(message: InboxMessage, participant: IndividualChallengeParticipant) {
+    const { startDate, endDate } = getIndividualChallengeDateBounds(message)
+    const storedDate = String(participant.roundDate || '').trim().slice(0, 10)
+    if (storedDate && (!startDate || storedDate >= startDate) && (!endDate || storedDate <= endDate)) return storedDate
+    if (startDate && (!endDate || startDate === endDate)) return startDate
+    return ''
   }
 
   function applyRefreshedIndividualChallengeParticipants(updated: InboxMessage) {
@@ -1046,6 +1088,11 @@ export default function Challenges() {
     if (isSkinsTeamChallenge(scoringType)) {
       const proposerPoints = Number(proposer.ownPoints || 0)
       const challengedPoints = Number(challenged.ownPoints || 0)
+      if (scoringType === 'skins_push') {
+        if (proposerPoints === challengedPoints) return `Result: ${proposer.teamName} ${formatDollarAmount(proposerPoints)} — ${challenged.teamName} ${formatDollarAmount(challengedPoints)} · Tie`
+        const winner = proposerPoints > challengedPoints ? proposer : challenged
+        return `Result: ${proposer.teamName} ${formatDollarAmount(proposerPoints)} — ${challenged.teamName} ${formatDollarAmount(challengedPoints)} · ${winner.teamName} ${formatDollarAmount(Math.abs(proposerPoints - challengedPoints))} won`
+      }
       if (proposerPoints === challengedPoints) return `Result: ${proposer.teamName} ${formatPointNumber(proposerPoints)} pts — ${challenged.teamName} ${formatPointNumber(challengedPoints)} pts · Tie`
       const winner = proposerPoints > challengedPoints ? proposer : challenged
       return `Result: ${proposer.teamName} ${formatPointNumber(proposerPoints)} pts — ${challenged.teamName} ${formatPointNumber(challengedPoints)} pts · ${winner.teamName} wins`
@@ -1295,7 +1342,7 @@ export default function Challenges() {
       restoredTarget = true
     } else if (restored.kind === 'individual' && message.messageType === 'individual_challenge' && restored.participantEmail) {
       const participant = getIndividualChallengeParticipants(message).find((item) => participantEmail(item) === restored.participantEmail)
-      if (participant && getIndividualChallengeParticipantCourseName(message, participant)) {
+      if (participant && getIndividualChallengeParticipantCourseName(message, participant) && (!isIndividualChallengeDateRange(message) || getIndividualChallengeParticipantRoundDate(message, participant))) {
         const key = getIndividualChallengeScoreKey(message, participant)
         const holes = getIndividualChallengeHoles(message, participant)
         setIndividualChallengeScorecards((current) => ({ ...current, [key]: holes }))
@@ -1388,15 +1435,18 @@ export default function Challenges() {
 
   function addIndividualChallengeCreateMember() {
     if (individualChallengeMembers.length >= 24) return
+    setChallengeSubmitFeedback(null)
     setIndividualChallengeMembers((current) => [...current, makeChallengeMemberDraft()])
     logFrontendEvent({ category: 'inbox.individualChallenge.members', message: 'individual_challenge_create_member_row_added', data: { memberRowCount: individualChallengeMembers.length + 1 } })
   }
 
   function patchIndividualChallengeCreateMember(id: string, email: string) {
+    setChallengeSubmitFeedback(null)
     setIndividualChallengeMembers((current) => current.map((member) => member.id === id ? { ...member, email, name: null, validationState: 'idle' } : member))
   }
 
   function removeIndividualChallengeCreateMember(id: string) {
+    setChallengeSubmitFeedback(null)
     setIndividualChallengeMembers((current) => {
       const next = current.filter((member) => member.id !== id)
       return next.length ? next : [makeChallengeMemberDraft()]
@@ -1621,9 +1671,17 @@ export default function Challenges() {
 
   async function handleChallengeSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSending(true)
     setError(null)
     setStatus(null)
+    setChallengeSubmitFeedback(null)
+    const participantEmails = parsedIndividualParticipantEmails
+    if (isIndividualChallenge && participantEmails.length === 0) {
+      const feedback = 'Add at least one other golfer. An Individual Challenge must have at least two participants, including you.'
+      setChallengeSubmitFeedback(feedback)
+      logFrontendEvent({ category: 'inbox.individualChallenge.members', level: 'warn', message: 'individual_challenge_create_blocked_too_few_participants', data: { correlationId: getCorrelationId(), participantCount: 1, requiredParticipantCount: 2 } })
+      return
+    }
+    setSending(true)
     const trimmedChallengeTeamIdentifier = challengedTeamIdentifier.trim()
     const trimmedChallengeDate = teamChallengeDate.trim()
     const trimmedChallengeEndDate = individualChallengeEndDate.trim() || trimmedChallengeDate
@@ -1634,7 +1692,6 @@ export default function Challenges() {
     const effectiveChallengeTeeColor = normalizeTeeColor(teamChallengeTeeColor)
     const effectiveChallengeScoringType = normalizeTeamChallengeScoringType(teamChallengeScoringType)
     const effectiveChallengePointsPerHole = isSkinsTeamChallenge(effectiveChallengeScoringType) ? normalizeTeamChallengePointsPerHole(teamChallengePointsPerHole) : null
-    const participantEmails = parsedIndividualParticipantEmails
     const effectiveChallengeState = isTeamChallenge || individualLocationEnabled ? trimmedChallengeState : ''
     const effectiveChallengeCourse = isTeamChallenge || individualLocationEnabled ? trimmedChallengeCourse : ''
 
@@ -1660,6 +1717,7 @@ export default function Challenges() {
       setTeamChallengeScoringType('stroke_play')
       setTeamChallengePointsPerHole('1')
       setChallengeBody('')
+      setChallengeSubmitFeedback(null)
       setChallengesComposeOpen(false)
       logFrontendEvent({
         category: isTeamChallenge ? 'inbox.teamChallenge' : 'inbox.individualChallenge',
@@ -1907,19 +1965,28 @@ export default function Challenges() {
   }
 
   function openIndividualChallengeCoursePicker(message: InboxMessage, participant: IndividualChallengeParticipant) {
-    const existingState = String(participant.courseState || '').trim().toUpperCase()
+    const creatorAssignedCourse = String(message.challengeCourse || '').trim()
+    const existingState = String(creatorAssignedCourse ? message.challengeState : participant.courseState || '').trim().toUpperCase()
+    const existingCourse = String(creatorAssignedCourse || participant.courseName || '').trim()
     const profileStateCode = /^[A-Za-z]{2}$/.test(profilePrimaryState.trim()) ? profilePrimaryState.trim().toUpperCase() : ''
+    const roundDate = getIndividualChallengeParticipantRoundDate(message, participant)
+    const { startDate, endDate } = getIndividualChallengeDateBounds(message)
+    const latestAllowedRoundDate = latestAllowedIndividualChallengeRoundDate(endDate)
+    const roundDateIsSelectable = Boolean(roundDate && (!startDate || roundDate >= startDate) && roundDate <= latestAllowedRoundDate)
     setIndividualCourseState(existingState || profileStateCode)
-    setIndividualCourseName(String(participant.courseName || '').trim())
-    setIndividualCourseSearch(String(participant.courseName || '').trim())
-    setIndividualCourseId(String(participant.courseId || '').trim())
+    setIndividualCourseName(existingCourse)
+    setIndividualCourseSearch(existingCourse)
+    setIndividualCourseId(creatorAssignedCourse ? '' : String(participant.courseId || '').trim())
+    setIndividualRoundDate(roundDateIsSelectable ? roundDate : '')
     setIndividualCoursePicker({ message, participant })
     setError(null)
-    logFrontendEvent({ category: 'inbox.individualChallenge.course', message: 'individual_challenge_course_picker_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), existingState: existingState || null, existingCourse: participant.courseName || null } })
+    logFrontendEvent({ category: 'inbox.individualChallenge.course', message: 'individual_challenge_round_details_picker_opened', data: { messageId: message.id, threadId: messageThreadId(message), participantEmail: participantEmail(participant), existingState: existingState || null, existingCourse: existingCourse || null, creatorAssignedCourse: Boolean(creatorAssignedCourse), existingRoundDate: roundDate || null, selectedRoundDate: roundDateIsSelectable ? roundDate : null, challengeStartDate: startDate || null, challengeEndDate: endDate || null, latestAllowedRoundDate, dateSelectionRequired: isIndividualChallengeDateRange(message) } })
   }
 
   function openIndividualChallengeScorecard(message: InboxMessage, participant: IndividualChallengeParticipant) {
-    if (!String(message.challengeCourse || '').trim() && !getIndividualChallengeParticipantCourseName(message, participant)) {
+    const needsCourse = !String(message.challengeCourse || '').trim() && !getIndividualChallengeParticipantCourseName(message, participant)
+    const needsRoundDate = isIndividualChallengeDateRange(message) && !getIndividualChallengeParticipantRoundDate(message, participant)
+    if (needsCourse || needsRoundDate) {
       openIndividualChallengeCoursePicker(message, participant)
       return
     }
@@ -1940,17 +2007,41 @@ export default function Challenges() {
 
   async function saveIndividualChallengeCourse() {
     const target = individualCoursePicker
-    if (!target || !individualCourseState || !individualCourseName) return
+    if (!target) return
+    const creatorAssignedCourse = String(target.message.challengeCourse || '').trim()
+    const requiresRoundDate = isIndividualChallengeDateRange(target.message)
+    const { startDate, endDate } = getIndividualChallengeDateBounds(target.message)
+    const today = getUserTodayISO()
+    const effectiveRoundDate = individualRoundDate || startDate
+    if (!creatorAssignedCourse && (!individualCourseState || !individualCourseName)) return
+    if (requiresRoundDate && !individualRoundDate) {
+      setError('Select the date you played this Individual Challenge round.')
+      return
+    }
+    if (effectiveRoundDate && startDate && effectiveRoundDate < startDate) {
+      setError(`Round date must be between ${startDate} and ${endDate || startDate} for this Individual Challenge.`)
+      return
+    }
+    if (effectiveRoundDate && endDate && effectiveRoundDate > endDate) {
+      setError(`Round date must be between ${startDate || endDate} and ${endDate} for this Individual Challenge.`)
+      return
+    }
+    if (effectiveRoundDate && effectiveRoundDate > today) {
+      const validationError = 'Round date must be today or earlier in your local time zone.'
+      setError(validationError)
+      logFrontendEvent({ category: 'inbox.individualChallenge.course', level: 'warn', message: 'individual_challenge_round_details_save_blocked', data: { correlationId: getCorrelationId(), messageId: target.message.id, threadId: messageThreadId(target.message), participantEmail: participantEmail(target.participant), roundDate: effectiveRoundDate, challengeStartDate: startDate || null, challengeEndDate: endDate || null, today, validationReason: 'future_round_date', error: validationError } })
+      return
+    }
     const correlationId = getCorrelationId()
     setSavingIndividualCourse(true)
     setError(null)
-    logFrontendEvent({ category: 'inbox.individualChallenge.course', message: 'individual_challenge_course_save_started', data: { correlationId, messageId: target.message.id, threadId: messageThreadId(target.message), participantEmail: participantEmail(target.participant), courseState: individualCourseState, courseName: individualCourseName, courseId: individualCourseId || null } })
+    logFrontendEvent({ category: 'inbox.individualChallenge.course', message: 'individual_challenge_round_details_save_started', data: { correlationId, messageId: target.message.id, threadId: messageThreadId(target.message), participantEmail: participantEmail(target.participant), courseState: individualCourseState || null, courseName: individualCourseName || null, courseId: individualCourseId || null, creatorAssignedCourse: Boolean(creatorAssignedCourse), roundDate: individualRoundDate || null } })
     try {
-      const updated = await updateIndividualChallengeCourse(target.message.id, { state: individualCourseState, course: individualCourseName, courseId: individualCourseId || null })
+      const updated = await updateIndividualChallengeCourse(target.message.id, { state: individualCourseState || undefined, course: individualCourseName || undefined, courseId: individualCourseId || null, roundDate: individualRoundDate || undefined })
       const email = participantEmail(target.participant)
       patchIndividualChallengeUpdate(updated, email)
       const updatedParticipant = (updated.individualChallengeParticipants || []).find((participant) => participantEmail(participant) === email)
-      if (!updatedParticipant) throw new Error('The selected golfer could not be refreshed after choosing a course.')
+      if (!updatedParticipant) throw new Error('The selected golfer could not be refreshed after choosing round details.')
       const key = getIndividualChallengeScoreKey(updated, updatedParticipant)
       setIndividualChallengeScorecards((current) => {
         const next = { ...current }
@@ -1958,13 +2049,13 @@ export default function Challenges() {
         return next
       })
       setIndividualCoursePicker(null)
-      setStatus(`Golf course selected: ${getIndividualChallengeParticipantCourseName(updated, updatedParticipant)}.`)
-      logFrontendEvent({ category: 'inbox.individualChallenge.course', message: 'individual_challenge_course_save_succeeded', data: { correlationId, messageId: updated.id, threadId: messageThreadId(updated), participantEmail: email, courseState: updatedParticipant.courseState || null, courseName: updatedParticipant.courseName || null, courseId: updatedParticipant.courseId || null } })
+      setStatus(`Round details selected: ${getIndividualChallengeParticipantCourseName(updated, updatedParticipant)}${updatedParticipant.roundDate ? ` on ${updatedParticipant.roundDate}` : ''}.`)
+      logFrontendEvent({ category: 'inbox.individualChallenge.course', message: 'individual_challenge_round_details_save_succeeded', data: { correlationId, messageId: updated.id, threadId: messageThreadId(updated), participantEmail: email, courseState: updatedParticipant.courseState || target.message.challengeState || null, courseName: updatedParticipant.courseName || target.message.challengeCourse || null, courseId: updatedParticipant.courseId || null, roundDate: updatedParticipant.roundDate || individualRoundDate || null } })
       openIndividualChallengeScorecard(updated, updatedParticipant)
     } catch (err) {
-      const messageText = err instanceof Error ? err.message : 'Could not save the golf course for this Individual Challenge.'
+      const messageText = err instanceof Error ? err.message : 'Could not save the round details for this Individual Challenge.'
       setError(messageText)
-      logFrontendEvent({ category: 'inbox.individualChallenge.course', level: 'error', message: 'individual_challenge_course_save_failed', data: { correlationId, messageId: target.message.id, threadId: messageThreadId(target.message), participantEmail: participantEmail(target.participant), error: messageText } })
+      logFrontendEvent({ category: 'inbox.individualChallenge.course', level: 'error', message: 'individual_challenge_round_details_save_failed', data: { correlationId, messageId: target.message.id, threadId: messageThreadId(target.message), participantEmail: participantEmail(target.participant), roundDate: individualRoundDate || null, error: messageText } })
     } finally {
       setSavingIndividualCourse(false)
     }
@@ -2166,7 +2257,7 @@ export default function Challenges() {
             </div>
             {isSkinsTeamChallenge(draft.scoringType) ? (
               <div>
-                <label className="label" htmlFor={`challenge-points-${messageThreadId(message)}`}>Points per hole</label>
+                <label className="label" htmlFor={`challenge-points-${messageThreadId(message)}`}>{draft.scoringType === 'skins_push' ? 'Dollars per hole' : 'Points per hole'}</label>
                 <input id={`challenge-points-${messageThreadId(message)}`} className="input" type="number" min="0.01" step="0.01" value={draft.pointsPerHole} onChange={(event) => patchChallengeSettingsDraft(message, { pointsPerHole: event.target.value })} />
               </div>
             ) : null}
@@ -2318,14 +2409,22 @@ export default function Challenges() {
           <div className="inboxTeamChallengeScoreGrid inboxIndividualChallengeScoreGrid">
             {editableParticipants.map((participant) => {
               const score = getIndividualChallengeScore(message, participant, false)
+              const needsCourse = !message.challengeCourse && !participant.courseName
+              const needsRoundDate = isIndividualChallengeDateRange(message) && !getIndividualChallengeParticipantRoundDate(message, participant)
+              const entryPrompt = needsCourse && needsRoundDate
+                ? 'Choose course and round date to enter score'
+                : needsCourse
+                  ? 'Choose course to enter score'
+                  : needsRoundDate ? 'Choose round date to enter score' : 'Tap to enter score'
               return (
                 <div key={participantEmail(participant)} className="inboxTeamChallengeScoreCard inboxTeamChallengeScoreCard--editable">
                   <label className="label">{participantDisplayName(participant)} Score</label>
                   <button type="button" className="teamScorecardOpenButton teamScorecardInputButton" onClick={() => openIndividualChallengeScorecard(message, participant)}>
-                    <span className="teamScorecardInputBadge">{!message.challengeCourse && !participant.courseName ? 'Choose course to enter score' : 'Tap to enter score'}</span>
+                    <span className="teamScorecardInputBadge">{entryPrompt}</span>
                     <strong>{score == null ? 'Pending' : score}</strong>
                     <span>{getIndividualChallengeScorecardSummary(message, participant)}</span>
                     <span>{getIndividualChallengeParticipantCourseName(message, participant) ? `Course: ${getIndividualChallengeParticipantCourseName(message, participant)}` : 'Choose the golf course you are playing for this challenge.'}</span>
+                    {getIndividualChallengeParticipantRoundDate(message, participant) ? <span>Round date: {getIndividualChallengeParticipantRoundDate(message, participant)}</span> : null}
                     <span>Only you can edit your Individual Challenge score.</span>
                   </button>
                 </div>
@@ -2401,6 +2500,8 @@ export default function Challenges() {
     const pointSummary = getTeamChallengePointSummary(message)
     const showPushColumn = pointSummary.scoringType === 'skins_push'
     const showPointsColumn = isSkinsTeamChallenge(pointSummary.scoringType)
+    const isDollarGame = pointSummary.scoringType === 'skins_push'
+    const valueColumnLabel = isDollarGame ? 'Dollars' : 'Points'
     const resultsByHole = new Map(pointSummary.holeResults.map((result) => [result.hole, result]))
     const holeNumbers = Array.from(new Set([
       ...pointSummary.holeResults.map((result) => result.hole),
@@ -2476,7 +2577,7 @@ export default function Challenges() {
             {renderTeamHeader('challenged', challengedTeamName)}
             <span>Winner</span>
             {showPushColumn ? <span>Push</span> : null}
-            {showPointsColumn ? <span>Points</span> : null}
+            {showPointsColumn ? <span>{valueColumnLabel}</span> : null}
           </div>
           {rows.map((row) => (
             <div key={row.holeNumber} className="inboxTeamChallengeSummaryRow" role="row">
@@ -2485,7 +2586,7 @@ export default function Challenges() {
               <span className="inboxTeamChallengeSummaryScore"><HoleStrokeScore score={row.proposerHole?.scoreProvided ? row.proposerHole.score : null} par={row.par} compact /></span>
               <span className="inboxTeamChallengeSummaryScore"><HoleStrokeScore score={row.challengedHole?.scoreProvided ? row.challengedHole.score : null} par={row.par} compact /></span>
               <span className={`inboxTeamChallengeSummaryWinner inboxTeamChallengeSummaryWinner--${row.result.winner}`}>{getTeamChallengeSummaryWinnerLabel(message, row.result.winner)}</span>
-              {showPushColumn ? <span>{row.pushedPoints > 0 ? formatPointNumber(row.pushedPoints) : '—'}</span> : null}
+              {showPushColumn ? <span>{row.pushedPoints > 0 ? (isDollarGame ? formatDollarAmount(row.pushedPoints) : formatPointNumber(row.pushedPoints)) : '—'}</span> : null}
               {showPointsColumn ? <strong className="inboxTeamChallengeSummaryPoints">{row.pointLeadLabel}</strong> : null}
             </div>
           ))}
@@ -2495,7 +2596,7 @@ export default function Challenges() {
             <span>{proposerScore == null ? '—' : proposerScore}</span>
             <span>{challengedScore == null ? '—' : challengedScore}</span>
             <span>—</span>
-            {showPushColumn ? <span>{pushedPointsTotal > 0 ? formatPointNumber(pushedPointsTotal) : '—'}</span> : null}
+            {showPushColumn ? <span>{pushedPointsTotal > 0 ? (isDollarGame ? formatDollarAmount(pushedPointsTotal) : formatPointNumber(pushedPointsTotal)) : '—'}</span> : null}
             {showPointsColumn ? <strong className="inboxTeamChallengeSummaryPoints">{finalLeadLabel}</strong> : null}
           </div>
         </div>
@@ -2761,7 +2862,7 @@ export default function Challenges() {
                     }}
                   >
                     <strong>{row.position}</strong>
-                    <span className="inboxLeaderboardPlayer"><strong>{row.teamName}</strong><small>{row.pointsRelativeLabel}</small></span>
+                    <span className="inboxLeaderboardPlayer"><strong>{row.teamName}</strong>{row.pointsRelativeLabel ? <small>{row.pointsRelativeLabel}</small> : null}</span>
                     <strong>{row.roundLabel}</strong>
                     <strong>{row.thru || '—'}</strong>
                     <strong>{row.totalLabel}</strong>
@@ -2886,62 +2987,114 @@ export default function Challenges() {
     const target = individualCoursePicker
     if (!target) return null
     const golferName = participantDisplayName(target.participant)
+    const creatorAssignedCourse = String(target.message.challengeCourse || '').trim()
+    const { startDate, endDate } = getIndividualChallengeDateBounds(target.message)
+    const dateRange = isIndividualChallengeDateRange(target.message)
+    const latestAllowedRoundDate = latestAllowedIndividualChallengeRoundDate(endDate)
+    const dateWindowOpen = !startDate || startDate <= latestAllowedRoundDate
+    const courseReady = Boolean(creatorAssignedCourse || (individualCourseState && individualCourseName))
+    const dateReady = dateWindowOpen && (!dateRange || Boolean(individualRoundDate && (!startDate || individualRoundDate >= startDate) && individualRoundDate <= latestAllowedRoundDate))
     return (
       <div className="modalOverlay" role="presentation" onClick={() => !savingIndividualCourse && setIndividualCoursePicker(null)}>
-        <div className="modalCard individualChallengeCoursePickerModal" role="dialog" aria-modal="true" aria-label="Choose Individual Challenge golf course" onClick={(event) => event.stopPropagation()}>
+        <div className="modalCard individualChallengeCoursePickerModal" role="dialog" aria-modal="true" aria-label="Choose Individual Challenge round details" onClick={(event) => event.stopPropagation()}>
           <div className="modalHeader">
             <div>
-              <h2>Choose golf course</h2>
-              <div className="small">{golferName} can play this Individual Challenge at any course because the challenge creator did not assign one.</div>
+              <h2>Choose round details</h2>
+              <div className="small">
+                {creatorAssignedCourse
+                  ? `${golferName} will play this Individual Challenge at ${creatorAssignedCourse}.`
+                  : `${golferName} can play this Individual Challenge at any course because the challenge creator did not assign one.`}
+              </div>
             </div>
             <button type="button" className="btn btnSmall" disabled={savingIndividualCourse} onClick={() => setIndividualCoursePicker(null)}>Close</button>
           </div>
           <div className="formStack">
-            <div>
-              <label className="label" htmlFor="individualParticipantCourseState">State</label>
-              <select
-                id="individualParticipantCourseState"
-                className="input"
-                value={individualCourseState}
-                onChange={(event) => {
-                  setIndividualCourseState(event.target.value)
-                  setIndividualCourseName('')
-                  setIndividualCourseSearch('')
-                  setIndividualCourseId('')
-                }}
-                disabled={individualCourseStatesLoading && !individualCourseStateOptions.length}
-                required
-              >
-                <option value="">{individualCourseStatesLoading ? 'Loading states…' : 'Select state'}</option>
-                {individualCourseStateOptions.map((state) => <option key={state.abbr} value={state.abbr}>{state.name}</option>)}
-              </select>
-              {individualCourseStatesError ? <div className="small">{individualCourseStatesError}</div> : null}
-            </div>
-            <GolfCourseInput
-              label="Golf course"
-              state={individualCourseState}
-              searchValue={individualCourseSearch}
-              selectedCourseName={individualCourseName}
-              selectedCourseId={individualCourseId}
-              onSearchChange={(next) => {
-                setIndividualCourseSearch(next)
-                setIndividualCourseName('')
-                setIndividualCourseId('')
-              }}
-              onCourseSelected={(selected) => {
-                setIndividualCourseState(String(selected.state || selected.state_code || individualCourseState).toUpperCase())
-                setIndividualCourseName(selected.name || '')
-                setIndividualCourseSearch(selected.name || '')
-                setIndividualCourseId(selected.id || '')
-              }}
-              placeholder="Search courses in the selected state"
-              inputId="individualParticipantCourseSearch"
-              required
-            />
+            {dateRange ? (
+              <div>
+                <label className="label" htmlFor="individualParticipantRoundDate">Round date</label>
+                <input
+                  id="individualParticipantRoundDate"
+                  className="input"
+                  type="date"
+                  min={startDate || undefined}
+                  max={latestAllowedRoundDate || undefined}
+                  value={individualRoundDate}
+                  onChange={(event) => {
+                    setIndividualRoundDate(event.target.value)
+                    setError(null)
+                  }}
+                  disabled={!dateWindowOpen}
+                  required
+                />
+                <div className="small">
+                  {dateWindowOpen
+                    ? <>Choose the date you played the round. It must be within the challenge date range {startDate} through {endDate} and cannot be after today.</>
+                    : <>This challenge starts on {startDate}. Round scoring will be available on that date.</>}
+                </div>
+              </div>
+            ) : startDate ? (
+              <div>
+                <div className="label">Round date</div>
+                <div className="input individualChallengeFixedRoundDetail" aria-label="Individual Challenge round date">{startDate}</div>
+                {!dateWindowOpen ? <div className="small">This challenge is scheduled for {startDate}. Round scoring will be available on that date.</div> : null}
+              </div>
+            ) : null}
+
+            {creatorAssignedCourse ? (
+              <div>
+                <div className="label">Golf course</div>
+                <div className="input individualChallengeFixedRoundDetail" aria-label="Individual Challenge golf course">{creatorAssignedCourse}{target.message.challengeState ? ` · ${String(target.message.challengeState).toUpperCase()}` : ''}</div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="label" htmlFor="individualParticipantCourseState">State</label>
+                  <select
+                    id="individualParticipantCourseState"
+                    className="input"
+                    value={individualCourseState}
+                    onChange={(event) => {
+                      setIndividualCourseState(event.target.value)
+                      setIndividualCourseName('')
+                      setIndividualCourseSearch('')
+                      setIndividualCourseId('')
+                    }}
+                    disabled={individualCourseStatesLoading && !individualCourseStateOptions.length}
+                    required
+                  >
+                    <option value="">{individualCourseStatesLoading ? 'Loading states…' : 'Select state'}</option>
+                    {individualCourseStateOptions.map((state) => <option key={state.abbr} value={state.abbr}>{state.name}</option>)}
+                  </select>
+                  {individualCourseStatesError ? <div className="small">{individualCourseStatesError}</div> : null}
+                </div>
+                <GolfCourseInput
+                  label="Golf course"
+                  state={individualCourseState}
+                  searchValue={individualCourseSearch}
+                  selectedCourseName={individualCourseName}
+                  selectedCourseId={individualCourseId}
+                  onSearchChange={(next) => {
+                    setIndividualCourseSearch(next)
+                    setIndividualCourseName('')
+                    setIndividualCourseId('')
+                  }}
+                  onCourseSelected={(selected) => {
+                    setIndividualCourseState(String(selected.state || selected.state_code || individualCourseState).toUpperCase())
+                    setIndividualCourseName(selected.name || '')
+                    setIndividualCourseSearch(selected.name || '')
+                    setIndividualCourseId(selected.id || '')
+                  }}
+                  placeholder="Search courses in the selected state"
+                  inputId="individualParticipantCourseSearch"
+                  required
+                />
+              </>
+            )}
           </div>
+          {error ? <div className="inboxStatus inboxStatus--error" role="alert">{error}</div> : null}
           <div className="pageHeroActions">
             <button type="button" className="btn" disabled={savingIndividualCourse} onClick={() => setIndividualCoursePicker(null)}>Cancel</button>
-            <button type="button" className="btn btnPrimary" disabled={savingIndividualCourse || !individualCourseState || !individualCourseName} onClick={() => void saveIndividualChallengeCourse()}>{savingIndividualCourse ? 'Saving…' : 'Continue to scorecard'}</button>
+            <button type="button" className="btn btnPrimary" disabled={savingIndividualCourse || !courseReady || !dateReady} onClick={() => void saveIndividualChallengeCourse()}>{savingIndividualCourse ? 'Saving…' : 'Continue to scorecard'}</button>
           </div>
         </div>
       </div>
@@ -3048,7 +3201,7 @@ export default function Challenges() {
     const visibleConversation = getConversationFor(challengeMessage).filter((item) => !isIndividualChallengeInviteActivityMessage(item) && Boolean(String(item.body || '').trim()))
 
     return (
-      <article key={thread.threadId} className={`inboxChallengeLineItem ${thread.unreadCount > 0 ? 'inboxChallengeLineItem--unread' : 'inboxChallengeLineItem--read'} ${isExpanded ? 'inboxChallengeLineItem--expanded' : ''}`}>
+      <article key={thread.threadId} className={`inboxChallengeLineItem ${isTeamChallengeMessage ? 'inboxChallengeLineItem--team' : ''} ${thread.unreadCount > 0 ? 'inboxChallengeLineItem--unread' : 'inboxChallengeLineItem--read'} ${isExpanded ? 'inboxChallengeLineItem--expanded' : ''}`}>
         <div className="inboxChallengeLineItemTopRow">
           <button
             type="button"
@@ -3504,12 +3657,12 @@ export default function Challenges() {
                     <option value="skins">Skins</option>
                     <option value="skins_push">Skins - Push</option>
                   </select>
-                  <div className="small">Skins awards points for holes won. Skins - Push carries tied-hole points forward until a team wins a hole.</div>
+                  <div className="small">Skins awards points for holes won. Skins - Push uses dollars and carries tied-hole dollars forward until a team wins a hole.</div>
                 </div>
 
                 {isSkinsTeamChallenge(teamChallengeScoringType) ? (
                   <div>
-                    <label className="label" htmlFor="teamChallengePointsPerHole">Points per hole</label>
+                    <label className="label" htmlFor="teamChallengePointsPerHole">{teamChallengeScoringType === 'skins_push' ? 'Dollars per hole' : 'Points per hole'}</label>
                     <input
                       id="teamChallengePointsPerHole"
                       className="input"
@@ -3520,7 +3673,7 @@ export default function Challenges() {
                       onChange={(event) => setTeamChallengePointsPerHole(event.target.value)}
                       placeholder="1"
                     />
-                    <div className="small">Optional. Blank or invalid values default to 1 point per hole.</div>
+                    <div className="small">{teamChallengeScoringType === 'skins_push' ? 'Optional. Blank or invalid values default to $1 per hole.' : 'Optional. Blank or invalid values default to 1 point per hole.'}</div>
                   </div>
                 ) : null}
               </div>
@@ -3543,7 +3696,8 @@ export default function Challenges() {
             {status ? <div className="inboxStatus inboxStatus--success">{status}</div> : null}
             {error ? <div className="inboxStatus inboxStatus--error">{error}</div> : null}
 
-            <div className="pageHeroActions">
+            <div className="pageHeroActions challengeCreateActions">
+              {challengeSubmitFeedback ? <div className="challengeSubmitFeedback" role="alert">{challengeSubmitFeedback}</div> : null}
               <button className="btn btnPrimary" type="submit" disabled={sending || !canSubmitChallenge}>{sending ? 'Sending…' : isTeamChallenge ? 'Send Team Challenge' : 'Send Individual Challenge'}</button>
               <button
                 className="btn"

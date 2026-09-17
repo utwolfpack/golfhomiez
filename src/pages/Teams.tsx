@@ -25,6 +25,22 @@ const MAX_TEAM_SIZE = 4
 const CREATE_EXTRA_MEMBER_LIMIT = MAX_TEAM_SIZE - 1
 const TEAM_SIZE_ERROR = 'Teams can only have 2 to 4 team members.'
 
+function TeamMemberCheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="m5 12.5 4.2 4.2L19 7" />
+    </svg>
+  )
+}
+
+function TeamMemberTrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+    </svg>
+  )
+}
+
 export default function TeamsPage() {
   return (
     <ProtectedRoute>
@@ -552,15 +568,24 @@ function TeamsInner() {
                 <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
                   {createMembers.map((m, index) => (
                     <div key={m.id} className="card" style={{ padding: 12, background: 'rgba(255,255,255,.72)' }}>
-                      <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto', gap: 10, alignItems: 'end' }}>
-                        <div>
+                      <div className="teamCreateMemberControls">
+                        <div className="teamCreateMemberEmailField">
                           <label className="label">Email</label>
                           <input className="input" type="email" value={m.email} readOnly={m.validationState === 'validated' || m.validationState === 'invited'} onChange={e => patchCreateMember(m.id, 'email', e.target.value)} placeholder={`Member ${index + 2} email`} />
                         </div>
-                        <button type="button" className="btn" disabled={m.validationState === 'checking' || m.validationState === 'validated' || m.validationState === 'invited'} onClick={() => validateCreateMember(m.id)}>
-                          {m.validationState === 'validated' ? 'Validated' : m.validationState === 'invited' ? 'Invited' : m.validationState === 'checking' ? 'Validating…' : 'Validate'}
+                        <button
+                          type="button"
+                          className={`teamMemberValidateIconButton${m.validationState === 'validated' || m.validationState === 'invited' ? ' validated' : ''}`}
+                          disabled={m.validationState === 'checking' || m.validationState === 'validated' || m.validationState === 'invited'}
+                          onClick={() => validateCreateMember(m.id)}
+                          aria-label={m.validationState === 'validated' ? 'Email validated' : m.validationState === 'invited' ? 'Invitation sent' : 'Validate team member email'}
+                          title={m.validationState === 'validated' ? 'Validated' : m.validationState === 'invited' ? 'Invited' : 'Validate email'}
+                        >
+                          {m.validationState === 'checking' ? <span className="teamMemberValidationProgress" aria-hidden="true">…</span> : <TeamMemberCheckIcon />}
                         </button>
-                        <button type="button" className="btn" onClick={() => removeCreateMember(m.id)}>Remove</button>
+                        <button type="button" className="teamMemberRemoveIconButton" onClick={() => removeCreateMember(m.id)} aria-label={`Remove member ${index + 2}`} title="Remove team member">
+                          <TeamMemberTrashIcon />
+                        </button>
                       </div>
                       {m.validationState === 'validated' ? (
                         <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>

@@ -297,6 +297,7 @@ export default function NavBar() {
                       <>
                         <NavLink className="navDropdownItem" to="/organizer/portal" onClick={() => setOpen(false)}>Organizer portal</NavLink>
                         <NavLink className="navDropdownItem" to="/organizer/portal/profile" onClick={() => setOpen(false)}>Organizer profile</NavLink>
+                        <NavLink className="navDropdownItem" to="/organizer/portal/support" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.organizer', message: 'organizer_support_selected', data: { destination: '/organizer/portal/support', correlationId: getCorrelationId() } }) }}>Support</NavLink>
                       </>
                     ) : null}
                     {restrictedSession ? null : (

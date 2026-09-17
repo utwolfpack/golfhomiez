@@ -105,7 +105,7 @@ npm run data:populate:all -- --confirm \
 
 ## Data formatting
 
-Phone values are populated in the same human-readable format expected by the application phone inputs, for example `801 555 0100`. Tournament template bullet-list fields are stored one item per row/line so flyer and portal displays match real user-entered content. Skins-push team challenges include tied holes and carryover points so the leaderboard Push column has realistic values for commercials and QA.
+Phone values are populated in the same human-readable format expected by the application phone inputs, for example `801 555 0100`. Tournament template bullet-list fields are stored one item per row/line so flyer and portal displays match real user-entered content. Skins-push team challenges include tied holes and carryover dollars so the leaderboard Push column has realistic values for commercials and QA.
 
 ## Tournament flyer imagery
 

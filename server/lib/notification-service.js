@@ -653,10 +653,133 @@ export async function createTournamentMessageThread(db, {
   }
 }
 
+function tournamentPortalTracksGolferUnread(viewer = {}) {
+  const role = String(viewer?.role || '').trim().toLowerCase()
+  return role === 'host' || role === 'organizer'
+}
+
+function latestReadTimestamp(...values) {
+  let latest = 0
+  for (const value of values) {
+    if (!value) continue
+    const parsed = Date.parse(String(value))
+    if (Number.isFinite(parsed) && parsed > latest) latest = parsed
+  }
+  return latest
+}
+
+function countUnreadGolferMessages(thread, readAfterMs = 0, individuallyReadMessageIds = new Set()) {
+  return (thread?.messages || []).filter((message) => {
+    if (String(message.senderRole || '').toLowerCase() !== 'user') return false
+    if (individuallyReadMessageIds.has(String(message.id || ''))) return false
+    const createdMs = Date.parse(String(message.createdAt || ''))
+    return Number.isFinite(createdMs) && (!readAfterMs || createdMs > readAfterMs)
+  }).length
+}
+
+export async function getTournamentMessageUnreadSummary(db, tournamentIds = [], viewer = {}) {
+  const normalizedTournamentIds = [...new Set((Array.isArray(tournamentIds) ? tournamentIds : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))]
+  const viewerKey = tournamentPortalViewerKey(viewer)
+  const byTournament = Object.fromEntries(normalizedTournamentIds.map((tournamentId) => [tournamentId, 0]))
+  if (!normalizedTournamentIds.length || !viewerKey || !tournamentPortalTracksGolferUnread(viewer)) {
+    return { totalUnread: 0, byTournament }
+  }
+
+  const placeholders = normalizedTournamentIds.map(() => '?').join(', ')
+  const [rows] = await db.execute(
+    `SELECT t.tournament_id,
+            COUNT(*) AS unread_count
+       FROM tournament_message_threads t
+       INNER JOIN tournament_message_entries e
+               ON e.thread_id = t.id
+              AND LOWER(COALESCE(e.sender_role, '')) = 'user'
+       LEFT JOIN tournament_message_portal_state s
+              ON s.viewer_key = ?
+             AND s.tournament_id = t.tournament_id
+       LEFT JOIN tournament_message_thread_portal_state ts
+              ON ts.viewer_key = ?
+             AND ts.thread_id = t.id
+       LEFT JOIN tournament_message_entry_portal_state es
+              ON es.viewer_key = ?
+             AND es.message_id = e.id
+      WHERE t.tournament_id IN (${placeholders})
+        AND es.message_id IS NULL
+        AND e.created_at > GREATEST(
+              COALESCE(s.last_read_at, '1970-01-01 00:00:00.000000'),
+              COALESCE(ts.last_read_at, '1970-01-01 00:00:00.000000')
+            )
+      GROUP BY t.tournament_id`,
+    [viewerKey, viewerKey, viewerKey, ...normalizedTournamentIds],
+  )
+
+  let totalUnread = 0
+  for (const row of rows || []) {
+    const tournamentId = String(row.tournament_id || '').trim()
+    if (!tournamentId || !(tournamentId in byTournament)) continue
+    const unreadCount = Math.max(0, Number(row.unread_count || 0))
+    byTournament[tournamentId] = unreadCount
+    totalUnread += unreadCount
+  }
+  return { totalUnread, byTournament }
+}
+
+export async function listTournamentUnreadMessageItems(db, tournamentIds = [], viewer = {}) {
+  const normalizedTournamentIds = [...new Set((Array.isArray(tournamentIds) ? tournamentIds : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))]
+  const viewerKey = tournamentPortalViewerKey(viewer)
+  if (!normalizedTournamentIds.length || !viewerKey || !tournamentPortalTracksGolferUnread(viewer)) return []
+
+  const placeholders = normalizedTournamentIds.map(() => '?').join(', ')
+  const [rows] = await db.execute(
+    `SELECT e.id AS message_id,
+            e.thread_id,
+            t.tournament_id,
+            e.sender_email,
+            e.sender_name,
+            e.message_body,
+            e.created_at
+       FROM tournament_message_threads t
+       INNER JOIN tournament_message_entries e
+               ON e.thread_id = t.id
+              AND LOWER(COALESCE(e.sender_role, '')) = 'user'
+       LEFT JOIN tournament_message_portal_state s
+              ON s.viewer_key = ?
+             AND s.tournament_id = t.tournament_id
+       LEFT JOIN tournament_message_thread_portal_state ts
+              ON ts.viewer_key = ?
+             AND ts.thread_id = t.id
+       LEFT JOIN tournament_message_entry_portal_state es
+              ON es.viewer_key = ?
+             AND es.message_id = e.id
+      WHERE t.tournament_id IN (${placeholders})
+        AND es.message_id IS NULL
+        AND e.created_at > GREATEST(
+              COALESCE(s.last_read_at, '1970-01-01 00:00:00.000000'),
+              COALESCE(ts.last_read_at, '1970-01-01 00:00:00.000000')
+            )
+      ORDER BY e.created_at DESC, e.id DESC`,
+    [viewerKey, viewerKey, viewerKey, ...normalizedTournamentIds],
+  )
+
+  return (rows || []).map((row) => ({
+    messageId: String(row.message_id || ''),
+    threadId: String(row.thread_id || ''),
+    tournamentId: String(row.tournament_id || ''),
+    senderEmail: normalizeEmail(row.sender_email),
+    senderName: row.sender_name || null,
+    messagePreview: String(row.message_body || '').trim().slice(0, 240),
+    createdAt: toIso(row.created_at),
+  }))
+}
+
 export async function listTournamentMessageThreads(db, tournamentId, viewer = {}) {
+  const normalizedTournamentId = String(tournamentId || '')
   const [threadRows] = await db.execute(
-    'SELECT * FROM tournament_message_threads WHERE tournament_id = ? ORDER BY updated_at DESC, created_at DESC',
-    [String(tournamentId || '')],
+    'SELECT * FROM tournament_message_threads WHERE tournament_id = ? ORDER BY created_at DESC, id DESC',
+    [normalizedTournamentId],
   )
   const threads = []
   for (const row of threadRows) {
@@ -666,28 +789,53 @@ export async function listTournamentMessageThreads(db, tournamentId, viewer = {}
 
   let lastReadAt = null
   const viewerKey = tournamentPortalViewerKey(viewer)
+  const threadReadById = new Map()
+  const individuallyReadMessageIds = new Set()
   if (viewerKey) {
     const [[state] = []] = await db.execute(
       'SELECT last_read_at FROM tournament_message_portal_state WHERE viewer_key = ? AND tournament_id = ? LIMIT 1',
-      [viewerKey, String(tournamentId || '')],
+      [viewerKey, normalizedTournamentId],
     )
     lastReadAt = toIso(state?.last_read_at)
+
+    if (threads.length) {
+      const [threadStates] = await db.execute(
+        'SELECT thread_id, last_read_at FROM tournament_message_thread_portal_state WHERE viewer_key = ? AND tournament_id = ?',
+        [viewerKey, normalizedTournamentId],
+      )
+      for (const threadState of threadStates || []) {
+        threadReadById.set(String(threadState.thread_id || ''), toIso(threadState.last_read_at))
+      }
+
+      const [messageStates] = await db.execute(
+        'SELECT message_id FROM tournament_message_entry_portal_state WHERE viewer_key = ? AND tournament_id = ?',
+        [viewerKey, normalizedTournamentId],
+      )
+      for (const messageState of messageStates || []) {
+        individuallyReadMessageIds.add(String(messageState.message_id || ''))
+      }
+    }
   }
-  const lastReadMs = lastReadAt ? Date.parse(lastReadAt) : 0
-  const isHostViewer = String(viewer?.role || '').toLowerCase() === 'host'
-  const unreadCount = isHostViewer
-    ? threads.reduce((total, thread) => total + thread.messages.filter((message) => {
-        if (String(message.senderRole || '').toLowerCase() !== 'user') return false
-        const createdMs = Date.parse(String(message.createdAt || ''))
-        return Number.isFinite(createdMs) && (!lastReadMs || createdMs > lastReadMs)
-      }).length, 0)
-    : 0
+
+  const tracksUnread = tournamentPortalTracksGolferUnread(viewer)
+  let unreadCount = 0
+  const threadsWithReadState = threads.map((thread) => {
+    const threadLastReadAt = threadReadById.get(String(thread.id || '')) || null
+    const effectiveReadMs = latestReadTimestamp(lastReadAt, threadLastReadAt)
+    const threadUnreadCount = tracksUnread ? countUnreadGolferMessages(thread, effectiveReadMs, individuallyReadMessageIds) : 0
+    unreadCount += threadUnreadCount
+    return {
+      ...thread,
+      unreadCount: threadUnreadCount,
+      lastReadAt: threadLastReadAt || lastReadAt || null,
+    }
+  })
 
   return {
-    threads,
+    threads: threadsWithReadState,
     unreadCount,
-    totalThreads: threads.length,
-    totalMessages: threads.reduce((total, thread) => total + thread.messages.length, 0),
+    totalThreads: threadsWithReadState.length,
+    totalMessages: threadsWithReadState.reduce((total, thread) => total + thread.messages.length, 0),
     lastReadAt,
   }
 }
@@ -695,13 +843,87 @@ export async function listTournamentMessageThreads(db, tournamentId, viewer = {}
 export async function markTournamentMessagesRead(db, tournamentId, viewer = {}) {
   const viewerKey = tournamentPortalViewerKey(viewer)
   if (!viewerKey) throw new Error('Tournament message viewer is required.')
+  const normalizedTournamentId = String(tournamentId || '')
   await db.execute(
     `INSERT INTO tournament_message_portal_state (viewer_key, tournament_id, last_read_at, updated_at)
      VALUES (?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
      ON DUPLICATE KEY UPDATE last_read_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP(6)`,
-    [viewerKey, String(tournamentId || '')],
+    [viewerKey, normalizedTournamentId],
   )
-  return { tournamentId: String(tournamentId || ''), lastReadAt: new Date().toISOString() }
+  await db.execute(
+    'DELETE FROM tournament_message_thread_portal_state WHERE viewer_key = ? AND tournament_id = ?',
+    [viewerKey, normalizedTournamentId],
+  )
+  await db.execute(
+    'DELETE FROM tournament_message_entry_portal_state WHERE viewer_key = ? AND tournament_id = ?',
+    [viewerKey, normalizedTournamentId],
+  )
+  return { tournamentId: normalizedTournamentId, lastReadAt: new Date().toISOString() }
+}
+
+export async function markTournamentMessageThreadRead(db, tournamentId, threadId, viewer = {}) {
+  const viewerKey = tournamentPortalViewerKey(viewer)
+  if (!viewerKey) throw new Error('Tournament message viewer is required.')
+  const normalizedTournamentId = String(tournamentId || '').trim()
+  const normalizedThreadId = String(threadId || '').trim()
+  if (!normalizedTournamentId || !normalizedThreadId) throw new Error('Tournament message thread is required.')
+
+  const [[thread] = []] = await db.execute(
+    'SELECT id FROM tournament_message_threads WHERE id = ? AND tournament_id = ? LIMIT 1',
+    [normalizedThreadId, normalizedTournamentId],
+  )
+  if (!thread) return null
+
+  await db.execute(
+    `INSERT INTO tournament_message_thread_portal_state
+      (viewer_key, tournament_id, thread_id, last_read_at, updated_at)
+     VALUES (?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+     ON DUPLICATE KEY UPDATE
+       tournament_id = VALUES(tournament_id),
+       last_read_at = CURRENT_TIMESTAMP(6),
+       updated_at = CURRENT_TIMESTAMP(6)`,
+    [viewerKey, normalizedTournamentId, normalizedThreadId],
+  )
+  await db.execute(
+    'DELETE FROM tournament_message_entry_portal_state WHERE viewer_key = ? AND thread_id = ?',
+    [viewerKey, normalizedThreadId],
+  )
+  return { tournamentId: normalizedTournamentId, threadId: normalizedThreadId, lastReadAt: new Date().toISOString() }
+}
+
+export async function markTournamentMessageRead(db, tournamentId, threadId, messageId, viewer = {}) {
+  const viewerKey = tournamentPortalViewerKey(viewer)
+  if (!viewerKey) throw new Error('Tournament message viewer is required.')
+  const normalizedTournamentId = String(tournamentId || '').trim()
+  const normalizedThreadId = String(threadId || '').trim()
+  const normalizedMessageId = String(messageId || '').trim()
+  if (!normalizedTournamentId || !normalizedThreadId || !normalizedMessageId) throw new Error('Tournament message is required.')
+
+  const [[message] = []] = await db.execute(
+    `SELECT e.id
+       FROM tournament_message_entries e
+       INNER JOIN tournament_message_threads t ON t.id = e.thread_id
+      WHERE e.id = ?
+        AND e.thread_id = ?
+        AND t.tournament_id = ?
+        AND LOWER(COALESCE(e.sender_role, '')) = 'user'
+      LIMIT 1`,
+    [normalizedMessageId, normalizedThreadId, normalizedTournamentId],
+  )
+  if (!message) return null
+
+  await db.execute(
+    `INSERT INTO tournament_message_entry_portal_state
+      (viewer_key, tournament_id, thread_id, message_id, read_at, updated_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+     ON DUPLICATE KEY UPDATE
+       tournament_id = VALUES(tournament_id),
+       thread_id = VALUES(thread_id),
+       read_at = CURRENT_TIMESTAMP(6),
+       updated_at = CURRENT_TIMESTAMP(6)`,
+    [viewerKey, normalizedTournamentId, normalizedThreadId, normalizedMessageId],
+  )
+  return { tournamentId: normalizedTournamentId, threadId: normalizedThreadId, messageId: normalizedMessageId, readAt: new Date().toISOString() }
 }
 
 export async function appendTournamentPortalMessage(db, {

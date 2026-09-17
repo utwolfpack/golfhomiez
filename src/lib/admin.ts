@@ -160,22 +160,9 @@ export type PexelsQuotaMetadata = {
   endpoint?: string | null
 }
 
-export type SocialPublicationMetadata = {
-  platform: 'facebook' | 'instagram' | 'linkedin' | 'youtube' | string
-  status?: string | null
-  attemptCount?: number | null
-  platformUrl?: string | null
-  errorMessage?: string | null
-  publishedAt?: string | null
-  nextAttemptAt?: string | null
-}
-
 export type ScheduledJobCommercialMetadata = {
   pexelsConfigured?: boolean
   pexelsQuota?: PexelsQuotaMetadata | null
-  socialAutoPublishEnabled?: boolean
-  socialProviderConfiguration?: Record<string, SocialProviderConfiguration>
-  socialPublications?: SocialPublicationMetadata[]
   latestOutput?: {
     runId?: string | null
     completedAt?: string | null
@@ -210,30 +197,6 @@ export type ScheduledJob = {
   commercialMetadata?: ScheduledJobCommercialMetadata | null
 }
 
-export type SocialProviderConfiguration = {
-  platform: string
-  label: string
-  enabled: boolean
-  configured: boolean
-  missing: string[]
-  credentialSource?: string | null
-  accountId?: string | null
-  accountName?: string | null
-}
-
-export type SocialPublishingStatus = {
-  autoPublishEnabled: boolean
-  providers: Record<'facebook' | 'instagram' | 'linkedin' | 'youtube', SocialProviderConfiguration>
-}
-
-export async function fetchSocialPublishingStatus() {
-  return api<SocialPublishingStatus>('/api/admin/social-publishing/connections')
-}
-
-export async function retrySocialPublications(runId: string) {
-  return api<{ runId: string; publications: SocialPublicationMetadata[]; jobs: ScheduledJob[] }>(`/api/admin/social-publishing/publications/${encodeURIComponent(runId)}/retry`, { method: 'POST' })
-}
-
 export async function fetchScheduledJobs() {
   return api<{ jobs: ScheduledJob[] }>('/api/admin/scheduled-jobs')
 }
@@ -262,3 +225,46 @@ export type BillingAccessCode = { id: string; code: string; homieToken: string; 
 export const fetchBillingAccessCodes = () => api<{ codes: BillingAccessCode[] }>('/api/admin/billing/access-codes')
 export const createBillingAccessCode = (input: { homieToken: string; label?: string; maxRedemptions?: number | null; expiresAt?: string | null }) => api<{ created: { id: string; code: string; homieToken: string; codeLastFour: string }; codes: BillingAccessCode[] }>('/api/admin/billing/access-codes', { method: 'POST', body: JSON.stringify(input) })
 export const updateBillingAccessCode = (id: string, input: { active?: boolean; maxRedemptions?: number | null; expiresAt?: string | null }) => api<{ codes: BillingAccessCode[] }>(`/api/admin/billing/access-codes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) })
+
+export type AdminSupportTicketMessage = {
+  id: string
+  ticketId: string
+  senderType: 'user' | 'admin'
+  senderAccountId?: string | null
+  senderEmail?: string | null
+  message: string
+  createdAt?: string | null
+  correlationId?: string | null
+}
+
+export type AdminSupportTicket = {
+  id: string
+  accountType: string
+  accountId?: string | null
+  requesterEmail?: string | null
+  requesterName?: string | null
+  subject: string
+  status: 'open' | 'closed' | string
+  userUnread: boolean
+  adminUnread: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+  lastMessageAt?: string | null
+  closedAt?: string | null
+  messageCount?: number
+  metadata?: Record<string, unknown> | null
+  messages?: AdminSupportTicketMessage[]
+}
+
+export const fetchAdminSupportTickets = () => api<{ tickets: AdminSupportTicket[] }>('/api/admin/support/tickets')
+
+export const fetchAdminSupportTicket = (ticketId: string) => api<{ ticket: AdminSupportTicket }>(`/api/admin/support/tickets/${encodeURIComponent(ticketId)}`)
+
+export const replyToAdminSupportTicket = (ticketId: string, message: string) => api<{ ticket: AdminSupportTicket }>(`/api/admin/support/tickets/${encodeURIComponent(ticketId)}/messages`, {
+  method: 'POST',
+  body: JSON.stringify({ message }),
+})
+
+export const closeAdminSupportTicket = (ticketId: string) => api<{ ticket: AdminSupportTicket }>(`/api/admin/support/tickets/${encodeURIComponent(ticketId)}/close`, {
+  method: 'POST',
+})

@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import PageHero from '../components/PageHero'
 import PasswordCriteria from '../components/PasswordCriteria'
+import HostSupportSection from '../components/HostSupportSection'
 import { useHostAuth } from '../context/HostAuthContext'
-import { archiveHostTournamentRecord, createHostCourseEvent, createHostTournament, deleteHostCourseEvent, fetchHostCourseEvents, restoreHostTournamentRecord, sendHostTournamentInvite, updateHostCourseEvent, updateHostTournamentRecord, type CourseEventInput, type GolfCoursePublicPageEvent, type Tournament, type TournamentInput } from '../lib/accounts'
+import { archiveHostTournamentRecord, createHostCourseEvent, createHostTournament, deleteHostCourseEvent, fetchHostCourseEvents, fetchHostTournamentUnreadSummary, markHostTournamentMessageRead, restoreHostTournamentRecord, sendHostTournamentInvite, updateHostCourseEvent, updateHostTournamentRecord, type CourseEventInput, type GolfCoursePublicPageEvent, type HostTournamentUnreadMessage, type Tournament, type TournamentInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
-import { formatFriendlyDateTime } from '../lib/time-format'
+import { formatFriendlyDate, formatFriendlyDateTime } from '../lib/time-format'
 import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
@@ -20,7 +21,7 @@ import { assertPasswordPolicy } from '../lib/password-policy'
 const DEFAULT_TOURNAMENT_TEAM_SLOT_LIMIT = 24
 const TOURNAMENTS_PER_PAGE = 10
 
-type HostPortalSection = 'course-events' | 'tournaments' | 'host-accounts'
+type HostPortalSection = 'course-events' | 'tournaments' | 'host-accounts' | 'support'
 
 type HostPortalState = {
   account?: {
@@ -200,6 +201,10 @@ function RegisteredGolfers({ tournament }: { tournament: Tournament }) {
   }
   return (
     <div className="card tournamentBuilderCollapsibleCard">
+      <div className="tournamentWorkingContext" aria-label="Tournament currently being managed">
+        <strong>{tournament.name || 'Tournament'}</strong>
+        <span>{tournament.startDate ? formatFriendlyDate(tournament.startDate) : 'Tournament date not set'}</span>
+      </div>
       <button
         type="button"
         className="tournamentSectionToggleLink"
@@ -318,6 +323,12 @@ export default function HostPortal() {
   const [courseEventForm, setCourseEventForm] = useState<CourseEventInput>(() => createEmptyCourseEventForm())
   const [editingCourseEventId, setEditingCourseEventId] = useState<string | null>(null)
   const [openPortalSection, setOpenPortalSection] = useState<HostPortalSection | null>(null)
+  const [tournamentUnreadById, setTournamentUnreadById] = useState<Record<string, number>>({})
+  const [unreadTournamentMessages, setUnreadTournamentMessages] = useState<HostTournamentUnreadMessage[]>([])
+  const [unreadTournamentMessagesOpen, setUnreadTournamentMessagesOpen] = useState(false)
+  const [autoOpenTournamentMessagesId, setAutoOpenTournamentMessagesId] = useState<string | null>(null)
+  const [autoOpenTournamentMessageThreadId, setAutoOpenTournamentMessageThreadId] = useState<string | null>(null)
+  const [autoOpenTournamentMessageId, setAutoOpenTournamentMessageId] = useState<string | null>(null)
 
   function toggleHostPortalSection(section: HostPortalSection) {
     setOpenPortalSection((current) => {
@@ -337,6 +348,23 @@ export default function HostPortal() {
     setForm((current) => {
       return { ...current, templateData: applyGolfCourseTournamentDefaults(current.templateData, defaultLocation, golfCourseName) }
     })
+  }
+
+  async function loadTournamentUnreadSummary(options: { quiet?: boolean } = {}) {
+    try {
+      const result = await fetchHostTournamentUnreadSummary()
+      setTournamentUnreadById(result.byTournament || {})
+      setUnreadTournamentMessages(result.unreadMessages || [])
+      logFrontendEvent({
+        category: 'host.portal.tournamentMessages',
+        message: 'host_tournament_unread_summary_loaded',
+        data: { totalUnread: Number(result.totalUnread || 0), tournamentCountWithUnread: (result.tournaments || []).length, unreadMessageItems: (result.unreadMessages || []).length },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load tournament message notifications.'
+      if (!options.quiet) setError(message)
+      logFrontendEvent({ category: 'host.portal.tournamentMessages', level: 'error', message: 'host_tournament_unread_summary_load_failed', data: { error: message } })
+    }
   }
 
   async function loadCourseEvents() {
@@ -370,6 +398,20 @@ export default function HostPortal() {
     return () => { active = false }
   }, [])
 
+  useEffect(() => {
+    if (!portalData?.account?.id) return
+    void loadTournamentUnreadSummary({ quiet: true })
+    const refresh = () => { void loadTournamentUnreadSummary({ quiet: true }) }
+    const intervalId = window.setInterval(refresh, 30000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refresh)
+    }
+    // The host account id is the notification-summary identity for this portal session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portalData?.account?.id])
+
   async function onCreateHostAccount(event: FormEvent) {
     event.preventDefault()
     setHostAccountBusy(true)
@@ -381,8 +423,10 @@ export default function HostPortal() {
       if (!result.response.ok) throw new Error((result.data as any)?.message || 'The host account could not be created. Review the information and try again.')
       setNewHostAccount({ contactName: '', email: '', password: '' })
       setHostAccountFormOpen(false)
-      setSuccess('Host account created. The new host can sign in with the email and password you provided.')
-      logFrontendEvent({ category: 'host.portal', message: 'host_additional_account_created', data: { createdHostAccountId: result.data?.hostAccount?.id || null } })
+      setSuccess(result.data?.invitationEmailSent === false
+        ? 'Host account created, but the invitation email could not be sent. The new host can still sign in with the email and password you provided.'
+        : 'Host account created. The new host was emailed that they were invited by an existing golf-course host, including their host name and email address.')
+      logFrontendEvent({ category: 'host.portal', message: 'host_additional_account_created', data: { createdHostAccountId: result.data?.hostAccount?.id || null, invitationEmailSent: result.data?.invitationEmailSent !== false } })
       await loadPortal()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'The host account could not be created. Review the information and try again.'
@@ -580,12 +624,15 @@ export default function HostPortal() {
     })
   }, [portalData?.tournaments])
 
-  function startEditing(tournament: Tournament) {
+  function startEditing(tournament: Tournament, options: { openMessages?: boolean; openThreadId?: string | null; openMessageId?: string | null } = {}) {
     setCreateTournamentOpen(false)
     setCreateAdditionalFieldsOpen(false)
     setEditingId(tournament.id)
     setEditForm(toEditForm(tournament))
     setTournamentInfoOpen(false)
+    setAutoOpenTournamentMessagesId(options.openMessages ? tournament.id : null)
+    setAutoOpenTournamentMessageThreadId(options.openMessages ? options.openThreadId || null : null)
+    setAutoOpenTournamentMessageId(options.openMessages ? options.openMessageId || null : null)
     setError(null)
     setSuccess(null)
     logFrontendEvent({
@@ -595,8 +642,52 @@ export default function HostPortal() {
         tournamentId: tournament.id,
         tournamentIdentifier: tournament.tournamentIdentifier || null,
         otherTournamentCountHidden: Math.max((portalData?.tournaments || []).length - 1, 0),
+        openMessages: Boolean(options.openMessages),
+        openThreadId: options.openThreadId || null,
+        openMessageId: options.openMessageId || null,
       },
     })
+  }
+
+  function updateTournamentUnreadCount(tournamentId: string, unreadCount: number) {
+    const normalizedUnreadCount = Math.max(0, Number(unreadCount || 0))
+    setTournamentUnreadById((current) => ({ ...current, [tournamentId]: normalizedUnreadCount }))
+    if (autoOpenTournamentMessagesId === tournamentId) {
+      setAutoOpenTournamentMessagesId(null)
+      setAutoOpenTournamentMessageThreadId(null)
+      setAutoOpenTournamentMessageId(null)
+    }
+    if (normalizedUnreadCount <= 0) {
+      setUnreadTournamentMessages((current) => current.filter((item) => item.tournamentId !== tournamentId))
+    }
+  }
+
+  async function openUnreadTournamentMessage(item: HostTournamentUnreadMessage) {
+    const tournament = activeHostedTournaments.find((candidate) => candidate.id === item.tournamentId)
+    if (!tournament) {
+      setUnreadTournamentMessagesOpen(false)
+      setError('The tournament for this unread message is no longer available in the active tournament list.')
+      logFrontendEvent({ category: 'host.portal.tournamentMessages', level: 'warn', message: 'host_tournament_unread_message_tournament_not_found', data: { tournamentId: item.tournamentId, threadId: item.threadId, messageId: item.messageId } })
+      return
+    }
+
+    try {
+      const readState = await markHostTournamentMessageRead(item.tournamentId, item.threadId, item.messageId)
+      const remainingUnread = Math.max(0, Number(readState.remainingUnread ?? Math.max(0, Number(tournamentUnreadById[item.tournamentId] || 0) - 1)))
+      setUnreadTournamentMessages((current) => current.filter((candidate) => candidate.messageId !== item.messageId))
+      setTournamentUnreadById((current) => ({ ...current, [item.tournamentId]: remainingUnread }))
+      logFrontendEvent({ category: 'host.portal.tournamentMessages', message: 'host_tournament_unread_message_marked_read_from_summary', data: { tournamentId: item.tournamentId, threadId: item.threadId, messageId: item.messageId, unreadCleared: 1, remainingUnread } })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not mark this tournament message as read.'
+      logFrontendEvent({ category: 'host.portal.tournamentMessages', level: 'error', message: 'host_tournament_unread_message_mark_read_failed', data: { tournamentId: item.tournamentId, threadId: item.threadId, messageId: item.messageId, error: message } })
+    }
+
+    setUnreadTournamentMessagesOpen(false)
+    setOpenPortalSection('tournaments')
+    setShowArchivedTournaments(false)
+    setCreateTournamentOpen(false)
+    startEditing(tournament, { openMessages: true, openThreadId: item.threadId, openMessageId: item.messageId })
+    logFrontendEvent({ category: 'host.portal.tournamentMessages', message: 'host_tournament_unread_message_selected', data: { tournamentId: item.tournamentId, threadId: item.threadId, messageId: item.messageId, tournamentDate: item.tournamentDate || null, messageDate: item.createdAt || null } })
   }
 
   async function onCreateTournament(event: FormEvent) {
@@ -782,9 +873,14 @@ export default function HostPortal() {
     }
   }
 
-  const hostedTournaments = sortTournamentsByCreatedDescending(portalData?.tournaments || [])
+  const hostedTournaments = sortTournamentsByCreatedDescending(portalData?.tournaments || []).map((tournament) => ({
+    ...tournament,
+    unreadMessageCount: Math.max(0, Number(tournamentUnreadById[tournament.id] || 0)),
+  }))
   const activeHostedTournaments = hostedTournaments.filter((tournament) => !tournament.archivedAt)
   const archivedHostedTournaments = hostedTournaments.filter((tournament) => Boolean(tournament.archivedAt))
+  const totalUnreadTournamentMessages = activeHostedTournaments.reduce((total, tournament) => total + Number(tournament.unreadMessageCount || 0), 0)
+  const unreadTournamentCount = activeHostedTournaments.filter((tournament) => Number(tournament.unreadMessageCount || 0) > 0).length
   const selectedTournamentPool = showArchivedTournaments ? archivedHostedTournaments : activeHostedTournaments
   const currentYear = getCurrentYearInUserTimeZone()
   const hostTournamentYears = useMemo(() => tournamentYearOptions(selectedTournamentPool.filter((tournament) => String(tournament.status || '').toLowerCase() !== 'draft'), currentYear), [currentYear, selectedTournamentPool])
@@ -796,7 +892,7 @@ export default function HostPortal() {
   const totalTournamentPages = Math.max(1, Math.ceil(selectedHostedTournaments.length / TOURNAMENTS_PER_PAGE))
   const safeTournamentPage = Math.min(tournamentPage, totalTournamentPages)
   const pagedHostedTournaments = selectedHostedTournaments.slice((safeTournamentPage - 1) * TOURNAMENTS_PER_PAGE, safeTournamentPage * TOURNAMENTS_PER_PAGE)
-  const visibleHostedTournaments = editingId ? selectedTournamentPool.filter((tournament) => tournament.id === editingId) : pagedHostedTournaments
+  const visibleHostedTournaments = editingId ? hostedTournaments.filter((tournament) => tournament.id === editingId) : pagedHostedTournaments
   const sortedCourseEvents = [...courseEvents].sort((left, right) => `${left.eventDate} ${left.startTime || '99:99'}`.localeCompare(`${right.eventDate} ${right.startTime || '99:99'}`))
   useEffect(() => {
     if (tournamentPage > totalTournamentPages) setTournamentPage(totalTournamentPages)
@@ -903,10 +999,33 @@ export default function HostPortal() {
             </section>
 
             <section className="card hostPortalAccordionSection" data-testid="host-tournaments-section">
-              <button type="button" className="hostPortalAccordionHeader" aria-expanded={openPortalSection === 'tournaments'} aria-controls="host-tournaments-accordion" onClick={() => toggleHostPortalSection('tournaments')}>
-                <span><strong>Tournaments</strong><span className="small">Create, manage, publish, and archive tournaments.</span></span>
-                <span className="hostPortalAccordionIndicator" aria-hidden="true">{openPortalSection === 'tournaments' ? '−' : '+'}</span>
-              </button>
+              <div className="hostPortalAccordionHeader hostPortalAccordionHeader--composite">
+                <button type="button" className="hostPortalAccordionMainButton" aria-expanded={openPortalSection === 'tournaments'} aria-controls="host-tournaments-accordion" onClick={() => toggleHostPortalSection('tournaments')}>
+                  <span><strong>Tournaments</strong><span className="small">Create, manage, publish, and archive tournaments.</span></span>
+                </button>
+                <span className="hostPortalAccordionHeaderActions">
+                  {totalUnreadTournamentMessages > 0 ? (
+                    <button
+                      type="button"
+                      className="hostTournamentUnreadButton"
+                      aria-label={`${totalUnreadTournamentMessages} unread tournament message${totalUnreadTournamentMessages === 1 ? '' : 's'} across ${unreadTournamentCount} tournament${unreadTournamentCount === 1 ? '' : 's'}`}
+                      onClick={() => {
+                        setError(null)
+                        setSuccess(null)
+                        setUnreadTournamentMessagesOpen(true)
+                        void loadTournamentUnreadSummary({ quiet: true })
+                        logFrontendEvent({ category: 'host.portal.tournamentMessages', message: 'host_tournament_unread_summary_selected', data: { totalUnread: totalUnreadTournamentMessages, tournamentCount: unreadTournamentCount, openedUnreadModal: true } })
+                      }}
+                    >
+                      <span className="hostTournamentUnreadDot" aria-hidden="true" />
+                      <span>{totalUnreadTournamentMessages > 1 ? `${totalUnreadTournamentMessages} unread` : 'Unread'}</span>
+                    </button>
+                  ) : null}
+                  <button type="button" className="hostPortalAccordionIndicator hostPortalAccordionIndicatorButton" aria-label={openPortalSection === 'tournaments' ? 'Collapse Tournaments' : 'Expand Tournaments'} onClick={() => toggleHostPortalSection('tournaments')}>
+                    <span aria-hidden="true">{openPortalSection === 'tournaments' ? '−' : '+'}</span>
+                  </button>
+                </span>
+              </div>
               {openPortalSection === 'tournaments' ? (
                 <div id="host-tournaments-accordion" className="hostPortalAccordionBody">
             {!editingId ? <section className="card" style={{ padding: 16 }} data-testid="host-create-tournament-section">
@@ -1104,7 +1223,14 @@ export default function HostPortal() {
                     {editingId === tournament.id && editForm ? (
                       <form onSubmit={onSaveTournament} className="formStack" onClick={(e) => e.stopPropagation()}>
                         <RegisteredGolfers tournament={tournament} />
-                        <TournamentMessagingPanel tournament={tournament} actor="host" />
+                        <TournamentMessagingPanel
+                          tournament={tournament}
+                          actor="host"
+                          autoOpenMessages={autoOpenTournamentMessagesId === tournament.id}
+                          autoOpenThreadId={autoOpenTournamentMessagesId === tournament.id ? autoOpenTournamentMessageThreadId : null}
+                          autoOpenMessageId={autoOpenTournamentMessagesId === tournament.id ? autoOpenTournamentMessageId : null}
+                          onUnreadCountChange={(unreadCount) => updateTournamentUnreadCount(tournament.id, unreadCount)}
+                        />
                         <div className="card tournamentBuilderCollapsibleCard">
                           <button
                             type="button"
@@ -1227,7 +1353,7 @@ export default function HostPortal() {
                         archived={showArchivedTournaments}
                         busy={archiveBusyId === tournament.id}
                         showPublishedLeaderboard
-                        onSelect={showArchivedTournaments ? undefined : startEditing}
+                        onSelect={showArchivedTournaments ? undefined : (selectedTournament) => startEditing(selectedTournament)}
                         onArchive={onArchiveTournament}
                         onRestore={onRestoreTournament}
                       />
@@ -1254,7 +1380,42 @@ export default function HostPortal() {
               ) : null}
             </section>
 
+            {unreadTournamentMessagesOpen ? (
+              <div className="modalOverlay hostTournamentUnreadModalOverlay" role="presentation" onClick={() => setUnreadTournamentMessagesOpen(false)}>
+                <section className="modalCard hostTournamentUnreadModal" role="dialog" aria-modal="true" aria-labelledby="host-unread-tournament-messages-title" onClick={(event) => event.stopPropagation()}>
+                  <div className="hostTournamentUnreadModalHeader">
+                    <div>
+                      <h2 id="host-unread-tournament-messages-title">Unread tournament messages</h2>
+                      <p>Select a message to open its tournament conversation.</p>
+                    </div>
+                    <button type="button" className="button secondary small" onClick={() => setUnreadTournamentMessagesOpen(false)}>Close</button>
+                  </div>
+                  {unreadTournamentMessages.length === 0 ? (
+                    <p className="emptyState">No unread tournament messages remain.</p>
+                  ) : (
+                    <div className="hostTournamentUnreadMessageList">
+                      {unreadTournamentMessages.map((item) => (
+                        <button
+                          key={item.messageId}
+                          type="button"
+                          className="hostTournamentUnreadMessageLine"
+                          onClick={() => void openUnreadTournamentMessage(item)}
+                        >
+                          <span><span>Message date</span><strong>{item.createdAt ? formatFriendlyDateTime(item.createdAt) : 'Date unavailable'}</strong></span>
+                          <span><span>From</span><strong>{item.senderName || item.senderEmail || 'Registered golfer'}</strong></span>
+                          <span><span>Tournament</span><strong>{item.tournamentName || 'Tournament'}</strong></span>
+                          <span><span>Tournament date</span><strong>{item.tournamentDate ? formatFriendlyDate(item.tournamentDate) : 'Not set'}</strong></span>
+                          <span className="hostTournamentUnreadMessagePreview"><span>Message</span><strong>{item.messagePreview || 'Open this message to read the conversation.'}</strong></span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            ) : null}
+
             {!createTournamentOpen && !editingId ? (
+            <>
             <section className="card hostPortalAccordionSection" data-testid="host-accounts-accordion-section">
               <button type="button" className="hostPortalAccordionHeader" aria-expanded={openPortalSection === 'host-accounts'} aria-controls="host-accounts-accordion" onClick={() => toggleHostPortalSection('host-accounts')}>
                 <span><strong>Golf-course Host Accounts</strong><span className="small">Manage access for this golf course.</span></span>
@@ -1362,6 +1523,22 @@ export default function HostPortal() {
                 </div>
               ) : null}
             </section>
+            <section className="card hostPortalAccordionSection" data-testid="host-support-accordion-section">
+              <button type="button" className="hostPortalAccordionHeader" aria-expanded={openPortalSection === 'support'} aria-controls="host-support-accordion" onClick={() => toggleHostPortalSection('support')}>
+                <span><strong>Support</strong><span className="small">Submit and review support requests with GolfHomiez admin.</span></span>
+                <span className="hostPortalAccordionIndicator" aria-hidden="true">{openPortalSection === 'support' ? '−' : '+'}</span>
+              </button>
+              {openPortalSection === 'support' ? (
+                <div id="host-support-accordion" className="hostPortalAccordionBody">
+                  <HostSupportSection
+                    accountId={portalData.account?.id || null}
+                    email={portalData.account?.email || ''}
+                    golfCourseName={portalData.account?.golfCourseName || null}
+                  />
+                </div>
+              ) : null}
+            </section>
+            </>
             ) : null}
           </div>
         ) : null}

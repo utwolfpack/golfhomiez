@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import PageHero from '../components/PageHero'
 import GolfCoursePublicNav from '../components/GolfCoursePublicNav'
@@ -57,6 +57,7 @@ export default function GolfCoursePage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedTournamentYear, setSelectedTournamentYear] = useState(() => String(new Date().getFullYear()))
   const [selectedTournamentPage, setSelectedTournamentPage] = useState(1)
+  const [selectedUpcomingItem, setSelectedUpcomingItem] = useState<null | { kind: 'tournament' | 'courseEvent'; id: string; title: string; eventDate: string; startTime?: string | null; endTime?: string | null; details?: string | null; path?: string | null }>(null)
 
   useEffect(() => {
     let active = true
@@ -145,6 +146,16 @@ export default function GolfCoursePage() {
     setSelectedTournamentPage(1)
   }, [selectedTournamentYear])
 
+
+  function handleUpcomingItemSelected(event: MouseEvent<HTMLAnchorElement>, item: { kind: 'tournament' | 'courseEvent'; id: string; title: string; eventDate: string; startTime?: string | null; endTime?: string | null; details?: string | null; path?: string | null }) {
+    const destinationPath = item.path || page?.calendarPath || ''
+    const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width:760px)').matches
+    logFrontendEvent({ category: 'golf-course.public-page', message: item.kind === 'tournament' ? 'upcoming_tournament_selected' : 'upcoming_course_event_selected', data: { slug: page?.slug || golfCourseSlug, itemId: item.id, itemType: item.kind, eventDate: item.eventDate, destinationPath, mobileModal: mobile } })
+    if (!mobile) return
+    event.preventDefault()
+    setSelectedUpcomingItem(item)
+  }
+
   useEffect(() => {
     if (selectedTournamentPage !== safeTournamentPage) setSelectedTournamentPage(safeTournamentPage)
   }, [safeTournamentPage, selectedTournamentPage])
@@ -209,7 +220,7 @@ export default function GolfCoursePage() {
                       key={`${event.kind}-${event.id}`}
                       className="golfCourseUpcomingEventRow"
                       to={event.path || page.calendarPath}
-                      onClick={() => logFrontendEvent({ category: 'golf-course.public-page', message: event.kind === 'tournament' ? 'upcoming_tournament_selected' : 'upcoming_course_event_selected', data: { slug: page.slug, itemId: event.id, itemType: event.kind, eventDate: event.eventDate, destinationPath: event.path || page.calendarPath } })}
+                      onClick={(clickEvent) => handleUpcomingItemSelected(clickEvent, event)}
                     >
                       <div className="golfCourseUpcomingEventDate">
                         <strong>{formatTournamentDate(event.eventDate)}</strong>
@@ -308,6 +319,25 @@ export default function GolfCoursePage() {
           )}
         </section>
       </div>
+      {selectedUpcomingItem ? (
+        <div className="golfCourseCalendarMobileModalOverlay" role="presentation" onClick={() => setSelectedUpcomingItem(null)}>
+          <div className="golfCourseCalendarMobileModal" role="dialog" aria-modal="true" aria-label={`${selectedUpcomingItem.title} event details`} onClick={(event) => event.stopPropagation()}>
+            <section className={`card golfCourseCalendarDetails golfCourseCalendarDetails--mobileModal${selectedUpcomingItem.kind === 'courseEvent' ? ' golfCourseCalendarDetails--courseEvent' : ''}`}>
+              <div className="golfCourseCalendarDetailsHeader">
+                <div><div className="golfCoursePublicEyebrow">{selectedUpcomingItem.kind === 'tournament' ? 'Tournament details' : 'Course event details'}</div><h2>{selectedUpcomingItem.title}</h2></div>
+                <button className="btn" type="button" onClick={() => setSelectedUpcomingItem(null)}>Close</button>
+              </div>
+              <div className="golfCourseCalendarDetailGrid">
+                <div><div className="label">Date</div><div>{formatTournamentDate(selectedUpcomingItem.eventDate)}</div></div>
+                <div><div className="label">Time</div><div>{[formatTournamentStartTime(selectedUpcomingItem.startTime), selectedUpcomingItem.kind === 'courseEvent' ? formatTournamentStartTime(selectedUpcomingItem.endTime) : ''].filter(Boolean).join(' – ') || 'Time TBA'}</div></div>
+                <div><div className="label">Golf course</div><div>{page.golfCourseName}</div></div>
+              </div>
+              {selectedUpcomingItem.details ? <div className="golfCourseCalendarCourseEventDetails">{selectedUpcomingItem.details}</div> : null}
+              <Link className="btn btnPrimary" to={selectedUpcomingItem.path || page.calendarPath} onClick={() => setSelectedUpcomingItem(null)}>View event</Link>
+            </section>
+          </div>
+        </div>
+      ) : null}
     </main>
   )
 }

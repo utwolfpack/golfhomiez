@@ -212,6 +212,7 @@ export type Tournament = {
   verifiedUserCount?: number
   openTeamSlotCount?: number
   startAssignments?: TournamentStartAssignment[]
+  unreadMessageCount?: number
 }
 
 
@@ -250,6 +251,8 @@ export type TournamentMessageThread = {
   hostName?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  unreadCount?: number
+  lastReadAt?: string | null
   recipients: TournamentMessageRecipient[]
   messages: TournamentMessageEntry[]
 }
@@ -261,6 +264,26 @@ export type TournamentMessagesResponse = {
   totalMessages: number
   lastReadAt?: string | null
 }
+
+export type HostTournamentUnreadMessage = {
+  messageId: string
+  threadId: string
+  tournamentId: string
+  tournamentName: string
+  tournamentDate?: string | null
+  senderEmail?: string | null
+  senderName?: string | null
+  messagePreview?: string | null
+  createdAt?: string | null
+}
+
+export type HostTournamentUnreadSummary = {
+  totalUnread: number
+  byTournament: Record<string, number>
+  tournaments: Array<{ tournamentId: string; tournamentName: string; unreadCount: number }>
+  unreadMessages: HostTournamentUnreadMessage[]
+}
+
 
 export type AdminUser = {
   id: string
@@ -626,8 +649,20 @@ export function fetchHostTournamentMessages(tournamentId: string) {
   return api<TournamentMessagesResponse>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/messages`)
 }
 
+export function fetchHostTournamentUnreadSummary() {
+  return api<HostTournamentUnreadSummary>('/api/host/tournament-messages/unread-summary')
+}
+
 export function markHostTournamentMessagesRead(tournamentId: string) {
   return api<{ ok: boolean; tournamentId: string; lastReadAt?: string | null }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/messages/read`, { method: 'PATCH' })
+}
+
+export function markHostTournamentMessageThreadRead(tournamentId: string, threadId: string) {
+  return api<{ ok: boolean; tournamentId: string; threadId: string; lastReadAt?: string | null }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/message-threads/${encodeURIComponent(threadId)}/read`, { method: 'PATCH' })
+}
+
+export function markHostTournamentMessageRead(tournamentId: string, threadId: string, messageId: string) {
+  return api<{ ok: boolean; tournamentId: string; threadId: string; messageId: string; readAt?: string | null; remainingUnread?: number }>(`/api/host/tournaments/${encodeURIComponent(tournamentId)}/message-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/read`, { method: 'PATCH' })
 }
 
 export function replyHostTournamentMessage(tournamentId: string, threadId: string, body: string) {
@@ -650,6 +685,10 @@ export function fetchOrganizerTournamentMessages(tournamentId: string) {
 
 export function markOrganizerTournamentMessagesRead(tournamentId: string) {
   return api<{ ok: boolean; tournamentId: string; lastReadAt?: string | null }>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/messages/read`, { method: 'PATCH' })
+}
+
+export function markOrganizerTournamentMessageThreadRead(tournamentId: string, threadId: string) {
+  return api<{ ok: boolean; tournamentId: string; threadId: string; lastReadAt?: string | null }>(`/api/organizer/tournaments/${encodeURIComponent(tournamentId)}/message-threads/${encodeURIComponent(threadId)}/read`, { method: 'PATCH' })
 }
 
 export function replyOrganizerTournamentMessage(tournamentId: string, threadId: string, body: string) {

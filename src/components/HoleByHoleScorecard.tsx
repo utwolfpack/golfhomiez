@@ -761,6 +761,25 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
     roundTypeLabel ? { key: 'roundType', value: roundTypeLabel, subtle: false } : null,
   ].filter(Boolean) as Array<{ key: string; value: string; emphasis?: boolean; subtle?: boolean }>
 
+  function adjustActiveScore(delta: number, source: 'decrease_button' | 'increase_button') {
+    const previousScore = activeScore
+    const nextScore = Math.max(0, previousScore + delta)
+    setActiveScoreDirty(true); setActiveScore(nextScore)
+    logFrontendEvent({
+      category: 'scorecard.hole.stroke_adjust',
+      message: delta < 0 ? 'score_decreased' : 'score_increased',
+      data: {
+        correlationId: getCorrelationId(),
+        hole: activeHole.hole,
+        source,
+        previousScore,
+        nextScore,
+        teeColor: selectedTeeColor,
+        draftContext,
+      },
+    })
+  }
+
 
   return (
     <div className={`card holeInputPanel ${compactMobileInput ? 'holeInputPanel--compact' : ''}`} style={{ marginTop: 16 }}>
@@ -782,11 +801,11 @@ export default function HoleByHoleScorecard({ enabled, stateCode, course, course
             ))}
           </div>
           <div className="scoreStepper holeInputPageStepper">
-            <button type="button" className="btn holeInputStepperButton" aria-label="Decrease score" onClick={() => { setActiveScoreDirty(true); setActiveScore((score) => Math.max(0, score - 1)) }}>−</button>
+            <button type="button" className="btn holeInputStepperButton" aria-label="Decrease score" onClick={() => adjustActiveScore(-1, 'decrease_button')}><span aria-hidden="true">−</span></button>
             <div className="holeInputScoreValueBlock">
               <div className="scoreStepperValue" aria-live="polite">{activeScore}</div>
             </div>
-            <button type="button" className="btn holeInputStepperButton" aria-label="Increase score" onClick={() => { setActiveScoreDirty(true); setActiveScore((score) => score + 1) }}>+</button>
+            <button type="button" className="btn holeInputStepperButton" aria-label="Increase score" onClick={() => adjustActiveScore(1, 'increase_button')}><span aria-hidden="true">+</span></button>
           </div>
 
           <button

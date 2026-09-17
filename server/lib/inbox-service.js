@@ -26,8 +26,9 @@ export function normalizeTeamChallengePointsPerHole(value, scoringType = DEFAULT
   if (normalizedScoringType === DEFAULT_TEAM_CHALLENGE_SCORING_TYPE) return null
   if (value === null || value === undefined || value === '') return DEFAULT_TEAM_CHALLENGE_POINTS_PER_HOLE
   const points = Number(value)
-  if (!Number.isFinite(points) || points <= 0) throw new Error('Team Challenge points per hole must be greater than zero.')
-  if (points > 10000) throw new Error('Team Challenge points per hole is too high.')
+  const valueLabel = normalizedScoringType === 'skins_push' ? 'dollars per hole' : 'points per hole'
+  if (!Number.isFinite(points) || points <= 0) throw new Error(`Team Challenge ${valueLabel} must be greater than zero.`)
+  if (points > 10000) throw new Error(`Team Challenge ${valueLabel} is too high.`)
   return Math.round(points * 100) / 100
 }
 
@@ -87,7 +88,7 @@ export function normalizeIndividualChallengeParticipantEmails(value) {
     seen.add(email)
     emails.push(email)
   }
-  if (emails.length === 0) throw new Error('Add at least one golfer email for the Individual Challenge.')
+  if (emails.length === 0) throw new Error('An Individual Challenge must have at least two participants. Add at least one other golfer.')
   if (emails.length > MAX_INDIVIDUAL_CHALLENGE_GOLFERS) throw new Error(`Individual Challenge supports up to ${MAX_INDIVIDUAL_CHALLENGE_GOLFERS} golfers.`)
   return emails
 }

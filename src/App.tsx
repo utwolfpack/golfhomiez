@@ -183,6 +183,7 @@ export default function App() {
               <Route path="/organizer/reset-password" element={<OrganizerResetPassword />} />
               <Route path="/organizer/portal" element={<OrganizerProtectedRoute><OrganizerTournaments /></OrganizerProtectedRoute>} />
               <Route path="/organizer/portal/profile" element={<OrganizerProtectedRoute><OrganizerProfile /></OrganizerProtectedRoute>} />
+              <Route path="/organizer/portal/support" element={<OrganizerProtectedRoute><Support /></OrganizerProtectedRoute>} />
               <Route path="/tournaments/:id/leaderboard" element={<TournamentLeaderboard />} />
               <Route path="/tournaments/:id/pictures" element={<TournamentPictures />} />
               <Route path="/tournaments/:id" element={<TournamentPortal />} />
