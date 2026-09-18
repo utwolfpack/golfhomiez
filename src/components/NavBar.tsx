@@ -291,6 +291,7 @@ export default function NavBar() {
                       <>
                         <NavLink className="navDropdownItem" to="/host/portal" onClick={() => setOpen(false)}>Host portal</NavLink>
                         <NavLink className="navDropdownItem" to="/host/portal/profile" onClick={() => setOpen(false)}>Host profile</NavLink>
+                        <NavLink className="navDropdownItem" to="/host/golfhomiezsite" onClick={() => { setOpen(false); logFrontendEvent({ category: 'app.nav.host', message: 'golf_homiez_site_selected', data: { destination: '/host/golfhomiezsite', correlationId: getCorrelationId() } }) }}>Golf Homiez Site</NavLink>
                       </>
                     ) : null}
                     {organizerAccount ? (

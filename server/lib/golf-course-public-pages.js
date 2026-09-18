@@ -17,6 +17,36 @@ function cleanText(value, maxLength = 5000) {
   return normalized ? normalized.slice(0, maxLength) : null
 }
 
+function normalizeHttpUrl(value, { baseUrl = '', label = 'URL', allowAppRelative = true } = {}) {
+  const candidate = cleanText(value, 1024)
+  if (!candidate) return null
+  const normalizedBaseUrl = String(baseUrl || '').trim().replace(/\/$/, '')
+  let url
+  try {
+    if (allowAppRelative && candidate.startsWith('/') && normalizedBaseUrl) {
+      url = new URL(candidate, `${normalizedBaseUrl}/`)
+    } else {
+      url = new URL(candidate)
+    }
+  } catch {
+    throw new Error(`${label} must be a valid URL.`)
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${label} must use HTTP or HTTPS.`)
+  return url.toString()
+}
+
+function normalizeMappedHttpUrl(value, baseUrl = '') {
+  const candidate = cleanText(value, 1024)
+  if (!candidate) return null
+  const normalizedBaseUrl = String(baseUrl || '').trim().replace(/\/$/, '')
+  if (!candidate.startsWith('/') || !normalizedBaseUrl) return candidate
+  try {
+    return new URL(candidate, `${normalizedBaseUrl}/`).toString()
+  } catch {
+    return candidate
+  }
+}
+
 function estimateDataUrlBytes(value) {
   const encoded = String(value || '').split(',')[1] || ''
   return Math.ceil((encoded.length * 3) / 4)
@@ -329,9 +359,9 @@ function mapPage(row, { baseUrl = '', tournaments = [], courseEvents = [], calen
     calendarUrl: normalizedBaseUrl ? `${normalizedBaseUrl}${calendarPath}` : calendarPath,
     golfCourseName: row.golf_course_name,
     summary: row.summary || '',
-    bannerImageUrl: row.banner_image_url || null,
+    bannerImageUrl: normalizeMappedHttpUrl(row.banner_image_url, normalizedBaseUrl),
     bannerImageData: row.banner_image_data || null,
-    websiteUrl: row.website_url || null,
+    websiteUrl: normalizeMappedHttpUrl(row.website_url, normalizedBaseUrl),
     contactPhone: row.contact_phone || null,
     addressLine1: row.address_line1 || null,
     city: row.city || null,
@@ -677,12 +707,16 @@ export async function updateGolfCoursePublicPageForHost(db, hostAccountId, input
   const existing = existingRows[0]
   if (!existing) throw new Error('Golf-course public page not found.')
 
+  const bannerImageData = sanitizeUploadedBannerData(firstProvidedValue(input, ['bannerImageData', 'publicPageBannerImageData'], existing.banner_image_data))
+  const legacyBannerImageUrl = cleanText(firstProvidedValue(input, ['bannerImageUrl', 'publicPageBannerImageUrl'], existing.banner_image_url), 1024)
   const values = {
     golfCourseName: cleanText(firstProvidedValue(input, ['golfCourseName'], existing.golf_course_name), 191),
     summary: cleanText(firstProvidedValue(input, ['summary', 'publicPageSummary'], existing.summary), 5000),
-    bannerImageUrl: cleanText(firstProvidedValue(input, ['bannerImageUrl', 'publicPageBannerImageUrl'], existing.banner_image_url), 1024),
-    bannerImageData: sanitizeUploadedBannerData(firstProvidedValue(input, ['bannerImageData', 'publicPageBannerImageData'], existing.banner_image_data)),
-    websiteUrl: cleanText(firstProvidedValue(input, ['websiteUrl', 'publicPageWebsiteUrl'], existing.website_url), 1024),
+    // Uploaded image data is the supported custom-banner mechanism. A legacy URL is retained only
+    // when there is no uploaded banner, and app-relative legacy URLs are normalized safely.
+    bannerImageUrl: bannerImageData ? null : normalizeHttpUrl(legacyBannerImageUrl, { baseUrl: options.baseUrl, label: 'Banner image URL' }),
+    bannerImageData,
+    websiteUrl: normalizeHttpUrl(firstProvidedValue(input, ['websiteUrl', 'publicPageWebsiteUrl'], existing.website_url), { baseUrl: options.baseUrl, label: 'Website URL' }),
     contactPhone: cleanText(firstProvidedValue(input, ['contactPhone', 'publicContactPhone'], existing.contact_phone), 64),
     addressLine1: cleanText(firstProvidedValue(input, ['addressLine1', 'publicAddressLine1'], existing.address_line1), 255),
     city: cleanText(firstProvidedValue(input, ['city', 'publicCity'], existing.city), 128),
@@ -693,12 +727,6 @@ export async function updateGolfCoursePublicPageForHost(db, hostAccountId, input
   if (!values.golfCourseName) throw new Error('Golf-course name is required.')
   if (!values.summary) throw new Error('Golf-course page summary is required.')
   if (!values.stateCode) throw new Error('Golf-course page state is required.')
-  for (const [label, value] of [['Website URL', values.websiteUrl], ['Banner image URL', values.bannerImageUrl]]) {
-    if (!value) continue
-    let url
-    try { url = new URL(value) } catch { throw new Error(`${label} must be a valid URL.`) }
-    if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${label} must use HTTP or HTTPS.`)
-  }
 
   await db.execute(
     `UPDATE golf_course_public_pages

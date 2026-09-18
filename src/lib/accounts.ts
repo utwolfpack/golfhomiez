@@ -559,6 +559,14 @@ export function updateHostProfile(input: Partial<HostAccountInput>) {
   return api<HostAccount>('/api/host/profile', { method: 'PUT', body: JSON.stringify(input) })
 }
 
+export function fetchHostGolfHomiezSite() {
+  return api<HostAccount>('/api/host/golfhomiez-site')
+}
+
+export function updateHostGolfHomiezSite(input: GolfCoursePublicPageInput) {
+  return api<HostAccount>('/api/host/golfhomiez-site', { method: 'PUT', body: JSON.stringify({ publicPage: input }) })
+}
+
 export function fetchGolfCoursePublicPage(slug: string) {
   return api<GolfCoursePublicPage>(`/api/golf-course-pages/${encodeURIComponent(slug)}`)
 }
