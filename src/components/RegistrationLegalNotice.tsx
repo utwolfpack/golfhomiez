@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import golfHomiezEmblem from '../assets/GolfHomiezEmblem.png'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 
@@ -209,14 +210,28 @@ function PrivacyContent() {
 
 export default function RegistrationLegalNotice({ accountType, actionLabel }: Props) {
   const [openDocument, setOpenDocument] = useState<LegalDocument | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (!openDocument) return
+
+    const previousBodyOverflow = document.body.style.overflow
+    const previousHtmlOverscrollBehavior = document.documentElement.style.overscrollBehavior
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overscrollBehavior = 'none'
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpenDocument(null)
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus())
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousBodyOverflow
+      document.documentElement.style.overscrollBehavior = previousHtmlOverscrollBehavior
+    }
   }, [openDocument])
 
   function openLegalDocument(document: LegalDocument) {
@@ -249,26 +264,29 @@ export default function RegistrationLegalNotice({ accountType, actionLabel }: Pr
         <a href="#golfhomiez-privacy" onClick={(event) => { event.preventDefault(); openLegalDocument('privacy') }}>Privacy Policy</a>.
       </div>
 
-      {openDocument ? (
-        <div className="modalOverlay registrationLegalOverlay" onMouseDown={() => closeLegalDocument('overlay')}>
-          <div className="modalCard registrationLegalModal" role="dialog" aria-modal="true" aria-labelledby="registration-legal-title" onMouseDown={(event) => event.stopPropagation()}>
-            <header className="registrationLegalHeader">
-              <div className="registrationLegalBrand">
-                <img src={golfHomiezEmblem} alt="GolfHomiez" />
-                <div>
-                  <span>GolfHomiez</span>
-                  <h2 id="registration-legal-title">{title}</h2>
+      {openDocument && typeof document !== 'undefined'
+        ? createPortal(
+            <div className="modalOverlay registrationLegalOverlay" onMouseDown={() => closeLegalDocument('overlay')}>
+              <div className="modalCard registrationLegalModal" role="dialog" aria-modal="true" aria-labelledby="registration-legal-title" onMouseDown={(event) => event.stopPropagation()}>
+                <header className="registrationLegalHeader">
+                  <div className="registrationLegalBrand">
+                    <img src={golfHomiezEmblem} alt="GolfHomiez" />
+                    <div>
+                      <span>GolfHomiez</span>
+                      <h2 id="registration-legal-title">{title}</h2>
+                    </div>
+                  </div>
+                  <button ref={closeButtonRef} className="btn btnSmall registrationLegalClose" type="button" onClick={() => closeLegalDocument('close_button')}>Close</button>
+                </header>
+                <div className="registrationLegalUpdated">Last updated {LAST_UPDATED}</div>
+                <div className="registrationLegalBody">
+                  {openDocument === 'terms' ? <TermsContent /> : <PrivacyContent />}
                 </div>
               </div>
-              <button className="btn btnSmall" type="button" onClick={() => closeLegalDocument('close_button')}>Close</button>
-            </header>
-            <div className="registrationLegalUpdated">Last updated {LAST_UPDATED}</div>
-            <div className="registrationLegalBody">
-              {openDocument === 'terms' ? <TermsContent /> : <PrivacyContent />}
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   )
 }
