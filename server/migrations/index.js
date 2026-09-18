@@ -3488,6 +3488,30 @@ SET target.is_course_admin = 1, target.updated_at = CURRENT_TIMESTAMP`)
       return loadMigrationSql('20260917_093_tournament_message_entry_read_state.sql')
     },
   },
+  {
+    version: '20260918_094',
+    name: 'course_event_recurrence',
+    filename: '20260918_094_course_event_recurrence.sql',
+    async isSatisfied(db) {
+      return (
+        await tableExists(db, 'golf_course_events') &&
+        await columnExists(db, 'golf_course_events', 'recurrence_cadence') &&
+        await columnExists(db, 'golf_course_events', 'recurrence_end_date') &&
+        await indexExists(db, 'golf_course_events', 'idx_golf_course_events_recurrence')
+      )
+    },
+    async getSql(db) {
+      if (!(await tableExists(db, 'golf_course_events'))) {
+        return `${loadMigrationSql('20260903_084_course_calendar_events.sql')}
+${loadMigrationSql('20260918_094_course_event_recurrence.sql')}`
+      }
+      const statements = []
+      if (!(await columnExists(db, 'golf_course_events', 'recurrence_cadence'))) statements.push(`ALTER TABLE golf_course_events ADD COLUMN recurrence_cadence VARCHAR(16) NOT NULL DEFAULT 'none' AFTER details`)
+      if (!(await columnExists(db, 'golf_course_events', 'recurrence_end_date'))) statements.push(`ALTER TABLE golf_course_events ADD COLUMN recurrence_end_date DATE NULL AFTER recurrence_cadence`)
+      if (!(await indexExists(db, 'golf_course_events', 'idx_golf_course_events_recurrence'))) statements.push(`CREATE INDEX idx_golf_course_events_recurrence ON golf_course_events (golf_course_public_page_id, recurrence_cadence, recurrence_end_date, event_date)`)
+      return statements.join(';\n')
+    },
+  },
 
 ]
 

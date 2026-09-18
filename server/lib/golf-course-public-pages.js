@@ -619,7 +619,7 @@ export async function getGolfCoursePublicPageBySlug(db, slug, options = {}) {
   const schema = { tournamentColumns, searchColumns }
   const tournamentCalendarAvailable = await getCourseTournamentCalendarAvailability(db, criteria, schema)
   const tournaments = await listPublicTournamentsForCoursePage(db, criteria, schema)
-  const courseEvents = await listCourseEventsForPage(db, rows[0].id, { publicOnly: true, limit: 500 })
+  const courseEvents = await listCourseEventsForPage(db, rows[0].id, { publicOnly: true, limit: 500, expandRecurring: true, expandedLimit: 5000 })
   const calendarAvailable = tournamentCalendarAvailable || courseEvents.length > 0
   return mapPage(rows[0], { baseUrl: options.baseUrl, tournaments, courseEvents, calendarAvailable })
 }
