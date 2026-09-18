@@ -9739,3 +9739,11 @@ button.navDropdownItem{font:inherit;}
   .registrationLegalUpdated{padding:8px 12px 0;}
   .registrationLegalBody{padding:6px 12px max(18px, env(safe-area-inset-bottom));font-size:.92rem;}
 }
+
+/* Recurring golf-course calendar event controls and summaries. */
+.hostCourseEventRecurrenceRow{align-items:end}
+.hostCourseEventRecurrenceHelp{margin-top:-4px;color:#52616b}
+.hostCourseEventRecurrenceSummary{margin-top:3px;font-weight:600;color:#315d47}
+@media (max-width:760px){
+  .hostCourseEventRecurrenceRow{grid-template-columns:1fr}
+}

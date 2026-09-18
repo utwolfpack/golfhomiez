@@ -139,7 +139,7 @@ function createEmptyTournamentForm(defaultLocation = '', golfCourseName = ''): T
 }
 
 function createEmptyCourseEventForm(): CourseEventInput {
-  return { title: '', eventDate: '', startTime: '', endTime: '', details: '' }
+  return { title: '', eventDate: '', startTime: '', endTime: '', details: '', recurrenceCadence: 'none', recurrenceEndDate: '' }
 }
 
 function formatCourseEventDate(value?: string | null) {
@@ -161,6 +161,13 @@ function courseEventTimeRange(event: GolfCoursePublicPageEvent) {
   const end = formatCourseEventTime(event.endTime)
   if (start && end) return `${start} – ${end}`
   return start || 'Time to be announced'
+}
+
+function courseEventRecurrenceLabel(event: Pick<GolfCoursePublicPageEvent, 'recurrenceCadence' | 'recurrenceEndDate'>) {
+  const cadence = event.recurrenceCadence || 'none'
+  if (cadence === 'none') return ''
+  const cadenceLabel = cadence === 'daily' ? 'Daily' : cadence === 'weekly' ? 'Weekly' : cadence === 'monthly' ? 'Monthly' : 'Yearly'
+  return event.recurrenceEndDate ? `${cadenceLabel} through ${formatCourseEventDate(event.recurrenceEndDate)}` : cadenceLabel
 }
 
 function formatRegisteredAt(value?: string | null) {
@@ -526,6 +533,8 @@ export default function HostPortal() {
       startTime: event.startTime || '',
       endTime: event.endTime || '',
       details: event.details || '',
+      recurrenceCadence: event.recurrenceCadence || 'none',
+      recurrenceEndDate: event.recurrenceEndDate || '',
     })
     setCreateCourseEventOpen(true)
     setCourseEventError(null)
@@ -549,6 +558,8 @@ export default function HostPortal() {
         startTime: String(courseEventForm.startTime || '').trim() || null,
         endTime: String(courseEventForm.endTime || '').trim() || null,
         details: String(courseEventForm.details || '').trim() || null,
+        recurrenceCadence: courseEventForm.recurrenceCadence || 'none',
+        recurrenceEndDate: courseEventForm.recurrenceCadence && courseEventForm.recurrenceCadence !== 'none' ? String(courseEventForm.recurrenceEndDate || '').trim() || null : null,
       }
       const saved = editingCourseEventId
         ? await updateHostCourseEvent(editingCourseEventId, payload)
@@ -557,7 +568,7 @@ export default function HostPortal() {
       logFrontendEvent({
         category: 'host.portal.course-events',
         message: editingCourseEventId ? 'host_course_event_updated' : 'host_course_event_created',
-        data: { courseEventId: savedEvent.id, eventDate: savedEvent.eventDate, startTime: savedEvent.startTime || null, hasDetails: Boolean(savedEvent.details) },
+        data: { courseEventId: savedEvent.id, eventDate: savedEvent.eventDate, startTime: savedEvent.startTime || null, hasDetails: Boolean(savedEvent.details), recurrenceCadence: savedEvent.recurrenceCadence || 'none', recurrenceEndDate: savedEvent.recurrenceEndDate || null },
       })
       setSuccess(editingCourseEventId ? 'Course event updated.' : 'Course event added to the public calendar.')
       resetCourseEventForm()
@@ -573,7 +584,7 @@ export default function HostPortal() {
   }
 
   async function onDeleteCourseEvent(event: GolfCoursePublicPageEvent) {
-    if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete ${event.title} from the golf-course calendar?`)) return
+    if (typeof globalThis.confirm === 'function' && !globalThis.confirm(event.isRecurring ? `Delete the recurring ${event.title} event series from the golf-course calendar?` : `Delete ${event.title} from the golf-course calendar?`)) return
     setCourseEventBusy(true)
     setCourseEventError(null)
     try {
@@ -966,6 +977,42 @@ export default function HostPortal() {
                     <label className="label">End time (optional)</label>
                     <input className="input" type="time" value={courseEventForm.endTime || ''} onChange={(event) => setCourseEventForm((current) => ({ ...current, endTime: event.target.value }))} />
                   </div>
+                  <div className="formRow formRow--split hostCourseEventRecurrenceRow">
+                    <div>
+                      <label className="label">Repeats</label>
+                      <select
+                        className="input"
+                        value={courseEventForm.recurrenceCadence || 'none'}
+                        onChange={(event) => {
+                          const recurrenceCadence = event.target.value as CourseEventInput['recurrenceCadence']
+                          setCourseEventForm((current) => ({ ...current, recurrenceCadence, recurrenceEndDate: recurrenceCadence === 'none' ? '' : current.recurrenceEndDate }))
+                          logFrontendEvent({ category: 'host.portal.course-events', message: 'host_course_event_recurrence_changed', data: { recurrenceCadence } })
+                        }}
+                      >
+                        <option value="none">Does not repeat</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                    </div>
+                    {courseEventForm.recurrenceCadence && courseEventForm.recurrenceCadence !== 'none' ? (
+                      <div>
+                        <label className="label">Repeat through</label>
+                        <input
+                          className="input"
+                          type="date"
+                          required
+                          min={courseEventForm.eventDate || undefined}
+                          value={courseEventForm.recurrenceEndDate || ''}
+                          onChange={(event) => setCourseEventForm((current) => ({ ...current, recurrenceEndDate: event.target.value }))}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                  {courseEventForm.recurrenceCadence && courseEventForm.recurrenceCadence !== 'none' ? (
+                    <div className="small hostCourseEventRecurrenceHelp">The event will appear on each matching date through the repeat-through date. Editing or deleting it changes the entire recurring series.</div>
+                  ) : null}
                   <div>
                     <label className="label">Event details (optional)</label>
                     <textarea className="input" rows={4} maxLength={5000} value={courseEventForm.details || ''} onChange={(event) => setCourseEventForm((current) => ({ ...current, details: event.target.value }))} placeholder="Add check-in details, audience, pricing, food, league information, or anything golfers should know." />
@@ -986,6 +1033,7 @@ export default function HostPortal() {
                     <div className="hostCourseEventRowMain">
                       <strong>{courseEvent.title}</strong>
                       <div className="small">{formatCourseEventDate(courseEvent.eventDate)} · {courseEventTimeRange(courseEvent)}</div>
+                      {courseEvent.isRecurring ? <div className="small hostCourseEventRecurrenceSummary">Repeats: {courseEventRecurrenceLabel(courseEvent)}</div> : null}
                     </div>
                     <div className="hostCourseEventRowActions">
                       <button type="button" className="btn btnSmall" disabled={courseEventBusy} onClick={() => startCourseEventEdit(courseEvent)}>Edit</button>

@@ -3275,11 +3275,11 @@ app.post('/api/host/course-events', hostAuthMiddleware, async (req, res) => {
       correlationId: req.correlationId,
       input: req.body || {},
     })
-    logApi('host_course_event_created', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: event?.id || null, eventDate: event?.eventDate || null })
+    logApi('host_course_event_created', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: event?.id || null, eventDate: event?.eventDate || null, recurrenceCadence: event?.recurrenceCadence || 'none', recurrenceEndDate: event?.recurrenceEndDate || null })
     return res.status(201).json({ event })
   } catch (error) {
     if (error?.code === 'GOLF_COURSE_PUBLIC_PAGE_REQUIRED') return res.status(409).json({ message: error.message })
-    if (error instanceof Error && /Event name|Event date|Event start time|Event end time/i.test(error.message)) {
+    if (error instanceof Error && /Event name|Event date|Event start time|Event end time|Event recurrence|Recurring events|Repeat-through/i.test(error.message)) {
       logApi('host_course_event_create_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, reason: error.message })
       return res.status(400).json({ message: error.message })
     }
@@ -3296,11 +3296,11 @@ app.put('/api/host/course-events/:id', hostAuthMiddleware, async (req, res) => {
     logApi('host_course_event_update_started', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: eventId })
     const event = await updateCourseEvent(db, { id: eventId, golfCoursePublicPageId: page.id, correlationId: req.correlationId, input: req.body || {} })
     if (!event) return res.status(404).json({ message: 'Golf-course event not found.' })
-    logApi('host_course_event_updated', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: event.id, eventDate: event.eventDate })
+    logApi('host_course_event_updated', { ...requestContext(req), hostAccountId: req.hostAccount.id, golfCoursePublicPageId: page.id, courseEventId: event.id, eventDate: event.eventDate, recurrenceCadence: event.recurrenceCadence || 'none', recurrenceEndDate: event.recurrenceEndDate || null })
     return res.json({ event })
   } catch (error) {
     if (error?.code === 'GOLF_COURSE_PUBLIC_PAGE_REQUIRED') return res.status(409).json({ message: error.message })
-    if (error instanceof Error && /Event name|Event date|Event start time|Event end time/i.test(error.message)) {
+    if (error instanceof Error && /Event name|Event date|Event start time|Event end time|Event recurrence|Recurring events|Repeat-through/i.test(error.message)) {
       logApi('host_course_event_update_rejected', { ...requestContext(req), hostAccountId: req.hostAccount?.id || null, courseEventId: req.params?.id || null, reason: error.message })
       return res.status(400).json({ message: error.message })
     }

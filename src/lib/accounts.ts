@@ -17,14 +17,21 @@ export type GolfCoursePublicPageTournament = {
   portalPath: string
 }
 
+export type CourseEventRecurrenceCadence = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+
 export type GolfCoursePublicPageEvent = {
   id: string
+  sourceEventId?: string
   golfCoursePublicPageId: string
   title: string
   eventDate: string
   startTime?: string | null
   endTime?: string | null
   details?: string | null
+  recurrenceCadence?: CourseEventRecurrenceCadence
+  recurrenceEndDate?: string | null
+  isRecurring?: boolean
+  isOccurrence?: boolean
   isPublic: boolean
   createdAt?: string | null
   updatedAt?: string | null
@@ -36,6 +43,8 @@ export type CourseEventInput = {
   startTime?: string | null
   endTime?: string | null
   details?: string | null
+  recurrenceCadence?: CourseEventRecurrenceCadence
+  recurrenceEndDate?: string | null
 }
 
 export type GolfCoursePublicPageInput = {

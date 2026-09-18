@@ -15,6 +15,7 @@ import {
 import {
   createCourseEvent,
   deleteCourseEvent,
+  expandRecurringCourseEvents,
   sanitizeCourseEventInput,
   updateCourseEvent,
 } from '../server/lib/course-events.js'
@@ -597,6 +598,8 @@ test('course calendar event validation and CRUD preserve public event details an
     startTime: '08:30',
     endTime: '11:15',
     details: 'Check in near the first tee.',
+    recurrenceCadence: 'none',
+    recurrenceEndDate: null,
   })
   assert.throws(() => sanitizeCourseEventInput({ title: 'Bad date', eventDate: '2026-02-31' }), /valid calendar date/i)
   assert.throws(() => sanitizeCourseEventInput({ title: 'Bad time', eventDate: '2026-09-18', startTime: '14:00', endTime: '09:00' }), /cannot be before/i)
@@ -613,9 +616,11 @@ test('course calendar event validation and CRUD preserve public event details an
           start_time: params[4],
           end_time: params[5],
           details: params[6],
+          recurrence_cadence: params[7],
+          recurrence_end_date: params[8],
           is_public: 1,
-          created_by_host_account_id: params[7],
-          correlation_id: params[8],
+          created_by_host_account_id: params[9],
+          correlation_id: params[10],
           created_at: '2026-09-03 10:00:00',
           updated_at: '2026-09-03 10:00:00',
         }
@@ -623,7 +628,7 @@ test('course calendar event validation and CRUD preserve public event details an
       }
       if (/SELECT \* FROM golf_course_events WHERE id/i.test(sql)) return [[row]]
       if (/UPDATE golf_course_events/i.test(sql)) {
-        row = { ...row, title: params[0], event_date: params[1], start_time: params[2], end_time: params[3], details: params[4], correlation_id: params[5] }
+        row = { ...row, title: params[0], event_date: params[1], start_time: params[2], end_time: params[3], details: params[4], recurrence_cadence: params[5], recurrence_end_date: params[6], correlation_id: params[7] }
         return [{ affectedRows: 1 }]
       }
       if (/DELETE FROM golf_course_events/i.test(sql)) {
@@ -653,6 +658,53 @@ test('course calendar event validation and CRUD preserve public event details an
   assert.equal(updated.eventDate, '2026-09-19')
   assert.equal(updated.correlationId, 'corr-update')
   assert.equal(await deleteCourseEvent(db, { id: created.id, golfCoursePublicPageId: 'page-1' }), true)
+})
+
+
+test('course calendar recurring events validate cadence and expand daily, weekly, monthly, and yearly occurrences', () => {
+  assert.deepEqual(sanitizeCourseEventInput({
+    title: 'Weekly League',
+    eventDate: '2026-09-01',
+    recurrenceCadence: 'weekly',
+    recurrenceEndDate: '2026-09-29',
+  }), {
+    title: 'Weekly League',
+    eventDate: '2026-09-01',
+    startTime: null,
+    endTime: null,
+    details: null,
+    recurrenceCadence: 'weekly',
+    recurrenceEndDate: '2026-09-29',
+  })
+  assert.throws(() => sanitizeCourseEventInput({ title: 'Missing end', eventDate: '2026-09-01', recurrenceCadence: 'weekly' }), /repeat-through/i)
+  assert.throws(() => sanitizeCourseEventInput({ title: 'Bad cadence', eventDate: '2026-09-01', recurrenceCadence: 'fortnightly', recurrenceEndDate: '2026-10-01' }), /cadence/i)
+  assert.throws(() => sanitizeCourseEventInput({ title: 'Backwards', eventDate: '2026-09-10', recurrenceCadence: 'daily', recurrenceEndDate: '2026-09-09' }), /cannot be before/i)
+
+  const baseEvent = {
+    id: 'event-1',
+    sourceEventId: 'event-1',
+    golfCoursePublicPageId: 'page-1',
+    title: 'Weekly League',
+    eventDate: '2026-09-01',
+    startTime: '09:00',
+    endTime: null,
+    details: null,
+    recurrenceCadence: 'weekly',
+    recurrenceEndDate: '2026-09-29',
+    isRecurring: true,
+    isOccurrence: false,
+    isPublic: true,
+  }
+  const weekly = expandRecurringCourseEvents([baseEvent])
+  assert.deepEqual(weekly.map((event) => event.eventDate), ['2026-09-01', '2026-09-08', '2026-09-15', '2026-09-22', '2026-09-29'])
+  assert.equal(weekly[1].sourceEventId, 'event-1')
+  assert.equal(weekly[1].id, 'event-1::2026-09-08')
+
+  const monthly = expandRecurringCourseEvents([{ ...baseEvent, id: 'monthly', eventDate: '2026-01-31', recurrenceCadence: 'monthly', recurrenceEndDate: '2026-05-31' }])
+  assert.deepEqual(monthly.map((event) => event.eventDate), ['2026-01-31', '2026-03-31', '2026-05-31'])
+
+  const yearly = expandRecurringCourseEvents([{ ...baseEvent, id: 'yearly', eventDate: '2024-02-29', recurrenceCadence: 'yearly', recurrenceEndDate: '2028-02-29' }])
+  assert.deepEqual(yearly.map((event) => event.eventDate), ['2024-02-29', '2028-02-29'])
 })
 
 test('public golf-course page exposes public course events and makes the course calendar available without a tournament', async () => {
