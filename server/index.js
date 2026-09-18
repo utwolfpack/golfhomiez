@@ -84,6 +84,34 @@ function resolveScoreCourseMetadata(state, matchedCourse) {
     coursePar: Number.isFinite(coursePar) && coursePar > 0 ? coursePar : null,
   }
 }
+
+function inferRoundHoleCount({ matchedCourse = null, score = null, holes = null } = {}) {
+  const explicit = Number(
+    matchedCourse?.holesCount ?? matchedCourse?.holes_count
+    ?? score?.courseHoleCount ?? score?.course_hole_count ?? score?.holesCount ?? score?.holes_count,
+  )
+  if (Number.isFinite(explicit) && explicit > 0 && explicit <= 18) return Math.trunc(explicit)
+
+  const coursePar = Number(
+    matchedCourse?.parTotal ?? matchedCourse?.par_total ?? matchedCourse?.par
+    ?? score?.coursePar ?? score?.course_par ?? score?.parTotal ?? score?.par_total,
+  )
+  const highestHole = Array.isArray(holes)
+    ? holes.reduce((maxHole, hole, index) => {
+        const holeNumber = typeof hole === 'object' && hole
+          ? Number(hole.hole ?? hole.holeNumber ?? hole.hole_number ?? index + 1)
+          : index + 1
+        return Number.isFinite(holeNumber) && holeNumber > 0 ? Math.max(maxHole, Math.trunc(holeNumber)) : maxHole
+      }, 0)
+    : 0
+
+  if (highestHole > 9) return Math.min(18, highestHole)
+  if (Number.isFinite(coursePar) && coursePar > 0) {
+    if (coursePar <= 45 && highestHole <= 9) return 9
+    if (coursePar > 45) return 18
+  }
+  return 18
+}
 const clientOrigin = String(process.env.CLIENT_ORIGIN || '').trim()
 const publicServerOrigin = String(process.env.BETTER_AUTH_URL || '').trim()
 const allowedOrigins = new Set([
@@ -7382,13 +7410,15 @@ app.get('/api/solo-round-score', requireStorage, authMiddleware, async (req, res
     const entry = findMatchingSoloRound(scores, { ...context, course: matchedCourse.name, user: req.user })
     const holes = Array.isArray(entry?.holes) ? entry.holes : null
     const providedHoleCount = countProvidedHoleScores(holes)
+    const expectedHoleCount = inferRoundHoleCount({ matchedCourse, score: entry, holes })
     logApi('solo_round_score_lookup_loaded', {
       ...requestContext(req),
       ...context,
       course: matchedCourse.name,
       scoreId: entry?.id || null,
       providedHoleCount,
-      incomplete: providedHoleCount > 0 && providedHoleCount < 18,
+      expectedHoleCount,
+      incomplete: providedHoleCount > 0 && providedHoleCount < expectedHoleCount,
     })
     res.json({ score: entry || null })
   } catch (error) {
@@ -7451,11 +7481,39 @@ app.get('/api/scores', requireStorage, authMiddleware, async (req, res) => {
     const challengeImageCounts = individualChallengeThreadIds.length
       ? await getUserImageCounts(getPool(), USER_IMAGE_ENTITY_TYPES.CHALLENGE, individualChallengeThreadIds)
       : new Map()
-    const responseScores = sourcedScores.map((score) => ({
-      ...score,
-      imageCount: score.source === 'individual_challenge'
-        ? (challengeImageCounts.get(String(score.challengeThreadId || '')) || 0)
-        : (scoreImageCounts.get(String(score.id)) || 0),
+    const courseLookupPromises = new Map()
+    const resolveScoreCourse = async (score) => {
+      const state = String(score?.state || '').trim().toUpperCase()
+      const course = String(score?.course || '').trim()
+      const courseId = String(score?.golfCourseId || score?.golf_course_id || '').trim()
+      if (!state || (!course && !courseId) || course === 'Team Challenge') return null
+      const cacheKey = `${state}\u0000${courseId || course.toLowerCase()}`
+      if (!courseLookupPromises.has(cacheKey)) {
+        courseLookupPromises.set(cacheKey, findGolfCourseForState(state, course, courseId).catch((error) => {
+          logWarn('score_course_hole_count_lookup_failed', {
+            ...requestContext(req),
+            scoreId: score?.id || null,
+            state,
+            course,
+            courseId: courseId || null,
+            error,
+          })
+          return null
+        }))
+      }
+      return courseLookupPromises.get(cacheKey)
+    }
+    const responseScores = await Promise.all(sourcedScores.map(async (score) => {
+      const matchedCourse = await resolveScoreCourse(score)
+      const holes = Array.isArray(score.holes) ? score.holes : null
+      const courseHoleCount = inferRoundHoleCount({ matchedCourse, score, holes })
+      return {
+        ...score,
+        courseHoleCount,
+        imageCount: score.source === 'individual_challenge'
+          ? (challengeImageCounts.get(String(score.challengeThreadId || '')) || 0)
+          : (scoreImageCounts.get(String(score.id)) || 0),
+      }
     }))
     logApi('score_records_loaded', {
       ...requestContext(req),
@@ -7584,6 +7642,7 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
           logError('Failed to clear solo scorecard draft after score creation', { error: draftError, scoreId: entry.id, userId: req.user.id })
         }
       }
+      const expectedHoleCount = inferRoundHoleCount({ matchedCourse, score: entry, holes: normalizedHoles })
       logApi('solo_score_created', {
         ...requestContext(req),
         scoreId: entry.id,
@@ -7593,8 +7652,9 @@ app.post('/api/scores', requireStorage, authMiddleware, async (req, res) => {
         courseRating: courseMetadata.courseRating,
         slopeRating: courseMetadata.slopeRating,
         holeCount: normalizedHoles?.length || 0,
+        expectedHoleCount,
         providedHoleCount,
-        incomplete: providedHoleCount > 0 && providedHoleCount < 18,
+        incomplete: providedHoleCount > 0 && providedHoleCount < expectedHoleCount,
         currentHoleScoreTotal: normalizedHoles ? currentHoleScoreTotal : null,
       })
       return res.status(201).json(entry)

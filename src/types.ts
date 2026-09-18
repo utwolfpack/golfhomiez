@@ -42,6 +42,7 @@ export type TeamScoreEntry = {
   courseRating?: number | null
   slopeRating?: number | null
   coursePar?: number | null
+  courseHoleCount?: number | null
   teeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   createdByUserId?: string
   createdByEmail?: string
@@ -71,6 +72,7 @@ export type SoloScoreEntry = {
   courseRating?: number | null
   slopeRating?: number | null
   coursePar?: number | null
+  courseHoleCount?: number | null
   teeColor?: 'red' | 'white' | 'blue' | 'black' | string | null
   createdByUserId?: string
   createdByEmail?: string

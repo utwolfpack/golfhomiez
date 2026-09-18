@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useAuth } from '../context/AuthContext'
 import PageHero from '../components/PageHero'
 import PasswordCriteria from '../components/PasswordCriteria'
+import RegistrationLegalNotice from '../components/RegistrationLegalNotice'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { assertPasswordPolicy } from '../lib/password-policy'
 
@@ -84,6 +85,8 @@ export default function Register() {
           </div>
 
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
+
+          <RegistrationLegalNotice accountType="golfer" actionLabel="Create account" />
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btnPrimary" disabled={busy}>
