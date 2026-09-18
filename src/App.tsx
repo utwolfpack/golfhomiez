@@ -37,6 +37,7 @@ import HostForgotPassword from './pages/HostForgotPassword'
 import HostResetPassword from './pages/HostResetPassword'
 import HostPortal from './pages/HostPortal'
 import HostProfile from './pages/HostProfile'
+import HostGolfHomiezSite from './pages/HostGolfHomiezSite'
 import Support from './pages/Support'
 import Inbox from './pages/Inbox'
 import Challenges from './pages/Challenges'
@@ -177,6 +178,7 @@ export default function App() {
               <Route path="/host/reset-password" element={<HostResetPassword />} />
               <Route path="/host/portal" element={<HostProtectedRoute><HostPortal /></HostProtectedRoute>} />
               <Route path="/host/portal/profile" element={<HostProtectedRoute><HostProfile /></HostProtectedRoute>} />
+              <Route path="/host/golfhomiezsite" element={<HostProtectedRoute><HostGolfHomiezSite /></HostProtectedRoute>} />
               <Route path="/organizer/register" element={<LoginEntryRoute mode="organizer"><Suspense fallback={<div className="container pageStack"><div className="card pageCardShell">Loading…</div></div>}><OrganizerRegister /></Suspense></LoginEntryRoute>} />
               <Route path="/organizer/login" element={<LoginEntryRoute mode="organizer"><OrganizerLogin /></LoginEntryRoute>} />
               <Route path="/organizer/forgot-password" element={<OrganizerForgotPassword />} />

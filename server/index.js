@@ -2481,7 +2481,7 @@ async function proxyClientApp(req, res, next) {
   }
 }
 
-app.get(['/register', '/login', '/verify-contact', '/support', '/find-tournament', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/organizer/login', '/organizer/forgot-password', '/organizer/reset-password', '/organizer/portal/profile', '/organizer/portal/support'], async (req, res, next) => {
+app.get(['/register', '/login', '/verify-contact', '/support', '/find-tournament', '/golfadmin', '/golfadmin/scheduled-jobs', '/golfadmin/forgot-password', '/golfadmin/reset-password', '/host/register', '/host/login', '/host/request-password-reset', '/host/reset-password', '/host/portal', '/host/portal/profile', '/host/golfhomiezsite', '/organizer/login', '/organizer/forgot-password', '/organizer/reset-password', '/organizer/portal/profile', '/organizer/portal/support'], async (req, res, next) => {
   const distDir = path.join(__dirname, '..', 'dist')
   if (fs.existsSync(distDir)) return next()
 
@@ -3481,17 +3481,81 @@ app.put('/api/host/profile', hostAuthMiddleware, async (req, res) => {
     const db = getPool()
     const input = sanitizeHostProfilePayload(req.body || {})
     const profile = await updateHostProfile(db, req.hostAccount.id, input)
-    let existingPublicPage = await getGolfCoursePublicPageByHostAccount(db, req.hostAccount.id, { baseUrl: getHostAppBaseUrl(req) })
+    let publicPage = await getGolfCoursePublicPageByHostAccount(db, req.hostAccount.id, { baseUrl: getHostAppBaseUrl(req) })
+    if (publicPage) {
+      publicPage = await syncGolfCoursePublicPageCatalogDefaults(db, req.hostAccount.id, {
+        baseUrl: getHostAppBaseUrl(req),
+        correlationId: req.correlationId,
+      }) || publicPage
+    }
+    logApi('host_profile_updated', { ...requestContext(req), hostAccountId: profile?.id || req.hostAccount.id, publicPageSlug: publicPage?.slug || null })
+    res.json({ ...profile, publicPage })
+  } catch (error) {
+    if (error instanceof Error && /required|invalid|must be|too large|banner/i.test(error.message)) {
+      logApi('host_profile_update_rejected', { ...requestContext(req), hostAccountId: req.hostAccount.id, reason: error.message })
+      return res.status(400).json({ message: error.message })
+    }
+    logRouteError('Host profile update error', req, error)
+    res.status(500).json({ message: 'Could not update host profile' })
+  }
+})
+
+app.get('/api/host/golfhomiez-site', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const profile = await getHostProfile(db, req.hostAccount.id)
+    if (!profile) return res.status(404).json({ message: 'Host profile not found' })
+    let publicPage = await getGolfCoursePublicPageByHostAccount(db, req.hostAccount.id, { baseUrl: getHostAppBaseUrl(req) })
+    if (!publicPage) {
+      publicPage = await createGolfCoursePublicPageForApprovedHost(db, {
+        hostAccountId: req.hostAccount.id,
+        golfCourseId: profile.golfCourseId || req.hostAccount.golf_course_id || null,
+        golfCourseName: profile.golfCourseName,
+        stateCode: profile.catalogCourse?.stateCode || null,
+        baseUrl: getHostAppBaseUrl(req),
+      })
+      logApi('golf_course_public_page_backfilled', { ...requestContext(req), hostAccountId: profile.id, publicPageSlug: publicPage?.slug || null, source: 'host_golfhomiez_site_load' })
+    }
+    publicPage = await syncGolfCoursePublicPageCatalogDefaults(db, req.hostAccount.id, {
+      baseUrl: getHostAppBaseUrl(req),
+      correlationId: req.correlationId,
+    }) || publicPage
+    logApi('host_golfhomiez_site_loaded', {
+      ...requestContext(req),
+      hostAccountId: profile.id,
+      publicPageSlug: publicPage?.slug || null,
+      hasUploadedBanner: Boolean(publicPage?.bannerImageData),
+      websiteUrl: publicPage?.websiteUrl || null,
+    })
+    return res.json({ ...profile, publicPage })
+  } catch (error) {
+    logRouteError('Host Golf Homiez Site load error', req, error)
+    return res.status(500).json({ message: 'Could not load the Golf Homiez Site settings.' })
+  }
+})
+
+app.put('/api/host/golfhomiez-site', hostAuthMiddleware, async (req, res) => {
+  try {
+    const db = getPool()
+    const profile = await getHostProfile(db, req.hostAccount.id)
+    if (!profile) return res.status(404).json({ message: 'Host profile not found' })
     const publicPageInput = req.body?.publicPage && typeof req.body.publicPage === 'object' ? req.body.publicPage : req.body || {}
+    logApi('host_golfhomiez_site_update_started', {
+      ...requestContext(req),
+      hostAccountId: req.hostAccount.id,
+      hasUploadedBanner: Boolean(String(publicPageInput.bannerImageData || '').trim()),
+      publicPagePublished: publicPageInput.isPublished ?? null,
+    })
+    let existingPublicPage = await getGolfCoursePublicPageByHostAccount(db, req.hostAccount.id, { baseUrl: getHostAppBaseUrl(req) })
     if (!existingPublicPage) {
       existingPublicPage = await createGolfCoursePublicPageForApprovedHost(db, {
         hostAccountId: req.hostAccount.id,
         golfCourseId: profile.golfCourseId || req.hostAccount.golf_course_id || null,
         golfCourseName: profile.golfCourseName,
-        stateCode: publicPageInput.stateCode || publicPageInput.publicStateCode || null,
+        stateCode: publicPageInput.stateCode || publicPageInput.publicStateCode || profile.catalogCourse?.stateCode || null,
         baseUrl: getHostAppBaseUrl(req),
       })
-      logApi('golf_course_public_page_backfilled', { ...requestContext(req), hostAccountId: profile.id, publicPageSlug: existingPublicPage?.slug || null, source: 'host_profile_update' })
+      logApi('golf_course_public_page_backfilled', { ...requestContext(req), hostAccountId: profile.id, publicPageSlug: existingPublicPage?.slug || null, source: 'host_golfhomiez_site_update' })
     }
     existingPublicPage = await syncGolfCoursePublicPageCatalogDefaults(db, req.hostAccount.id, {
       baseUrl: getHostAppBaseUrl(req),
@@ -3501,15 +3565,22 @@ app.put('/api/host/profile', hostAuthMiddleware, async (req, res) => {
       ...publicPageInput,
       golfCourseName: profile.golfCourseName,
     }, { baseUrl: getHostAppBaseUrl(req) })
-    logApi('host_profile_updated', { ...requestContext(req), hostAccountId: profile?.id || req.hostAccount.id, publicPageSlug: publicPage?.slug || null, publicPagePublished: publicPage?.isPublished ?? null })
-    res.json({ ...profile, publicPage })
+    logApi('host_golfhomiez_site_updated', {
+      ...requestContext(req),
+      hostAccountId: profile.id,
+      publicPageSlug: publicPage?.slug || null,
+      publicPagePublished: publicPage?.isPublished ?? null,
+      hasUploadedBanner: Boolean(publicPage?.bannerImageData),
+      websiteUrl: publicPage?.websiteUrl || null,
+    })
+    return res.json({ ...profile, publicPage })
   } catch (error) {
-    if (error instanceof Error && /required|invalid|must be|too large|banner/i.test(error.message)) {
-      logApi('host_profile_update_rejected', { ...requestContext(req), hostAccountId: req.hostAccount.id, reason: error.message })
+    if (error instanceof Error && /required|invalid|must be|too large|banner|url/i.test(error.message)) {
+      logApi('host_golfhomiez_site_update_rejected', { ...requestContext(req), hostAccountId: req.hostAccount.id, reason: error.message })
       return res.status(400).json({ message: error.message })
     }
-    logRouteError('Host profile update error', req, error)
-    res.status(500).json({ message: 'Could not update host profile' })
+    logRouteError('Host Golf Homiez Site update error', req, error)
+    return res.status(500).json({ message: 'Could not update the Golf Homiez Site.' })
   }
 })
 

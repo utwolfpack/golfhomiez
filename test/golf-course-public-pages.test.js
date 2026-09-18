@@ -423,6 +423,67 @@ test('host public-page updates can clear optional website, banner, and contact f
   assert.equal(page.isPublished, false)
 })
 
+test('host Golf Homiez Site accepts uploaded banners with legacy relative URLs and normalizes the course website URL', async () => {
+  let updateParams = null
+  const existing = {
+    id: 'page-legacy',
+    host_account_id: 'host-legacy',
+    golf_course_id: 'course-legacy',
+    slug: 'golfhomiezlakeviewut',
+    golf_course_name: 'Golf Homiez Lake View',
+    summary: 'Lake View course summary',
+    banner_image_url: '/tournament-templates/golf-course.jpg',
+    banner_image_data: null,
+    website_url: '/golfhomiezlakeviewut',
+    contact_phone: '801 555 0188',
+    address_line1: '1888 Lake View Fairway Drive',
+    city: 'Tooele',
+    state_code: 'UT',
+    postal_code: '84074',
+    is_published: 1,
+  }
+  const db = {
+    async execute(sql, params = []) {
+      if (/SELECT \* FROM golf_course_public_pages WHERE host_account_id/i.test(sql)) return [[existing]]
+      if (/SELECT \* FROM golf_course_public_pages WHERE id = \?/i.test(sql)) return [[existing]]
+      if (/UPDATE golf_course_public_pages/i.test(sql)) {
+        updateParams = params
+        Object.assign(existing, {
+          golf_course_name: params[0],
+          summary: params[1],
+          banner_image_url: params[2],
+          banner_image_data: params[3],
+          website_url: params[4],
+          contact_phone: params[5],
+          address_line1: params[6],
+          city: params[7],
+          state_code: params[8],
+          postal_code: params[9],
+          is_published: params[10],
+        })
+        return [{ affectedRows: 1 }]
+      }
+      if (/FROM golf_course_events/i.test(sql)) return [[]]
+      throw new Error(`Unexpected SQL: ${sql}`)
+    },
+  }
+
+  const page = await updateGolfCoursePublicPageForHost(db, 'host-legacy', {
+    summary: existing.summary,
+    bannerImageData: 'data:image/jpeg;base64,YWJj',
+    websiteUrl: '/golfhomiezlakeviewut',
+    stateCode: 'UT',
+    isPublished: true,
+  }, { baseUrl: 'https://golfhomiez.com' })
+
+  assert.equal(updateParams[2], null)
+  assert.equal(updateParams[3], 'data:image/jpeg;base64,YWJj')
+  assert.equal(updateParams[4], 'https://golfhomiez.com/golfhomiezlakeviewut')
+  assert.equal(page.bannerImageUrl, null)
+  assert.equal(page.bannerImageData, 'data:image/jpeg;base64,YWJj')
+  assert.equal(page.websiteUrl, 'https://golfhomiez.com/golfhomiezlakeviewut')
+})
+
 test('host-uploaded banner data accepts safe image data URLs and rejects unsafe content', () => {
   assert.equal(sanitizeUploadedBannerData('data:image/jpeg;base64,YWJj'), 'data:image/jpeg;base64,YWJj')
   assert.equal(sanitizeUploadedBannerData(''), null)
@@ -490,6 +551,7 @@ test('migration, API route, host editor, frontend route, and correlated logging 
   const adminPortal = fs.readFileSync(new URL('../server/lib/admin-portal.js', import.meta.url), 'utf8')
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const hostProfile = fs.readFileSync(new URL('../src/pages/HostProfile.tsx', import.meta.url), 'utf8')
+  const hostSite = fs.readFileSync(new URL('../src/pages/HostGolfHomiezSite.tsx', import.meta.url), 'utf8')
   const adminPage = fs.readFileSync(new URL('../src/pages/AdminPortal.tsx', import.meta.url), 'utf8')
 
   assert.match(migration, /CREATE TABLE IF NOT EXISTS golf_course_public_pages/)
@@ -512,11 +574,13 @@ test('migration, API route, host editor, frontend route, and correlated logging 
   assert.match(calendarPage, /Name of Course/)
   assert.match(calendarPage, /calendar_tournament_selected/)
   assert.match(courseNav, /Tournament Calendar/)
-  assert.match(hostProfile, /Public golf-course page/)
-  assert.match(hostProfile, /ImageUploadField/)
-  assert.match(hostProfile, /defaultGolfCourseBanner/)
+  assert.doesNotMatch(hostProfile, /Public Golf-Course Page/)
+  assert.match(hostSite, /Public Golf-Course Page/)
+  assert.match(hostSite, /ImageUploadField/)
+  assert.match(hostSite, /defaultGolfCourseBanner/)
   assert.match(hostProfile, /readOnly aria-readonly="true"/)
   assert.match(hostProfile, /logFrontendEvent/)
+  assert.match(hostSite, /host\.golfhomiezSite/)
   assert.match(adminPage, /host_account_approval_completed/)
 })
 
