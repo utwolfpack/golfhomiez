@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 import PasswordCriteria from '../components/PasswordCriteria'
+import RegistrationLegalNotice from '../components/RegistrationLegalNotice'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { requestHostAccount } from '../lib/host-auth'
 import { searchGolfCourses, type GolfCourseOption } from '../lib/golf-courses'
@@ -193,6 +194,8 @@ export default function CreateHostAccount() {
           </div>
 
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
+
+          <RegistrationLegalNotice accountType="host" actionLabel="Submit request" />
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btnPrimary" type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Submit request'}</button>

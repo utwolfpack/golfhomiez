@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router'
 import LocationInput from '../components/LocationInput'
 import PageHero from '../components/PageHero'
 import PasswordCriteria from '../components/PasswordCriteria'
+import RegistrationLegalNotice from '../components/RegistrationLegalNotice'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 import { fetchOrganizerInviteEligibility, type OrganizerInviteEligibility } from '../lib/accounts'
 import type { SavedLocation } from '../lib/location-store'
@@ -116,6 +117,7 @@ export default function OrganizerRegister() {
             <input className="input" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" minLength={10} />
           </div>
           {error ? <div className="small" style={{ color: '#b91c1c' }}>{error}</div> : null}
+          <RegistrationLegalNotice accountType="organizer" actionLabel="Create organizer account" />
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btnPrimary" disabled={busy || checkingEligibility || !canCreateOrganizerAccess}>{busy ? 'Creating…' : 'Create organizer account'}</button>
             <Link className="btn" to={`/organizer/login${params.toString() ? `?${params.toString()}` : ''}`}>Already have organizer access?</Link>

@@ -27,11 +27,34 @@ function holeScoreProvided(hole) {
   return Number.isFinite(score) && score >= 0
 }
 
+function expectedRoundHoleCount(score, holes) {
+  const explicit = Number(score?.courseHoleCount ?? score?.course_hole_count ?? score?.holesCount ?? score?.holes_count)
+  if (Number.isFinite(explicit) && explicit > 0 && explicit <= 18) return Math.trunc(explicit)
+
+  const coursePar = Number(score?.coursePar ?? score?.course_par ?? score?.parTotal ?? score?.par_total)
+  const highestHole = Array.isArray(holes)
+    ? holes.reduce((maxHole, hole, index) => {
+        const holeNumber = typeof hole === 'object' && hole
+          ? Number(hole.hole ?? hole.holeNumber ?? hole.hole_number ?? index + 1)
+          : index + 1
+        return Number.isFinite(holeNumber) && holeNumber > 0 ? Math.max(maxHole, Math.trunc(holeNumber)) : maxHole
+      }, 0)
+    : 0
+
+  if (highestHole > 9) return Math.min(18, highestHole)
+  if (Number.isFinite(coursePar) && coursePar > 0) {
+    if (coursePar <= 45 && highestHole <= 9) return 9
+    if (coursePar > 45) return 18
+  }
+  if (holes?.length >= 18) return 18
+  return 18
+}
+
 function isCompleteRound(score) {
   const holes = parseScoreHoles(score?.holes ?? score?.holes_json)
   if (!holes || holes.length === 0) return scoreValue(score) != null
   const providedCount = holes.filter(holeScoreProvided).length
-  return providedCount >= 18
+  return providedCount >= expectedRoundHoleCount(score, holes)
 }
 
 function normalizedMode(score) {
@@ -164,6 +187,7 @@ function mapScoreRow(row) {
     holes: parseScoreHoles(row.holes_json),
     courseRating: row.course_rating == null ? null : Number(row.course_rating),
     slopeRating: row.slope_rating == null ? null : Number(row.slope_rating),
+    coursePar: row.course_par == null ? null : Number(row.course_par),
     createdAt: row.created_at || null,
   }
 }
@@ -171,7 +195,7 @@ function mapScoreRow(row) {
 export async function loadProfileSummary(db, user) {
   const email = String(user?.email || '').trim().toLowerCase()
   const [rows] = await db.execute(
-    `SELECT id, mode, date, course, round_score, team_total, holes_json, course_rating, slope_rating, created_at
+    `SELECT id, mode, date, course, round_score, team_total, holes_json, course_rating, slope_rating, course_par, created_at
        FROM scores
       WHERE created_by_user_id = ? OR LOWER(created_by_email) = LOWER(?)
       ORDER BY date DESC, created_at DESC`,

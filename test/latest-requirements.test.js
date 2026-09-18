@@ -456,3 +456,68 @@ test('mobile team, notifications, host messaging, calendar, and Oquirrh Hills re
   assert.match(migration, /oquirrh-tooele-brick-01/)
   assert.match(migrations, /20260916_091_oquirrh_hills_hole_data_correction\.sql/)
 })
+
+
+test('nine-hole score completion and registration legal content are course-aware and branded', async () => {
+  const { buildProfileSummaryFromScores } = await import('../server/lib/profile-summary.js')
+  const nineHoleScore = (provided) => ({
+    id: `nine-${provided}`,
+    mode: 'solo',
+    date: '2026-09-18',
+    course: 'Bear Lake Golf Course',
+    roundScore: 36,
+    coursePar: 36,
+    courseRating: 35.5,
+    slopeRating: 113,
+    holes: Array.from({ length: 9 }, (_, index) => ({
+      hole: index + 1,
+      par: 4,
+      score: index < provided ? 4 : null,
+      scoreProvided: index < provided,
+    })),
+  })
+
+  const complete = buildProfileSummaryFromScores([nineHoleScore(9)])
+  const incomplete = buildProfileSummaryFromScores([nineHoleScore(8)])
+  assert.equal(complete.bestScore?.course, 'Bear Lake Golf Course')
+  assert.equal(complete.bestScore?.score, 36)
+  assert.equal(incomplete.bestScore, null)
+
+  const roundStatus = read('src/lib/round-status.ts')
+  const scoresPage = read('src/pages/MyGolfScores.tsx')
+  const roundModal = read('src/components/RoundDetailModal.tsx')
+  const server = read('server/index.js')
+  assert.match(roundStatus, /resolveExpectedRoundHoleCount/)
+  assert.match(roundStatus, /coursePar <= 45/)
+  assert.doesNotMatch(roundStatus, /holes\.length === 9/)
+  assert.doesNotMatch(roundStatus, /Math\.max\(18, holes\.length\)/)
+  assert.match(scoresPage, /getIncompleteRoundStatus\(round\)/)
+  assert.match(roundModal, /getIncompleteRoundStatus\(round\)/)
+  assert.match(server, /const matchedCourse = await resolveScoreCourse\(score\)/)
+  assert.match(server, /courseHoleCount,/)
+  assert.match(server, /providedHoleCount < expectedHoleCount/)
+
+  const golfer = read('src/pages/Register.tsx')
+  const organizer = read('src/pages/OrganizerRegister.tsx')
+  const host = read('src/pages/CreateHostAccount.tsx')
+  assert.match(golfer, /<RegistrationLegalNotice accountType="golfer" actionLabel="Create account" \/>/)
+  assert.match(organizer, /<RegistrationLegalNotice accountType="organizer" actionLabel="Create organizer account" \/>/)
+  assert.match(host, /<RegistrationLegalNotice accountType="host" actionLabel="Submit request" \/>/)
+  assert.ok(golfer.indexOf('RegistrationLegalNotice') < golfer.indexOf("{busy ? 'Creating…' : 'Create account'}"))
+  assert.ok(organizer.lastIndexOf('RegistrationLegalNotice') < organizer.indexOf("{busy ? 'Creating…' : 'Create organizer account'}"))
+  assert.ok(host.lastIndexOf('RegistrationLegalNotice') < host.indexOf("{busy ? 'Submitting…' : 'Submit request'}"))
+
+  const legal = read('src/components/RegistrationLegalNotice.tsx')
+  const styles = read('src/index.css')
+  assert.match(legal, /GolfHomiezEmblem\.png/)
+  assert.match(legal, /href="#golfhomiez-terms"/)
+  assert.match(legal, /href="#golfhomiez-privacy"/)
+  assert.match(legal, /Terms and Conditions/)
+  assert.match(legal, /Privacy Policy/)
+  assert.match(legal, /score logging, teams, challenges, golf-course pages, tournaments/)
+  assert.match(legal, /role="dialog" aria-modal="true"/)
+  assert.match(legal, /registration_legal_document_opened/)
+  assert.match(legal, /getCorrelationId\(\)/)
+  assert.match(styles, /\.registrationLegalModal/)
+  assert.match(styles, /\.registrationLegalBrand/)
+})
