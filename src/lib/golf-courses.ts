@@ -7,7 +7,7 @@ export type GolfCourseStateOption = {
 }
 
 const COURSE_SEARCH_MIN_CHARS = 0
-export const MAX_COURSE_SEARCH_LIMIT = 1000
+export const MAX_COURSE_SEARCH_LIMIT = 5000
 const courseSearchCache = new Map<string, GolfCourseOption[]>()
 const courseSearchInFlight = new Map<string, Promise<GolfCourseOption[]>>()
 

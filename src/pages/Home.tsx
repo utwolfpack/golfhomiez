@@ -6,13 +6,12 @@ import { DEFAULT_HOME_MARKETING_SETTINGS, fetchHomeMarketingSettings, toYouTubeE
 import { useAuth } from '../context/AuthContext'
 
 
-type SocialPlatform = 'facebook' | 'instagram' | 'youtube' | 'linkedin'
+type SocialPlatform = 'facebook' | 'instagram' | 'youtube'
 
 const GOLFHOMIEZ_SOCIAL_LINKS: Array<{ platform: SocialPlatform; label: string; href: string }> = [
-  { platform: 'facebook', label: 'Facebook', href: 'https://www.facebook.com/profile.php?id=61594389986881' },
+  { platform: 'facebook', label: 'Facebook', href: 'https://www.facebook.com/people/Golf-Homiez/61593610114459/' },
   { platform: 'instagram', label: 'Instagram', href: 'https://www.instagram.com/golfhomiez/' },
   { platform: 'youtube', label: 'YouTube', href: 'https://www.youtube.com/@GolfHomiez' },
-  { platform: 'linkedin', label: 'LinkedIn', href: 'https://www.linkedin.com/company/14374197' },
 ]
 
 function SocialPlatformIcon({ platform }: { platform: SocialPlatform }) {
@@ -36,11 +35,7 @@ function SocialPlatformIcon({ platform }: { platform: SocialPlatform }) {
       </svg>
     )
   }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M6.6 8.3H3.2V21h3.4V8.3ZM4.9 3A2 2 0 1 0 4.9 7a2 2 0 0 0 0-4ZM9.1 8.3h3.3V10h.1c.5-.9 1.7-2 3.5-2 3.7 0 4.4 2.4 4.4 5.6V21H17v-6.6c0-1.6 0-3.6-2.2-3.6s-2.5 1.7-2.5 3.5V21H9.1V8.3Z" />
-    </svg>
-  )
+  return null
 }
 
 function HomeVideoSection({ title, url, logKey, pagePath }: { title: string; url: string; logKey: string; pagePath: string }) {

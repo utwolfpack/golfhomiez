@@ -221,7 +221,7 @@ app.get('/api/golf-courses', async (req, res) => {
     const query = String(req.query.q || req.query.query || '').trim()
     if (!state && !query) return res.status(400).json({ message: 'state or q query parameter required' })
 
-    const limit = Math.min(Math.max(Number(req.query.limit) || 1000, 1), 1000)
+    const limit = Math.min(Math.max(Number(req.query.limit) || 5000, 1), 5000)
     const courses = await listGolfCoursesForState(state, { query, limit })
     logApi('golf_courses_list_completed', {
       ...requestContext(req),
@@ -230,6 +230,7 @@ app.get('/api/golf-courses', async (req, res) => {
       source: 'database',
       limit,
       resultCount: courses.length,
+      duplicatePolicy: 'one_normalized_course_name_per_state',
     })
     return res.json(courses)
   } catch (error) {
@@ -3075,7 +3076,17 @@ app.post('/api/host/account-requests', async (req, res) => {
     if (rejectPasswordPolicy(req, res, password, 'golf_course', 'request_account')) return
 
     const matchedCourse = await findGolfCourseForState(stateCode, golfCourseName, golfCourseId)
-    if (!matchedCourse) return res.status(400).json({ message: 'Select a golf course from the database catalog for the selected state.' })
+    if (!matchedCourse) {
+      logApi('host_account_request_course_rejected', {
+        ...requestContext(req),
+        email,
+        stateCode,
+        requestedGolfCourseId: golfCourseId || null,
+        requestedGolfCourseName: golfCourseName || null,
+        reason: 'course_not_found_in_selected_state',
+      })
+      return res.status(400).json({ message: 'Select a golf course from the database catalog for the selected state.' })
+    }
 
     const request = await createHostAccountRequest({
       firstName,
