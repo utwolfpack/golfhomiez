@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router'
+import GolfCourseInput from '../components/GolfCourseInput'
 import PageHero from '../components/PageHero'
 import PasswordCriteria from '../components/PasswordCriteria'
 import RegistrationLegalNotice from '../components/RegistrationLegalNotice'
 import { useGolfCourseStates } from '../hooks/useGolfCourseStates'
 import { requestHostAccount } from '../lib/host-auth'
-import { searchGolfCourses, type GolfCourseOption } from '../lib/golf-courses'
+import type { GolfCourseOption } from '../lib/golf-courses'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { assertPasswordPolicy } from '../lib/password-policy'
 
@@ -15,8 +16,8 @@ export default function CreateHostAccount() {
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [state, setState] = useState('UT')
-  const [courseId, setCourseId] = useState('')
-  const [courses, setCourses] = useState<GolfCourseOption[]>([])
+  const [courseSearch, setCourseSearch] = useState('')
+  const [selectedCourse, setSelectedCourse] = useState<GolfCourseOption | null>(null)
   const [representativeDetails, setRepresentativeDetails] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -34,31 +35,10 @@ export default function CreateHostAccount() {
   useEffect(() => {
     if (stateOptions.length && !stateOptions.some(option => option.abbr === state)) {
       setState(stateOptions[0].abbr)
-      setCourseId('')
+      setCourseSearch('')
+      setSelectedCourse(null)
     }
   }, [stateOptions, state])
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadCourses() {
-      try {
-        const options = await searchGolfCourses({ state, limit: 100 })
-        if (cancelled) return
-        setCourses(options)
-        setCourseId((prev) => (prev && options.some((option) => option.id === prev) ? prev : (options[0]?.id || '')))
-      } catch {
-        if (cancelled) return
-        setCourses([])
-        setCourseId('')
-      }
-    }
-
-    loadCourses()
-    return () => {
-      cancelled = true
-    }
-  }, [state])
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
@@ -70,8 +50,9 @@ export default function CreateHostAccount() {
       if (!lastName.trim()) throw new Error('Last name is required.')
       if (!email.trim()) throw new Error('Email is required.')
       if (!state.trim()) throw new Error('State is required.')
-      const selectedCourse = courses.find((entry) => entry.id === courseId)
       if (!selectedCourse) throw new Error('Golf Course is required.')
+      const selectedCourseState = String(selectedCourse.state || selectedCourse.state_code || '').trim().toUpperCase()
+      if (selectedCourseState && selectedCourseState !== state) throw new Error('Select a golf course from the selected state.')
       if (!representativeDetails.trim()) throw new Error('Representative details are required.')
       assertPasswordPolicy(password)
       if (password !== confirmPassword) throw new Error('Passwords do not match.')
@@ -97,6 +78,8 @@ export default function CreateHostAccount() {
       setFirstName('')
       setLastName('')
       setEmail('')
+      setCourseSearch('')
+      setSelectedCourse(null)
       setRepresentativeDetails('')
       setPassword('')
       setConfirmPassword('')
@@ -160,7 +143,18 @@ export default function CreateHostAccount() {
           <div className="grid grid2" style={{ gap: 12 }}>
             <div>
               <label className="label">State</label>
-              <select className="input" value={state} onChange={(e) => { setState(e.target.value); setCourseId('') }} disabled={statesLoading && !stateOptions.length}>
+              <select
+                className="input"
+                value={state}
+                onChange={(e) => {
+                  const nextState = e.target.value
+                  setState(nextState)
+                  setCourseSearch('')
+                  setSelectedCourse(null)
+                  logFrontendEvent({ category: 'golf_course.registration', message: 'golf_course_state_changed', data: { stateCode: nextState } })
+                }}
+                disabled={statesLoading && !stateOptions.length}
+              >
                 {!stateOptions.length ? <option value={state}>{statesLoading ? 'Loading golf course states…' : (state || 'No golf course states available')}</option> : null}
                 {stateOptions.map((entry) => (
                   <option key={entry.abbr} value={entry.abbr}>{entry.name}</option>
@@ -170,13 +164,29 @@ export default function CreateHostAccount() {
             </div>
 
             <div>
-              <label className="label">Golf Course</label>
-              <select className="input" value={courseId} onChange={(e) => setCourseId(e.target.value)} disabled={!courses.length}>
-                {!courses.length ? <option value="">No courses available</option> : null}
-                {courses.map((entry) => (
-                  <option key={entry.id} value={entry.id}>{entry.name}</option>
-                ))}
-              </select>
+              <GolfCourseInput
+                label="Golf Course"
+                state={state}
+                searchValue={courseSearch}
+                selectedCourseName={selectedCourse?.name || ''}
+                selectedCourseId={selectedCourse?.id || ''}
+                onSearchChange={(next) => {
+                  setCourseSearch(next)
+                  if (selectedCourse && next.trim().toLowerCase() !== selectedCourse.name.trim().toLowerCase()) setSelectedCourse(null)
+                }}
+                onCourseSelected={(course) => {
+                  setSelectedCourse(course)
+                  setCourseSearch('')
+                  logFrontendEvent({
+                    category: 'golf_course.registration',
+                    message: 'golf_course_selected',
+                    data: { stateCode: state, golfCourseId: course.id, golfCourseName: course.name },
+                  })
+                }}
+                placeholder="Search all courses in the selected state"
+                helperText="Start typing to search the complete course catalog for this state. Select a result to bind the request to the correct course record."
+                required
+              />
             </div>
           </div>
 

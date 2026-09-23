@@ -8,7 +8,7 @@ import { createQrMatrix, generateQrSvg, MAX_QR_BYTE_LENGTH, QR_SIZE } from '../s
 import { deleteTournamentWithSafeAssociations, SAFE_TOURNAMENT_CHILD_DELETES } from '../server/lib/tournament-delete.js'
 import { deleteCancelledTournaments, nextCancelledTournamentCleanupRun, CANCELLED_TOURNAMENT_CLEANUP_TIME_ZONE } from '../server/lib/cancelled-tournament-cleanup.js'
 import { buildDefaultHoleScorecard, calculateHoleScoreTotal, calculateProvidedHoleScoreTotal, normalizeHoleScorePayload } from '../server/lib/hole-scorecard.js'
-import { calculateDistanceYards } from '../server/lib/golf-course-service.js'
+import { calculateDistanceYards, dedupeGolfCoursesByName } from '../server/lib/golf-course-service.js'
 import { buildOpenGolfApiStateCoursesPath, buildOpenGolfApiUrl, extractOpenGolfApiBulkCourseList, extractOpenGolfApiCourseList, extractOpenGolfApiCoursePage, extractOpenGolfCourseHoleEndpointRows, extractOpenGolfCourseHoles, extractOpenGolfCourseTeeSummary, getOpenGolfApiRateLimitConfig, getOpenGolfApiRequestHeaders, getOpenGolfApiStateImportConfig, getOpenGolfApiRetryDelayMs, isOpenGolfApiRetriableStatus, normalizeOpenGolfCoursePayload, parseOpenGolfApiRateLimitResetMs, parseOpenGolfApiRetryAfterMs } from '../server/lib/opengolfapi-client.js'
 import { buildGolfCourseDataImportPlan, normalizeGolfCourseDataJobConfig } from '../server/lib/golf-course-data-import.js'
 import { buildScorecardDraftId, normalizeDraftContext, normalizeDraftHole } from '../server/lib/scorecard-drafts.js'
@@ -39,6 +39,61 @@ test('forgot password client points at the correct Better Auth endpoint', () => 
   const source = fs.readFileSync(new URL('../src/lib/auth-api.ts', import.meta.url), 'utf8')
   assert.match(source, /\$\{AUTH_BASE\}\/request-password-reset/)
   assert.doesNotMatch(source, /\$\{AUTH_BASE\}\/forget-password/)
+})
+
+test('golf course catalog de-duplicates normalized names per state and keeps the best-backed record', () => {
+  const courses = dedupeGolfCoursesByName([
+    {
+      id: 'tx-duplicate-light',
+      name: 'Columbus Golf Course',
+      state: 'TX',
+      city: 'Columbus',
+      source: 'manual',
+      isManual: true,
+    },
+    {
+      id: 'tx-duplicate-complete',
+      externalCourseId: 'open-golf-123',
+      name: '  Columbus   Golf Course  ',
+      state_code: 'tx',
+      city: 'Columbus',
+      address: '100 Fairway Dr',
+      postalCode: '78934',
+      latitude: 29.7066,
+      longitude: -96.5397,
+      holesCount: 18,
+      parTotal: 72,
+      source: 'opengolfapi',
+      isManual: false,
+    },
+    {
+      id: 'tx-other',
+      name: 'Another Texas Course',
+      state: 'TX',
+      city: 'Austin',
+    },
+  ])
+
+  assert.equal(courses.length, 2)
+  assert.equal(courses.find((course) => /columbus/i.test(course.name))?.id, 'tx-duplicate-complete')
+})
+
+test('host registration uses the solo logger course-search control and the complete per-state catalog', () => {
+  const hostRegister = fs.readFileSync(new URL('../src/pages/CreateHostAccount.tsx', import.meta.url), 'utf8')
+  const courseInput = fs.readFileSync(new URL('../src/components/GolfCourseInput.tsx', import.meta.url), 'utf8')
+  const courseClient = fs.readFileSync(new URL('../src/lib/golf-courses.ts', import.meta.url), 'utf8')
+  const server = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
+
+  assert.match(hostRegister, /import GolfCourseInput from '\.\.\/components\/GolfCourseInput'/)
+  assert.match(hostRegister, /placeholder="Search all courses in the selected state"/)
+  assert.match(hostRegister, /selectedCourseId=\{selectedCourse\?\.id \|\| ''\}/)
+  assert.match(hostRegister, /golfCourseId: selectedCourse\.id/)
+  assert.match(hostRegister, /golf_course_selected/)
+  assert.doesNotMatch(hostRegister, /searchGolfCourses\(\{ state, limit: 100 \}\)/)
+  assert.match(courseInput, /limit = MAX_COURSE_SEARCH_LIMIT/)
+  assert.match(courseClient, /MAX_COURSE_SEARCH_LIMIT = 5000/)
+  assert.match(server, /Number\(req\.query\.limit\) \|\| 5000/)
+  assert.match(server, /duplicatePolicy: 'one_normalized_course_name_per_state'/)
 })
 
 test('tournament schedule conflict helpers block active same-day tournaments while ignoring cancelled, archived, and the edited tournament', () => {
@@ -560,10 +615,10 @@ test('score and challenge course pickers use one search field across all courses
   assert.match(courseInput, /getBrowserCoordinates/)
   assert.match(courseInput, /findNearestGolfCourse/)
   assert.match(courseInput, /uniqueCourses\.slice\(0, 12\)/)
-  assert.match(courseClient, /export const MAX_COURSE_SEARCH_LIMIT = 1000/)
+  assert.match(courseClient, /export const MAX_COURSE_SEARCH_LIMIT = 5000/)
   assert.match(courseClient, /export async function findNearestGolfCourse/)
   assert.match(courseClient, /\/api\/golf-courses\/nearest/)
-  assert.match(server, /Number\(req\.query\.limit\) \|\| 1000, 1\), 1000/)
+  assert.match(server, /Number\(req\.query\.limit\) \|\| 5000, 1\), 5000/)
   assert.match(server, /app\.get\('\/api\/golf-courses\/nearest'/)
   assert.match(server, /findNearestGolfCourse/)
   assert.match(css, /courseSearchResults/)
@@ -2061,7 +2116,7 @@ test('host auth flow keeps request-based host access and removes host invite red
   assert.doesNotMatch(hostClient, /\/api\/host\/register/)
   assert.match(hostRegister, /Request your golf-course account/)
   assert.match(hostRegister, /<label className="label">State<\/label>/)
-  assert.match(hostRegister, /<label className="label">Golf Course<\/label>/)
+  assert.match(hostRegister, /<GolfCourseInput[\s\S]*label="Golf Course"/)
   assert.match(hostRegister, /<label className="label">Password<\/label>/)
   assert.match(hostRegister, /<label className="label">Confirm password<\/label>/)
   assert.match(hostRegister, /thank you for your Golf Homiez golf-course account request/i)

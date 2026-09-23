@@ -4,8 +4,8 @@ import { logApi } from './logger.js'
 import { extractOpenGolfCourseHoleEndpointRows, extractOpenGolfCourseHoles, extractOpenGolfCourseTeeSummary, normalizeCourseName, normalizeOpenGolfCoursePayload } from './opengolfapi-client.js'
 import { normalizeStateCode, stateNameForCode } from './us-states.js'
 
-const DEFAULT_COURSE_LIMIT = 250
-const MAX_COURSE_LIMIT = 1000
+const DEFAULT_COURSE_LIMIT = 1000
+const MAX_COURSE_LIMIT = 5000
 const EARTH_RADIUS_YARDS = 6_371_000 * 1.0936132983377
 
 function normalizeText(value) {
@@ -208,6 +208,54 @@ function normalizeCourseRow(row = {}) {
   }
 }
 
+function golfCourseCompletenessScore(course = {}) {
+  let score = 0
+  if (normalizeText(course.externalCourseId || course.external_course_id)) score += 30
+  if (toNumber(course.latitude) != null && toNumber(course.longitude) != null) score += 12
+  if (normalizeText(course.address)) score += 8
+  if (normalizeText(course.city)) score += 4
+  if (normalizeText(course.postalCode || course.postal_code)) score += 3
+  if (normalizeText(course.website || course.golfCourseWebsite)) score += 4
+  if (normalizeText(course.phone)) score += 3
+  if (toInteger(course.holesCount ?? course.holes_count ?? course.holes) != null) score += 3
+  if (toInteger(course.parTotal ?? course.par_total ?? course.par) != null) score += 3
+  if (normalizeText(course.source).toLowerCase() === 'opengolfapi') score += 2
+  if (!Boolean(course.isManual ?? course.is_manual)) score += 1
+  return score
+}
+
+function preferredDuplicateCourse(current, candidate) {
+  if (!current) return candidate
+  const currentScore = golfCourseCompletenessScore(current)
+  const candidateScore = golfCourseCompletenessScore(candidate)
+  if (candidateScore !== currentScore) return candidateScore > currentScore ? candidate : current
+
+  const currentId = normalizeText(current.id || current.externalCourseId || current.external_course_id)
+  const candidateId = normalizeText(candidate.id || candidate.externalCourseId || candidate.external_course_id)
+  if (!currentId) return candidate
+  if (!candidateId) return current
+  return candidateId.localeCompare(currentId) < 0 ? candidate : current
+}
+
+export function dedupeGolfCoursesByName(courses = []) {
+  const selected = new Map()
+  for (const course of Array.isArray(courses) ? courses : []) {
+    const stateCode = normalizeStateCode(course?.state_code || course?.state)
+    const normalizedName = normalizeCourseName(course?.name)
+    if (!normalizedName) continue
+    const key = `${stateCode}::${normalizedName}`
+    selected.set(key, preferredDuplicateCourse(selected.get(key), course))
+  }
+
+  return [...selected.values()].sort((left, right) => {
+    const nameCompare = normalizeText(left?.name).localeCompare(normalizeText(right?.name))
+    if (nameCompare) return nameCompare
+    const cityCompare = normalizeText(left?.city).localeCompare(normalizeText(right?.city))
+    if (cityCompare) return cityCompare
+    return normalizeText(left?.id).localeCompare(normalizeText(right?.id))
+  })
+}
+
 function normalizeLimit(value) {
   const limit = Math.trunc(Number(value) || DEFAULT_COURSE_LIMIT)
   return Math.min(Math.max(limit, 1), MAX_COURSE_LIMIT)
@@ -274,7 +322,7 @@ export async function listGolfCoursesForState(state, options = {}) {
       LIMIT ${limit}`,
     params,
   )
-  return rows.map(normalizeCourseRow)
+  return dedupeGolfCoursesByName(rows.map(normalizeCourseRow))
 }
 
 export async function listGolfCourseNamesByState(state, options = {}) {
