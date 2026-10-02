@@ -857,6 +857,7 @@ test('tournament flyer separates charity from misc content and persists a custom
 test('host and organizer rich-text fields preserve line breaks, common formatting, and safe public rendering', async () => {
   const editor = read('src/components/RichTextEditor.tsx')
   const content = read('src/components/RichTextContent.tsx')
+  const styles = read('src/index.css')
   const tournamentFields = read('src/components/TournamentTemplateFields.tsx')
   const hostPortal = read('src/pages/HostPortal.tsx')
   const organizerPortal = read('src/pages/OrganizerTournaments.tsx')
@@ -888,6 +889,9 @@ test('host and organizer rich-text fields preserve line breaks, common formattin
   assert.match(editor, /quill_pasted_image_rejected/)
   assert.match(content, /dangerouslySetInnerHTML/)
   assert.match(content, /sanitizeRichTextHtml/)
+  assert.match(styles, /\.richTextContent\{white-space:normal;overflow-wrap:break-word;word-break:normal;hyphens:none\}/)
+  assert.match(styles, /\.richTextEditor__quill \.ql-editor\{[^}]*overflow-wrap:break-word;word-break:normal;hyphens:none\}/)
+  assert.doesNotMatch(styles, /\.richTextContent\{[^}]*overflow-wrap:anywhere/)
 
   assert.match(hostPortal, /host\.tournamentBuilder\.description/)
   assert.match(hostPortal, /host\.portal\.courseEvents\.details/)
