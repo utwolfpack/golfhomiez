@@ -10830,14 +10830,14 @@ button.navDropdownItem{font:inherit;}
 .richTextEditor__toolbar.ql-snow .ql-fill{fill:currentColor}
 .richTextEditor__quill.ql-container.ql-snow{min-height:118px;border:1px solid #cbd5e1;border-radius:0 0 10px 10px;background:#fff;color:#111827;font-family:inherit;font-size:inherit;line-height:1.45}
 .richTextEditor__quill.ql-container.ql-snow:focus-within{outline:2px solid rgba(22,101,52,.18);outline-offset:0;border-color:#166534}
-.richTextEditor__quill .ql-editor{min-height:118px;max-height:360px;overflow:auto;padding:10px 12px;font-family:inherit;font-size:inherit;line-height:1.45}
+.richTextEditor__quill .ql-editor{min-height:118px;max-height:360px;overflow:auto;padding:10px 12px;font-family:inherit;font-size:inherit;line-height:1.45;overflow-wrap:break-word;word-break:normal;hyphens:none}
 .richTextEditor__quill .ql-editor.ql-blank::before{left:12px;right:12px;color:#94a3b8;font-style:normal}
 .richTextEditor__quill .ql-editor p{margin:0 0 .5em}
 .richTextEditor__quill .ql-editor p:last-child{margin-bottom:0}
 .richTextEditor__quill .ql-editor ul,.richTextEditor__quill .ql-editor ol{margin:.35em 0 .5em;padding-left:1.65em}
 .richTextEditor__quill .ql-editor li+li{margin-top:.12em}
 .richTextEditor__meta{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.richTextContent{white-space:normal;overflow-wrap:anywhere}
+.richTextContent{white-space:normal;overflow-wrap:break-word;word-break:normal;hyphens:none}
 .richTextContent p,.richTextContent div{margin:0 0 .48em}
 .richTextContent p:last-child,.richTextContent div:last-child{margin-bottom:0}
 .richTextContent ul,.richTextContent ol{margin:.35em 0 .55em 1.25em;padding-left:.75em}
