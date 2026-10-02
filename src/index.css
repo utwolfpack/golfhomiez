@@ -10964,9 +10964,9 @@ button.navDropdownItem{font:inherit;}
   }
 }
 
-/* 2026-10-02: Preserve whole-word wrapping in public rich text and tournament flyers.
-   Wide children are already constrained with min-width:0/max-width:100%; normal
-   wrapping keeps readable words intact while URLs/code may still break safely. */
+/* 2026-10-02: Keep rich text readable on narrow screens without allowing pasted
+   non-breaking-space runs to force the page wider than the viewport. Sanitization
+   normalizes those spaces; break-word remains only as a fallback for genuinely long tokens. */
 .richTextContent,
 .richTextContent p,
 .richTextContent div,
@@ -10983,12 +10983,11 @@ button.navDropdownItem{font:inherit;}
 .golfCourseCalendarCourseEventDetails.richTextContent p,
 .golfCourseCalendarCourseEventDetails.richTextContent div,
 .golfCourseCalendarCourseEventDetails.richTextContent li{
-  overflow-wrap:normal;
+  overflow-wrap:break-word;
   word-break:normal;
   hyphens:none;
 }
 
-/* Only genuinely unbroken values such as URLs/code may break inside a token. */
 .richTextContent a,
 .richTextContent code,
 .richTextEditor__quill .ql-editor a,
@@ -10997,15 +10996,21 @@ button.navDropdownItem{font:inherit;}
   word-break:normal;
 }
 
-/* The historical flyer rule allowed every word to split at any character.
-   Keep ordinary flyer copy intact and reserve arbitrary breaking for links/code. */
+/* Flyer body copy can fall back to breaking only a genuinely oversized token.
+   Headings remain whole-word-only and are sized responsively to fit mobile widths. */
 .tournament-flyer,
 .tournament-flyer *,
 .tournament-guided-flyer,
 .tournament-guided-flyer *{
-  overflow-wrap:normal;
+  overflow-wrap:break-word;
   word-break:normal;
   hyphens:none;
+}
+
+.tournament-flyer-title,
+.tournament-guided-hero-copy h1{
+  overflow-wrap:normal;
+  word-break:normal;
 }
 
 .tournament-flyer a,
@@ -11017,6 +11022,20 @@ button.navDropdownItem{font:inherit;}
 }
 
 @media screen and (max-width:760px){
+  .golfCoursePublicPage{
+    width:100%;
+    max-width:100%;
+    overflow-x:clip;
+  }
+
+  .golfCoursePublicPage .container,
+  .golfCoursePublicContent,
+  .golfCoursePublicSummaryCard,
+  .golfCourseTournamentSection{
+    min-width:0;
+    max-width:100%;
+  }
+
   /* Fit common long title words (for example, TOURNAMENT) without splitting them. */
   .tournament-flyer--spec-layout .tournament-flyer-title{
     font-size:clamp(25px,9.5vw,36px) !important;
@@ -11033,7 +11052,7 @@ button.navDropdownItem{font:inherit;}
   .golfCourseCalendarHappyLink,
   .golfCourseUpcomingEventMain > strong,
   .golfCoursePublicSummaryCard .btn{
-    overflow-wrap:normal;
+    overflow-wrap:break-word;
     word-break:normal;
     hyphens:none;
   }

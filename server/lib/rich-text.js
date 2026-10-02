@@ -102,7 +102,10 @@ export function sanitizeRichTextHtml(value, { maxTextLength = 5000 } = {}) {
     }
 
     if (textCount >= maxTextLength) continue
-    const normalized = piece.replace(/\r\n?/g, '\n')
+    const normalized = piece
+      .replace(/&(?:nbsp|#160|#x0*a0|NonBreakingSpace);/gi, ' ')
+      .replace(/[\u00a0\u2007\u202f\ufeff]/g, ' ')
+      .replace(/\r\n?/g, '\n')
     const remaining = maxTextLength - textCount
     const truncated = normalized.slice(0, remaining)
     textCount += truncated.length
