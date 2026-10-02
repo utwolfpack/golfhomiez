@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto'
 import { isEmail, normalizeEmail } from './team-utils.js'
 import { getOrganizerAuthAccountByEmail } from './organizer-auth.js'
 import { normalizeTournamentScheduleDate } from './tournament-schedule-conflicts.js'
+import { sanitizeRichTextHtml } from './rich-text.js'
 
 export const ROLE_USER = 'user'
 export const ROLE_HOST = 'host'
@@ -364,7 +365,7 @@ export function sanitizeHostAccountPayload(body = {}) {
   const city = String(body.city || '').trim()
   const state = String(body.state || '').trim()
   const postalCode = String(body.postalCode || '').trim()
-  const notes = String(body.notes || '').trim()
+  const notes = sanitizeRichTextHtml(body.notes, { maxTextLength: 5000 })
   const securityKey = String(body.securityKey || '').trim()
 
   if (!golfCourseName) throw new Error('Golf course name is required.')
@@ -388,7 +389,7 @@ export function sanitizeOrganizerAccountPayload(body = {}) {
   const contactName = String(body.contactName || '').trim()
   const phone = sanitizeOptionalPhone(body.phone)
   const websiteUrl = String(body.websiteUrl || '').trim()
-  const notes = String(body.notes || '').trim()
+  const notes = sanitizeRichTextHtml(body.notes, { maxTextLength: 5000 })
 
   if (!organizationName) throw new Error('Organization name is required.')
   if (!contactName) throw new Error('Contact name is required.')
@@ -404,7 +405,7 @@ export function sanitizeOrganizerAccountPayload(body = {}) {
 
 export function sanitizeTournamentPayload(body = {}, options = {}) {
   const name = String(body.name || '').trim()
-  const description = String(body.description || '').trim()
+  const description = sanitizeRichTextHtml(body.description, { maxTextLength: 5000 })
   const startDate = normalizeTournamentScheduleDate(body.startDate)
   const endDate = ''
   const hostAccountId = String(body.hostAccountId || '').trim()
@@ -521,7 +522,7 @@ export function sanitizeTournamentTemplateData(value = {}) {
   return {
     hostOrganization: cleanString('hostOrganization'),
     beneficiaryCharity: cleanString('beneficiaryCharity'),
-    charityMessage: cleanString('charityMessage'),
+    charityMessage: sanitizeRichTextHtml(source.charityMessage, { maxTextLength: 5000 }),
     locationAddress: cleanString('locationAddress'),
     eventDate: cleanString('eventDate'),
     checkInTime: cleanString('checkInTime'),
@@ -546,8 +547,8 @@ export function sanitizeTournamentTemplateData(value = {}) {
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
     promotionalPhotoUrl: cleanString('promotionalPhotoUrl'),
     flyerBackgroundColor: /^#[0-9a-f]{6}$/i.test(String(source.flyerBackgroundColor || '').trim()) ? String(source.flyerBackgroundColor).trim().toLowerCase() : null,
-    miscNotes: cleanString('miscNotes'),
-    tournamentSummary: source.tournamentSummary == null ? null : (String(source.tournamentSummary).trim().slice(0, 5000) || null),
+    miscNotes: sanitizeRichTextHtml(source.miscNotes, { maxTextLength: 5000 }),
+    tournamentSummary: sanitizeRichTextHtml(source.tournamentSummary, { maxTextLength: 5000 }),
     tournamentCourseMisc: source.tournamentCourseMisc == null ? null : (String(source.tournamentCourseMisc).trim().slice(0, 5000) || null),
     sponsorsAvailable: Boolean(source.sponsorsAvailable),
   }

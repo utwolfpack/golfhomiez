@@ -3,6 +3,7 @@ import ImageUploadField from './ImageUploadField'
 import { compressImageFile } from '../lib/image-upload'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
+import RichTextEditor from './RichTextEditor'
 
 export type TournamentTemplateFormValue = {
   startDate?: string | null
@@ -91,11 +92,6 @@ export function TournamentRegistrationDeadlineField({ value, onChange }: Props) 
     onChange({ ...value, templateData: { ...templateData, ...next } })
   }
 
-  function updateTextField(key: keyof TournamentTemplateData, rawValue: string) {
-    const value = key === 'contactPhone' ? sanitizePhoneInput(rawValue) : rawValue
-    updateTemplateData({ [key]: value })
-  }
-
   return (
     <div>
       <label className="label">Registration deadline</label>
@@ -117,17 +113,16 @@ export function TournamentSummaryField({ value, onChange }: Props) {
 
   return (
     <div className="card tournament-summary-editor" style={{ padding: 14, background: '#f8fafc' }}>
-      <label className="label" htmlFor="tournament-summary">Tournament summary</label>
-      <textarea
+      <RichTextEditor
         id="tournament-summary"
-        className="input"
-        rows={5}
-        maxLength={5000}
+        label="Tournament summary"
         value={summary}
-        onChange={(event) => onChange({ ...value, templateData: { ...templateData, tournamentSummary: event.target.value } })}
+        maxLength={5000}
+        onChange={(next) => onChange({ ...value, templateData: { ...templateData, tournamentSummary: next } })}
         placeholder="Add final results, winners, memorable moments, charity totals, or other completed-tournament notes."
+        helpText="When this tournament is completed, this summary appears below the final leaderboard on the public tournament page."
+        logCategory="tournament.builder.summary"
       />
-      <div className="small" style={{ marginTop: 4 }}>When this tournament is completed, this summary appears below the final leaderboard on the public tournament page.</div>
     </div>
   )
 }
@@ -330,14 +325,14 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
       </div>
 
       <div style={{ marginTop: 14 }}>
-        <label className="label">Beneficiary / Charity message</label>
-        <textarea
-          className="input"
-          rows={3}
+        <RichTextEditor
+          label="Beneficiary / Charity message"
           value={String(templateData.charityMessage || DEFAULT_TOURNAMENT_CHARITY_MESSAGE)}
-          onChange={(e) => updateTemplateData({ charityMessage: e.target.value })}
+          onChange={(next) => updateTemplateData({ charityMessage: next })}
+          helpText="This message appears in the Beneficiary / Charity section of the public tournament page."
+          maxLength={5000}
+          logCategory="tournament.builder.charityMessage"
         />
-        <div className="small" style={{ marginTop: 4 }}>This message appears in the Beneficiary / Charity section of the public tournament page.</div>
       </div>
 
 
@@ -435,8 +430,14 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
         <BulletedTextarea label="Prize details" value={String(templateData.prizeDetails || '')} onChange={(next) => updateTemplateData({ prizeDetails: next })} />
         <BulletedTextarea label="Hole contests/extras" value={String(templateData.holeContestsExtras || '')} onChange={(next) => updateTemplateData({ holeContestsExtras: next })} />
         <div>
-          <label className="label">Misc Notes</label>
-          <textarea className="input" rows={3} value={String(templateData.miscNotes || '')} onChange={(e) => updateTemplateData({ miscNotes: e.target.value })} />
+          <RichTextEditor
+            label="Misc Notes"
+            value={String(templateData.miscNotes || '')}
+            onChange={(next) => updateTemplateData({ miscNotes: next })}
+            maxLength={5000}
+            placeholder="Add tournament information, special instructions, or other details."
+            logCategory="tournament.builder.miscNotes"
+          />
         </div>
       </div>
 

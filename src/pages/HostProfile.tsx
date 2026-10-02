@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
+import RichTextEditor from '../components/RichTextEditor'
 import { useHostAuth } from '../context/HostAuthContext'
 import { fetchHostProfile, updateHostProfile, type HostAccount, type HostAccountInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
@@ -122,8 +123,13 @@ export default function HostProfile() {
               </div>
             </div>
             <div>
-              <label className="label">Notes</label>
-              <textarea className="input" rows={3} value={form.notes ?? ''} onChange={(event) => setForm((previous) => ({ ...previous, notes: nullableInput(event.target.value) }))} />
+              <RichTextEditor
+                label="Notes"
+                value={form.notes ?? ''}
+                onChange={(next) => setForm((previous) => ({ ...previous, notes: nullableInput(next) }))}
+                maxLength={5000}
+                logCategory="host.profile.notes"
+              />
             </div>
             <div className="small"><strong>Email:</strong> {account?.email || 'Not available'}</div>
           </section>

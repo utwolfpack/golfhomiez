@@ -10819,3 +10819,42 @@ button.navDropdownItem{font:inherit;}
   .tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-image{width:100%}
   .tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-copy{margin-left:0}
 }
+
+/* Rich text fields used by host/organizer tournament, profile, course-site, and calendar editors. */
+.richTextEditor{display:grid;gap:6px;min-width:0}
+.richTextEditor__toolbar.ql-toolbar.ql-snow{display:flex;flex-wrap:wrap;gap:6px;padding:7px;border:1px solid #cbd5e1;border-bottom:0;border-radius:10px 10px 0 0;background:#f8fafc;font-family:inherit}
+.richTextEditor__toolbar.ql-toolbar.ql-snow button{width:34px;height:30px;padding:5px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;color:#1f2937;cursor:pointer}
+.richTextEditor__toolbar.ql-toolbar.ql-snow button:hover,.richTextEditor__toolbar.ql-toolbar.ql-snow button:focus-visible{border-color:#166534;box-shadow:0 0 0 2px rgba(22,101,52,.14);outline:0}
+.richTextEditor__toolbar.ql-toolbar.ql-snow button.ql-active,.richTextEditor__toolbar.ql-toolbar.ql-snow .ql-picker-label.ql-active{border-color:#166534;background:#ecfdf5;color:#166534}
+.richTextEditor__toolbar.ql-snow .ql-stroke{stroke:currentColor}
+.richTextEditor__toolbar.ql-snow .ql-fill{fill:currentColor}
+.richTextEditor__quill.ql-container.ql-snow{min-height:118px;border:1px solid #cbd5e1;border-radius:0 0 10px 10px;background:#fff;color:#111827;font-family:inherit;font-size:inherit;line-height:1.45}
+.richTextEditor__quill.ql-container.ql-snow:focus-within{outline:2px solid rgba(22,101,52,.18);outline-offset:0;border-color:#166534}
+.richTextEditor__quill .ql-editor{min-height:118px;max-height:360px;overflow:auto;padding:10px 12px;font-family:inherit;font-size:inherit;line-height:1.45}
+.richTextEditor__quill .ql-editor.ql-blank::before{left:12px;right:12px;color:#94a3b8;font-style:normal}
+.richTextEditor__quill .ql-editor p{margin:0 0 .5em}
+.richTextEditor__quill .ql-editor p:last-child{margin-bottom:0}
+.richTextEditor__quill .ql-editor ul,.richTextEditor__quill .ql-editor ol{margin:.35em 0 .5em;padding-left:1.65em}
+.richTextEditor__quill .ql-editor li+li{margin-top:.12em}
+.richTextEditor__meta{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.richTextContent{white-space:normal;overflow-wrap:anywhere}
+.richTextContent p,.richTextContent div{margin:0 0 .48em}
+.richTextContent p:last-child,.richTextContent div:last-child{margin-bottom:0}
+.richTextContent ul,.richTextContent ol{margin:.35em 0 .55em 1.25em;padding-left:.75em}
+.richTextContent li+li{margin-top:.12em}
+.tournament-flyer-description.richTextContent,.tournament-print-description.richTextContent{white-space:normal}
+.tournament-flyer-rich-copy,.tournament-print-rich-copy{font:inherit;color:inherit}
+.tournament-flyer-rich-copy ul,.tournament-flyer-rich-copy ol,.tournament-print-rich-copy ul,.tournament-print-rich-copy ol{margin-top:.25em;margin-bottom:.25em}
+.golfCoursePublicSummary.richTextContent{margin:0;color:inherit}
+.golfCourseCalendarCourseEventDetails.richTextContent{white-space:normal}
+
+@media print{
+  .richTextContent p,.richTextContent div{margin:0 0 .32em}
+  .richTextContent ul,.richTextContent ol{margin:.2em 0 .35em 1.05em;padding-left:.55em}
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-beneficiary-copy > .richTextContent,
+.tournament-flyer--spec-layout .tournament-flyer-misc-copy > .richTextContent{margin-top:9px;color:#475569;line-height:1.45}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity-copy > .richTextContent,
+.tournament-guided-flyer--spec-layout .tournament-guided-misc-copy > .richTextContent{color:#475569;line-height:1.45}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-misc-copy > .richTextContent{color:#334155}

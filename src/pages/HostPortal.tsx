@@ -8,6 +8,7 @@ import { archiveHostTournamentRecord, createHostCourseEvent, createHostTournamen
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDate, formatFriendlyDateTime } from '../lib/time-format'
 import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
+import RichTextEditor from '../components/RichTextEditor'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
 import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
@@ -1078,9 +1079,15 @@ export default function HostPortal() {
                     <div className="small hostCourseEventRecurrenceHelp">The event will appear on each matching date through the repeat-through date. Editing or deleting it changes the entire recurring series.</div>
                   ) : null}
                   <div>
-                    <label className="label">Event details (optional)</label>
-                    <textarea className="input" rows={4} maxLength={5000} value={courseEventForm.details || ''} onChange={(event) => setCourseEventForm((current) => ({ ...current, details: event.target.value }))} placeholder="Add check-in details, audience, pricing, food, league information, or anything golfers should know." />
-                    <div className="small" style={{ marginTop: 4 }}>This event will be visible to the public on the golf-course calendar.</div>
+                    <RichTextEditor
+                      label="Event details (optional)"
+                      value={courseEventForm.details || ''}
+                      onChange={(next) => setCourseEventForm((current) => ({ ...current, details: next }))}
+                      maxLength={5000}
+                      placeholder="Add check-in details, audience, pricing, food, league information, or anything golfers should know."
+                      helpText="This event will be visible to the public on the golf-course calendar."
+                      logCategory="host.portal.courseEvents.details"
+                    />
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button className="btn btnPrimary" disabled={courseEventBusy}>{courseEventBusy ? 'Saving…' : (editingCourseEventId ? 'Save event changes' : 'Add event to calendar')}</button>
@@ -1225,8 +1232,7 @@ export default function HostPortal() {
                   {createAdditionalFieldsOpen ? (
                     <div id="host-create-tournament-optional-fields" className="formStack">
                       <div>
-                        <label className="label">Description</label>
-                        <textarea className="input" rows={4} value={form.description || ''} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+                        <RichTextEditor label="Description" value={form.description || ''} onChange={(next) => setForm((prev) => ({ ...prev, description: next }))} maxLength={5000} logCategory="host.tournamentBuilder.description" />
                       </div>
                       <div className="formRow formRow--split">
                         <div>
@@ -1380,8 +1386,7 @@ export default function HostPortal() {
                                                         <input className="input" value={editForm.name} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, name: e.target.value }) : prev)} />
                                                       </div>
                                                       <div>
-                                                        <label className="label">Description</label>
-                                                        <textarea className="input" rows={4} value={editForm.description || ''} onChange={(e) => setEditForm((prev) => prev ? ({ ...prev, description: e.target.value }) : prev)} />
+                                                        <RichTextEditor label="Description" value={editForm.description || ''} onChange={(next) => setEditForm((prev) => prev ? ({ ...prev, description: next }) : prev)} maxLength={5000} logCategory="host.tournamentBuilder.description" />
                                                       </div>
                                                       <div className="formRow formRow--split">
                                                         <div>

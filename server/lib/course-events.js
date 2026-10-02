@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { sanitizeRichTextHtml } from './rich-text.js'
 
 const MAX_TITLE_LENGTH = 191
 const MAX_DETAILS_LENGTH = 5000
@@ -114,7 +115,7 @@ export function sanitizeCourseEventInput(input = {}) {
   const rawEndTime = String(input.endTime ?? input.end_time ?? '').trim()
   const startTime = normalizeTime(rawStartTime)
   const endTime = normalizeTime(rawEndTime)
-  const details = cleanText(input.details ?? input.miscInfo ?? input.misc_info, MAX_DETAILS_LENGTH)
+  const details = sanitizeRichTextHtml(input.details ?? input.miscInfo ?? input.misc_info, { maxTextLength: MAX_DETAILS_LENGTH })
   const recurrenceCadence = normalizeRecurrenceCadence(input.recurrenceCadence ?? input.recurrence_cadence)
   const rawRecurrenceEndDate = String(input.recurrenceEndDate ?? input.recurrence_end_date ?? '').trim()
   const recurrenceEndDate = recurrenceCadence === 'none' ? null : normalizeDate(rawRecurrenceEndDate)

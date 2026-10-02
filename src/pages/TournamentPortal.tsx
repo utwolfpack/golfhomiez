@@ -9,6 +9,8 @@ import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
 import { getTournamentQrCodeUrl } from '../lib/tournament-qr'
 import golfHomiezEmblemUrl from '../assets/GolfHomiezEmblem.png'
 import HoleStrokeScore from '../components/HoleStrokeScore'
+import RichTextContent from '../components/RichTextContent'
+import { richTextHasContent, richTextToPlainText } from '../lib/rich-text'
 
 function lines(value?: string | null) {
   return String(value || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
@@ -86,13 +88,13 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
   const rows = ATTRIBUTE_ROWS.map((row) => ({ ...row, displayValue: row.key === 'registrationFee' ? feeValue : row.value(tournament, templateData) }))
   const backgroundImageUrl = tournament.templateBackgroundImageUrl || DEFAULT_TOURNAMENT_BANNER_URL
   const isDefaultBackground = !tournament.templateBackgroundImageUrl
-  const description = String(tournament.description || '').trim()
+  const description = String(tournament.description || '')
   const flyerPageUrl = tournament.portalUrl || (typeof window !== 'undefined' ? window.location.href : tournament.portalPath || '')
   const charityImageUrl = templateData.supportingPhotoUrl || DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL
   const promotionalPhotoUrl = String(templateData.promotionalPhotoUrl || '').trim()
   const flyerBackgroundColor = normalizeTournamentBackgroundColor(templateData.flyerBackgroundColor)
-  const hasMiscSection = Boolean(String(templateData.miscNotes || '').trim() || promotionalPhotoUrl)
-  const charityMessage = templateData.charityMessage || DEFAULT_TOURNAMENT_CHARITY_MESSAGE
+  const hasMiscSection = Boolean(richTextHasContent(templateData.miscNotes) || promotionalPhotoUrl)
+  const charityMessage = richTextHasContent(templateData.charityMessage) ? String(templateData.charityMessage) : DEFAULT_TOURNAMENT_CHARITY_MESSAGE
   const isDefaultCharityImage = !templateData.supportingPhotoUrl
   const qrCodeUrl = getTournamentQrCodeUrl(tournament.tournamentIdentifier || tournament.id)
   const registrationDeadline = flyerRegistrationDeadline(templateData)
@@ -139,7 +141,7 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
               onError={(event) => { applyFallbackImage(event, DEFAULT_TOURNAMENT_BANNER_URL); logFrontendEvent({ category: 'tournament.portal', level: 'error', message: 'tournament_banner_load_failed', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null, isDefaultBackground, backgroundImageUrl, fallbackApplied: !isDefaultBackground, correlationId: bannerCorrelationId } }) }}
             />
           </div>
-          {description ? <p className="tournament-flyer-description">{description}</p> : null}
+          {richTextHasContent(description) ? <RichTextContent value={description} className="tournament-flyer-description" ariaLabel="Tournament description" /> : null}
         </section>
 
         <section className="tournament-flyer-essentials-section" aria-label="Tournament essentials">
@@ -182,7 +184,7 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
                 <div className="tournament-flyer-beneficiary-copy">
                   <div className="tournament-flyer-section-label">Beneficiary / Charity</div>
                   <h2>{templateData.beneficiaryCharity || 'Proceeds benefit'}</h2>
-                  <p>{charityMessage}</p>
+                  <RichTextContent value={charityMessage} className="tournament-flyer-rich-copy" ariaLabel="Beneficiary charity message" />
                 </div>
               </div>
             </div>
@@ -191,7 +193,7 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
                 {templateData.miscNotes ? (
                   <div className="tournament-flyer-misc-copy">
                     <div className="tournament-flyer-section-label">Tournament Information</div>
-                    <p>{templateData.miscNotes}</p>
+                    <RichTextContent value={String(templateData.miscNotes || '')} className="tournament-flyer-rich-copy" ariaLabel="Tournament information" />
                   </div>
                 ) : null}
                 {promotionalPhotoUrl ? (
@@ -285,9 +287,9 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
   const charityImageUrl = templateData.supportingPhotoUrl || DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL
   const promotionalPhotoUrl = String(templateData.promotionalPhotoUrl || '').trim()
   const flyerBackgroundColor = normalizeTournamentBackgroundColor(templateData.flyerBackgroundColor)
-  const hasMiscSection = Boolean(String(templateData.miscNotes || '').trim() || promotionalPhotoUrl)
-  const description = String(tournament.description || '').trim()
-  const charityMessage = templateData.charityMessage || DEFAULT_TOURNAMENT_CHARITY_MESSAGE
+  const hasMiscSection = Boolean(richTextHasContent(templateData.miscNotes) || promotionalPhotoUrl)
+  const description = String(tournament.description || '')
+  const charityMessage = richTextHasContent(templateData.charityMessage) ? String(templateData.charityMessage) : DEFAULT_TOURNAMENT_CHARITY_MESSAGE
   const feeValue = templateData.entryFee ? (String(templateData.entryFee).trim().startsWith('$') ? templateData.entryFee : `$${templateData.entryFee}`) : 'To be announced'
   const rows = ATTRIBUTE_ROWS.map((row) => ({ ...row, displayValue: row.key === 'registrationFee' ? feeValue : row.value(tournament, templateData) }))
   const flyerPageUrl = tournament.portalUrl || (typeof window !== 'undefined' ? window.location.href : tournament.portalPath || '')
@@ -330,7 +332,7 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
             <div className="tournament-guided-host">{host}</div>
           </div>
         </div>
-        {description ? <div className="tournament-guided-description"><p>{description}</p></div> : null}
+        {richTextHasContent(description) ? <div className="tournament-guided-description"><RichTextContent value={description} ariaLabel="Tournament description" /></div> : null}
       </section>
 
       <section className="tournament-guided-essentials-section" aria-label="Tournament essentials">
@@ -372,7 +374,7 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
             <div className="tournament-guided-charity-copy">
               <div className="tournament-guided-section-label">Beneficiary / Charity</div>
               <h2>{templateData.beneficiaryCharity || 'Proceeds benefit'}</h2>
-              <p>{charityMessage}</p>
+              <RichTextContent value={charityMessage} className="tournament-flyer-rich-copy" ariaLabel="Beneficiary charity message" />
             </div>
           </div>
 
@@ -381,7 +383,7 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
               {templateData.miscNotes ? (
                 <div className="tournament-guided-misc-copy">
                   <div className="tournament-guided-section-label">Tournament Information</div>
-                  <p>{templateData.miscNotes}</p>
+                  <RichTextContent value={String(templateData.miscNotes || '')} className="tournament-flyer-rich-copy" ariaLabel="Tournament information" />
                 </div>
               ) : null}
               {promotionalPhotoUrl ? (
@@ -470,13 +472,13 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
   const rows = ATTRIBUTE_ROWS.map((row) => ({ ...row, displayValue: row.key === 'registrationFee' ? feeValue : row.value(tournament, templateData) }))
   const backgroundImageUrl = tournament.templateBackgroundImageUrl || DEFAULT_TOURNAMENT_BANNER_URL
   const isDefaultBackground = !tournament.templateBackgroundImageUrl
-  const description = String(tournament.description || '').trim()
+  const description = String(tournament.description || '')
   const charityImageUrl = templateData.supportingPhotoUrl || DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL
   const promotionalPhotoUrl = String(templateData.promotionalPhotoUrl || '').trim()
   const flyerBackgroundColor = normalizeTournamentBackgroundColor(templateData.flyerBackgroundColor)
-  const printMiscNotes = String(templateData.miscNotes || '').trim()
-  const hasPrintMisc = Boolean(printMiscNotes || promotionalPhotoUrl)
-  const charityMessage = templateData.charityMessage || DEFAULT_TOURNAMENT_CHARITY_MESSAGE
+  const printMiscNotes = String(templateData.miscNotes || '')
+  const hasPrintMisc = Boolean(richTextHasContent(printMiscNotes) || promotionalPhotoUrl)
+  const charityMessage = richTextHasContent(templateData.charityMessage) ? String(templateData.charityMessage) : DEFAULT_TOURNAMENT_CHARITY_MESSAGE
   const qrCodeUrl = getTournamentQrCodeUrl(tournament.tournamentIdentifier || tournament.id)
   const logos = Array.isArray(templateData.logoFiles) ? templateData.logoFiles.slice(0, 10) : []
   const printFeesInclude = lines(templateData.feesInclude)
@@ -489,9 +491,11 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
   const hasPrintContact = Boolean(printContactPerson || printContactPhone || printContactEmail)
   const printRegistrationDeadline = flyerRegistrationDeadline(templateData)
   const printOptionalContentCount = printFeesInclude.length + printPrizeDetails.length + printContestDetails.length + logos.length + (printMiscNotes ? 2 : 0) + (promotionalPhotoUrl ? 2 : 0)
-  const printContentDensity = printInfoPanelCount <= 2 && logos.length === 0 && printOptionalContentCount <= 10 && description.length <= 260 && charityMessage.length <= 420
+  const descriptionTextLength = richTextToPlainText(description).length
+  const charityTextLength = richTextToPlainText(charityMessage).length
+  const printContentDensity = printInfoPanelCount <= 2 && logos.length === 0 && printOptionalContentCount <= 10 && descriptionTextLength <= 260 && charityTextLength <= 420
     ? 'light'
-    : printOptionalContentCount >= 16 || description.length > 320 || charityMessage.length > 520
+    : printOptionalContentCount >= 16 || descriptionTextLength > 320 || charityTextLength > 520
       ? 'full'
       : 'balanced'
 
@@ -511,7 +515,7 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
         <div className="tournament-print-banner">
           <img src={backgroundImageUrl} alt={isDefaultBackground ? 'Default Golf Homiez tournament flyer banner' : 'Tournament flyer banner'} onError={(event) => applyFallbackImage(event, DEFAULT_TOURNAMENT_BANNER_URL)} />
         </div>
-        {description ? <div className="tournament-print-description">{description}</div> : null}
+        {richTextHasContent(description) ? <RichTextContent value={description} className="tournament-print-description" ariaLabel="Tournament description" /> : null}
       </section>
 
       <section className="tournament-print-essentials-section" aria-label="Tournament essentials">
@@ -539,7 +543,7 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
             <div className="tournament-print-beneficiary-copy">
               <strong>Beneficiary / Charity</strong>
               <span>{templateData.beneficiaryCharity || 'Proceeds benefit'}</span>
-              <p>{charityMessage}</p>
+              <RichTextContent value={charityMessage} className="tournament-flyer-rich-copy" ariaLabel="Beneficiary charity message" />
             </div>
           </div>
         </div>
@@ -548,7 +552,7 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
             {printMiscNotes ? (
               <div className="tournament-print-misc-copy">
                 <strong>Tournament Information</strong>
-                <p>{printMiscNotes}</p>
+                <RichTextContent value={printMiscNotes} className="tournament-print-rich-copy" ariaLabel="Tournament information" />
               </div>
             ) : null}
             {promotionalPhotoUrl ? (
@@ -724,13 +728,12 @@ function TournamentFinalLeaderboard({ rows }: { rows: TournamentFinalLeaderboard
 }
 
 function CompletedTournamentSummary({ summary }: { summary?: string | null }) {
-  const text = String(summary || '').trim()
-  if (!text) return null
+  if (!richTextHasContent(summary)) return null
   return (
     <section className="tournament-completed-summary" aria-label="Tournament summary">
       <div className="golfCoursePublicEyebrow">Tournament recap</div>
       <h2>Tournament Summary</h2>
-      <div className="tournament-completed-summary__text">{text}</div>
+      <RichTextContent value={summary} className="tournament-completed-summary__text" ariaLabel="Tournament summary content" />
     </section>
   )
 }
@@ -920,9 +923,16 @@ const TOURNAMENT_FLYER_PRINT_STYLES = `
   .tournament-print-register strong { display: block !important; color: #0f3f24 !important; font-size: 8pt !important; line-height: 1.02 !important; text-transform: uppercase !important; }
   .tournament-print-beneficiary span { display: block !important; color: #0f3f24 !important; margin-top: 0.018in !important; font-size: 11.8pt !important; line-height: 1 !important; font-weight: 900 !important; }
   .tournament-print-beneficiary p,
-  .tournament-print-misc-copy p { display: block !important; color: #1f2937 !important; margin: 0.025in 0 0 !important; font-size: 7.7pt !important; line-height: 1.11 !important; overflow-wrap: anywhere !important; }
+  .tournament-print-misc-copy p,
+  .tournament-print-beneficiary .richTextContent,
+  .tournament-print-misc-copy .richTextContent { display: block !important; color: #1f2937 !important; margin: 0.025in 0 0 !important; font-size: 7.7pt !important; line-height: 1.11 !important; overflow-wrap: anywhere !important; }
+  .tournament-print-beneficiary .richTextContent p,
+  .tournament-print-beneficiary .richTextContent div,
+  .tournament-print-misc-copy .richTextContent p,
+  .tournament-print-misc-copy .richTextContent div { color: inherit !important; font: inherit !important; line-height: inherit !important; margin: 0 0 0.025in !important; }
   .tournament-print-flyer--content-light .tournament-print-beneficiary span { font-size: 12.8pt !important; }
-  .tournament-print-flyer--content-light .tournament-print-beneficiary p { font-size: 8pt !important; line-height: 1.13 !important; }
+  .tournament-print-flyer--content-light .tournament-print-beneficiary p,
+  .tournament-print-flyer--content-light .tournament-print-beneficiary .richTextContent { font-size: 8pt !important; line-height: 1.13 !important; }
   .tournament-print-beneficiary p strong { display: inline !important; color: #0f3f24 !important; font-size: inherit !important; line-height: inherit !important; }
 
   .tournament-print-misc {

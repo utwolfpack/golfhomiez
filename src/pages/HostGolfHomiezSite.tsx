@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router'
 import ImageUploadField from '../components/ImageUploadField'
+import RichTextEditor from '../components/RichTextEditor'
 import PageHero from '../components/PageHero'
 import {
   fetchHostGolfHomiezSite,
@@ -11,6 +12,7 @@ import {
 } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
+import { richTextHasContent } from '../lib/rich-text'
 
 const defaultGolfCourseBanner = '/DefaultGolfBanner.jpg'
 
@@ -106,7 +108,7 @@ export default function HostGolfHomiezSite() {
       logFrontendEvent({ category: 'host.golfhomiezSite', level: 'error', message: 'host_golfhomiez_site_invalid_phone', data: { hostAccountId: account?.id || null } })
       return
     }
-    if (!publicPage.summary.trim()) {
+    if (!richTextHasContent(publicPage.summary)) {
       setError('Course Summary is a required field.')
       return
     }
@@ -183,8 +185,15 @@ export default function HostGolfHomiezSite() {
             ) : null}
 
             <div>
-              <label className="label">Course Summary</label>
-              <textarea className="input" rows={6} value={publicPage.summary} onChange={(event) => updatePublicPage({ summary: event.target.value })} maxLength={5000} required />
+              <RichTextEditor
+                label="Course Summary"
+                value={publicPage.summary}
+                onChange={(next) => updatePublicPage({ summary: next })}
+                maxLength={5000}
+                required
+                helpText="Shown on the public Golf Homiez course page."
+                logCategory="host.golfhomiezSite.courseSummary"
+              />
             </div>
 
             <ImageUploadField
