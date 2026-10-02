@@ -924,3 +924,16 @@ test('host and organizer rich-text fields preserve line breaks, common formattin
   const event = courseEvents.sanitizeCourseEventInput({ title: 'League', eventDate: '2026-10-10', details: '<b>Check in</b>\nBring clubs' })
   assert.equal(event.details, '<strong>Check in</strong><br>Bring clubs')
 })
+
+
+test('public rich text and mobile tournament flyers keep ordinary words intact while allowing long URLs to break safely', () => {
+  const styles = read('src/index.css')
+
+  assert.match(styles, /\.richTextContent,[\s\S]*?\.golfCoursePublicSummary\.richTextContent,[\s\S]*?overflow-wrap:normal;[\s\S]*?word-break:normal;[\s\S]*?hyphens:none;/)
+  assert.match(styles, /\.richTextContent a,[\s\S]*?\.richTextEditor__quill \.ql-editor code\{[\s\S]*?overflow-wrap:anywhere;[\s\S]*?word-break:normal;/)
+  assert.match(styles, /\.tournament-flyer,[\s\S]*?\.tournament-guided-flyer \*\{[\s\S]*?overflow-wrap:normal;[\s\S]*?word-break:normal;[\s\S]*?hyphens:none;/)
+  assert.match(styles, /\.tournament-flyer a,[\s\S]*?\.tournament-guided-flyer code\{[\s\S]*?overflow-wrap:anywhere;/)
+  assert.match(styles, /@media screen and \(max-width:760px\)\{[\s\S]*?\.tournament-flyer--spec-layout \.tournament-flyer-title\{[\s\S]*?font-size:clamp\(25px,9\.5vw,36px\) !important;[\s\S]*?text-wrap:balance;/)
+  assert.match(styles, /\.tournament-guided-flyer--spec-layout \.tournament-guided-hero-copy h1\{[\s\S]*?font-size:clamp\(28px,9\.5vw,40px\) !important;[\s\S]*?text-wrap:balance;/)
+  assert.match(styles, /\.golfCourseCalendarHappyLink,[\s\S]*?\.golfCoursePublicSummaryCard \.btn\{[\s\S]*?overflow-wrap:normal;[\s\S]*?word-break:normal;/)
+})
