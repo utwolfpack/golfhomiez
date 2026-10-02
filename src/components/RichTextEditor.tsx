@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Quill from 'quill'
 import 'quill/dist/quill.snow.css'
 import { getCorrelationId, logFrontendEvent } from '../lib/frontend-logger'
-import { richTextToPlainText, sanitizeRichTextHtml } from '../lib/rich-text'
+import { emojiTextFromClipboardImage, richTextToPlainText, sanitizeRichTextHtml } from '../lib/rich-text'
 
 type Props = {
   id?: string
@@ -101,6 +101,35 @@ export default function RichTextEditor({ id, label, value = '', onChange, placeh
       },
     })
     quillRef.current = quill
+
+    // Facebook and some other sites place emoji on the clipboard as <img> elements.
+    // Convert only emoji images to Unicode text; ordinary pasted images remain rejected.
+    const Delta = Quill.import('delta') as any
+    quill.clipboard.addMatcher('IMG', (node) => {
+      const image = node as HTMLImageElement
+      const emoji = emojiTextFromClipboardImage({
+        alt: image.getAttribute('alt'),
+        ariaLabel: image.getAttribute('aria-label'),
+        dataEmoji: image.getAttribute('data-emoji'),
+        title: image.getAttribute('title'),
+        src: image.getAttribute('src'),
+      })
+      if (!emoji) {
+        logFrontendEvent({
+          category: logCategoryRef.current,
+          message: 'quill_pasted_image_rejected',
+          data: { field: labelRef.current, correlationId: getCorrelationId() },
+        })
+        return new Delta()
+      }
+      logFrontendEvent({
+        category: logCategoryRef.current,
+        message: 'quill_pasted_emoji_image_converted',
+        data: { field: labelRef.current, emoji, correlationId: getCorrelationId() },
+      })
+      return new Delta().insert(emoji)
+    })
+
     quill.root.id = id || ''
     quill.root.setAttribute('aria-label', label)
     quill.root.setAttribute('aria-multiline', 'true')
