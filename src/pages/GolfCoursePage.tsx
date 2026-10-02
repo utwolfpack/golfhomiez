@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import PageHero from '../components/PageHero'
+import RichTextContent from '../components/RichTextContent'
 import GolfCoursePublicNav from '../components/GolfCoursePublicNav'
 import { fetchGolfCoursePublicPage, type GolfCoursePublicPage as GolfCoursePublicPageRecord } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
@@ -239,7 +240,7 @@ export default function GolfCoursePage() {
               <p className="golfCourseUpcomingEventsEmpty">No upcoming course events are scheduled yet. Check the tournament calendar for tournament dates and future updates.</p>
             )}
           </section>
-          <p>{page.summary}</p>
+          <RichTextContent value={page.summary} className="golfCoursePublicSummary" ariaLabel="Course summary" />
           <div className="golfCoursePublicContactGrid">
             {address ? (
               <div>

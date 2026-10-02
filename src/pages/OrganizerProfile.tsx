@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
+import RichTextEditor from '../components/RichTextEditor'
 import { useOrganizerAuth } from '../context/OrganizerAuthContext'
 import { fetchOrganizerProfile, updateOrganizerProfile, type OrganizerAccount, type OrganizerAccountInput } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
@@ -103,8 +104,13 @@ export default function OrganizerProfile() {
             <div className="small">Format: 801 743 7000.</div>
           </div>
           <div>
-            <label className="label">Notes</label>
-            <textarea className="input" rows={4} value={form.notes ?? ''} onChange={(e) => setNotesValue(e.target.value)} />
+            <RichTextEditor
+              label="Notes"
+              value={form.notes ?? ''}
+              onChange={setNotesValue}
+              maxLength={5000}
+              logCategory="organizer.profile.notes"
+            />
           </div>
           <div className="small"><strong>Email:</strong> {account?.email || 'Not available'}</div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

@@ -43,6 +43,7 @@ import { createMarketingVideoSection, deleteMarketingVideoSection, getHomeMarket
 import { PASSWORD_POLICY_MESSAGE, validatePasswordPolicy } from './lib/password-policy.js'
 import { completeCheckout, createAccessCode, createCheckout, createPaymentMethodCheckout, createPortal, getBillingStatus, listAccessCodes, processStripeWebhook, redeemAccessCode, requireBillingAccess, setCancellation, updateAccessCode } from './lib/billing.js'
 import { ROUND_IMAGE_LIMIT, TOURNAMENT_IMAGE_LIMIT, USER_IMAGE_ENTITY_TYPES, deleteUserImage, ensureUserImagesDirectory, getUserImage, getUserImageCounts, listUserImages, safeImageFilePath, saveUserImage } from './lib/user-images.js'
+import { sanitizeRichTextHtml } from './lib/rich-text.js'
 import { addAdminSupportMessage, addRequesterSupportMessage, closeSupportTicket, createSupportTicket, getSupportTicketForAdmin, getSupportTicketForRequester, listSupportTicketsForAdmin, listSupportTicketsForRequester } from './lib/support-tickets.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -1888,7 +1889,7 @@ function sanitizeOrganizerTournamentUpdatePayload(body = {}) {
   if (!allowedTemplateKeys.has(templateKey)) throw new Error('Tournament Template is invalid. Select an available tournament template.')
   return {
     name,
-    description: body.description == null ? null : String(body.description).trim() || null,
+    description: sanitizeRichTextHtml(body.description, { maxTextLength: 5000 }),
     startDate: startDate || null,
     endDate: null,
     status,
@@ -1983,7 +1984,7 @@ function sanitizeHostProfilePayload(body = {}) {
   return {
     contactName: sanitizeProfileText(body.contactName ?? body.contact_name, 191),
     phone: sanitizeProfilePhone(body.phone, 64),
-    notes: sanitizeProfileText(body.notes, 5000),
+    notes: sanitizeRichTextHtml(body.notes, { maxTextLength: 5000 }),
   }
 }
 
@@ -2038,7 +2039,7 @@ function sanitizeOrganizerProfilePayload(body = {}) {
     organizationName,
     contactName: sanitizeProfileText(body.contactName ?? body.contact_name, 191),
     phone: sanitizeProfilePhone(body.phone, 64),
-    notes: sanitizeProfileText(body.notes, 5000),
+    notes: sanitizeRichTextHtml(body.notes, { maxTextLength: 5000 }),
   }
 }
 

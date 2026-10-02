@@ -6,6 +6,7 @@ import { archiveOrganizerTournamentRecord, fetchOrganizerPortal, restoreOrganize
 import { logFrontendEvent } from '../lib/frontend-logger'
 import { formatFriendlyDate, formatFriendlyDateTime } from '../lib/time-format'
 import TournamentTemplateFields, { TournamentCourseMiscField, TournamentRegistrationDeadlineField, TournamentSummaryField } from '../components/TournamentTemplateFields'
+import RichTextEditor from '../components/RichTextEditor'
 import TournamentStartScheduleManager from '../components/TournamentStartScheduleManager'
 import TournamentManagementLineItem, { TournamentManagementPagination } from '../components/TournamentManagementLineItem'
 import TournamentMessagingPanel from '../components/TournamentMessagingPanel'
@@ -390,8 +391,7 @@ export default function OrganizerTournaments() {
                                             <input className="input" value={form.name} onChange={(e) => setForm((prev) => prev ? ({ ...prev, name: e.target.value }) : prev)} />
                                           </div>
                                           <div>
-                                            <label className="label">Description</label>
-                                            <textarea className="input" rows={4} value={form.description || ''} onChange={(e) => setForm((prev) => prev ? ({ ...prev, description: e.target.value }) : prev)} />
+                                            <RichTextEditor label="Description" value={form.description || ''} onChange={(next) => setForm((prev) => prev ? ({ ...prev, description: next }) : prev)} maxLength={5000} logCategory="organizer.tournamentBuilder.description" />
                                           </div>
                                           <div className="formRow formRow--split">
                                             <div>

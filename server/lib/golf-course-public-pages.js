@@ -5,6 +5,7 @@ import net from 'node:net'
 import { logApi, logWarn } from './logger.js'
 import { normalizeTournamentScheduleDate } from './tournament-schedule-conflicts.js'
 import { listCourseEventsForPage } from './course-events.js'
+import { richTextHasContent, sanitizeRichTextHtml } from './rich-text.js'
 
 const MAX_WEBSITE_HTML_BYTES = 1_000_000
 const WEBSITE_FETCH_TIMEOUT_MS = 7_500
@@ -711,7 +712,7 @@ export async function updateGolfCoursePublicPageForHost(db, hostAccountId, input
   const legacyBannerImageUrl = cleanText(firstProvidedValue(input, ['bannerImageUrl', 'publicPageBannerImageUrl'], existing.banner_image_url), 1024)
   const values = {
     golfCourseName: cleanText(firstProvidedValue(input, ['golfCourseName'], existing.golf_course_name), 191),
-    summary: cleanText(firstProvidedValue(input, ['summary', 'publicPageSummary'], existing.summary), 5000),
+    summary: sanitizeRichTextHtml(firstProvidedValue(input, ['summary', 'publicPageSummary'], existing.summary), { maxTextLength: 5000 }),
     // Uploaded image data is the supported custom-banner mechanism. A legacy URL is retained only
     // when there is no uploaded banner, and app-relative legacy URLs are normalized safely.
     bannerImageUrl: bannerImageData ? null : normalizeHttpUrl(legacyBannerImageUrl, { baseUrl: options.baseUrl, label: 'Banner image URL' }),
@@ -725,7 +726,7 @@ export async function updateGolfCoursePublicPageForHost(db, hostAccountId, input
     isPublished: Object.prototype.hasOwnProperty.call(input, 'isPublished') ? Boolean(input.isPublished) : Boolean(existing.is_published),
   }
   if (!values.golfCourseName) throw new Error('Golf-course name is required.')
-  if (!values.summary) throw new Error('Golf-course page summary is required.')
+  if (!richTextHasContent(values.summary)) throw new Error('Golf-course page summary is required.')
   if (!values.stateCode) throw new Error('Golf-course page state is required.')
 
   await db.execute(

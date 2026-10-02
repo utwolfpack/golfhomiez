@@ -4,6 +4,7 @@ import GolfCoursePublicNav from '../components/GolfCoursePublicNav'
 import PageHero from '../components/PageHero'
 import { fetchGolfCoursePublicPage, type GolfCoursePublicPage, type GolfCoursePublicPageEvent, type GolfCoursePublicPageTournament } from '../lib/accounts'
 import { logFrontendEvent } from '../lib/frontend-logger'
+import RichTextContent from '../components/RichTextContent'
 
 const defaultGolfCourseBanner = '/DefaultGolfBanner.jpg'
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -200,7 +201,7 @@ export default function GolfCourseCalendarPage() {
           <div><div className="label">Time</div><div>{formatTimeRange(selectedItem.event)}</div></div>
           <div><div className="label">Golf course</div><div>{page?.golfCourseName}</div></div>
         </div>
-        {selectedItem.event.details ? <div className="golfCourseCalendarCourseEventDetails">{selectedItem.event.details}</div> : <div className="small">No additional event details were provided.</div>}
+        {selectedItem.event.details ? <RichTextContent value={selectedItem.event.details} className="golfCourseCalendarCourseEventDetails" ariaLabel="Course event details" /> : <div className="small">No additional event details were provided.</div>}
       </section>
     )
   }

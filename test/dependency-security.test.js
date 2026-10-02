@@ -39,6 +39,8 @@ test('npm audit v2 remediation pins direct dependencies to patched major lines',
   assert.equal(packageJson.dependencies['react-dom'], '^19.2.8')
   assert.equal(packageJson.dependencies['react-router'], '^8.3.0')
   assert.equal(packageJson.dependencies.mysql2, '^3.24.3')
+  assert.equal(packageJson.dependencies.quill, '2.0.3')
+  assert.equal(packageJson.dependencies['react-quill'], undefined)
   assert.equal(packageJson.dependencies['react-router-dom'], undefined)
   assert.equal(packageJson.dependencies.uuid, '^11.1.1')
   assert.equal(packageJson.devDependencies.eslint, '^10.8.0')
@@ -92,6 +94,24 @@ test('runtime container and package engine satisfy the React Router v8 declarati
 
   assert.match(dockerfile, /^FROM node:22-bookworm-slim/m)
   assert.equal(packageJson.engines.node, '>=22.22.0')
+})
+
+
+test('Quill rich-text integration is locked to the reviewed direct package and transitive tree', async () => {
+  const packageJson = await readProjectJson('package.json')
+  const packageLock = await readProjectJson('package-lock.json')
+
+  assert.equal(packageJson.dependencies.quill, '2.0.3')
+  assert.equal(packageLock.packages['']?.dependencies?.quill, '2.0.3')
+  assert.equal(packageLock.packages['node_modules/quill']?.version, '2.0.3')
+  assert.equal(
+    packageLock.packages['node_modules/quill']?.integrity,
+    'sha512-xEYQBqfYx/sfb33VJiKnSJp8ehloavImQ2A6564GAbqG55PGw1dAWUn1MUbQB62t0azawUS2CZZhWCjO8gRvTw==',
+  )
+  assert.equal(packageLock.packages['node_modules/quill-delta']?.version, '5.1.0')
+  assert.equal(packageLock.packages['node_modules/parchment']?.version, '3.0.0')
+  assert.equal(packageLock.packages['node_modules/lodash-es']?.version, '4.17.21')
+  assert.equal(packageLock.packages['node_modules/eventemitter3']?.version, '5.0.1')
 })
 
 test('uuid usage remains on the v4 named export supported by the upgraded uuid line', async () => {
