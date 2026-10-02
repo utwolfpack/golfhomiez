@@ -27,8 +27,8 @@ export function normalizeTeamChallengePointsPerHole(value, scoringType = DEFAULT
   if (value === null || value === undefined || value === '') return DEFAULT_TEAM_CHALLENGE_POINTS_PER_HOLE
   const points = Number(value)
   const valueLabel = normalizedScoringType === 'skins_push' ? 'dollars per hole' : 'points per hole'
-  if (!Number.isFinite(points) || points <= 0) throw new Error(`Team Challenge ${valueLabel} must be greater than zero.`)
-  if (points > 10000) throw new Error(`Team Challenge ${valueLabel} is too high.`)
+  if (!Number.isFinite(points) || points <= 0) throw new Error(`Challenge ${valueLabel} must be greater than zero.`)
+  if (points > 10000) throw new Error(`Challenge ${valueLabel} is too high.`)
   return Math.round(points * 100) / 100
 }
 
@@ -296,8 +296,8 @@ export function normalizeInboxMessagePayload(payload = {}) {
       challengeState: validateOptionalChallengeState(payload.challengeState || payload.state || payload.stateCode),
       challengeCourse: validateOptionalChallengeCourse(payload.challengeCourse || payload.course),
       challengeTeeColor: normalizeTeeColor(payload.challengeTeeColor || payload.teeColor || DEFAULT_TEE_COLOR),
-      challengeScoringType: DEFAULT_TEAM_CHALLENGE_SCORING_TYPE,
-      challengePointsPerHole: null,
+      challengeScoringType: normalizeTeamChallengeScoringType(payload.challengeScoringType || payload.scoringType),
+      challengePointsPerHole: normalizeTeamChallengePointsPerHole(payload.challengePointsPerHole ?? payload.pointsPerHole, payload.challengeScoringType || payload.scoringType),
       individualParticipantEmails: normalizeIndividualChallengeParticipantEmails(payload.individualParticipantEmails || payload.recipientEmails || payload.participantEmails || payload.recipients),
     }
   }

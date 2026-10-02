@@ -544,6 +544,8 @@ export function sanitizeTournamentTemplateData(value = {}) {
     contactEmail: cleanString('contactEmail'),
     logoFiles,
     supportingPhotoUrl: cleanString('supportingPhotoUrl'),
+    promotionalPhotoUrl: cleanString('promotionalPhotoUrl'),
+    flyerBackgroundColor: /^#[0-9a-f]{6}$/i.test(String(source.flyerBackgroundColor || '').trim()) ? String(source.flyerBackgroundColor).trim().toLowerCase() : null,
     miscNotes: cleanString('miscNotes'),
     tournamentSummary: source.tournamentSummary == null ? null : (String(source.tournamentSummary).trim().slice(0, 5000) || null),
     tournamentCourseMisc: source.tournamentCourseMisc == null ? null : (String(source.tournamentCourseMisc).trim().slice(0, 5000) || null),

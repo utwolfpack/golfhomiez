@@ -28,6 +28,7 @@ export type TournamentTemplate = {
   accentColor: string
   previewClassName: string
   attributeIcons: Record<TournamentAttributeIconKey, string>
+  backgroundColor: string
 }
 
 export type TournamentTemplateData = {
@@ -51,6 +52,8 @@ export type TournamentTemplateData = {
   contactEmail?: string | null
   logoFiles?: string[] | null
   supportingPhotoUrl?: string | null
+  promotionalPhotoUrl?: string | null
+  flyerBackgroundColor?: string | null
   miscNotes?: string | null
   tournamentSummary?: string | null
   tournamentCourseMisc?: string | null
@@ -67,12 +70,30 @@ const DEFAULT_ATTRIBUTE_ICONS: Record<TournamentAttributeIconKey, string> = {
   registrationFee: '/tournament-templates/registration-fee.jpg',
 }
 
+
+export const TOURNAMENT_BACKGROUND_COLOR_PALETTE = [
+  { label: 'Golf green', value: '#0f3f24' },
+  { label: 'Fairway green', value: '#174b22' },
+  { label: 'Modern olive', value: '#eff1d9' },
+  { label: 'Charity green', value: '#1f3d0f' },
+  { label: 'Sunset cream', value: '#f5f0dc' },
+  { label: 'Invitation cream', value: '#f4f1df' },
+  { label: 'Clean white', value: '#ffffff' },
+  { label: 'Soft gray', value: '#f4f6f5' },
+] as const
+
+export function normalizeTournamentBackgroundColor(value?: string | null) {
+  const color = String(value || '').trim()
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : ''
+}
+
 export const TOURNAMENT_TEMPLATES: TournamentTemplate[] = [
   {
     key: 'classic-flyer',
     name: 'Classic Golf Homiez',
     description: 'Clean green-and-gold flyer with readable event rows, charity highlights, registration details, contact information, and sponsor logos.',
     accentColor: '#0f3f24',
+    backgroundColor: '#ffffff',
     previewClassName: 'tournament-template-preview--classic',
     attributeIcons: DEFAULT_ATTRIBUTE_ICONS,
   },
@@ -81,6 +102,7 @@ export const TOURNAMENT_TEMPLATES: TournamentTemplate[] = [
     name: 'Fairway Poster',
     description: 'Bold photo-first event poster with a large tournament title, compact event facts, and a strong registration callout.',
     accentColor: '#174b22',
+    backgroundColor: '#0d3d22',
     previewClassName: 'tournament-template-preview--fairway',
     attributeIcons: DEFAULT_ATTRIBUTE_ICONS,
   },
@@ -89,6 +111,7 @@ export const TOURNAMENT_TEMPLATES: TournamentTemplate[] = [
     name: 'Modern Golf Open',
     description: 'Contemporary block layout with a strong hero image, high-contrast date and format details, and easy-to-scan information panels.',
     accentColor: '#244b17',
+    backgroundColor: '#eff1d9',
     previewClassName: 'tournament-template-preview--modern',
     attributeIcons: DEFAULT_ATTRIBUTE_ICONS,
   },
@@ -97,6 +120,7 @@ export const TOURNAMENT_TEMPLATES: TournamentTemplate[] = [
     name: 'Charity & Memorial',
     description: 'Charity-forward design that gives the beneficiary image and message extra emphasis while keeping tournament details easy to find.',
     accentColor: '#24440f',
+    backgroundColor: '#1f3d0f',
     previewClassName: 'tournament-template-preview--charity',
     attributeIcons: DEFAULT_ATTRIBUTE_ICONS,
   },
@@ -105,6 +129,7 @@ export const TOURNAMENT_TEMPLATES: TournamentTemplate[] = [
     name: 'Sunset Drive',
     description: 'Image-led promotional flyer with oversized event branding, centered registration details, and sponsor visibility for a polished event-poster feel.',
     accentColor: '#41520d',
+    backgroundColor: '#f5f0dc',
     previewClassName: 'tournament-template-preview--sunset',
     attributeIcons: DEFAULT_ATTRIBUTE_ICONS,
   },
@@ -113,6 +138,7 @@ export const TOURNAMENT_TEMPLATES: TournamentTemplate[] = [
     name: 'Green Invitation',
     description: 'Minimal invitation-style flyer inspired by a sculpted fairway edge, with bold vertical event typography and compact registration details.',
     accentColor: '#176b2c',
+    backgroundColor: '#f4f1df',
     previewClassName: 'tournament-template-preview--green-invite',
     attributeIcons: DEFAULT_ATTRIBUTE_ICONS,
   },
@@ -158,6 +184,8 @@ export function emptyTournamentTemplateData(): TournamentTemplateData {
     contactEmail: '',
     logoFiles: [],
     supportingPhotoUrl: '',
+    promotionalPhotoUrl: '',
+    flyerBackgroundColor: '',
     miscNotes: '',
     tournamentSummary: '',
     tournamentCourseMisc: '',

@@ -37,6 +37,7 @@ import type { TeeColorSelection } from '../lib/tee-colors'
 import { DEFAULT_TEE_COLOR, normalizeTeeColor, teeColorLabel } from '../lib/tee-colors'
 import { fetchProfile } from '../lib/profile'
 import { calculateTeamChallengePoints, isSkinsTeamChallenge, normalizeTeamChallengePointsPerHole, normalizeTeamChallengeScoringType, teamChallengeScoringTypeLabel, type TeamChallengeScoringType } from '../lib/team-challenge-scoring'
+import { calculateIndividualChallengePoints } from '../lib/individual-challenge-scoring'
 import { clearChallengeScoreFlowState, loadChallengeScoreFlowState, saveChallengeScoreFlowState } from '../lib/score-flow-state'
 import PictureLibraryModal from '../components/PictureLibraryModal'
 
@@ -576,6 +577,13 @@ export default function Challenges() {
     return getTeamChallengeDisplayName(message, side)
   }
 
+  function getTeamChallengeIdentifier(message: InboxMessage, side: 'proposer' | 'challenged') {
+    const teamId = side === 'proposer' ? message.proposerTeamId : message.challengedTeamId
+    if (!teamId) return null
+    const team = teams.find((candidate) => candidate.id === teamId)
+    return Number.isFinite(Number(team?.teamIdentifier)) ? Number(team?.teamIdentifier) : null
+  }
+
   function getTeamChallengeStateCode(message: InboxMessage) {
     return String(message.challengeState || '').trim().toUpperCase()
   }
@@ -1036,6 +1044,37 @@ export default function Challenges() {
     return `${providedCount} of ${holes.length || 18} holes entered • Live score ${score ?? 0}`
   }
 
+  function getIndividualChallengePointSummary(message: InboxMessage) {
+    return calculateIndividualChallengePoints(
+      getIndividualChallengeParticipants(message).map((participant) => ({
+        key: participantEmail(participant),
+        name: participantDisplayName(participant),
+        holes: getIndividualChallengeHoles(message, participant, false),
+      })),
+      getTeamChallengeScoringType(message),
+      getTeamChallengePointsPerHole(message),
+    )
+  }
+
+  function getIndividualChallengeScoringLabel(message: InboxMessage) {
+    const scoringType = getTeamChallengeScoringType(message)
+    if (scoringType === 'skins_push') return `Skins - Push · ${formatDollarAmount(getTeamChallengePointsPerHole(message))} / pushed hole`
+    if (scoringType === 'skins') return `Skins · ${formatPointNumber(getTeamChallengePointsPerHole(message))} pts/hole`
+    return 'Standard individual score'
+  }
+
+  function getIndividualChallengePointsLeaderLabel(message: InboxMessage, summary = getIndividualChallengePointSummary(message)) {
+    const entries = getIndividualChallengeParticipants(message).map((participant) => ({
+      name: participantDisplayName(participant),
+      points: Number(summary.participantPoints[participantEmail(participant)] || 0),
+    }))
+    const best = Math.max(0, ...entries.map((entry) => entry.points))
+    if (best <= 0) return '—'
+    const leaders = entries.filter((entry) => entry.points === best).map((entry) => entry.name)
+    const value = summary.scoringType === 'skins_push' ? formatDollarAmount(best) : `${formatPointNumber(best)} pts`
+    return `${leaders.join(' / ')} ${value}`
+  }
+
   function formatLeaderboardRelative(value: number | null) {
     if (value == null || !Number.isFinite(value)) return '—'
     if (value === 0) return 'E'
@@ -1043,6 +1082,8 @@ export default function Challenges() {
   }
 
   function getIndividualChallengeLeaderboardRows(message: InboxMessage) {
+    const pointSummary = getIndividualChallengePointSummary(message)
+    const skinsScoring = isSkinsTeamChallenge(pointSummary.scoringType)
     return getIndividualChallengeParticipants(message)
       .map((participant) => {
         const holes = getIndividualChallengeHoles(message, participant, false)
@@ -1050,12 +1091,14 @@ export default function Challenges() {
         const score = getIndividualChallengeScore(message, participant, false)
         const parTotal = enteredHoles.reduce((sum, hole) => sum + (Number(hole.par) || 0), 0)
         const relativeScore = score == null || enteredHoles.length === 0 ? null : score - parTotal
+        const points = Number(pointSummary.participantPoints[participantEmail(participant)] || 0)
         return {
           participant,
           holes,
           score,
           thru: enteredHoles.length,
           relativeScore,
+          points,
           courseName: getIndividualChallengeParticipantCourseName(message, participant) || 'Course not selected',
           courseState: getIndividualChallengeParticipantStateCode(message, participant),
           roundLabel: formatLeaderboardRelative(relativeScore),
@@ -1064,6 +1107,7 @@ export default function Challenges() {
       })
       .filter((row) => row.thru > 0)
       .sort((a, b) => {
+        if (skinsScoring && a.points !== b.points) return b.points - a.points
         if (a.relativeScore == null && b.relativeScore == null) return participantDisplayName(a.participant).localeCompare(participantDisplayName(b.participant))
         if (a.relativeScore == null) return 1
         if (b.relativeScore == null) return -1
@@ -1076,6 +1120,18 @@ export default function Challenges() {
   function getCompletedChallengeResultLabel(message: InboxMessage) {
     if (!isChallengeCompleted(message)) return ''
     if (message.messageType === 'individual_challenge') {
+      const pointSummary = getIndividualChallengePointSummary(message)
+      if (isSkinsTeamChallenge(pointSummary.scoringType)) {
+        const entries = getIndividualChallengeParticipants(message).map((participant) => ({
+          name: participantDisplayName(participant),
+          points: Number(pointSummary.participantPoints[participantEmail(participant)] || 0),
+        }))
+        const best = Math.max(0, ...entries.map((entry) => entry.points))
+        if (best <= 0) return 'Result: No skins awarded'
+        const leaders = entries.filter((entry) => entry.points === best).map((entry) => entry.name)
+        const value = pointSummary.scoringType === 'skins_push' ? formatDollarAmount(best) : `${formatPointNumber(best)} pts`
+        return leaders.length > 1 ? `Result: Tie · ${leaders.join(' / ')} ${value}` : `Result: ${leaders[0]} ${value}`
+      }
       const winner = getIndividualChallengeLeaderboardRows(message)[0]
       return winner ? `1st place: ${participantDisplayName(winner.participant)}` : '1st place: No score recorded'
     }
@@ -1110,10 +1166,17 @@ export default function Challenges() {
     const currentMessage = await fetchCurrentChallengeForLeaderboard(directoryRefreshedMessage, 'individual_challenge', 'open')
     if (!currentMessage) return null
     const rows = getIndividualChallengeLeaderboardRows(currentMessage)
+    const pointSummary = getIndividualChallengePointSummary(currentMessage)
+    const skinsScoring = isSkinsTeamChallenge(pointSummary.scoringType)
     setIndividualChallengeLeaderboardReturnTarget(returnTarget)
     setActiveIndividualLeaderboardParticipant(null)
     setActiveIndividualChallengeLeaderboard(currentMessage)
-    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: messageThreadId(currentMessage), participantCount: getIndividualChallengeParticipants(currentMessage).length, displayOrder: ['Round', 'Thru', 'Total'], totalDisplayMode: 'entered_strokes', rowCount: rows.length, completedCount: rows.filter((row) => row.score != null).length, golferRowsClickable: true, roundSummaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'], readOnlyScoreTilesRemoved: true, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
+    const combinedDisplayOrder = pointSummary.scoringType === 'skins_push'
+      ? ['Hole', 'Par', 'Winner', 'Worst', 'Push', 'Dollars']
+      : pointSummary.scoringType === 'skins'
+        ? ['Hole', 'Par', 'Winner', 'Points']
+        : []
+    logFrontendEvent({ category: 'inbox.individualChallenge.leaderboard', message: 'individual_challenge_leaderboard_opened', data: { messageId: currentMessage.id, threadId: messageThreadId(currentMessage), participantCount: getIndividualChallengeParticipants(currentMessage).length, challengeScoringType: pointSummary.scoringType, playerDisplayOrder: ['Position', 'Player / course', 'Round', 'Thru', 'Total'], combinedDisplayOrder, combinedViewVisible: skinsScoring, totalDisplayMode: skinsScoring ? 'individual_player_rows_plus_skins_hole_comparison' : 'individual_player_rows_only', rowCount: rows.length, combinedRowCount: skinsScoring ? pointSummary.holeResults.length : 0, completedCount: rows.filter((row) => row.score != null).length, golferRowsClickable: true, roundSummaryColumns: ['Hole', 'Par', 'Score', 'Current round score over/under', 'Current round total stroke score'], readOnlyScoreTilesRemoved: true, pushedHoleCount: pointSummary.pushedHoles, carryoverPoints: pointSummary.carryoverPoints, fetchedCurrentData: true, returnToScorecard: Boolean(returnTarget) } })
     return currentMessage
   }
 
@@ -1586,6 +1649,8 @@ export default function Challenges() {
           }
         : {
             challengeTeeColor: draft.teeColor,
+            challengeScoringType: draft.scoringType,
+            challengePointsPerHole: isSkinsTeamChallenge(draft.scoringType) ? draft.pointsPerHole : null,
             challengeDate: draft.challengeDate,
             challengeEndDate: draft.challengeEndDate || draft.challengeDate,
           }
@@ -1703,7 +1768,7 @@ export default function Challenges() {
       })
       const result = await sendInboxMessage(isTeamChallenge
         ? { proposerTeamId, challengedTeamIdentifier: trimmedChallengeTeamIdentifier, challengeDate: trimmedChallengeDate, challengeState: effectiveChallengeState, challengeCourse: effectiveChallengeCourse, challengeTeeColor: effectiveChallengeTeeColor, challengeScoringType: effectiveChallengeScoringType, challengePointsPerHole: effectiveChallengePointsPerHole, messageType: messageTypeForChallenge, body: trimmedBody }
-        : { individualParticipantEmails: participantEmails, challengeDate: trimmedChallengeDate, challengeEndDate: trimmedChallengeEndDate, challengeState: effectiveChallengeState || null, challengeCourse: effectiveChallengeCourse || null, challengeTeeColor: effectiveChallengeTeeColor, messageType: messageTypeForChallenge, body: trimmedBody })
+        : { individualParticipantEmails: participantEmails, challengeDate: trimmedChallengeDate, challengeEndDate: trimmedChallengeEndDate, challengeState: effectiveChallengeState || null, challengeCourse: effectiveChallengeCourse || null, challengeTeeColor: effectiveChallengeTeeColor, challengeScoringType: effectiveChallengeScoringType, challengePointsPerHole: effectiveChallengePointsPerHole, messageType: messageTypeForChallenge, body: trimmedBody })
       setStatus(result.notice || (isTeamChallenge ? 'Your Team Challenge was sent successfully.' : 'Your Individual Challenge was sent successfully.'))
       setChallengedTeamIdentifier('')
       setIndividualChallengeMembers([makeChallengeMemberDraft()])
@@ -2189,14 +2254,20 @@ export default function Challenges() {
     return (
       <div className="inboxTeamChallengeContext" aria-label="Challenge details">
         {message.messageType === 'challenge_request' ? (
-          <span>{getTeamChallengeDisplayName(message, 'proposer')} challenged {getTeamChallengeDisplayName(message, 'challenged')}</span>
+          <>
+            <span>{getTeamChallengeDisplayName(message, 'proposer')} challenged {getTeamChallengeDisplayName(message, 'challenged')}</span>
+            <span className="teamChallengeIdList" aria-label="GolfHomiez Team IDs">
+              {getTeamChallengeIdentifier(message, 'proposer') != null ? <span className="teamChallengeIdChip">{getTeamChallengeDisplayName(message, 'proposer')} · Team ID {getTeamChallengeIdentifier(message, 'proposer')}</span> : null}
+              {getTeamChallengeIdentifier(message, 'challenged') != null ? <span className="teamChallengeIdChip">{getTeamChallengeDisplayName(message, 'challenged')} · Team ID {getTeamChallengeIdentifier(message, 'challenged')}</span> : null}
+            </span>
+          </>
         ) : (
           <span>{participants.length} golfer challenge</span>
         )}
         {message.challengeDate || message.challengeState || message.challengeCourse ? (
           <span className="small">{[challengeDateLabel(message), message.challengeState, message.challengeCourse, `${teeColorLabel(getTeamChallengeTeeColor(message))} tees`].filter(Boolean).join(' • ')}</span>
         ) : null}
-        {message.messageType === 'challenge_request' ? <span className="teamChallengeTypeIndicator">{getTeamChallengeScoringLabel(message)}</span> : null}
+        <span className="teamChallengeTypeIndicator">{message.messageType === 'challenge_request' ? getTeamChallengeScoringLabel(message) : getIndividualChallengeScoringLabel(message)}</span>
         {isChallengeCompleted(message) ? <span className="challengeCompletedLabel">Completed · scores locked</span> : null}
       </div>
     )
@@ -2245,24 +2316,24 @@ export default function Challenges() {
           </div>
         </div>
         <TeeColorSelector value={draft.teeColor} onChange={(value) => patchChallengeSettingsDraft(message, { teeColor: value })} label="Tees played" />
-        {message.messageType === 'challenge_request' ? (
-          <div className="grid grid2 teamChallengeSkinsOptions">
-            <div>
-              <label className="label" htmlFor={`challenge-game-${messageThreadId(message)}`}>Team challenge game</label>
-              <select id={`challenge-game-${messageThreadId(message)}`} className="input" value={draft.scoringType} onChange={(event) => patchChallengeSettingsDraft(message, { scoringType: normalizeTeamChallengeScoringType(event.target.value) })}>
-                <option value="stroke_play">Standard team score</option>
-                <option value="skins">Skins</option>
-                <option value="skins_push">Skins - Push</option>
-              </select>
-            </div>
-            {isSkinsTeamChallenge(draft.scoringType) ? (
-              <div>
-                <label className="label" htmlFor={`challenge-points-${messageThreadId(message)}`}>{draft.scoringType === 'skins_push' ? 'Dollars per hole' : 'Points per hole'}</label>
-                <input id={`challenge-points-${messageThreadId(message)}`} className="input" type="number" min="0.01" step="0.01" value={draft.pointsPerHole} onChange={(event) => patchChallengeSettingsDraft(message, { pointsPerHole: event.target.value })} />
-              </div>
-            ) : null}
+        <div className="grid grid2 teamChallengeSkinsOptions">
+          <div>
+            <label className="label" htmlFor={`challenge-game-${messageThreadId(message)}`}>{message.messageType === 'challenge_request' ? 'Team challenge game' : 'Individual challenge game'}</label>
+            <select id={`challenge-game-${messageThreadId(message)}`} className="input" value={draft.scoringType} onChange={(event) => patchChallengeSettingsDraft(message, { scoringType: normalizeTeamChallengeScoringType(event.target.value) })}>
+              <option value="stroke_play">{message.messageType === 'challenge_request' ? 'Standard team score' : 'Standard individual score'}</option>
+              <option value="skins">Skins</option>
+              <option value="skins_push">Skins - Push</option>
+            </select>
+            {message.messageType === 'individual_challenge' ? <div className="small">Skins require an outright low hole score. Skins - Push carries tied-hole dollars forward and pays an outright winner for the stroke gap to the worst recorded score.</div> : null}
           </div>
-        ) : (
+          {isSkinsTeamChallenge(draft.scoringType) ? (
+            <div>
+              <label className="label" htmlFor={`challenge-points-${messageThreadId(message)}`}>{draft.scoringType === 'skins_push' ? 'Dollars per hole' : 'Points per hole'}</label>
+              <input id={`challenge-points-${messageThreadId(message)}`} className="input" type="number" min="0.01" step="0.01" value={draft.pointsPerHole} onChange={(event) => patchChallengeSettingsDraft(message, { pointsPerHole: event.target.value })} />
+            </div>
+          ) : null}
+        </div>
+        {message.messageType === 'individual_challenge' ? (
           <div className="grid grid2 individualChallengeSettingsDates">
             <div>
               <label className="label" htmlFor={`challenge-start-${messageThreadId(message)}`}>Start date</label>
@@ -2285,7 +2356,7 @@ export default function Challenges() {
               <div className="small">Maximum challenge length: one month.</div>
             </div>
           </div>
-        )}
+        ) : null}
         <div className="pageHeroActions">
           <button type="button" className="btn btnPrimary btnSmall" disabled={updatingChallengeSettings || !individualRangeValid} onClick={() => void saveChallengeSettings(message)}>{updatingChallengeSettings ? 'Saving…' : 'Save challenge settings'}</button>
         </div>
@@ -2882,11 +2953,73 @@ export default function Challenges() {
     )
   }
 
+  function renderIndividualChallengeSkinsSummaryView(message: InboxMessage) {
+    const pointSummary = getIndividualChallengePointSummary(message)
+    const showPushAndWorstColumns = pointSummary.scoringType === 'skins_push'
+    const valueColumnLabel = showPushAndWorstColumns ? 'Dollars' : 'Points'
+    const rows = pointSummary.holeResults
+    const tableClassName = `inboxIndividualSkinsSummaryTable${showPushAndWorstColumns ? '' : ' inboxIndividualSkinsSummaryTable--skins'}`
+
+    return (
+      <div className="inboxIndividualSkinsSummaryView" aria-label="Individual Challenge skins scoring summary">
+        <div className={tableClassName} role="table" aria-label="Hole-by-hole Individual Challenge skins summary">
+          <div className="inboxIndividualSkinsSummaryHeader" role="row">
+            <span>Hole</span>
+            <span>Par</span>
+            <span>Winner</span>
+            {showPushAndWorstColumns ? <span>Worst</span> : null}
+            {showPushAndWorstColumns ? <span>Push</span> : null}
+            <span>{valueColumnLabel}</span>
+          </div>
+          {rows.map((row) => {
+            const winnerLabel = row.status === 'won' && row.winnerName ? row.winnerName : row.status === 'push' ? 'Push' : 'Pending'
+            const worstNames = row.worstParticipantNames.length ? row.worstParticipantNames.join(' / ') : '—'
+            const carryover = showPushAndWorstColumns && row.carryoverAfterHole > 0 ? formatDollarAmount(row.carryoverAfterHole) : '—'
+            const awarded = row.status === 'won' && row.pointsAwarded > 0
+              ? (showPushAndWorstColumns ? formatDollarAmount(row.pointsAwarded) : `${formatPointNumber(row.pointsAwarded)} pts`)
+              : '—'
+            return (
+              <div className="inboxIndividualSkinsSummaryRow" role="row" key={row.hole}>
+                <strong>{row.hole}</strong>
+                <span>{row.par ?? '—'}</span>
+                <span className={`inboxIndividualSkinPerson inboxIndividualSkinPerson--${row.status}`}>
+                  <strong>{winnerLabel}</strong>
+                  {row.winnerScore != null ? <HoleStrokeScore score={row.winnerScore} par={row.par} compact /> : null}
+                </span>
+                {showPushAndWorstColumns ? (
+                  <span className="inboxIndividualSkinPerson">
+                    <strong>{worstNames}</strong>
+                    {row.worstScore != null ? <HoleStrokeScore score={row.worstScore} par={row.par} compact /> : null}
+                  </span>
+                ) : null}
+                {showPushAndWorstColumns ? <span>{carryover}</span> : null}
+                <strong className="inboxIndividualSkinsValue">{awarded}</strong>
+              </div>
+            )
+          })}
+          <div className="inboxIndividualSkinsSummaryRow inboxIndividualSkinsSummaryRow--total" role="row">
+            <strong>Total</strong>
+            <span>—</span>
+            <span className="inboxIndividualSkinsTotalLeader">{getIndividualChallengePointsLeaderLabel(message, pointSummary)}</span>
+            {showPushAndWorstColumns ? <span>—</span> : null}
+            {showPushAndWorstColumns ? <span>{pointSummary.carryoverPoints > 0 ? formatDollarAmount(pointSummary.carryoverPoints) : '—'}</span> : null}
+            <strong>—</strong>
+          </div>
+        </div>
+        <div className="inboxLeaderboardUpdated">
+          {pointSummary.resolvedHoles} of {rows.length} holes have at least two recorded scores • An outright low score is required to win a hole
+        </div>
+      </div>
+    )
+  }
+
   function renderIndividualChallengeLeaderboardModal() {
     if (!activeIndividualChallengeLeaderboard) return null
     const message = activeIndividualChallengeLeaderboard
     const rows = getIndividualChallengeLeaderboardRows(message)
     const completedCount = rows.filter((row) => row.score != null).length
+    const individualScoringType = getTeamChallengeScoringType(message)
+    const skinsScoring = isSkinsTeamChallenge(individualScoringType)
     const selectedParticipant = activeIndividualLeaderboardParticipant
     const selectedName = selectedParticipant ? participantDisplayName(selectedParticipant) : ''
     const summaryRows = selectedParticipant ? getIndividualRoundSummaryRows(message, selectedParticipant) : []
@@ -2922,6 +3055,7 @@ export default function Challenges() {
             <h2>{selectedParticipant ? 'Round Summary' : 'Individual Challenge Leaderboard'}</h2>
             <div className="inboxLeaderboardDivider" />
             <strong>{selectedParticipant ? selectedName : (message.challengeCourse || 'Individual Challenge')}</strong>
+            {!selectedParticipant ? <span className="teamChallengeTypeIndicator inboxIndividualSkinsTypeIndicator">{getIndividualChallengeScoringLabel(message)}</span> : null}
             {selectedParticipant ? <span className="inboxIndividualRoundSummaryCourse">{getIndividualChallengeParticipantCourseName(message, selectedParticipant) || 'Course not selected'}</span> : null}
             <span>{[message.challengeDate, selectedParticipant ? getIndividualChallengeParticipantStateCode(message, selectedParticipant) : message.challengeState, `${teeColorLabel(getTeamChallengeTeeColor(message))} tees`].filter(Boolean).join(' • ')}</span>
           </div>
@@ -2957,7 +3091,7 @@ export default function Challenges() {
               <div className="inboxIndividualRoundSummaryLegend">Round is the current cumulative score over or under par. Total is the current cumulative stroke score.</div>
             </div>
           ) : (
-            <div className="inboxLeaderboardBoard">
+            <div className={`inboxLeaderboardBoard${skinsScoring ? ' inboxIndividualSkinsLeaderboardBoard' : ''}`}>
               <div className="inboxLeaderboardHeaderRow">
                 <span>POS</span><span>PLAYER / COURSE</span><span>ROUND</span><span>THRU</span><span>TOTAL</span>
               </div>
@@ -2975,6 +3109,12 @@ export default function Challenges() {
                 )
               })}
               <div className="inboxLeaderboardUpdated">{completedCount} of {rows.length} scores entered live • Select a golfer for the hole-by-hole round summary</div>
+              {skinsScoring ? (
+                <>
+                  <div className="inboxTeamComparisonHeading inboxIndividualSkinsComparisonHeading">Hole-by-hole comparison</div>
+                  {renderIndividualChallengeSkinsSummaryView(message)}
+                </>
+              ) : null}
             </div>
           )}
         </div>
@@ -3417,7 +3557,7 @@ export default function Challenges() {
                     disabled={myTeams.length === 0}
                   >
                     {myTeams.length === 0 ? <option value="">Create or join a team first</option> : null}
-                    {myTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                    {myTeams.map((team) => <option key={team.id} value={team.id}>{team.name} · Team ID {team.teamIdentifier}</option>)}
                   </select>
                   {myTeams.length === 0 ? (
                     <div className="challengeTeamSetupNotice" role="status">
@@ -3444,24 +3584,44 @@ export default function Challenges() {
             </div>
 
             {isTeamChallenge ? (
-              <div>
-                <label className="label" htmlFor="teamChallengeIdentifier">GolfHomiez Team ID</label>
-                <input
-                  id="teamChallengeIdentifier"
-                  className="input"
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  list="teamChallengeOptions"
-                  required={isTeamChallenge}
-                  value={challengedTeamIdentifier}
-                  onChange={(event) => setChallengedTeamIdentifier(event.target.value.replace(/\D/g, ''))}
-                  placeholder="Enter the team's numeric ID"
-                />
-                <datalist id="teamChallengeOptions">
-                  {teamChallengeOptions.map((team) => <option key={team.id} value={String(team.teamIdentifier)} label={team.name} />)}
-                </datalist>
-                <div className="small">Use the numeric ID shown on the team's Teams page.{selectedChallengedTeam ? ` Selected team: ${selectedChallengedTeam.name}.` : ''}</div>
+              <div className="teamChallengeTeamLookup">
+                <div>
+                  <label className="label" htmlFor="teamChallengeDirectory">Find a team by name</label>
+                  <select
+                    id="teamChallengeDirectory"
+                    className="input"
+                    value={selectedChallengedTeam ? String(selectedChallengedTeam.teamIdentifier) : ''}
+                    onChange={(event) => {
+                      const teamIdentifier = event.target.value
+                      setChallengedTeamIdentifier(teamIdentifier)
+                      const selectedTeam = teamChallengeOptions.find((team) => String(team.teamIdentifier) === teamIdentifier)
+                      logFrontendEvent({ category: 'inbox.teamChallenge', message: 'team_challenge_directory_team_selected', data: { teamIdentifier: teamIdentifier || null, teamId: selectedTeam?.id || null, teamName: selectedTeam?.name || null } })
+                    }}
+                  >
+                    <option value="">Choose a GolfHomiez team</option>
+                    {teamChallengeOptions.map((team) => <option key={team.id} value={String(team.teamIdentifier)}>{team.name} · Team ID {team.teamIdentifier}</option>)}
+                  </select>
+                  <div className="small">Choose a team to fill its Team ID automatically. Team IDs are shown next to every team name.</div>
+                </div>
+                <div>
+                  <label className="label" htmlFor="teamChallengeIdentifier">GolfHomiez Team ID</label>
+                  <input
+                    id="teamChallengeIdentifier"
+                    className="input"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    list="teamChallengeOptions"
+                    required={isTeamChallenge}
+                    value={challengedTeamIdentifier}
+                    onChange={(event) => setChallengedTeamIdentifier(event.target.value.replace(/\D/g, ''))}
+                    placeholder="Enter the team's numeric ID"
+                  />
+                  <datalist id="teamChallengeOptions">
+                    {teamChallengeOptions.map((team) => <option key={team.id} value={String(team.teamIdentifier)} label={`${team.name} · Team ID ${team.teamIdentifier}`} />)}
+                  </datalist>
+                  <div className="small">{selectedChallengedTeam ? `Selected team: ${selectedChallengedTeam.name} · Team ID ${selectedChallengedTeam.teamIdentifier}.` : 'You can also enter a Team ID directly.'}</div>
+                </div>
               </div>
             ) : null}
 
@@ -3639,45 +3799,47 @@ export default function Challenges() {
 
             <TeeColorSelector value={teamChallengeTeeColor} onChange={setTeamChallengeTeeColor} label="Tees played" />
 
-            {isTeamChallenge ? (
-              <div className="grid grid2 teamChallengeSkinsOptions">
-                <div>
-                  <label className="label" htmlFor="teamChallengeScoringType">Team challenge game</label>
-                  <select
-                    id="teamChallengeScoringType"
-                    className="input"
-                    value={teamChallengeScoringType}
-                    onChange={(event) => {
-                      const nextScoringType = normalizeTeamChallengeScoringType(event.target.value)
-                      setTeamChallengeScoringType(nextScoringType)
-                      logFrontendEvent({ category: 'inbox.teamChallenge.scoring', message: 'team_challenge_scoring_type_changed', data: { challengeScoringType: nextScoringType } })
-                    }}
-                  >
-                    <option value="stroke_play">Standard team score</option>
-                    <option value="skins">Skins</option>
-                    <option value="skins_push">Skins - Push</option>
-                  </select>
-                  <div className="small">Skins awards points for holes won. Skins - Push uses dollars and carries tied-hole dollars forward until a team wins a hole.</div>
+            <div className="grid grid2 teamChallengeSkinsOptions">
+              <div>
+                <label className="label" htmlFor="teamChallengeScoringType">{isTeamChallenge ? 'Team challenge game' : 'Individual challenge game'}</label>
+                <select
+                  id="teamChallengeScoringType"
+                  className="input"
+                  value={teamChallengeScoringType}
+                  onChange={(event) => {
+                    const nextScoringType = normalizeTeamChallengeScoringType(event.target.value)
+                    setTeamChallengeScoringType(nextScoringType)
+                    logFrontendEvent({ category: isTeamChallenge ? 'inbox.teamChallenge.scoring' : 'inbox.individualChallenge.scoring', message: isTeamChallenge ? 'team_challenge_scoring_type_changed' : 'individual_challenge_scoring_type_changed', data: { challengeScoringType: nextScoringType } })
+                  }}
+                >
+                  <option value="stroke_play">{isTeamChallenge ? 'Standard team score' : 'Standard individual score'}</option>
+                  <option value="skins">Skins</option>
+                  <option value="skins_push">Skins - Push</option>
+                </select>
+                <div className="small">
+                  {isTeamChallenge
+                    ? 'Skins awards points for holes won. Skins - Push uses dollars and carries tied-hole dollars forward until a team wins a hole.'
+                    : 'Skins awards points only for an outright low score. Skins - Push carries tied-hole dollars forward; an outright winner earns dollars for the stroke gap between the winning score and the worst recorded score, plus any carryover.'}
                 </div>
-
-                {isSkinsTeamChallenge(teamChallengeScoringType) ? (
-                  <div>
-                    <label className="label" htmlFor="teamChallengePointsPerHole">{teamChallengeScoringType === 'skins_push' ? 'Dollars per hole' : 'Points per hole'}</label>
-                    <input
-                      id="teamChallengePointsPerHole"
-                      className="input"
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={teamChallengePointsPerHole}
-                      onChange={(event) => setTeamChallengePointsPerHole(event.target.value)}
-                      placeholder="1"
-                    />
-                    <div className="small">{teamChallengeScoringType === 'skins_push' ? 'Optional. Blank or invalid values default to $1 per hole.' : 'Optional. Blank or invalid values default to 1 point per hole.'}</div>
-                  </div>
-                ) : null}
               </div>
-            ) : null}
+
+              {isSkinsTeamChallenge(teamChallengeScoringType) ? (
+                <div>
+                  <label className="label" htmlFor="teamChallengePointsPerHole">{teamChallengeScoringType === 'skins_push' ? 'Dollars per hole' : 'Points per hole'}</label>
+                  <input
+                    id="teamChallengePointsPerHole"
+                    className="input"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={teamChallengePointsPerHole}
+                    onChange={(event) => setTeamChallengePointsPerHole(event.target.value)}
+                    placeholder="1"
+                  />
+                  <div className="small">{teamChallengeScoringType === 'skins_push' ? 'Optional. Blank or invalid values default to $1 per hole.' : 'Optional. Blank or invalid values default to 1 point per hole.'}</div>
+                </div>
+              ) : null}
+            </div>
 
             <div>
               <label className="label" htmlFor="challengeMessageBody">Challenge Message (optional)</label>

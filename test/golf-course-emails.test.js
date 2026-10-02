@@ -8,6 +8,7 @@ import {
   dedupeGolfCourseEmailRecords,
   extractGolfCourseEmailContacts,
   findBestGolfCourseContactPage,
+  findGolfCourseContactPages,
   runBuildGolfCourseEmails,
 } from '../server/lib/golf-course-emails.js'
 import { SCHEDULED_JOB_DEFINITIONS } from '../server/lib/scheduled-jobs.js'
@@ -17,6 +18,20 @@ import {
   scrubGolfCourseEmailsCsv,
 } from '../server/lib/golf-course-email-scrub.js'
 
+test('local dev watcher ignores scheduled-job runtime artifacts so checkpoints cannot restart an active crawl', async () => {
+  const [packageJsonText, gitignore] = await Promise.all([
+    readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    readFile(new URL('../.gitignore', import.meta.url), 'utf8'),
+  ])
+  const packageJson = JSON.parse(packageJsonText)
+  const ignored = packageJson.nodemonConfig?.ignore || []
+  assert.ok(ignored.includes('docs/**'))
+  assert.ok(ignored.includes('logging/**'))
+  assert.ok(ignored.includes('jobs/**'))
+  assert.match(gitignore, /^docs\/golfCourseEmails\.csv\.checkpoint\.json$/m)
+  assert.match(gitignore, /^docs\/golfCourseEmails\.csv\.checkpoint\.json\.\*\.tmp$/m)
+})
+
 test('Build Golf Course Emails is registered as an admin scheduled job', () => {
   const definition = SCHEDULED_JOB_DEFINITIONS.find((job) => job.id === 'buildGolfCourseEmails')
   assert.ok(definition)
@@ -24,7 +39,8 @@ test('Build Golf Course Emails is registered as an admin scheduled job', () => {
   assert.equal(definition.defaultSchedule?.type, 'manual')
   assert.equal(definition.backgroundManualRun, true)
   assert.match(definition.description, /docs\/golfCourseEmails\.csv/)
-  assert.match(definition.description, /at most two page attempts/i)
+  assert.match(definition.description, /not retried/i)
+  assert.match(definition.description, /checkpoint\/resume/i)
 })
 
 test('golf course email extraction captures required email plus nearby optional contact details', () => {
@@ -45,23 +61,33 @@ test('golf course email extraction captures required email plus nearby optional 
   assert.ok(contacts.some((contact) => contact.email === 'info@examplegolf.com'))
 })
 
-test('contact-page discovery stays on the golf course website and prefers contact/staff links', () => {
-  const selected = findBestGolfCourseContactPage(`
+test('contact-page discovery stays on the golf course website and prioritizes multiple useful personnel pages', () => {
+  const html = `
     <a href="/about">About Us</a>
     <a href="/contact-us">Contact</a>
+    <a href="/staff">Staff</a>
+    <a href="/management">Management</a>
     <a href="https://outside.example/staff">Staff elsewhere</a>
-  `, 'https://course.example/')
-  assert.equal(selected, 'https://course.example/contact-us')
+  `
+  assert.equal(findBestGolfCourseContactPage(html, 'https://course.example/'), 'https://course.example/contact-us')
+  assert.deepEqual(findGolfCourseContactPages(html, 'https://course.example/', 4), [
+    'https://course.example/contact-us',
+    'https://course.example/staff',
+    'https://course.example/management',
+    'https://course.example/about',
+  ])
 })
 
-test('Build Golf Course Emails crawls no more than two pages per course and writes the requested CSV in docs format', async () => {
+test('Build Golf Course Emails crawls prioritized personnel pages once, reports progress, and writes auditable source fields', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'golf-course-emails-'))
   const outputPath = path.join(tempDir, 'docs', 'golfCourseEmails.csv')
   const requests = []
+  const progressEvents = []
   const db = {
     async execute(sql) {
       assert.match(sql, /FROM golf_courses/)
       assert.match(sql, /TRIM\(website\)/)
+      assert.doesNotMatch(sql, /IS NOT NULL/)
       return [[{
         id: 'course-1',
         name: 'Example Golf Club',
@@ -72,14 +98,25 @@ test('Build Golf Course Emails crawls no more than two pages per course and writ
     },
   }
   const fetchImpl = async (url) => {
-    requests.push(String(url))
-    if (String(url).endsWith('/contact')) {
+    const requestUrl = String(url)
+    requests.push(requestUrl)
+    if (requestUrl.endsWith('/contact')) {
       return new Response(`
+        <title>Contact Golf Staff</title>
         <div>Jane Smith | General Manager | <a href="mailto:jane@example.com">jane@example.com</a></div>
-        <a href="/staff">Staff</a>
       `, { status: 200, headers: { 'content-type': 'text/html' } })
     }
+    if (requestUrl.endsWith('/staff')) {
+      return new Response(`
+        <title>Golf Staff</title>
+        <div>Sam Green | Director of Golf | <a href="mailto:sam@example.com">sam@example.com</a></div>
+      `, { status: 200, headers: { 'content-type': 'text/html' } })
+    }
+    if (requestUrl.endsWith('/about')) {
+      return new Response('<title>About</title><p>No public email on this page.</p>', { status: 200, headers: { 'content-type': 'text/html' } })
+    }
     return new Response(`
+      <title>Example Golf Club</title>
       <footer>Email info@example.com</footer>
       <a href="/about">About</a>
       <a href="/contact">Contact Us</a>
@@ -94,19 +131,29 @@ test('Build Golf Course Emails crawls no more than two pages per course and writ
       outputPath,
       concurrency: 1,
       timeoutMs: 2_000,
+      reportProgress: (progress) => progressEvents.push(progress),
     })
-    assert.equal(requests.length, 2)
+    assert.equal(requests.length, 4)
+    assert.equal(new Set(requests).size, 4)
+    assert.equal(output.golfCoursesTargeted, 1)
     assert.equal(output.golfCoursesEligible, 1)
     assert.equal(output.golfCoursesProcessed, 1)
     assert.equal(output.golfCoursesWithEmails, 1)
-    assert.equal(output.pagesAttempted, 2)
-    assert.equal(output.pagesFetched, 2)
-    assert.equal(output.emailRecords, 2)
+    assert.equal(output.pagesAttempted, 4)
+    assert.equal(output.pagesFetched, 4)
+    assert.equal(output.emailRecords, 3)
+    assert.equal(output.retryAttempts, 0)
+    assert.ok(progressEvents.length >= 3)
+    assert.equal(progressEvents.at(-1).phase, 'completed')
+    assert.equal(progressEvents.at(-1).percentComplete, 100)
+    assert.equal(progressEvents.at(-1).processedCourses, 1)
+    assert.equal(progressEvents.at(-1).totalCourses, 1)
 
     const csv = await readFile(outputPath, 'utf8')
-    assert.match(csv, /^Golf Course Name,Email Address,First Name,Last Name,Position\n/)
-    assert.match(csv, /Example Golf Club,info@example\.com,,,/)
-    assert.match(csv, /Example Golf Club,jane@example\.com,Jane,Smith,General Manager/)
+    assert.match(csv, /^Golf Course Name,Email Address,First Name,Last Name,Position,City,State,Source URL,Source Page Title,Discovered At\n/)
+    assert.match(csv, /Example Golf Club,info@example\.com,,,,Salt Lake City,UT,http:\/\/93\.184\.216\.34\/,Example Golf Club,/)
+    assert.match(csv, /Example Golf Club,jane@example\.com,,,General Manager,Salt Lake City,UT,http:\/\/93\.184\.216\.34\/contact,Contact Golf Staff,/)
+    assert.match(csv, /Example Golf Club,sam@example\.com,Sam,Green,Director Of Golf,Salt Lake City,UT,http:\/\/93\.184\.216\.34\/staff,Golf Staff,/)
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
@@ -114,7 +161,7 @@ test('Build Golf Course Emails crawls no more than two pages per course and writ
 
 test('CSV escaping keeps commas and quotes valid for downstream email jobs', () => {
   const csv = buildGolfCourseEmailsCsv([{ golfCourseName: 'Golf, Club', email: 'pro@example.com', firstName: 'Ann', lastName: 'O"Neil', position: 'GM' }])
-  assert.equal(csv, 'Golf Course Name,Email Address,First Name,Last Name,Position\n"Golf, Club",pro@example.com,Ann,"O""Neil",GM\n')
+  assert.equal(csv, 'Golf Course Name,Email Address,First Name,Last Name,Position,City,State,Source URL,Source Page Title,Discovered At\n"Golf, Club",pro@example.com,Ann,"O""Neil",GM,,,,,\n')
 })
 
 
@@ -135,15 +182,15 @@ test('golfCourseEmails.csv creation prevents duplicate email addresses case-inse
   assert.match(csv, /Gamma Golf Club,events@example\.com,,,/)
 })
 
-test('transient root failures receive only one retry and consume the two-attempt course budget', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'golf-course-emails-retry-'))
+test('failed website requests are not retried', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'golf-course-emails-no-retry-'))
   const outputPath = path.join(tempDir, 'docs', 'golfCourseEmails.csv')
   let requestCount = 0
   const db = {
     async execute() {
       return [[{
-        id: 'course-retry',
-        name: 'Retry Golf Club',
+        id: 'course-no-retry',
+        name: 'No Retry Golf Club',
         state_code: 'UT',
         city: 'Ogden',
         website: 'http://93.184.216.34/',
@@ -152,24 +199,94 @@ test('transient root failures receive only one retry and consume the two-attempt
   }
   const fetchImpl = async () => {
     requestCount += 1
-    if (requestCount === 1) return new Response('temporary failure', { status: 503, headers: { 'content-type': 'text/plain' } })
-    return new Response(`
-      <a href="mailto:manager@retry.example">manager@retry.example</a>
-      <a href="/contact">Contact</a>
-    `, { status: 200, headers: { 'content-type': 'text/html' } })
+    return new Response('temporary failure', { status: 503, headers: { 'content-type': 'text/plain' } })
   }
 
   try {
     const output = await runBuildGolfCourseEmails(db, { fetchImpl, outputPath, concurrency: 1, timeoutMs: 2_000 })
-    assert.equal(requestCount, 2)
-    assert.equal(output.pagesAttempted, 2)
-    assert.equal(output.pagesFetched, 1)
-    assert.equal(output.emailRecords, 1)
+    assert.equal(requestCount, 1)
+    assert.equal(output.pagesAttempted, 1)
+    assert.equal(output.pagesFetched, 0)
+    assert.equal(output.golfCoursesFailed, 1)
+    assert.equal(output.emailRecords, 0)
+    assert.equal(output.retryAttempts, 0)
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
 })
 
+test('Build Golf Course Emails checkpoints completed courses and resumes without re-crawling them', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'golf-course-emails-resume-'))
+  const outputPath = path.join(tempDir, 'docs', 'golfCourseEmails.csv')
+  const checkpointPath = `${outputPath}.checkpoint.json`
+  const controller = new AbortController()
+  const firstRunRequests = []
+  const rows = [
+    { id: 'course-1', name: 'Alpha Golf Club', state_code: 'UT', city: 'Alpha', website: 'http://93.184.216.34/course-1' },
+    { id: 'course-2', name: 'Beta Golf Club', state_code: 'UT', city: 'Beta', website: 'http://93.184.216.34/course-2' },
+  ]
+  const db = { async execute() { return [rows] } }
+
+  try {
+    await assert.rejects(
+      runBuildGolfCourseEmails(db, {
+        outputPath,
+        checkpointPath,
+        checkpointCourseInterval: 1,
+        concurrency: 1,
+        signal: controller.signal,
+        fetchImpl: async (url) => {
+          firstRunRequests.push(String(url))
+          return new Response(`<title>Course</title><a href="mailto:${String(url).includes('course-1') ? 'alpha' : 'beta'}@example.com">Email</a>`, { status: 200, headers: { 'content-type': 'text/html' } })
+        },
+        reportProgress: (progress) => {
+          if (progress.processedCourses === 1 && !controller.signal.aborted) {
+            const error = new Error('test cancellation')
+            error.code = 'SCHEDULED_JOB_CANCELLED'
+            controller.abort(error)
+          }
+        },
+      }),
+      /test cancellation/,
+    )
+    assert.equal(firstRunRequests.length, 1)
+    const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'))
+    assert.deepEqual(checkpoint.completedCourseIds, ['course-1'])
+
+    const secondRunRequests = []
+    const progressEvents = []
+    const output = await runBuildGolfCourseEmails(db, {
+      outputPath,
+      checkpointPath,
+      checkpointCourseInterval: 1,
+      concurrency: 1,
+      fetchImpl: async (url) => {
+        secondRunRequests.push(String(url))
+        return new Response('<title>Beta</title><a href="mailto:beta@example.com">Email</a>', { status: 200, headers: { 'content-type': 'text/html' } })
+      },
+      reportProgress: (progress) => progressEvents.push(progress),
+    })
+    assert.equal(secondRunRequests.length, 1)
+    assert.match(secondRunRequests[0], /course-2/)
+    assert.equal(output.resumedCourses, 1)
+    assert.equal(output.golfCoursesProcessed, 2)
+    assert.equal(output.emailRecords, 2)
+    assert.equal(progressEvents[0].resumedCourses, 1)
+    await assert.rejects(readFile(checkpointPath, 'utf8'), /ENOENT/)
+    const csv = await readFile(outputPath, 'utf8')
+    assert.match(csv, /alpha@example\.com/)
+    assert.match(csv, /beta@example\.com/)
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
+
+
+test('Build Golf Course Emails does not depend on or exclude addresses from a Brevo import file', async () => {
+  const source = await readFile(new URL('../server/lib/golf-course-emails.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /golfCourseEmails_brevo_import/i)
+  assert.doesNotMatch(source, /brevo.*exclude|exclude.*brevo/i)
+})
 
 test('Scrub Golf Course Emails is registered as a configurable manual scheduled job', () => {
   const definition = SCHEDULED_JOB_DEFINITIONS.find((job) => job.id === 'scrubGolfCourseEmails')

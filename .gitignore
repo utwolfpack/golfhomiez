@@ -21,3 +21,8 @@ jobs/commercials/*
 
 # Downloaded/managed runtime tools are environment-specific and not source-controlled.
 .runtime/
+
+# Runtime checkpoint/temp files for Build Golf Course Emails are not source-controlled.
+docs/golfCourseEmails.csv.checkpoint.json
+docs/golfCourseEmails.csv.checkpoint.json.*.tmp
+docs/golfCourseEmails.csv.*.tmp
