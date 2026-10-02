@@ -10858,3 +10858,108 @@ button.navDropdownItem{font:inherit;}
 .tournament-guided-flyer--spec-layout .tournament-guided-charity-copy > .richTextContent,
 .tournament-guided-flyer--spec-layout .tournament-guided-misc-copy > .richTextContent{color:#475569;line-height:1.45}
 .tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-misc-copy > .richTextContent{color:#334155}
+
+/* Mobile public golf-course rich-text containment.
+   Keep wide calendar/header children from increasing the card's intrinsic width,
+   which otherwise causes the course summary to render beyond the mobile viewport. */
+.golfCoursePublicContent,
+.golfCoursePublicSummaryCard,
+.golfCoursePublicSummaryCard > *,
+.golfCoursePublicSummaryHeading,
+.golfCourseUpcomingEvents,
+.golfCourseUpcomingEventList,
+.golfCourseUpcomingEventRow,
+.golfCoursePublicSummary.richTextContent,
+.golfCoursePublicContactGrid{
+  min-width:0;
+  max-width:100%;
+}
+
+.golfCoursePublicSummary.richTextContent,
+.golfCoursePublicSummary.richTextContent p,
+.golfCoursePublicSummary.richTextContent div,
+.golfCoursePublicSummary.richTextContent li{
+  max-width:100%;
+  overflow-wrap:break-word;
+  word-break:normal;
+  hyphens:none;
+}
+
+@media (max-width:760px){
+  .golfCoursePublicContent{
+    width:100%;
+    padding-left:12px;
+    padding-right:12px;
+  }
+
+  .golfCoursePublicSummaryCard{
+    width:100%;
+    padding:12px;
+  }
+
+  .golfCoursePublicSummaryHeading{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    align-items:stretch;
+    gap:10px;
+  }
+
+  .golfCourseCalendarHappyLink{
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    white-space:normal;
+    overflow-wrap:break-word;
+    word-break:normal;
+  }
+
+  .golfCourseUpcomingEvents{
+    width:100%;
+    padding:8px;
+  }
+
+  .golfCourseUpcomingEventRow{
+    grid-template-columns:minmax(0,1fr);
+    align-items:start;
+    gap:4px;
+    width:100%;
+    padding:7px 6px;
+  }
+
+  .golfCourseUpcomingEventDate,
+  .golfCourseUpcomingEventMain{
+    min-width:0;
+    max-width:100%;
+    flex-wrap:wrap;
+  }
+
+  .golfCourseUpcomingEventMain > strong{
+    min-width:0;
+    max-width:100%;
+    overflow:visible;
+    text-overflow:clip;
+    white-space:normal;
+    overflow-wrap:break-word;
+    word-break:normal;
+  }
+
+  .golfCourseUpcomingEventType{
+    max-width:100%;
+  }
+
+  .golfCourseUpcomingEventAction{
+    display:none;
+  }
+
+  .golfCoursePublicSummaryCard p,
+  .golfCoursePublicSummary.richTextContent{
+    width:100%;
+  }
+
+  .golfCoursePublicSummaryCard .btn{
+    max-width:100%;
+    white-space:normal;
+    overflow-wrap:break-word;
+    word-break:normal;
+  }
+}
