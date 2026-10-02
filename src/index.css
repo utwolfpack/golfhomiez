@@ -10963,3 +10963,78 @@ button.navDropdownItem{font:inherit;}
     word-break:normal;
   }
 }
+
+/* 2026-10-02: Preserve whole-word wrapping in public rich text and tournament flyers.
+   Wide children are already constrained with min-width:0/max-width:100%; normal
+   wrapping keeps readable words intact while URLs/code may still break safely. */
+.richTextContent,
+.richTextContent p,
+.richTextContent div,
+.richTextContent li,
+.richTextEditor__quill .ql-editor,
+.richTextEditor__quill .ql-editor p,
+.richTextEditor__quill .ql-editor div,
+.richTextEditor__quill .ql-editor li,
+.golfCoursePublicSummary.richTextContent,
+.golfCoursePublicSummary.richTextContent p,
+.golfCoursePublicSummary.richTextContent div,
+.golfCoursePublicSummary.richTextContent li,
+.golfCourseCalendarCourseEventDetails.richTextContent,
+.golfCourseCalendarCourseEventDetails.richTextContent p,
+.golfCourseCalendarCourseEventDetails.richTextContent div,
+.golfCourseCalendarCourseEventDetails.richTextContent li{
+  overflow-wrap:normal;
+  word-break:normal;
+  hyphens:none;
+}
+
+/* Only genuinely unbroken values such as URLs/code may break inside a token. */
+.richTextContent a,
+.richTextContent code,
+.richTextEditor__quill .ql-editor a,
+.richTextEditor__quill .ql-editor code{
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+
+/* The historical flyer rule allowed every word to split at any character.
+   Keep ordinary flyer copy intact and reserve arbitrary breaking for links/code. */
+.tournament-flyer,
+.tournament-flyer *,
+.tournament-guided-flyer,
+.tournament-guided-flyer *{
+  overflow-wrap:normal;
+  word-break:normal;
+  hyphens:none;
+}
+
+.tournament-flyer a,
+.tournament-flyer code,
+.tournament-guided-flyer a,
+.tournament-guided-flyer code{
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+
+@media screen and (max-width:760px){
+  /* Fit common long title words (for example, TOURNAMENT) without splitting them. */
+  .tournament-flyer--spec-layout .tournament-flyer-title{
+    font-size:clamp(25px,9.5vw,36px) !important;
+    line-height:.98 !important;
+    text-wrap:balance;
+  }
+
+  .tournament-guided-flyer--spec-layout .tournament-guided-hero-copy h1{
+    font-size:clamp(28px,9.5vw,40px) !important;
+    line-height:.96 !important;
+    text-wrap:balance;
+  }
+
+  .golfCourseCalendarHappyLink,
+  .golfCourseUpcomingEventMain > strong,
+  .golfCoursePublicSummaryCard .btn{
+    overflow-wrap:normal;
+    word-break:normal;
+    hyphens:none;
+  }
+}
