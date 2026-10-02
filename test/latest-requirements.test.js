@@ -892,6 +892,11 @@ test('host and organizer rich-text fields preserve line breaks, common formattin
   assert.match(styles, /\.richTextContent\{white-space:normal;overflow-wrap:break-word;word-break:normal;hyphens:none\}/)
   assert.match(styles, /\.richTextEditor__quill \.ql-editor\{[^}]*overflow-wrap:break-word;word-break:normal;hyphens:none\}/)
   assert.doesNotMatch(styles, /\.richTextContent\{[^}]*overflow-wrap:anywhere/)
+  assert.match(styles, /\.golfCoursePublicSummaryCard > \*,[\s\S]*?\.golfCoursePublicSummary\.richTextContent,[\s\S]*?min-width:0;[\s\S]*?max-width:100%/)
+  assert.match(styles, /@media \(max-width:760px\)\{[\s\S]*?\.golfCoursePublicSummaryHeading\{[\s\S]*?grid-template-columns:minmax\(0,1fr\)/)
+  assert.match(styles, /\.golfCourseUpcomingEventRow\{[\s\S]*?grid-template-columns:minmax\(0,1fr\)/)
+  assert.match(styles, /\.golfCourseUpcomingEventMain > strong\{[\s\S]*?white-space:normal;[\s\S]*?word-break:normal/)
+  assert.match(styles, /\.golfCourseCalendarHappyLink\{[\s\S]*?max-width:100%;[\s\S]*?white-space:normal/)
 
   assert.match(hostPortal, /host\.tournamentBuilder\.description/)
   assert.match(hostPortal, /host\.portal\.courseEvents\.details/)
