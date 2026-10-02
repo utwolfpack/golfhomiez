@@ -193,7 +193,7 @@ export const SCHEDULED_JOB_DEFINITIONS = [
   {
     id: 'buildGolfCourseEmails',
     name: 'Build Golf Course Emails',
-    description: 'Builds docs/golfCourseEmails.csv from active golf-course websites. Each course uses at most two page attempts, with only a single transient retry when the first request fails, and captures course name, email address, and any nearby contact name or position found on the site.',
+    description: 'Builds docs/golfCourseEmails.csv by crawling every active golf-course record, visiting the home page plus prioritized same-site contact, staff, directory, management, about, leadership, and pro-shop pages. Failed requests are not retried. Progress, ETA, checkpoint/resume status, source URLs, and discovered contact details are tracked while the job runs.',
     scheduleLabel: 'Manual',
     defaultScheduleLabel: 'Manual',
     scheduleTimeZone: GET_TOURNAMENTS_TIME_ZONE,
@@ -201,13 +201,14 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     getDefaultNextRunAt: () => null,
     defaultJobConfig: {},
     backgroundManualRun: true,
-    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal }) {
+    async run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, reportProgress, signal }) {
       return runBuildGolfCourseEmails(pool, {
         correlationId,
         triggeredBy,
         logApi,
         logError,
         logScheduledJob,
+        reportProgress,
         signal,
       })
     },
@@ -421,6 +422,7 @@ export async function listScheduledJobs(pool, now = new Date()) {
       ...job,
       canCancel: Boolean(active && !active.controller.signal.aborted),
       activeRunId: active?.runId || null,
+      activeProgress: active?.progress || null,
       commercialMetadata: commercialMetadataForJob(job, latestSuccessfulRun, pexelsQuota),
     }
   })
@@ -518,6 +520,7 @@ export async function runScheduledJob(pool, jobId, {
     controller,
     triggeredBy,
     startedAt: new Date(),
+    progress: null,
   }
   activeJobRuns.set(jobId, active)
 
@@ -533,7 +536,16 @@ export async function runScheduledJob(pool, jobId, {
     logApi('scheduled_job_run_started', { correlationId, jobId: definition.id, jobName: definition.name, runId, triggeredBy, adminUserId: adminUser?.id || null })
 
     throwIfJobCancelled(controller.signal)
-    const output = await definition.run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, signal: controller.signal, jobConfig })
+    const reportProgress = (progress) => {
+      if (!progress || typeof progress !== 'object') return
+      active.progress = {
+        ...progress,
+        correlationId: progress.correlationId || correlationId,
+        runId: active.runId || null,
+        updatedAt: progress.updatedAt || new Date().toISOString(),
+      }
+    }
+    const output = await definition.run({ pool, correlationId, triggeredBy, logApi, logError, logScheduledJob, reportProgress, signal: controller.signal, jobConfig })
     throwIfJobCancelled(controller.signal)
     const completedOutput = output
     const nextRunAt = await resolveNextRun(pool, definition)

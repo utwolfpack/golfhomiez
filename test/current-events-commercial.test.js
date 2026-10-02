@@ -645,6 +645,7 @@ test('no npm dependency was added for video generation and patched audit-sensiti
   assert.equal(packageJson.devDependencies?.['ffmpeg-static'], undefined)
   assert.equal(packageJson.scripts?.['setup:ffmpeg'], 'node server/scripts/ensure-ffmpeg.js')
   assert.match(packageJson.scripts?.postinstall || '', /db:migrate.*build/)
-  assert.equal(packageLock.packages['node_modules/brace-expansion']?.version, '5.0.9')
+  assert.equal(packageJson.overrides?.['brace-expansion'], '5.0.12')
+  assert.equal(packageLock.packages['node_modules/brace-expansion']?.version, '5.0.12')
   assert.equal(packageLock.packages['node_modules/nanoid']?.version, '3.3.18')
 })

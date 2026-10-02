@@ -1513,6 +1513,7 @@ test('great-shots configuration/docs preserve logging, migration, directories, a
   assert.equal(packageJson.dependencies?.['yt-dlp'], undefined)
   assert.equal(packageJson.dependencies?.pexels, undefined)
   assert.match(packageJson.scripts?.postinstall || '', /db:migrate.*build/)
-  assert.equal(packageLock.packages['node_modules/brace-expansion']?.version, '5.0.9')
+  assert.equal(packageJson.overrides?.['brace-expansion'], '5.0.12')
+  assert.equal(packageLock.packages['node_modules/brace-expansion']?.version, '5.0.12')
   assert.equal(packageLock.packages['node_modules/nanoid']?.version, '3.3.18')
 })

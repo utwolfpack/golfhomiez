@@ -378,3 +378,75 @@ test('latest challenge requirements add team row styling, skins-push dollars, in
   assert.match(roundDetail, /isIndividualChallengeRound/)
   assert.match(roundDetail, /'Individual Challenge'/)
 })
+
+test('individual challenges support skins games, skins-push hole comparisons, and easy Team ID lookup', () => {
+  const challengesPage = read('src/pages/Challenges.tsx')
+  const scoring = read('src/lib/individual-challenge-scoring.ts')
+  const inboxService = read('server/lib/inbox-service.js')
+  const server = read('server/index.js')
+  const styles = read('src/index.css')
+  const directions = read('src/pages/Directions.tsx')
+
+  const payload = normalizeInboxMessagePayload({
+    messageType: 'individual_challenge',
+    individualParticipantEmails: ['golfer@example.com'],
+    challengeDate: '2026-10-01',
+    challengeEndDate: '2026-10-02',
+    challengeScoringType: 'skins_push',
+    challengePointsPerHole: 1,
+    body: '',
+  })
+  assert.equal(payload.challengeScoringType, 'skins_push')
+  assert.equal(payload.challengePointsPerHole, 1)
+
+  assert.match(challengesPage, /id="teamChallengeDirectory"/)
+  assert.match(challengesPage, /Find a team by name/)
+  assert.match(challengesPage, /Team ID \{team\.teamIdentifier\}/)
+  assert.match(challengesPage, /team_challenge_directory_team_selected/)
+  assert.match(challengesPage, /function getTeamChallengeIdentifier/)
+  assert.match(challengesPage, /aria-label="GolfHomiez Team IDs"/)
+  assert.match(challengesPage, /teamChallengeIdChip/)
+  assert.match(styles, /\.teamChallengeTeamLookup\{[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/)
+  assert.match(styles, /\.teamChallengeIdChip\{/)
+
+  assert.match(challengesPage, /Individual challenge game/)
+  assert.match(challengesPage, /individual_challenge_scoring_type_changed/)
+  assert.match(challengesPage, /challengeScoringType: effectiveChallengeScoringType/)
+  assert.match(challengesPage, /renderIndividualChallengeSkinsSummaryView/)
+  assert.match(challengesPage, /<span>Winner<\/span>/)
+  assert.match(challengesPage, /<span>Worst<\/span>/)
+  assert.match(challengesPage, /worstParticipantNames\.join\('\s*\/\s*'\)/)
+  assert.match(challengesPage, /individual_player_rows_plus_skins_hole_comparison/)
+  assert.match(styles, /\.inboxIndividualSkinsSummaryTable/)
+
+  assert.match(scoring, /lowest\.length !== 1/)
+  assert.match(scoring, /worstScore - winnerScore/)
+  assert.match(scoring, /baseAward \+ carryoverPoints/)
+  assert.match(inboxService, /challengeScoringType: normalizeTeamChallengeScoringType\(payload\.challengeScoringType \|\| payload\.scoringType\)/)
+  assert.match(server, /challengeScoringType: payload\.challengeScoringType \|\| 'stroke_play'/)
+  assert.match(server, /settings\.challengeScoringType = challengeScoringType/)
+  assert.match(directions, /Individual Skins - Push Challenge/)
+  assert.match(directions, /worst score and golfer name or names/)
+})
+
+
+test('individual challenge leaderboard keeps clickable player rows and appends skins comparison only for skins games', () => {
+  const source = read('src/pages/Challenges.tsx')
+  const css = read('src/index.css')
+
+  assert.match(source, /const selectedParticipant = activeIndividualLeaderboardParticipant/)
+  assert.doesNotMatch(source, /const selectedParticipant = skinsScoring \? null : activeIndividualLeaderboardParticipant/)
+  assert.match(source, /inboxLeaderboardRow inboxLeaderboardRow--clickable/)
+  assert.match(source, /onClick=\{\(\) => openIndividualLeaderboardRoundSummary\(message, row\.participant\)\}/)
+  assert.match(source, /\{skinsScoring \? \([\s\S]*Hole-by-hole comparison[\s\S]*renderIndividualChallengeSkinsSummaryView\(message\)/)
+  assert.match(source, /combinedViewVisible: skinsScoring/)
+  assert.match(source, /totalDisplayMode: skinsScoring \? 'individual_player_rows_plus_skins_hole_comparison' : 'individual_player_rows_only'/)
+
+  // Plain Skins omits both Worst and Push from the combined table. Skins - Push retains both.
+  assert.match(source, /const showPushAndWorstColumns = pointSummary\.scoringType === 'skins_push'/)
+  assert.match(source, /\{showPushAndWorstColumns \? <span>Worst<\/span> : null\}/)
+  assert.match(source, /\{showPushAndWorstColumns \? <span>Push<\/span> : null\}/)
+  assert.match(source, /pointSummary\.scoringType === 'skins'[\s\S]*\['Hole', 'Par', 'Winner', 'Points'\]/)
+  assert.match(source, /pointSummary\.scoringType === 'skins_push'[\s\S]*\['Hole', 'Par', 'Winner', 'Worst', 'Push', 'Dollars'\]/)
+  assert.match(css, /\.inboxIndividualSkinsSummaryTable--skins \.inboxIndividualSkinsSummaryHeader,[\s\S]*grid-template-columns:44px 40px minmax\(140px,1fr\) 82px/)
+})

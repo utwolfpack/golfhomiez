@@ -4,14 +4,17 @@ import net from 'node:net'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { isPrivateNetworkAddress } from './golf-course-public-pages.js'
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 export const GOLF_COURSE_EMAILS_OUTPUT_PATH = path.join(PROJECT_ROOT, 'docs', 'golfCourseEmails.csv')
 const DEFAULT_TIMEOUT_MS = 7_000
 const DEFAULT_CONCURRENCY = 12
-const MAX_PAGE_ATTEMPTS_PER_COURSE = 2
+const DEFAULT_MAX_PAGES_PER_COURSE = 8
+const PROGRESS_LOG_COURSE_INTERVAL = 100
+const DEFAULT_CHECKPOINT_COURSE_INTERVAL = 50
 const MAX_RESPONSE_BYTES = 1_000_000
 const MAX_REDIRECTS = 3
 const USER_AGENT = 'GolfHomiezGolfCourseEmailBuilder/1.0 (+https://golfhomiez.com)'
@@ -82,6 +85,11 @@ function htmlToText(value) {
       .replace(/<[^>]+>/g, ' '),
     5_000,
   )
+}
+
+function pageTitleFromHtml(value) {
+  const match = String(value || '').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)
+  return match ? htmlToText(match[1]).slice(0, 191) : ''
 }
 
 export function normalizeGolfCourseWebsiteUrl(value) {
@@ -252,7 +260,7 @@ function contextAroundEmail(html, index, email) {
   return htmlToText(html.slice(start, end))
 }
 
-export function extractGolfCourseEmailContacts(html) {
+export function extractGolfCourseEmailContacts(html, { sourceUrl = '', sourcePageTitle = '' } = {}) {
   const source = decodeHtmlEntities(String(html || ''))
   const byEmail = new Map()
   let match
@@ -260,16 +268,22 @@ export function extractGolfCourseEmailContacts(html) {
   while ((match = EMAIL_PATTERN.exec(source))) {
     const email = normalizeEmail(match[0])
     if (!email || byEmail.has(email)) continue
-    byEmail.set(email, { email, ...inferContactDetails(contextAroundEmail(source, match.index, match[0]), email) })
+    byEmail.set(email, {
+      email,
+      ...inferContactDetails(contextAroundEmail(source, match.index, match[0]), email),
+      sourceUrl: cleanText(sourceUrl, 2048),
+      sourcePageTitle: cleanText(sourcePageTitle, 191),
+    })
   }
   return [...byEmail.values()]
 }
 
-export function findBestGolfCourseContactPage(html, baseUrl) {
+export function findGolfCourseContactPages(html, baseUrl, limit = DEFAULT_MAX_PAGES_PER_COURSE - 1) {
   const source = String(html || '')
-  let best = null
+  const candidates = new Map()
   const linkPattern = /<a\b[^>]*href\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi
   let match
+  let order = 0
   while ((match = linkPattern.exec(source))) {
     const href = decodeHtmlEntities(match[1] ?? match[2] ?? match[3] ?? '').trim()
     const label = htmlToText(match[4] || '')
@@ -293,9 +307,18 @@ export function findBestGolfCourseContactPage(html, baseUrl) {
       if (haystack.includes(keyword)) score = Math.max(score, points)
     }
     if (!score) continue
-    if (!best || score > best.score) best = { url: normalized, score }
+    const current = candidates.get(normalized)
+    if (!current || score > current.score) candidates.set(normalized, { url: normalized, score, order })
+    order += 1
   }
-  return best?.url || null
+  return [...candidates.values()]
+    .sort((a, b) => b.score - a.score || a.order - b.order)
+    .slice(0, positiveInt(limit, DEFAULT_MAX_PAGES_PER_COURSE - 1, 1, 24))
+    .map((candidate) => candidate.url)
+}
+
+export function findBestGolfCourseContactPage(html, baseUrl) {
+  return findGolfCourseContactPages(html, baseUrl, 1)[0] || null
 }
 
 function mergeContacts(existing, incoming) {
@@ -311,50 +334,72 @@ function mergeContacts(existing, incoming) {
       firstName: current.firstName || contact.firstName || '',
       lastName: current.lastName || contact.lastName || '',
       position: current.position || contact.position || '',
+      sourceUrl: current.sourceUrl || contact.sourceUrl || '',
+      sourcePageTitle: current.sourcePageTitle || contact.sourcePageTitle || '',
     })
   }
   return [...byEmail.values()]
 }
 
-function transientFetchError(error) {
-  const status = Number(error?.statusCode || 0)
-  return status === 408 || status === 425 || status === 429 || status >= 500 || error?.code === 'GOLF_COURSE_EMAIL_TIMEOUT' || ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(error?.code)
-}
-
 async function crawlGolfCourseForEmails(course, options) {
-  const { fetchImpl, timeoutMs, signal } = options
+  const { fetchImpl, timeoutMs, signal, maxPagesPerCourse } = options
   const rootUrl = normalizeGolfCourseWebsiteUrl(course.website || course.golf_course_website)
-  if (!rootUrl) return { contacts: [], pagesAttempted: 0, pagesFetched: 0, error: 'invalid_website' }
+  if (!rootUrl) {
+    return { contacts: [], pagesAttempted: 0, pagesFetched: 0, pageFailures: 0, error: 'missing_or_invalid_website', skipped: true }
+  }
 
-  let pagesAttempted = 0
+  let pagesAttempted = 1
   let pagesFetched = 0
+  let pageFailures = 0
   let root
   try {
-    pagesAttempted += 1
     root = await fetchHtml(rootUrl, { fetchImpl, timeoutMs, signal })
     pagesFetched += 1
   } catch (error) {
     throwIfCancelled(signal)
-    if (!transientFetchError(error) || pagesAttempted >= MAX_PAGE_ATTEMPTS_PER_COURSE) throw error
-    pagesAttempted += 1
-    root = await fetchHtml(rootUrl, { fetchImpl, timeoutMs, signal })
-    pagesFetched += 1
-  }
-
-  let contacts = extractGolfCourseEmailContacts(root.html)
-  const secondPageUrl = pagesAttempted < MAX_PAGE_ATTEMPTS_PER_COURSE ? findBestGolfCourseContactPage(root.html, root.url) : null
-  if (secondPageUrl) {
-    try {
-      pagesAttempted += 1
-      const secondPage = await fetchHtml(secondPageUrl, { fetchImpl, timeoutMs, signal })
-      pagesFetched += 1
-      contacts = mergeContacts(contacts, extractGolfCourseEmailContacts(secondPage.html))
-    } catch (error) {
-      throwIfCancelled(signal)
-      return { contacts, pagesAttempted, pagesFetched, error: error?.message || String(error), secondPageUrl }
+    return {
+      contacts: [],
+      pagesAttempted,
+      pagesFetched,
+      pageFailures: 1,
+      error: error?.message || String(error),
+      failed: true,
     }
   }
-  return { contacts, pagesAttempted, pagesFetched, error: null, secondPageUrl }
+
+  let contacts = extractGolfCourseEmailContacts(root.html, {
+    sourceUrl: root.url,
+    sourcePageTitle: pageTitleFromHtml(root.html),
+  })
+  const pageUrls = findGolfCourseContactPages(root.html, root.url, Math.max(1, maxPagesPerCourse - 1))
+  const pageErrors = []
+
+  for (const pageUrl of pageUrls) {
+    if (pagesAttempted >= maxPagesPerCourse) break
+    throwIfCancelled(signal)
+    pagesAttempted += 1
+    try {
+      const page = await fetchHtml(pageUrl, { fetchImpl, timeoutMs, signal })
+      pagesFetched += 1
+      contacts = mergeContacts(contacts, extractGolfCourseEmailContacts(page.html, {
+        sourceUrl: page.url,
+        sourcePageTitle: pageTitleFromHtml(page.html),
+      }))
+    } catch (error) {
+      throwIfCancelled(signal)
+      pageFailures += 1
+      pageErrors.push({ url: pageUrl, error: error?.message || String(error) })
+    }
+  }
+
+  return {
+    contacts,
+    pagesAttempted,
+    pagesFetched,
+    pageFailures,
+    error: pageErrors.length ? pageErrors[pageErrors.length - 1].error : null,
+    pageErrors,
+  }
 }
 
 function csvCell(value) {
@@ -375,9 +420,20 @@ export function dedupeGolfCourseEmailRecords(records) {
 }
 
 export function buildGolfCourseEmailsCsv(records) {
-  const rows = [['Golf Course Name', 'Email Address', 'First Name', 'Last Name', 'Position']]
+  const rows = [['Golf Course Name', 'Email Address', 'First Name', 'Last Name', 'Position', 'City', 'State', 'Source URL', 'Source Page Title', 'Discovered At']]
   for (const record of dedupeGolfCourseEmailRecords(records)) {
-    rows.push([record.golfCourseName, record.email, record.firstName || '', record.lastName || '', record.position || ''])
+    rows.push([
+      record.golfCourseName,
+      record.email,
+      record.firstName || '',
+      record.lastName || '',
+      record.position || '',
+      record.city || '',
+      record.state || '',
+      record.sourceUrl || '',
+      record.sourcePageTitle || '',
+      record.discoveredAt || '',
+    ])
   }
   return `${rows.map((row) => row.map(csvCell).join(',')).join('\n')}\n`
 }
@@ -401,7 +457,6 @@ async function loadGolfCourses(db) {
            COALESCE(NULLIF(TRIM(website), ''), NULLIF(TRIM(golf_course_website), '')) AS website
       FROM golf_courses
      WHERE active = 1
-       AND COALESCE(NULLIF(TRIM(website), ''), NULLIF(TRIM(golf_course_website), '')) IS NOT NULL
      ORDER BY state_code, name, id
   `)
   return Array.isArray(rows) ? rows : []
@@ -419,52 +474,238 @@ async function writeCsvAtomically(outputPath, csv) {
   }
 }
 
+function golfCourseCrawlFingerprint(courses) {
+  const hash = createHash('sha256')
+  for (const course of courses) {
+    hash.update(`${String(course?.id || '')}|${String(course?.website || '')}\n`)
+  }
+  return hash.digest('hex')
+}
+
+async function readGolfCourseEmailCheckpoint(checkpointPath, fingerprint) {
+  try {
+    const parsed = JSON.parse(await readFile(checkpointPath, 'utf8'))
+    if (!parsed || parsed.version !== 1 || parsed.courseFingerprint !== fingerprint) return null
+    if (!Array.isArray(parsed.completedCourseIds) || !Array.isArray(parsed.records) || !parsed.stats || typeof parsed.stats !== 'object') return null
+    return parsed
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    return null
+  }
+}
+
+async function writeGolfCourseEmailCheckpoint(checkpointPath, checkpoint) {
+  const directory = path.dirname(checkpointPath)
+  await mkdir(directory, { recursive: true })
+  const tempPath = `${checkpointPath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await writeFile(tempPath, `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8')
+    await rename(tempPath, checkpointPath)
+  } finally {
+    await rm(tempPath, { force: true }).catch(() => {})
+  }
+}
+
 export async function runBuildGolfCourseEmails(db, {
   correlationId = null,
   triggeredBy = 'manual',
   logApi = () => {},
   logError = () => {},
   logScheduledJob = () => {},
+  reportProgress = () => {},
   signal = null,
   fetchImpl = globalThis.fetch,
   outputPath = GOLF_COURSE_EMAILS_OUTPUT_PATH,
   concurrency = positiveInt(process.env.GOLF_COURSE_EMAILS_CONCURRENCY, DEFAULT_CONCURRENCY, 1, 24),
   timeoutMs = positiveInt(process.env.GOLF_COURSE_EMAILS_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, 1_000, 30_000),
+  maxPagesPerCourse = positiveInt(process.env.GOLF_COURSE_EMAILS_MAX_PAGES_PER_COURSE, DEFAULT_MAX_PAGES_PER_COURSE, 2, 24),
+  checkpointPath = `${outputPath}.checkpoint.json`,
+  checkpointCourseInterval = positiveInt(process.env.GOLF_COURSE_EMAILS_CHECKPOINT_COURSE_INTERVAL, DEFAULT_CHECKPOINT_COURSE_INTERVAL, 1, 500),
 } = {}) {
   throwIfCancelled(signal)
   const courses = await loadGolfCourses(db)
   const records = []
+  const startedAtMs = Date.now()
+  const discoveredAt = new Date(startedAtMs).toISOString()
+  const courseFingerprint = golfCourseCrawlFingerprint(courses)
+  const completedCourseIds = new Set()
   const stats = {
-    golfCoursesEligible: courses.length,
+    golfCoursesTargeted: courses.length,
+    golfCoursesEligible: courses.filter((course) => Boolean(normalizeGolfCourseWebsiteUrl(course.website))).length,
+    golfCoursesWithoutWebsite: 0,
     golfCoursesProcessed: 0,
     golfCoursesWithEmails: 0,
     golfCoursesFailed: 0,
+    pageFailures: 0,
     pagesAttempted: 0,
     pagesFetched: 0,
     emailRecords: 0,
     duplicateEmailRecordsSkipped: 0,
   }
-  const startDetails = { correlationId, triggeredBy, courseCount: courses.length, concurrency, timeoutMs, maxPageAttemptsPerCourse: MAX_PAGE_ATTEMPTS_PER_COURSE, outputPath }
+  const checkpoint = await readGolfCourseEmailCheckpoint(checkpointPath, courseFingerprint)
+  if (checkpoint) {
+    for (const id of checkpoint.completedCourseIds) completedCourseIds.add(String(id))
+    records.push(...checkpoint.records)
+    for (const key of ['golfCoursesWithoutWebsite', 'golfCoursesProcessed', 'golfCoursesWithEmails', 'golfCoursesFailed', 'pageFailures', 'pagesAttempted', 'pagesFetched']) {
+      const value = Number(checkpoint.stats?.[key])
+      if (Number.isFinite(value) && value >= 0) stats[key] = value
+    }
+  }
+  stats.golfCoursesProcessed = Math.min(courses.length, completedCourseIds.size)
+  const resumedCourses = stats.golfCoursesProcessed
+  let lastLoggedProgressCount = -1
+  let lastCheckpointCount = completedCourseIds.size
+  let checkpointWriteChain = Promise.resolve()
+
+  const buildProgress = (phase = 'crawling') => {
+    const nowMs = Date.now()
+    const elapsedMs = Math.max(0, nowMs - startedAtMs)
+    const totalCourses = stats.golfCoursesTargeted
+    const processedCourses = stats.golfCoursesProcessed
+    const percentComplete = totalCourses > 0 ? Math.min(100, (processedCourses / totalCourses) * 100) : 100
+    const coursesProcessedThisRun = Math.max(0, processedCourses - resumedCourses)
+    const coursesPerMinute = elapsedMs > 0 ? (coursesProcessedThisRun / elapsedMs) * 60_000 : 0
+    const estimatedRemainingMs = coursesProcessedThisRun > 0 && processedCourses < totalCourses && coursesPerMinute > 0
+      ? Math.round(((totalCourses - processedCourses) / coursesPerMinute) * 60_000)
+      : processedCourses >= totalCourses ? 0 : null
+    return {
+      phase,
+      correlationId,
+      processedCourses,
+      coursesProcessedThisRun,
+      resumedCourses,
+      totalCourses,
+      eligibleCourses: stats.golfCoursesEligible,
+      coursesWithoutWebsite: stats.golfCoursesWithoutWebsite,
+      coursesWithEmails: stats.golfCoursesWithEmails,
+      failedCourses: stats.golfCoursesFailed,
+      pageFailures: stats.pageFailures,
+      pagesAttempted: stats.pagesAttempted,
+      pagesFetched: stats.pagesFetched,
+      emailRecordsDiscovered: records.length,
+      percentComplete: Number(percentComplete.toFixed(2)),
+      elapsedMs,
+      coursesPerMinute: Number(coursesPerMinute.toFixed(2)),
+      estimatedRemainingMs,
+      expectedCompletionAt: estimatedRemainingMs == null ? null : new Date(nowMs + estimatedRemainingMs).toISOString(),
+      updatedAt: new Date(nowMs).toISOString(),
+      maxPagesPerCourse,
+      retryAttempts: 0,
+      checkpointFile: path.relative(PROJECT_ROOT, checkpointPath).replace(/\\/g, '/'),
+    }
+  }
+
+  const publishProgress = (phase = 'crawling', forceLog = false) => {
+    const progress = buildProgress(phase)
+    reportProgress(progress)
+    const shouldLog = forceLog
+      || progress.processedCourses === progress.totalCourses
+      || progress.processedCourses === 0
+      || progress.processedCourses - lastLoggedProgressCount >= PROGRESS_LOG_COURSE_INTERVAL
+    if (shouldLog) {
+      lastLoggedProgressCount = progress.processedCourses
+      logScheduledJob('build_golf_course_emails_progress', progress)
+      logApi('build_golf_course_emails_progress', progress)
+    }
+    return progress
+  }
+
+  const queueCheckpoint = (force = false) => {
+    if (!force && completedCourseIds.size - lastCheckpointCount < checkpointCourseInterval) return checkpointWriteChain
+    lastCheckpointCount = completedCourseIds.size
+    const snapshot = {
+      version: 1,
+      courseFingerprint,
+      startedAt: checkpoint?.startedAt || discoveredAt,
+      updatedAt: new Date().toISOString(),
+      completedCourseIds: [...completedCourseIds],
+      stats: { ...stats },
+      records: records.map((record) => ({ ...record })),
+    }
+    checkpointWriteChain = checkpointWriteChain
+      .catch(() => {})
+      .then(() => writeGolfCourseEmailCheckpoint(checkpointPath, snapshot))
+    return checkpointWriteChain
+  }
+
+  const startDetails = {
+    correlationId,
+    triggeredBy,
+    courseCount: courses.length,
+    eligibleCourseCount: stats.golfCoursesEligible,
+    concurrency,
+    timeoutMs,
+    maxPagesPerCourse,
+    retryAttempts: 0,
+    resumedCourses,
+    checkpointCourseInterval,
+    checkpointPath,
+    outputPath,
+  }
   logApi('build_golf_course_emails_started', startDetails)
   logScheduledJob('build_golf_course_emails_started', startDetails)
+  if (resumedCourses > 0) {
+    logApi('build_golf_course_emails_resumed', { correlationId, resumedCourses, checkpointPath })
+    logScheduledJob('build_golf_course_emails_resumed', { correlationId, resumedCourses, checkpointPath })
+  }
+  publishProgress(resumedCourses > 0 ? 'resuming' : 'starting', true)
 
-  await mapWithConcurrency(courses, concurrency, async (course) => {
+  const coursesToProcess = courses.filter((course) => !completedCourseIds.has(String(course.id)))
+  try {
+    await mapWithConcurrency(coursesToProcess, concurrency, async (course) => {
     throwIfCancelled(signal)
     try {
-      const result = await crawlGolfCourseForEmails(course, { fetchImpl, timeoutMs, signal })
+      const result = await crawlGolfCourseForEmails(course, { fetchImpl, timeoutMs, signal, maxPagesPerCourse })
       stats.golfCoursesProcessed += 1
       stats.pagesAttempted += result.pagesAttempted
       stats.pagesFetched += result.pagesFetched
-      if (result.contacts.length) {
-        stats.golfCoursesWithEmails += 1
-        for (const contact of result.contacts) {
-          records.push({
-            golfCourseName: cleanText(course.name, 191),
-            email: contact.email,
-            firstName: contact.firstName || '',
-            lastName: contact.lastName || '',
-            position: contact.position || '',
-          })
+      stats.pageFailures += result.pageFailures || 0
+
+      if (result.skipped) {
+        stats.golfCoursesWithoutWebsite += 1
+        logScheduledJob('build_golf_course_emails_course_skipped', {
+          correlationId,
+          golfCourseId: course.id,
+          golfCourseName: course.name,
+          reason: result.error,
+        })
+      } else if (result.failed) {
+        stats.golfCoursesFailed += 1
+        logError('Build Golf Course Emails course crawl failed; continuing to next course without retry', {
+          correlationId,
+          golfCourseId: course.id,
+          golfCourseName: course.name,
+          website: course.website,
+          error: result.error,
+        })
+        logScheduledJob('build_golf_course_emails_course_failed', {
+          correlationId,
+          golfCourseId: course.id,
+          golfCourseName: course.name,
+          website: course.website,
+          pagesAttempted: result.pagesAttempted,
+          pagesFetched: result.pagesFetched,
+          error: result.error,
+          retryAttempts: 0,
+          level: 'warn',
+        })
+      } else {
+        if (result.contacts.length) {
+          stats.golfCoursesWithEmails += 1
+          for (const contact of result.contacts) {
+            records.push({
+              golfCourseName: cleanText(course.name, 191),
+              email: contact.email,
+              firstName: contact.firstName || '',
+              lastName: contact.lastName || '',
+              position: contact.position || '',
+              city: cleanText(course.city, 120),
+              state: cleanText(course.state_code, 8),
+              sourceUrl: contact.sourceUrl || '',
+              sourcePageTitle: contact.sourcePageTitle || '',
+              discoveredAt,
+            })
+          }
         }
         logScheduledJob('build_golf_course_emails_course_completed', {
           correlationId,
@@ -473,24 +714,19 @@ export async function runBuildGolfCourseEmails(db, {
           emailCount: result.contacts.length,
           pagesAttempted: result.pagesAttempted,
           pagesFetched: result.pagesFetched,
+          pageFailures: result.pageFailures || 0,
           secondaryPageError: result.error || null,
-        })
-      } else if (result.error) {
-        logScheduledJob('build_golf_course_emails_course_partial_failure', {
-          correlationId,
-          golfCourseId: course.id,
-          golfCourseName: course.name,
-          pagesAttempted: result.pagesAttempted,
-          pagesFetched: result.pagesFetched,
-          error: result.error,
-          level: 'warn',
+          retryAttempts: 0,
         })
       }
+      completedCourseIds.add(String(course.id))
+      publishProgress('crawling')
+      await queueCheckpoint()
     } catch (error) {
       if (signal?.aborted || error?.code === 'SCHEDULED_JOB_CANCELLED') throw error
       stats.golfCoursesProcessed += 1
       stats.golfCoursesFailed += 1
-      logError('Build Golf Course Emails course crawl failed; continuing to next course', {
+      logError('Build Golf Course Emails course processing failed; continuing to next course without retry', {
         correlationId,
         golfCourseId: course.id,
         golfCourseName: course.name,
@@ -503,12 +739,31 @@ export async function runBuildGolfCourseEmails(db, {
         golfCourseName: course.name,
         website: course.website,
         error: error?.message || String(error),
+        retryAttempts: 0,
         level: 'warn',
       })
+      completedCourseIds.add(String(course.id))
+      publishProgress('crawling')
+      await queueCheckpoint()
     }
-  })
+    })
+  } catch (error) {
+    await queueCheckpoint(true).catch((checkpointError) => {
+      logError('Build Golf Course Emails checkpoint write failed during interruption', { correlationId, checkpointPath, error: checkpointError })
+    })
+    if (signal?.aborted || error?.code === 'SCHEDULED_JOB_CANCELLED') {
+      error.output = {
+        cancelled: true,
+        ...buildProgress('cancelled'),
+        checkpointFile: path.relative(PROJECT_ROOT, checkpointPath).replace(/\\/g, '/'),
+      }
+    }
+    throw error
+  }
 
   throwIfCancelled(signal)
+  await queueCheckpoint(true)
+  publishProgress('writing_output', true)
   records.sort((a, b) => a.golfCourseName.localeCompare(b.golfCourseName) || a.email.localeCompare(b.email))
   const uniqueRecords = dedupeGolfCourseEmailRecords(records)
   stats.duplicateEmailRecordsSkipped = records.length - uniqueRecords.length
@@ -521,7 +776,20 @@ export async function runBuildGolfCourseEmails(db, {
     })
   }
   await writeCsvAtomically(outputPath, buildGolfCourseEmailsCsv(uniqueRecords))
-  const output = { ...stats, outputFile: path.relative(PROJECT_ROOT, outputPath).replace(/\\/g, '/'), maxPageAttemptsPerCourse: MAX_PAGE_ATTEMPTS_PER_COURSE }
+  await rm(checkpointPath, { force: true }).catch((error) => {
+    logError('Build Golf Course Emails completed but could not remove checkpoint', { correlationId, checkpointPath, error })
+  })
+  const finalProgress = publishProgress('completed', true)
+  const output = {
+    ...stats,
+    outputFile: path.relative(PROJECT_ROOT, outputPath).replace(/\\/g, '/'),
+    maxPagesPerCourse,
+    retryAttempts: 0,
+    resumedCourses,
+    checkpointFile: path.relative(PROJECT_ROOT, checkpointPath).replace(/\\/g, '/'),
+    elapsedMs: finalProgress.elapsedMs,
+    coursesPerMinute: finalProgress.coursesPerMinute,
+  }
   logApi('build_golf_course_emails_completed', { correlationId, ...output })
   logScheduledJob('build_golf_course_emails_completed', { correlationId, ...output })
   return output

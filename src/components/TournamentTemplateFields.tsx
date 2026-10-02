@@ -1,4 +1,4 @@
-import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, TOURNAMENT_TEAM_SIZE_OPTIONS, TOURNAMENT_TEMPLATES, emptyTournamentTemplateData, getTournamentTeamSize, type TournamentTemplateData } from '../lib/tournament-templates'
+import { DEFAULT_TEE_TIME_INTERVAL_MINUTES, DEFAULT_TOURNAMENT_BANNER_URL, DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL, DEFAULT_TOURNAMENT_CHARITY_MESSAGE, TOURNAMENT_BACKGROUND_COLOR_PALETTE, TOURNAMENT_TEAM_SIZE_OPTIONS, TOURNAMENT_TEMPLATES, emptyTournamentTemplateData, getTournamentTeamSize, getTournamentTemplate, normalizeTournamentBackgroundColor, type TournamentTemplateData } from '../lib/tournament-templates'
 import ImageUploadField from './ImageUploadField'
 import { compressImageFile } from '../lib/image-upload'
 import { PHONE_PATTERN, PHONE_VALIDATION_MESSAGE, sanitizePhoneInput, validateOptionalPhoneNumber } from '../lib/phone-validation'
@@ -156,8 +156,12 @@ export function TournamentCourseMiscField({ value, onChange }: Props) {
 export default function TournamentTemplateFields({ value, onChange, hideRegistrationDeadline = false }: Props) {
   const templateData = { ...emptyTournamentTemplateData(), ...(value.templateData || {}) }
   const supportingPhotoUrl = templateData.supportingPhotoUrl || ''
+  const promotionalPhotoUrl = templateData.promotionalPhotoUrl || ''
   const charityImageUrl = supportingPhotoUrl || DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL
   const flyerBackgroundUrl = value.templateBackgroundImageUrl || ''
+  const selectedTemplate = getTournamentTemplate(value.templateKey || 'classic-flyer')
+  const customBackgroundColor = normalizeTournamentBackgroundColor(templateData.flyerBackgroundColor)
+  const displayedBackgroundColor = customBackgroundColor || selectedTemplate.backgroundColor
 
   function updateTemplateData(next: Partial<TournamentTemplateData>) {
     onChange({ ...value, templateData: { ...templateData, ...next } })
@@ -209,6 +213,16 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
         onRemove={() => updateTemplateData({ supportingPhotoUrl: '' })}
       />
 
+      <ImageUploadField
+        label="Tournament promotional image (optional)"
+        value={promotionalPhotoUrl}
+        emptyText="No promotional image uploaded. No promotional-image space will appear on the final flyer."
+        previewAlt="Selected tournament promotional image preview"
+        options={{ maxWidth: 1400, maxHeight: 1000, quality: 0.74, maxBytes: 380 * 1024, minQuality: 0.42, correlationData: { usage: 'tournament_promotional_image' } }}
+        onChange={(dataUrl) => updateTemplateData({ promotionalPhotoUrl: dataUrl })}
+        onRemove={() => updateTemplateData({ promotionalPhotoUrl: '' })}
+      />
+
       <div className="tournament-template-selector" style={{ marginTop: 16 }}>
         <div className="tournament-template-selector-heading">
           <div>
@@ -251,6 +265,67 @@ export default function TournamentTemplateFields({ value, onChange, hideRegistra
               </button>
             )
           })}
+        </div>
+      </div>
+
+      <div className="tournament-background-color-editor" style={{ marginTop: 16 }}>
+        <div className="tournament-template-selector-heading">
+          <div>
+            <label className="label" htmlFor="tournament-flyer-background-color">Flyer theme background color</label>
+            <div className="small">Choose a palette color or use the color picker. This background is used by the digital and printed flyer while preserving the selected layout.</div>
+          </div>
+          <button
+            type="button"
+            className="btn"
+            disabled={!customBackgroundColor}
+            onClick={() => {
+              const correlationId = getCorrelationId()
+              updateTemplateData({ flyerBackgroundColor: '' })
+              logFrontendEvent({ category: 'tournament.template', message: 'tournament_flyer_background_color_reset', data: { templateKey: selectedTemplate.key, defaultColor: selectedTemplate.backgroundColor, correlationId } })
+            }}
+          >
+            Use theme default
+          </button>
+        </div>
+        <div className="tournament-background-color-controls">
+          <div className="tournament-background-color-palette" role="radiogroup" aria-label="Flyer background color palette">
+            {TOURNAMENT_BACKGROUND_COLOR_PALETTE.map((swatch) => {
+              const selected = customBackgroundColor === swatch.value.toLowerCase()
+              return (
+                <button
+                  key={swatch.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={`${swatch.label} ${swatch.value}`}
+                  title={`${swatch.label} (${swatch.value})`}
+                  className={`tournament-background-color-swatch${selected ? ' tournament-background-color-swatch--selected' : ''}`}
+                  style={{ backgroundColor: swatch.value }}
+                  onClick={() => {
+                    const correlationId = getCorrelationId()
+                    updateTemplateData({ flyerBackgroundColor: swatch.value })
+                    logFrontendEvent({ category: 'tournament.template', message: 'tournament_flyer_background_color_selected', data: { templateKey: selectedTemplate.key, backgroundColor: swatch.value, source: 'palette', correlationId } })
+                  }}
+                />
+              )
+            })}
+          </div>
+          <label className="tournament-background-color-custom" htmlFor="tournament-flyer-background-color">
+            <span>Custom color</span>
+            <input
+              id="tournament-flyer-background-color"
+              type="color"
+              value={displayedBackgroundColor}
+              onChange={(event) => {
+                const backgroundColor = normalizeTournamentBackgroundColor(event.target.value)
+                const correlationId = getCorrelationId()
+                updateTemplateData({ flyerBackgroundColor: backgroundColor })
+                logFrontendEvent({ category: 'tournament.template', message: 'tournament_flyer_background_color_selected', data: { templateKey: selectedTemplate.key, backgroundColor, source: 'custom-picker', correlationId } })
+              }}
+              aria-label="Custom flyer background color"
+            />
+            <code>{displayedBackgroundColor}</code>
+          </label>
         </div>
       </div>
 

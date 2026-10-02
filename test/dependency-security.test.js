@@ -63,11 +63,16 @@ test('npm audit remediation keeps patched transitive dependencies without unsafe
     postcss: '8.5.23',
     qs: '6.16.0',
     '@humanfs/node': '0.16.8',
+    'brace-expansion': '5.0.12',
   })
-  assert.equal(Object.keys(packageJson.overrides).some((key) => key.startsWith('brace-expansion')), false)
+  assert.equal(packageJson.overrides['brace-expansion'], '5.0.12')
   assert.equal(Object.keys(packageJson.overrides).some((key) => key.startsWith('nanoid')), false)
 
-  assert.equal(packageLock.packages['node_modules/brace-expansion']?.version, '5.0.9')
+  assert.equal(packageLock.packages['node_modules/brace-expansion']?.version, '5.0.12')
+  assert.equal(
+    packageLock.packages['node_modules/brace-expansion']?.integrity,
+    'sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==',
+  )
   assert.equal(packageLock.packages['node_modules/nanoid']?.version, '3.3.18')
   assert.match(packageLock.packages['node_modules/minimatch']?.dependencies?.['brace-expansion'] ?? '', /^\^5\.0\.8$/)
   assert.match(packageLock.packages['node_modules/postcss']?.dependencies?.nanoid ?? '', /^\^3\.3\.16$/)

@@ -1357,8 +1357,8 @@ button.navDropdownItem{font:inherit;}
   .tournament-flyer-beneficiary-layout,
   .tournament-flyer-contact-register-grid,
   .tournament-flyer-register-card{grid-template-columns:1fr !important;}
-  .tournament-flyer-beneficiary-image-frame,
-  .tournament-flyer-beneficiary-image-frame img{min-height:140px !important;}
+  .tournament-flyer-beneficiary-image-frame{min-height:0 !important;width:fit-content !important;max-width:100% !important;display:flex !important;align-items:center !important;justify-content:center !important;}
+  .tournament-flyer-beneficiary-image-frame img{min-height:0 !important;object-fit:contain !important;}
   .tournament-flyer-register-card > div:first-child{font-size:22px !important;}
   .tournament-flyer-qr-code img{width:132px !important;height:132px !important;}
   .tournament-registration-member-row{grid-template-columns:1fr !important;}
@@ -1499,6 +1499,70 @@ button.navDropdownItem{font:inherit;}
 .tournament-template-selector{
   border-top:1px solid #dbe7dc;
   padding-top:16px;
+}
+
+.tournament-background-color-editor{
+  border-top:1px solid #dbe7dc;
+  padding-top:16px;
+}
+
+.tournament-background-color-controls{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  flex-wrap:wrap;
+}
+
+.tournament-background-color-palette{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  flex-wrap:wrap;
+}
+
+.tournament-background-color-swatch{
+  width:38px;
+  height:38px;
+  padding:0;
+  border:2px solid rgba(15,23,42,.18);
+  border-radius:11px;
+  box-shadow:0 1px 2px rgba(15,23,42,.08);
+  cursor:pointer;
+}
+
+.tournament-background-color-swatch:hover{
+  transform:translateY(-1px);
+  box-shadow:0 5px 14px rgba(15,23,42,.14);
+}
+
+.tournament-background-color-swatch--selected{
+  outline:3px solid rgba(22,101,52,.22);
+  border-color:#166534;
+}
+
+.tournament-background-color-custom{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  font-weight:800;
+  color:#334155;
+}
+
+.tournament-background-color-custom input[type="color"]{
+  width:44px;
+  height:38px;
+  padding:2px;
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  background:#fff;
+  cursor:pointer;
+}
+
+.tournament-background-color-custom code{
+  font-size:11px;
+  color:#475569;
 }
 
 .tournament-template-selector-heading{
@@ -1757,6 +1821,23 @@ button.navDropdownItem{font:inherit;}
   line-height:1.4;
 }
 
+.tournament-guided-description{
+  padding:12px 24px;
+  border-top:1px solid rgba(15,63,36,.1);
+  border-bottom:1px solid rgba(15,63,36,.12);
+  background:#fff;
+  color:#334155;
+  text-align:center;
+}
+
+.tournament-guided-description p{
+  max-width:860px;
+  margin:0 auto;
+  font-size:15px;
+  line-height:1.4;
+  overflow-wrap:anywhere;
+}
+
 .tournament-guided-facts{
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
@@ -1811,24 +1892,154 @@ button.navDropdownItem{font:inherit;}
 
 .tournament-guided-charity{
   display:grid;
-  grid-template-columns:minmax(220px,.8fr) minmax(0,1.5fr);
+  grid-template-columns:auto minmax(0,1fr);
   gap:20px;
-  align-items:stretch;
+  align-items:center;
 }
 
 .tournament-guided-charity-image-frame{
-  min-height:250px;
-  border-radius:18px;
-  overflow:hidden;
-  background:#d8e4da;
+  width:fit-content;
+  max-width:min(42vw,420px);
+  min-height:0;
+  border:0;
+  border-radius:0;
+  overflow:visible;
+  background:transparent;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  justify-self:start;
+  padding:0;
+  box-sizing:border-box;
 }
 
 .tournament-guided-charity-image-frame img{
-  width:100%;
-  height:100%;
-  min-height:250px;
-  object-fit:cover;
+  width:auto;
+  max-width:100%;
+  height:auto;
+  max-height:360px;
+  min-height:0;
+  object-fit:contain;
+  object-position:center;
+  background:transparent;
+  border-radius:12px;
   display:block;
+}
+
+.tournament-flyer-promotional-image-frame,
+.tournament-guided-promotional-image{
+  width:fit-content;
+  max-width:100%;
+  min-height:0;
+  max-height:none;
+  aspect-ratio:auto;
+  overflow:visible;
+  border:0;
+  background:transparent;
+  padding:0;
+  box-sizing:border-box;
+}
+
+.tournament-flyer-promotional-image-frame{
+  margin:20px auto 0;
+  border-radius:0;
+  box-shadow:none;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.tournament-flyer-promotional-image-frame img,
+.tournament-guided-promotional-image img{
+  width:auto;
+  max-width:100%;
+  height:auto;
+  max-height:420px;
+  min-height:0;
+  object-fit:contain;
+  object-position:center;
+  background:transparent;
+  border-radius:12px;
+  display:block;
+}
+
+.tournament-guided-promotional-image{
+  justify-self:center;
+  border-radius:0;
+  box-shadow:none;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.tournament-flyer-misc-section{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:18px;
+  align-items:center;
+  margin-top:20px;
+  padding:16px;
+  border:1px solid #b7d7ad;
+  border-radius:14px;
+  background:#f7fbf5;
+}
+
+.tournament-flyer-misc-section--image-only{
+  grid-template-columns:auto;
+  justify-content:center;
+}
+
+.tournament-flyer-misc-copy{
+  min-width:0;
+  color:#1f2937;
+}
+
+.tournament-flyer-misc-copy p{
+  margin:7px 0 0;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+}
+
+.tournament-flyer-misc-section .tournament-flyer-promotional-image-frame{
+  margin:0;
+  max-width:min(42vw,420px);
+}
+
+.tournament-guided-misc{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:18px;
+  align-items:center;
+  min-width:0;
+}
+
+.tournament-guided-misc--image-only{
+  grid-template-columns:auto;
+  justify-content:center;
+}
+
+.tournament-guided-misc-copy{
+  min-width:0;
+  padding:20px 22px;
+  border-radius:16px;
+  border:1px solid rgba(15,63,36,.14);
+  background:#fff;
+  color:#1f2937;
+}
+
+.tournament-guided-misc-copy .tournament-guided-section-label{
+  color:var(--tournament-template-accent);
+}
+
+.tournament-guided-misc-copy p{
+  margin:8px 0 0;
+  color:#475569;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+}
+
+.tournament-guided-misc .tournament-guided-promotional-image{
+  max-width:min(42vw,430px);
 }
 
 .tournament-guided-charity-copy{
@@ -1941,7 +2152,7 @@ button.navDropdownItem{font:inherit;}
 
 /* Fairway Poster: inspired by photo-first fundraising tournament posters. */
 .tournament-guided-flyer--fairway-poster{
-  background:#0d3d22 !important;
+  background:var(--tournament-template-background,#0d3d22) !important;
 }
 .tournament-guided-flyer--fairway-poster .tournament-guided-hero{min-height:470px}
 .tournament-guided-flyer--fairway-poster .tournament-guided-hero-copy{min-height:470px;justify-content:flex-start;text-align:center;align-items:center;padding-top:44px}
@@ -1949,59 +2160,67 @@ button.navDropdownItem{font:inherit;}
 .tournament-guided-flyer--fairway-poster .tournament-guided-facts{background:#dbe93b;color:#133017}
 .tournament-guided-flyer--fairway-poster .tournament-guided-fact{border-color:rgba(19,48,23,.15)}
 .tournament-guided-flyer--fairway-poster .tournament-guided-fact img{filter:none}
-.tournament-guided-flyer--fairway-poster .tournament-guided-body{background:#0d3d22}
+.tournament-guided-flyer--fairway-poster .tournament-guided-body{background:var(--tournament-template-background,#0d3d22)}
+.tournament-guided-flyer--fairway-poster .tournament-guided-promotional-image{border:0;border-radius:0;box-shadow:none}
 .tournament-guided-flyer--fairway-poster .tournament-guided-charity-copy,
 .tournament-guided-flyer--fairway-poster .tournament-guided-contact,
 .tournament-guided-flyer--fairway-poster .tournament-guided-sponsors{background:#f2f6df}
 
 /* Modern Open: inspired by geometric golf-open posters with segmented panels. */
-.tournament-guided-flyer--modern-open{background:#eff1d9 !important}
-.tournament-guided-flyer--modern-open .tournament-guided-hero{min-height:310px;width:67%}
+.tournament-guided-flyer--modern-open{background:var(--tournament-template-background,#eff1d9) !important}
+.tournament-guided-flyer--modern-open .tournament-guided-hero{min-height:310px;width:100%}
 .tournament-guided-flyer--modern-open .tournament-guided-hero-copy{min-height:310px;padding:28px}
-.tournament-guided-flyer--modern-open .tournament-guided-hero-copy h1{font-size:clamp(38px,7vw,74px)}
-.tournament-guided-flyer--modern-open .tournament-guided-facts{margin-top:-310px;margin-left:67%;min-height:310px;grid-template-columns:1fr;background:#244b17}
-.tournament-guided-flyer--modern-open .tournament-guided-fact{min-height:44px;padding:6px 12px}
+.tournament-guided-flyer--modern-open .tournament-guided-hero-copy h1{font-size:clamp(38px,7vw,74px);max-width:820px}
+.tournament-guided-flyer--modern-open .tournament-guided-description{position:relative;z-index:2}
+.tournament-guided-flyer--modern-open .tournament-guided-facts{margin:0;min-height:0;grid-template-columns:repeat(4,minmax(0,1fr));background:#244b17}
+.tournament-guided-flyer--modern-open .tournament-guided-fact{min-height:64px;padding:9px 12px}
 .tournament-guided-flyer--modern-open .tournament-guided-fact img{width:24px;height:24px}
-.tournament-guided-flyer--modern-open .tournament-guided-body{padding-top:28px}
-.tournament-guided-flyer--modern-open .tournament-guided-charity{grid-template-columns:1.15fr .85fr}
+.tournament-guided-flyer--modern-open .tournament-guided-body{padding-top:20px;background:var(--tournament-template-background,#eff1d9)}
+.tournament-guided-flyer--modern-open .tournament-guided-charity{grid-template-columns:minmax(0,1.15fr) auto}
 .tournament-guided-flyer--modern-open .tournament-guided-charity-image-frame{order:2}
 .tournament-guided-flyer--modern-open .tournament-guided-charity-copy{order:1;background:#dfe8ba;border:0}
+.tournament-guided-flyer--modern-open .tournament-guided-promotional-image{width:fit-content;max-width:100%;justify-self:end;border-radius:0;box-shadow:none}
 
 /* Charity & Memorial: inspired by charity-forward memorial tournament flyers. */
-.tournament-guided-flyer--charity-tribute{background:#1f3d0f !important;color:#fff}
+.tournament-guided-flyer--charity-tribute{background:var(--tournament-template-background,#1f3d0f) !important;color:#fff}
 .tournament-guided-flyer--charity-tribute .tournament-guided-hero{min-height:245px}
 .tournament-guided-flyer--charity-tribute .tournament-guided-hero-copy{min-height:245px;justify-content:center;text-align:center;align-items:center}
 .tournament-guided-flyer--charity-tribute .tournament-guided-hero-copy h1{font-family:Georgia,'Times New Roman',serif;text-transform:none;font-size:clamp(38px,7vw,72px);font-weight:800}
 .tournament-guided-flyer--charity-tribute .tournament-guided-facts{background:#6f8f2d}
-.tournament-guided-flyer--charity-tribute .tournament-guided-body{background:#1f3d0f}
-.tournament-guided-flyer--charity-tribute .tournament-guided-charity{grid-template-columns:minmax(240px,.75fr) minmax(0,1.5fr);align-items:center}
-.tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame{min-height:340px;border:8px solid rgba(255,255,255,.12);box-shadow:0 18px 46px rgba(0,0,0,.25)}
-.tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame img{min-height:340px}
+.tournament-guided-flyer--charity-tribute .tournament-guided-body{background:var(--tournament-template-background,#1f3d0f)}
+.tournament-guided-flyer--charity-tribute .tournament-guided-charity{grid-template-columns:auto minmax(0,1.5fr);align-items:center}
+.tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame{min-height:0;border:0;box-shadow:none}
+.tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame img{min-height:0}
 .tournament-guided-flyer--charity-tribute .tournament-guided-charity-copy{background:transparent;border:0;color:#fff}
 .tournament-guided-flyer--charity-tribute .tournament-guided-charity-copy .tournament-guided-section-label,
 .tournament-guided-flyer--charity-tribute .tournament-guided-charity-copy h2{color:#d8de63}
 .tournament-guided-flyer--charity-tribute .tournament-guided-charity-copy p{color:#f4f6e8;font-family:Georgia,'Times New Roman',serif;font-size:17px}
+.tournament-guided-flyer--charity-tribute .tournament-guided-misc-copy{background:#f4f6e8;border-color:rgba(255,255,255,.18);color:#111827}
+.tournament-guided-flyer--charity-tribute .tournament-guided-misc-copy p{color:#1f2937}
+.tournament-guided-flyer--charity-tribute .tournament-guided-promotional-image{width:fit-content;max-width:100%;justify-self:center;border:0;border-radius:0;aspect-ratio:auto;min-height:0}
+.tournament-guided-flyer--charity-tribute .tournament-guided-promotional-image img{min-height:0;aspect-ratio:auto}
 .tournament-guided-flyer--charity-tribute .tournament-guided-contact,
 .tournament-guided-flyer--charity-tribute .tournament-guided-sponsors{background:#294d15;border-color:rgba(255,255,255,.14);color:#fff}
 .tournament-guided-flyer--charity-tribute .tournament-guided-contact .tournament-guided-section-label,
 .tournament-guided-flyer--charity-tribute .tournament-guided-sponsors .tournament-guided-section-label{color:#d8de63}
 
 /* Sunset Drive: inspired by full-bleed golf photography promotional flyers. */
-.tournament-guided-flyer--sunset-drive{background:#273813 !important}
+.tournament-guided-flyer--sunset-drive{background:var(--tournament-template-background,#273813) !important}
 .tournament-guided-flyer--sunset-drive .tournament-guided-hero{min-height:560px}
 .tournament-guided-flyer--sunset-drive .tournament-guided-hero-shade{background:linear-gradient(180deg,rgba(15,23,42,.12),rgba(12,35,13,.9))}
 .tournament-guided-flyer--sunset-drive .tournament-guided-hero-copy{min-height:560px;align-items:center;justify-content:center;text-align:center}
 .tournament-guided-flyer--sunset-drive .tournament-guided-hero-copy h1{max-width:760px;font-size:clamp(52px,10vw,104px)}
 .tournament-guided-flyer--sunset-drive .tournament-guided-host{border-top:2px solid rgba(255,255,255,.72);padding-top:12px;margin-top:18px}
 .tournament-guided-flyer--sunset-drive .tournament-guided-facts{background:#273813}
-.tournament-guided-flyer--sunset-drive .tournament-guided-body{background:#f5f0dc}
-.tournament-guided-flyer--sunset-drive .tournament-guided-charity{grid-template-columns:1fr 1fr}
-.tournament-guided-flyer--sunset-drive .tournament-guided-charity-image-frame{border-radius:999px;aspect-ratio:1;min-height:0;max-width:320px;justify-self:center}
-.tournament-guided-flyer--sunset-drive .tournament-guided-charity-image-frame img{min-height:0;aspect-ratio:1}
+.tournament-guided-flyer--sunset-drive .tournament-guided-body{background:var(--tournament-template-background,#f5f0dc)}
+.tournament-guided-flyer--sunset-drive .tournament-guided-charity{grid-template-columns:auto minmax(0,1fr)}
+.tournament-guided-flyer--sunset-drive .tournament-guided-charity-image-frame{border-radius:0;min-height:0;max-width:420px;justify-self:center}
+.tournament-guided-flyer--sunset-drive .tournament-guided-charity-image-frame img{min-height:0;aspect-ratio:auto}
+.tournament-guided-flyer--sunset-drive .tournament-guided-promotional-image{border:0;border-radius:0;box-shadow:none}
 
 /* Green Invitation: inspired by the supplied minimal cream-and-fairway invitation flyer. */
-.tournament-guided-flyer--green-invite{background:#f4f1df !important;color:#14361f}
-.tournament-guided-flyer--green-invite .tournament-guided-hero{min-height:520px;background:#f4f1df}
+.tournament-guided-flyer--green-invite{background:var(--tournament-template-background,#f4f1df) !important;color:#14361f}
+.tournament-guided-flyer--green-invite .tournament-guided-hero{min-height:520px;background:var(--tournament-template-background,#f4f1df)}
 .tournament-guided-flyer--green-invite .tournament-guided-hero-image{width:46%;right:auto;object-position:center;clip-path:polygon(0 0,76% 0,68% 13%,75% 26%,67% 39%,76% 52%,66% 64%,75% 77%,67% 90%,76% 100%,0 100%)}
 .tournament-guided-flyer--green-invite .tournament-guided-hero-shade{background:linear-gradient(90deg,rgba(13,88,44,.08) 0 40%,rgba(244,241,223,.04) 40% 100%)}
 .tournament-guided-flyer--green-invite .tournament-guided-hero-copy{min-height:520px;margin-left:38%;padding:48px 42px 38px;color:#14361f;text-shadow:none;justify-content:center;align-items:flex-start;text-align:left}
@@ -2010,19 +2229,37 @@ button.navDropdownItem{font:inherit;}
 .tournament-guided-flyer--green-invite .tournament-guided-host{color:#111827;text-shadow:none}
 .tournament-guided-flyer--green-invite .tournament-guided-hero-copy p{color:#334155;text-shadow:none}
 .tournament-guided-flyer--green-invite .tournament-guided-facts{background:#176b2c}
-.tournament-guided-flyer--green-invite .tournament-guided-body{background:#f4f1df}
+.tournament-guided-flyer--green-invite .tournament-guided-body{background:var(--tournament-template-background,#f4f1df)}
 .tournament-guided-flyer--green-invite .tournament-guided-charity-copy{background:#fffdf2}
 .tournament-guided-flyer--green-invite .tournament-guided-register{background:#176b2c}
+.tournament-guided-flyer--green-invite .tournament-guided-promotional-image{width:fit-content;max-width:100%;justify-self:end;border-radius:0;border:0;box-shadow:none}
 
 .tournament-guided-hero,
-.tournament-guided-charity-image-frame,
-.tournament-flyer-beneficiary-image-frame,
 .tournament-flyer-banner{background-color:#d8e4da}
 
 .tournament-guided-hero-copy h1,
 .tournament-guided-host,
 .tournament-guided-kicker,
 .tournament-guided-hero-copy p{filter:drop-shadow(0 1px 1px rgba(0,0,0,.18))}
+
+.tournament-flyer-beneficiary-image-frame{
+  background:transparent !important;
+  border:0 !important;
+  padding:0 !important;
+  border-radius:0 !important;
+}
+
+.tournament-flyer-beneficiary-image-frame img{
+  width:auto !important;
+  max-width:100% !important;
+  height:auto !important;
+  max-height:240px !important;
+  min-height:0 !important;
+  background:transparent !important;
+  padding:0 !important;
+  object-fit:contain !important;
+  border-radius:12px !important;
+}
 
 .btnTournamentScheduleAuto{
   background:#dbeafe !important;
@@ -2042,6 +2279,12 @@ button.navDropdownItem{font:inherit;}
 @media screen and (max-width:720px){
   .tournament-template-selector-heading{display:grid}
   .tournament-template-selector-grid{grid-template-columns:1fr}
+  .tournament-background-color-controls{align-items:flex-start}
+  .tournament-background-color-custom{width:100%;justify-content:flex-start}
+  .tournament-flyer-misc-section,
+  .tournament-guided-misc{grid-template-columns:1fr}
+  .tournament-flyer-misc-section .tournament-flyer-promotional-image-frame,
+  .tournament-guided-misc .tournament-guided-promotional-image{max-width:100%;justify-self:center}
   .tournament-template-option{grid-template-columns:66px minmax(0,1fr) 22px}
   .tournament-template-preview{width:66px;height:82px}
   .tournament-guided-hero,
@@ -2066,10 +2309,13 @@ button.navDropdownItem{font:inherit;}
   .tournament-guided-flyer--sunset-drive .tournament-guided-charity{grid-template-columns:1fr}
   .tournament-guided-flyer--modern-open .tournament-guided-charity-image-frame{order:1}
   .tournament-guided-flyer--modern-open .tournament-guided-charity-copy{order:2}
+  .tournament-guided-flyer--modern-open .tournament-guided-promotional-image,
+  .tournament-guided-flyer--charity-tribute .tournament-guided-promotional-image,
+  .tournament-guided-flyer--green-invite .tournament-guided-promotional-image{width:fit-content;max-width:100%;justify-self:center;border-radius:0}
   .tournament-guided-charity-image-frame,
-  .tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame{min-height:220px}
+  .tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame{min-height:0;aspect-ratio:auto}
   .tournament-guided-charity-image-frame img,
-  .tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame img{min-height:220px}
+  .tournament-guided-flyer--charity-tribute .tournament-guided-charity-image-frame img{min-height:0;object-fit:contain}
   .tournament-guided-footer{grid-template-columns:1fr}
   .tournament-guided-register{grid-template-columns:1fr 112px}
   .tournament-guided-register img{width:112px;height:112px}
@@ -4714,6 +4960,172 @@ button.navDropdownItem{font:inherit;}
   align-items:start;
 }
 
+.teamChallengeTeamLookup{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:12px;
+  align-items:start;
+}
+
+.inboxIndividualSkinsLeaderboardBoard{
+  padding:10px;
+}
+
+.inboxIndividualSkinsComparisonHeading{
+  margin-top:6px;
+}
+
+.inboxIndividualSkinsSummaryView{
+  display:grid;
+  gap:10px;
+  min-width:0;
+}
+
+.inboxIndividualSkinsSummaryTable{
+  overflow:hidden;
+  border:1px solid rgba(15,23,42,.12);
+  border-radius:14px;
+  background:#fff;
+}
+
+.inboxIndividualSkinsSummaryHeader,
+.inboxIndividualSkinsSummaryRow{
+  display:grid;
+  grid-template-columns:44px 40px minmax(120px,1fr) minmax(120px,1fr) 66px 82px;
+  align-items:center;
+  gap:6px;
+  text-align:center;
+}
+
+.inboxIndividualSkinsSummaryTable--skins .inboxIndividualSkinsSummaryHeader,
+.inboxIndividualSkinsSummaryTable--skins .inboxIndividualSkinsSummaryRow{
+  grid-template-columns:44px 40px minmax(140px,1fr) 82px;
+}
+
+.inboxIndividualSkinsSummaryHeader{
+  padding:9px 8px;
+  background:#0b5a2a;
+  color:#fff;
+  font-size:.67rem;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+.inboxIndividualSkinsSummaryRow{
+  min-height:44px;
+  padding:7px 8px;
+  border-top:1px solid rgba(15,23,42,.08);
+  color:#0f172a;
+  font-size:.78rem;
+}
+
+.inboxIndividualSkinsSummaryRow--total{
+  background:#f0fdf4;
+  font-weight:950;
+}
+
+.inboxIndividualSkinPerson{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  min-width:0;
+}
+
+.inboxIndividualSkinPerson strong{
+  overflow:hidden;
+  min-width:0;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.inboxIndividualSkinPerson--won strong{
+  color:#15803d;
+}
+
+.inboxIndividualSkinPerson--push strong,
+.inboxIndividualSkinPerson--pending strong{
+  color:#64748b;
+}
+
+.inboxIndividualSkinsValue{
+  color:#166534;
+  white-space:nowrap;
+}
+
+.inboxIndividualSkinsTotalLeader{
+  grid-column:span 1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.inboxIndividualSkinsTypeIndicator{
+  align-self:center;
+}
+
+@media (max-width:680px){
+  .teamChallengeTeamLookup{
+    grid-template-columns:1fr;
+  }
+
+  .inboxIndividualSkinsLeaderboardBoard{
+    padding:6px;
+  }
+
+  .inboxIndividualSkinsSummaryHeader,
+  .inboxIndividualSkinsSummaryRow{
+    grid-template-columns:30px 28px minmax(72px,1fr) minmax(72px,1fr) 42px 54px;
+    gap:3px;
+    padding-left:5px;
+    padding-right:5px;
+  }
+
+  .inboxIndividualSkinsSummaryTable--skins .inboxIndividualSkinsSummaryHeader,
+  .inboxIndividualSkinsSummaryTable--skins .inboxIndividualSkinsSummaryRow{
+    grid-template-columns:30px 28px minmax(96px,1fr) 54px;
+  }
+
+  .inboxIndividualSkinsSummaryHeader{
+    font-size:.52rem;
+  }
+
+  .inboxIndividualSkinsSummaryRow{
+    min-height:38px;
+    font-size:.66rem;
+  }
+
+  .inboxIndividualSkinPerson{
+    flex-direction:column;
+    gap:2px;
+  }
+
+  .inboxIndividualSkinPerson .holeStrokeScore{
+    transform:scale(.88);
+  }
+}
+
+.teamChallengeIdList{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.teamChallengeIdChip{
+  display:inline-flex;
+  align-items:center;
+  width:max-content;
+  max-width:100%;
+  padding:3px 8px;
+  border:1px solid #bbf7d0;
+  border-radius:999px;
+  background:#f0fdf4;
+  color:#166534;
+  font-size:.74rem;
+  font-weight:850;
+}
+
 .teamChallengeTypeIndicator{
   display:inline-flex;
   align-items:center;
@@ -6165,6 +6577,46 @@ button.navDropdownItem{font:inherit;}
   word-break:break-word;
 }
 
+.scheduledJobProgress{
+  margin-top:10px;
+  padding:10px;
+  border:1px solid rgba(11,61,29,.14);
+  border-radius:10px;
+  background:rgba(248,251,249,.92);
+}
+
+.scheduledJobProgressHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:7px;
+}
+
+.scheduledJobProgressTrack{
+  position:relative;
+  width:100%;
+  height:10px;
+  overflow:hidden;
+  border-radius:999px;
+  background:rgba(11,61,29,.12);
+}
+
+.scheduledJobProgressBar{
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:currentColor;
+  color:#1f7a45;
+  transition:width .25s ease;
+}
+
+.scheduledJobProgressDetails{
+  display:grid;
+  gap:3px;
+  margin-top:8px;
+}
+
 @media (max-width:1000px){
   .scheduledJobsTable thead{
     display:none;
@@ -6929,6 +7381,12 @@ button.navDropdownItem{font:inherit;}
   border-color: #7aa785;
   box-shadow: 0 3px 12px rgba(24, 79, 43, 0.1);
   outline: none;
+}
+
+.hostTournamentListFocusTarget { outline: none; }
+.hostTournamentListFocusTarget:focus .tournament-management-line {
+  border-color: #2f855a;
+  box-shadow: 0 0 0 3px rgba(47, 133, 90, 0.18), 0 3px 12px rgba(24, 79, 43, 0.1);
 }
 
 .tournament-management-line--archived {
@@ -9746,4 +10204,618 @@ button.navDropdownItem{font:inherit;}
 .hostCourseEventRecurrenceSummary{margin-top:3px;font-weight:600;color:#315d47}
 @media (max-width:760px){
   .hostCourseEventRecurrenceRow{grid-template-columns:1fr}
+}
+
+
+.tournament-draft-preview-notice{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  margin-bottom:14px;
+  padding:12px 14px;
+  border-color:#d9b45b;
+  background:#fff9e8;
+  color:#5f4300;
+}
+.tournament-draft-preview-notice span{line-height:1.4}
+.tournament-draft-preview-details{border-color:#d9b45b;background:#fffdf4}
+
+/* Tournament flyer composition v2: shared hierarchy and spacing based on FlyerSpecs.docx. */
+.tournament-flyer--spec-layout,
+.tournament-guided-flyer--spec-layout{
+  --flyer-section-gap:clamp(16px,2.2vw,26px);
+  --flyer-inner-gap:clamp(10px,1.6vw,18px);
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-print-content{
+  display:grid;
+  gap:var(--flyer-section-gap);
+  padding:clamp(18px,3vw,32px);
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-primary-section,
+.tournament-flyer--spec-layout .tournament-flyer-essentials-section,
+.tournament-flyer--spec-layout .tournament-flyer-body,
+.tournament-guided-flyer--spec-layout .tournament-guided-primary-section,
+.tournament-guided-flyer--spec-layout .tournament-guided-essentials-section{
+  width:min(100%,980px);
+  margin:0 auto;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-primary-section{
+  display:grid;
+  gap:14px;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-header{
+  padding:2px 76px 0;
+  text-align:center;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-title{
+  color:var(--tournament-template-accent,#0f3f24);
+  font-size:clamp(38px,7vw,76px);
+  line-height:.92;
+  font-weight:950;
+  letter-spacing:-.02em;
+  text-transform:uppercase;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-presented-by{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  margin-top:10px;
+  color:var(--tournament-template-accent,#0f3f24);
+  font-size:13px;
+  font-weight:850;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-presented-by-rule{
+  flex:0 1 140px;
+  height:2px;
+  background:#c6922e;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-banner{
+  width:100%;
+  height:clamp(220px,31vw,320px);
+  overflow:hidden;
+  border:1px solid rgba(15,63,36,.18);
+  border-radius:18px;
+  background:#d8e4da;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-banner img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  object-position:center;
+  display:block;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-description{
+  max-width:860px;
+  margin:0 auto;
+  color:#334155;
+  font-size:clamp(15px,2vw,18px);
+  line-height:1.45;
+  text-align:center;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-essentials-section{
+  display:grid;
+  gap:12px;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-essentials-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  padding:0;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-attribute-row{
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr);
+  gap:10px;
+  align-items:center;
+  min-height:66px;
+  padding:10px 12px;
+  border:1px solid rgba(15,63,36,.18);
+  border-radius:12px;
+  background:rgba(247,251,245,.96);
+  min-width:0;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-attribute-row--registrationFee{
+  grid-column:1 / -1;
+  justify-self:stretch;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-attribute-icon{
+  justify-self:center;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-attribute-copy strong,
+.tournament-flyer--spec-layout .tournament-flyer-attribute-copy span{
+  display:block;
+  overflow-wrap:anywhere;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-attribute-copy strong{
+  color:var(--tournament-template-accent,#0f3f24);
+  font-size:11px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-attribute-value{
+  margin-top:3px;
+  color:#111827;
+  font-size:16px;
+  line-height:1.2;
+  font-weight:750;
+}
+
+.tournament-flyer-action-band,
+.tournament-guided-action-band{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:14px 18px;
+  border-radius:14px;
+  color:#fff;
+  background:var(--tournament-template-accent,#0f3f24);
+  box-shadow:0 8px 20px rgba(15,63,36,.14);
+}
+
+.tournament-flyer-action-band > div,
+.tournament-guided-action-band > div{
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+
+.tournament-flyer-action-band span,
+.tournament-guided-action-band span{
+  font-size:11px;
+  font-weight:850;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  opacity:.82;
+}
+
+.tournament-flyer-action-band strong,
+.tournament-guided-action-band strong{
+  font-size:clamp(20px,3vw,28px);
+  line-height:1.05;
+}
+
+.tournament-flyer-action-band small,
+.tournament-guided-action-band small{
+  font-size:13px;
+  line-height:1.25;
+  opacity:.92;
+}
+
+.tournament-flyer-action-band a,
+.tournament-guided-action-band a{
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px;
+  padding:10px 18px;
+  border-radius:999px;
+  background:#fff;
+  color:var(--tournament-template-accent,#0f3f24);
+  font-weight:900;
+  text-decoration:none;
+  white-space:nowrap;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-body{
+  display:grid;
+  gap:var(--flyer-section-gap);
+  padding:0;
+}
+
+.tournament-flyer-story-grid,
+.tournament-guided-story-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:var(--flyer-inner-gap);
+  align-items:stretch;
+}
+
+.tournament-flyer-story-grid--with-misc,
+.tournament-guided-story-grid--with-misc{
+  grid-template-columns:minmax(0,1.08fr) minmax(300px,.92fr);
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-beneficiary-section,
+.tournament-flyer--spec-layout .tournament-flyer-misc-section{
+  margin:0;
+  padding:18px;
+  border:1px solid rgba(15,63,36,.14);
+  border-radius:16px;
+  background:rgba(247,251,245,.96);
+  box-shadow:none;
+  min-width:0;
+  height:100%;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-beneficiary-layout{
+  display:grid;
+  grid-template-columns:minmax(130px,210px) minmax(0,1fr);
+  gap:18px;
+  align-items:center;
+  height:100%;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-beneficiary-image-frame,
+.tournament-flyer--spec-layout .tournament-flyer-misc-section .tournament-flyer-promotional-image-frame{
+  max-width:100%;
+  margin:0;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-beneficiary-image-frame img,
+.tournament-flyer--spec-layout .tournament-flyer-promotional-image-frame img{
+  max-height:260px !important;
+  border-radius:12px !important;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-beneficiary-copy h2{
+  margin:5px 0 0;
+  color:var(--tournament-template-accent,#0f3f24);
+  font-size:clamp(24px,4vw,38px);
+  line-height:1;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-beneficiary-copy p,
+.tournament-flyer--spec-layout .tournament-flyer-misc-copy p{
+  margin:9px 0 0;
+  color:#475569;
+  line-height:1.45;
+}
+
+.tournament-flyer-section-label{
+  color:var(--tournament-template-accent,#0f3f24);
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-misc-section{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:14px;
+  align-items:center;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-misc-section--image-only{
+  grid-template-columns:1fr;
+  justify-items:center;
+}
+
+.tournament-flyer-support-section,
+.tournament-guided-support-section{
+  display:grid;
+  gap:12px;
+}
+
+.tournament-flyer-summary-grid,
+.tournament-guided-highlights{
+  display:grid;
+  gap:12px;
+}
+
+.tournament-flyer-summary-grid--1,
+.tournament-guided-highlights--1{grid-template-columns:minmax(0,1fr)}
+.tournament-flyer-summary-grid--2,
+.tournament-guided-highlights--2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.tournament-flyer-summary-grid--3,
+.tournament-guided-highlights--3{grid-template-columns:repeat(3,minmax(0,1fr))}
+
+.tournament-flyer--spec-layout .tournament-flyer-info-panel,
+.tournament-guided-flyer--spec-layout .tournament-flyer-info-panel{
+  height:100%;
+  min-height:0;
+  box-sizing:border-box;
+  padding:14px 16px !important;
+  border-radius:14px !important;
+  border-color:rgba(15,63,36,.14) !important;
+  background:rgba(247,251,245,.98) !important;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-sponsors-section{
+  padding-top:2px;
+}
+.tournament-flyer--spec-layout .tournament-flyer-sponsors-section h3{
+  margin:0 0 8px;
+  color:var(--tournament-template-accent,#0f3f24);
+  text-align:center;
+  font-size:13px;
+  letter-spacing:.08em;
+}
+.tournament-flyer-sponsor-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(90px,1fr));
+  gap:10px;
+  align-items:center;
+}
+.tournament-flyer-sponsor-logo{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:58px;
+}
+.tournament-flyer-sponsor-logo img{
+  width:100%;
+  height:56px;
+  object-fit:contain;
+}
+
+.tournament-flyer--spec-layout .tournament-flyer-contact-register-grid{
+  display:grid;
+  grid-template-columns:minmax(220px,.7fr) minmax(360px,1.3fr);
+  gap:14px;
+  align-items:stretch;
+  margin:0;
+  max-width:none;
+}
+.tournament-flyer--spec-layout .tournament-flyer-contact-register-grid--register-only{
+  grid-template-columns:minmax(360px,1fr);
+}
+.tournament-flyer--spec-layout .tournament-flyer-contact-card{
+  padding:18px;
+  border:1px solid rgba(15,63,36,.14);
+  background:rgba(247,251,245,.98);
+}
+.tournament-flyer--spec-layout .tournament-flyer-contact-card strong{
+  color:var(--tournament-template-accent,#0f3f24);
+}
+.tournament-flyer--spec-layout .tournament-flyer-register-card{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 168px;
+  border:2px solid;
+  border-radius:14px;
+  overflow:hidden;
+  min-width:0;
+}
+.tournament-flyer--spec-layout .tournament-flyer-register-copy{
+  padding:18px;
+  color:#fff;
+  font-size:28px;
+  line-height:1;
+  font-weight:950;
+  text-transform:uppercase;
+}
+.tournament-flyer--spec-layout .tournament-flyer-register-copy div{
+  margin-top:8px;
+  font-size:12px;
+  line-height:1.25;
+  font-weight:700;
+  text-transform:none;
+  overflow-wrap:anywhere;
+}
+.tournament-flyer--spec-layout .tournament-flyer-register-copy a{color:#fff}
+.tournament-flyer--spec-layout .tournament-flyer-qr-code{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:10px;
+  background:#fff;
+  font-size:11px;
+  font-weight:850;
+  letter-spacing:.06em;
+  text-align:center;
+  text-transform:uppercase;
+}
+.tournament-flyer--spec-layout .tournament-flyer-qr-code img{width:142px;height:142px;display:block}
+
+.tournament-guided-flyer--spec-layout{
+  display:grid;
+  gap:0;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-primary-section,
+.tournament-guided-flyer--spec-layout .tournament-guided-essentials-section{
+  width:100%;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-hero,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-hero,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-hero,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero{
+  min-height:clamp(330px,42vw,470px);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-hero-copy,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-hero-copy,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-hero-copy,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-copy{
+  min-height:clamp(330px,42vw,470px);
+  padding:clamp(26px,4vw,42px);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-facts{
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-fact{
+  min-height:72px;
+  padding:10px 12px;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-action-band{
+  margin:12px clamp(16px,3vw,26px) 0;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-body{
+  display:grid;
+  gap:var(--flyer-section-gap);
+  padding:var(--flyer-section-gap);
+  background:var(--tournament-template-background,#f6f7ee);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-story-grid{
+  width:100%;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity,
+.tournament-guided-flyer--spec-layout .tournament-guided-misc{
+  display:grid;
+  gap:14px;
+  align-items:center;
+  min-width:0;
+  height:100%;
+  padding:18px;
+  border:1px solid rgba(15,63,36,.14);
+  border-radius:16px;
+  background:rgba(255,255,255,.96);
+  box-sizing:border-box;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity{
+  grid-template-columns:minmax(120px,190px) minmax(0,1fr);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity-copy{
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#1f2937;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity-copy h2{
+  color:var(--tournament-template-accent);
+  font-size:clamp(24px,4vw,40px);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity-copy p{color:#475569}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity-image-frame{
+  max-width:190px;
+  justify-self:center;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-charity-image-frame img{
+  max-height:250px;
+  border-radius:12px;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-misc{
+  grid-template-columns:minmax(0,1fr) auto;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-misc--image-only{
+  grid-template-columns:1fr;
+  justify-items:center;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-misc-copy{
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#1f2937;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-misc-copy p{color:#475569}
+.tournament-guided-flyer--spec-layout .tournament-guided-promotional-image{
+  max-width:min(32vw,300px);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-promotional-image img{
+  max-height:260px;
+  border-radius:12px;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-sponsors{
+  padding:14px 16px;
+  border-radius:14px;
+  background:rgba(255,255,255,.96);
+  color:#1f2937;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-footer{
+  display:grid;
+  grid-template-columns:minmax(220px,.7fr) minmax(360px,1.3fr);
+  gap:14px;
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-footer--register-only{
+  grid-template-columns:minmax(360px,1fr);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-contact{
+  color:#1f2937;
+  background:rgba(255,255,255,.96);
+}
+.tournament-guided-flyer--spec-layout .tournament-guided-register{
+  min-height:154px;
+}
+
+/* Keep theme identity while preserving the shared readable composition. */
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-charity,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-misc,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-sponsors,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-contact{
+  background:#f4f6e8;
+  color:#111827;
+}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-charity-copy h2,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-charity-copy .tournament-guided-section-label,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-misc-copy .tournament-guided-section-label,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-contact .tournament-guided-section-label,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-sponsors .tournament-guided-section-label{
+  color:#24440f;
+}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-charity-copy p,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-misc-copy p{color:#334155}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-charity-image-frame{order:initial}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-charity-copy{order:initial}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-copy{
+  margin-left:36%;
+}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-image{width:44%}
+
+@media screen and (max-width:820px){
+  .tournament-flyer-story-grid--with-misc,
+  .tournament-guided-story-grid--with-misc{
+    grid-template-columns:1fr;
+  }
+  .tournament-flyer--spec-layout .tournament-flyer-contact-register-grid,
+  .tournament-guided-flyer--spec-layout .tournament-guided-footer{
+    grid-template-columns:1fr;
+  }
+  .tournament-guided-flyer--spec-layout .tournament-guided-facts{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .tournament-guided-flyer--spec-layout .tournament-guided-promotional-image{max-width:100%}
+}
+
+@media screen and (max-width:620px){
+  .tournament-flyer--spec-layout .tournament-flyer-print-content{padding:14px;gap:16px}
+  .tournament-flyer--spec-layout .tournament-flyer-header{padding:0 48px}
+  .tournament-flyer--spec-layout .tournament-flyer-essentials-grid,
+  .tournament-guided-flyer--spec-layout .tournament-guided-facts,
+  .tournament-flyer-summary-grid--2,
+  .tournament-flyer-summary-grid--3,
+  .tournament-guided-highlights--2,
+  .tournament-guided-highlights--3{
+    grid-template-columns:1fr;
+  }
+  .tournament-flyer--spec-layout .tournament-flyer-attribute-row--registrationFee{grid-column:auto}
+  .tournament-flyer-action-band,
+  .tournament-guided-action-band{
+    align-items:stretch;
+    flex-direction:column;
+  }
+  .tournament-flyer-action-band a,
+  .tournament-guided-action-band a{width:100%;box-sizing:border-box}
+  .tournament-flyer--spec-layout .tournament-flyer-beneficiary-layout,
+  .tournament-guided-flyer--spec-layout .tournament-guided-charity,
+  .tournament-flyer--spec-layout .tournament-flyer-misc-section,
+  .tournament-guided-flyer--spec-layout .tournament-guided-misc{
+    grid-template-columns:1fr;
+  }
+  .tournament-flyer--spec-layout .tournament-flyer-beneficiary-image-frame,
+  .tournament-guided-flyer--spec-layout .tournament-guided-charity-image-frame,
+  .tournament-flyer--spec-layout .tournament-flyer-promotional-image-frame,
+  .tournament-guided-flyer--spec-layout .tournament-guided-promotional-image{
+    justify-self:center;
+  }
+  .tournament-flyer--spec-layout .tournament-flyer-register-card,
+  .tournament-guided-flyer--spec-layout .tournament-guided-register{
+    grid-template-columns:minmax(0,1fr) 118px;
+  }
+  .tournament-flyer--spec-layout .tournament-flyer-qr-code img,
+  .tournament-guided-flyer--spec-layout .tournament-guided-register img{width:104px;height:104px}
+  .tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-image{width:100%}
+  .tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-copy{margin-left:0}
 }

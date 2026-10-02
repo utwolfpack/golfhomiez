@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import PageHero from '../components/PageHero'
 import {
@@ -45,6 +45,52 @@ function statusClass(status?: string | null) {
   if (normalized === 'success') return 'statusMessage statusSuccess'
   if (normalized === 'failed' || normalized === 'error') return 'statusMessage statusError'
   return 'statusMessage'
+}
+
+function clampPercent(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, value))
+}
+
+function GolfCourseEmailProgress({ job }: { job: ScheduledJob }) {
+  if (job.id !== 'buildGolfCourseEmails') return null
+  const progress = job.activeProgress
+  if (!progress && !job.canCancel) return null
+  const percent = clampPercent(progress?.percentComplete)
+  const processed = progress?.processedCourses ?? 0
+  const total = progress?.totalCourses ?? 0
+  const phase = String(progress?.phase || 'starting').replace(/_/g, ' ')
+
+  return (
+    <div className="scheduledJobProgress" aria-live="polite">
+      <div className="scheduledJobProgressHeader">
+        <strong>Live crawl progress</strong>
+        <span>{progress ? `${percent.toFixed(percent >= 10 ? 1 : 2)}%` : 'Starting…'}</span>
+      </div>
+      <div
+        className="scheduledJobProgressTrack"
+        role="progressbar"
+        aria-label="Build Golf Course Emails progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(percent)}
+      >
+        <span className="scheduledJobProgressBar" style={{ width: `${percent}%` }} />
+      </div>
+      {progress ? (
+        <div className="scheduledJobProgressDetails small">
+          <div><strong>{formatCount(processed)}</strong> / {formatCount(total)} course records processed · {phase}</div>
+          <div>{formatCount(progress.emailRecordsDiscovered)} email records discovered · {formatCount(progress.coursesWithEmails)} courses with email · {formatCount(progress.failedCourses)} failed</div>
+          <div>{formatCount(progress.pagesFetched)} pages fetched · {formatCount(progress.pageFailures)} page failures · retries: {formatCount(progress.retryAttempts)}</div>
+          <div>Elapsed: {formatDuration(progress.elapsedMs)}{progress.estimatedRemainingMs != null ? ` · estimated remaining: ${formatDuration(progress.estimatedRemainingMs)}` : ''}</div>
+          {progress.expectedCompletionAt ? <div>Expected completion: {formatDate(progress.expectedCompletionAt)}</div> : <div>Expected completion will appear after enough courses are processed to estimate throughput.</div>}
+          {progress.coursesPerMinute != null ? <div>Current throughput: {progress.coursesPerMinute.toFixed(2)} courses/minute</div> : null}
+          {progress.resumedCourses ? <div>Resumed from checkpoint after {formatCount(progress.resumedCourses)} previously completed courses.</div> : null}
+          {progress.coursesWithoutWebsite ? <div>{formatCount(progress.coursesWithoutWebsite)} course records had no crawlable website.</div> : null}
+        </div>
+      ) : <div className="small">The crawler is starting. Progress updates automatically.</div>}
+    </div>
+  )
 }
 
 
@@ -167,28 +213,60 @@ export default function AdminScheduledJobs() {
   const [scrubValues, setScrubValues] = useState<string[]>([])
   const [scrubValueInput, setScrubValueInput] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
+  const progressMilestoneRef = useRef<string>('')
 
   const sortedJobs = useMemo(() => [...jobs].sort((a, b) => a.name.localeCompare(b.name)), [jobs])
 
-  async function loadJobs() {
-    setError(null)
+  const loadJobs = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!silent) setError(null)
     try {
-      logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_jobs_load_started', data: { route: '/golfadmin/scheduled-jobs' } })
+      if (!silent) logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_jobs_load_started', data: { route: '/golfadmin/scheduled-jobs' } })
       const result = await fetchScheduledJobs()
       setJobs(result.jobs || [])
-      logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_jobs_load_completed', data: { jobCount: result.jobs?.length || 0 } })
+      if (!silent) logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_jobs_load_completed', data: { jobCount: result.jobs?.length || 0 } })
     } catch (err) {
       const text = err instanceof Error ? err.message : 'Could not load scheduled jobs.'
-      setError(text)
-      logFrontendEvent({ category: 'admin.scheduled_jobs', level: 'error', message: 'scheduled_jobs_load_failed', data: { error: text } })
+      if (!silent) setError(text)
+      logFrontendEvent({ category: 'admin.scheduled_jobs', level: 'error', message: silent ? 'scheduled_jobs_progress_poll_failed' : 'scheduled_jobs_load_failed', data: { error: text } })
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     void loadJobs()
-  }, [])
+  }, [loadJobs])
+
+  const hasActiveJobs = jobs.some((job) => Boolean(job.canCancel))
+
+  useEffect(() => {
+    if (!hasActiveJobs || typeof window === 'undefined') return undefined
+    const timer = window.setInterval(() => {
+      void loadJobs({ silent: true })
+    }, 5_000)
+    return () => window.clearInterval(timer)
+  }, [hasActiveJobs, loadJobs])
+
+  const emailCrawlProgress = jobs.find((job) => job.id === 'buildGolfCourseEmails')?.activeProgress
+  useEffect(() => {
+    if (!emailCrawlProgress?.runId || emailCrawlProgress.percentComplete == null) return
+    const milestone = Math.floor(clampPercent(emailCrawlProgress.percentComplete) / 10) * 10
+    const milestoneKey = `${emailCrawlProgress.runId}:${milestone}`
+    if (progressMilestoneRef.current === milestoneKey) return
+    progressMilestoneRef.current = milestoneKey
+    logFrontendEvent({
+      category: 'admin.scheduled_jobs',
+      message: 'build_golf_course_emails_progress_observed',
+      data: {
+        correlationId: emailCrawlProgress.correlationId || null,
+        runId: emailCrawlProgress.runId,
+        percentComplete: emailCrawlProgress.percentComplete,
+        processedCourses: emailCrawlProgress.processedCourses || 0,
+        totalCourses: emailCrawlProgress.totalCourses || 0,
+        expectedCompletionAt: emailCrawlProgress.expectedCompletionAt || null,
+      },
+    })
+  }, [emailCrawlProgress])
 
   async function onRunJob(job: ScheduledJob) {
     const confirmed = typeof window === 'undefined' ? true : window.confirm(`Run scheduled job now: ${job.name}?`)
@@ -201,7 +279,7 @@ export default function AdminScheduledJobs() {
       const result = await runScheduledJob(job.id)
       setJobs(result.jobs || [])
       if (result.result.status === 'running') {
-        setMessage(`${job.name} started in the background. Refresh jobs to monitor progress or use Cancel job to stop it.`)
+        setMessage(`${job.name} started in the background. Progress updates automatically; use Cancel job to stop it.`)
         logFrontendEvent({ category: 'admin.scheduled_jobs', message: 'scheduled_job_background_run_accepted', data: { jobId: job.id, jobName: job.name, status: result.result.status, runId: result.result.runId, correlationId: result.result.correlationId } })
       } else {
         setMessage(`${job.name} completed with status: ${result.result.status}.`)
@@ -344,6 +422,10 @@ export default function AdminScheduledJobs() {
                             <div className="small">Target: ~{String(job.jobConfig?.targetRunHours || 12)} hours. A full US run needs roughly two REST calls per course plus state validation, so use an OpenGolfAPI key with enough daily quota; the run output reports the exact estimate.</div>
                           </>
                         ) : null}
+                        {job.id === 'buildGolfCourseEmails' ? (
+                          <div className="small">Full active-course crawl · up to 8 prioritized pages per course · no request retries · checkpoint/resume enabled.</div>
+                        ) : null}
+                        <GolfCourseEmailProgress job={job} />
                         {job.commercialMetadata ? <CommercialJobMetadata job={job} /> : null}
                       </td>
                       <td data-label="Actions" className="scheduledJobsActionsCell">

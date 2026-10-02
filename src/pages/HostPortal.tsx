@@ -80,6 +80,10 @@ function tournamentYearOptions(tournaments: Tournament[], currentYear: number) {
   return Array.from(years).sort((a, b) => b - a)
 }
 
+function hostTournamentRowId(tournamentId: string) {
+  return `host-tournament-row-${String(tournamentId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
+
 function HostPortalErrorMessage({ message, location, testId }: { message: string; location: 'page_top' | 'above_create_tournament' | 'above_save_tournament_changes'; testId: string }) {
   return (
     <div
@@ -316,6 +320,7 @@ export default function HostPortal() {
   const [selectedHostTournamentYear, setSelectedHostTournamentYear] = useState(() => String(getCurrentYearInUserTimeZone()))
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null)
   const [tournamentPage, setTournamentPage] = useState(1)
+  const [returnFocusTournamentId, setReturnFocusTournamentId] = useState<string | null>(null)
   const [hostAccountFormOpen, setHostAccountFormOpen] = useState(false)
   const [hostAccountBusy, setHostAccountBusy] = useState(false)
   const [hostAccountRequestBusyId, setHostAccountRequestBusyId] = useState<string | null>(null)
@@ -635,6 +640,19 @@ export default function HostPortal() {
     })
   }, [portalData?.tournaments])
 
+  useEffect(() => {
+    if (!returnFocusTournamentId || editingId || typeof document === 'undefined') return
+    const focusTarget = document.getElementById(hostTournamentRowId(returnFocusTournamentId))
+    if (!focusTarget) return
+    const frame = window.requestAnimationFrame(() => {
+      focusTarget.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      focusTarget.focus({ preventScroll: true })
+      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_builder_return_focus_applied', data: { tournamentId: returnFocusTournamentId, selectedHostTournamentYear, tournamentPage } })
+      setReturnFocusTournamentId(null)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [returnFocusTournamentId, editingId, selectedHostTournamentYear, tournamentPage, portalData?.tournaments])
+
   function startEditing(tournament: Tournament, options: { openMessages?: boolean; openThreadId?: string | null; openMessageId?: string | null } = {}) {
     setCreateTournamentOpen(false)
     setCreateAdditionalFieldsOpen(false)
@@ -658,6 +676,36 @@ export default function HostPortal() {
         openMessageId: options.openMessageId || null,
       },
     })
+  }
+
+  function closeTournamentBuilder(tournamentId: string | null = editingId) {
+    if (!tournamentId) return
+    const latestTournament = (portalData?.tournaments || []).find((tournament) => tournament.id === tournamentId)
+    let targetFilter = selectedHostTournamentYear
+    let targetPage = 1
+
+    if (latestTournament) {
+      const normalizedStatus = String(latestTournament.status || '').toLowerCase()
+      targetFilter = normalizedStatus === 'draft' ? 'draft' : String(tournamentYear(latestTournament.startDate) || getCurrentYearInUserTimeZone())
+      const targetPool = sortTournamentsByCreatedDescending((portalData?.tournaments || []).filter((tournament) => !tournament.archivedAt)).filter((tournament) => {
+        const status = String(tournament.status || '').toLowerCase()
+        return targetFilter === 'draft'
+          ? status === 'draft'
+          : status !== 'draft' && tournamentYear(tournament.startDate) === Number(targetFilter)
+      })
+      const targetIndex = targetPool.findIndex((tournament) => tournament.id === tournamentId)
+      targetPage = targetIndex >= 0 ? Math.floor(targetIndex / TOURNAMENTS_PER_PAGE) + 1 : 1
+    }
+
+    setShowArchivedTournaments(false)
+    setSelectedHostTournamentYear(targetFilter)
+    setTournamentPage(targetPage)
+    setEditingId(null)
+    setEditForm(null)
+    setTournamentInfoOpen(false)
+    setError(null)
+    setReturnFocusTournamentId(tournamentId)
+    logFrontendEvent({ category: 'host.portal', message: 'host_tournament_builder_closed', data: { tournamentId, targetFilter, targetPage, returnFocusRequested: true } })
   }
 
   function updateTournamentUnreadCount(tournamentId: string, unreadCount: number) {
@@ -713,11 +761,24 @@ export default function HostPortal() {
       return
     }
 
+    const draftPortalWindow = typeof window !== 'undefined' ? window.open('', '_blank') : null
+    if (draftPortalWindow) {
+      draftPortalWindow.opener = null
+      draftPortalWindow.document.title = 'Creating Golf Homiez tournament…'
+      draftPortalWindow.document.body.innerHTML = '<p style="font-family:Arial,sans-serif;padding:24px">Creating your Golf Homiez tournament draft…</p>'
+    }
+
     setSaving(true)
     setError(null)
     setSuccess(null)
     try {
-      const created = await createHostTournament({ ...form, name: tournamentName, organizerEmail: tournamentEmail || null })
+      const created = await createHostTournament({ ...form, name: tournamentName, organizerEmail: tournamentEmail || null, status: 'draft' })
+      const draftPortalUrl = created.tournament.portalUrl || (created.tournament.portalPath ? new URL(created.tournament.portalPath, window.location.origin).toString() : new URL(`/tournaments/${encodeURIComponent(created.tournament.tournamentIdentifier || created.tournament.id)}`, window.location.origin).toString())
+      if (draftPortalWindow && !draftPortalWindow.closed) {
+        draftPortalWindow.location.replace(draftPortalUrl)
+      } else if (typeof window !== 'undefined') {
+        window.open(draftPortalUrl, '_blank', 'noopener,noreferrer')
+      }
       logFrontendEvent({
         category: 'host.portal',
         message: 'host_tournament_created',
@@ -734,15 +795,17 @@ export default function HostPortal() {
           requestedStartDate: form.startDate || null,
           storedStartDate: created.tournament.startDate || null,
           userTimeZone: getUserTimeZone(),
+          draftPortalUrl,
+          draftPortalWindowOpened: Boolean(draftPortalWindow),
         },
       })
       if (tournamentEmail) {
         try {
           const invited = await sendHostTournamentInvite(created.tournament.id, { organizerEmail: tournamentEmail })
-          setSuccess(`Tournament created. Organizer invite sent to ${tournamentEmail}. Link: ${invited.organizerUrl}`)
+          setSuccess(`Tournament created in Draft status. Draft tournament page: ${draftPortalUrl}. Organizer invite sent to ${tournamentEmail}. Link: ${invited.organizerUrl}`)
         } catch (inviteError) {
           const inviteMessage = inviteError instanceof Error ? inviteError.message : 'Could not send the organizer invite.'
-          setSuccess('Tournament created.')
+          setSuccess(`Tournament created in Draft status. Draft tournament page: ${draftPortalUrl}.`)
           setError(`The tournament was created, but the organizer invite was not sent. Use Invite organizer from the tournament record. ${inviteMessage}`)
           logFrontendEvent({
             category: 'host.portal',
@@ -752,7 +815,7 @@ export default function HostPortal() {
           })
         }
       } else {
-        setSuccess('Tournament created. An organizer can be invited later from the tournament record.')
+        setSuccess(`Tournament created in Draft status. Draft tournament page: ${draftPortalUrl}. An organizer can be invited later from the tournament record.`)
       }
       const defaultLocation = portalData?.account?.defaultTournamentLocation || portalData?.account?.golfCourseAddress || portalData?.account?.golfCourseName || ''
       const golfCourseName = portalData?.account?.golfCourseName || ''
@@ -763,6 +826,7 @@ export default function HostPortal() {
       setTournamentPage(1)
       await loadPortal()
     } catch (err) {
+      if (draftPortalWindow && !draftPortalWindow.closed) draftPortalWindow.close()
       const message = getFriendlyTournamentError(err, 'create')
       const conflict = err && typeof err === 'object' && 'conflict' in err ? (err as any).conflict : null
       const isDateConflict = err && typeof err === 'object' && (err as any).code === 'TOURNAMENT_DATE_CONFLICT'
@@ -800,12 +864,12 @@ export default function HostPortal() {
     setSuccess(null)
     try {
       const saved = await updateHostTournamentRecord(editingId, { ...editForm, endDate: null })
+      const currentTournament = (portalData?.tournaments || []).find((item) => item.id === saved.id)
+      const mergedSavedTournament = { ...(currentTournament || {}), ...saved } as Tournament
       setPortalData((prev) => prev ? { ...prev, tournaments: (prev.tournaments || []).map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : prev)
-      setSuccess(['published', 'completed'].includes(String(saved.status || '').toLowerCase()) && (saved.registrationUrl || saved.portalUrl) ? `Tournament updated. ${saved.status === 'completed' ? 'Tournament page URL' : 'Registration URL'}: ${saved.registrationUrl || saved.portalUrl}` : 'Tournament updated.')
-      setEditingId(null)
-      setEditForm(null)
-      setTournamentInfoOpen(false)
-      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || editForm.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((editForm.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((editForm.templateData as any)?.tournamentSummary || '').length, tournamentCourseMiscPresent: Boolean(String((editForm.templateData as any)?.tournamentCourseMisc || '').trim()), tournamentCourseMiscLength: String((editForm.templateData as any)?.tournamentCourseMisc || '').length, requestedStartDate: editForm.startDate || null, storedStartDate: saved.startDate || null, userTimeZone: getUserTimeZone() } })
+      setEditForm(toEditForm(mergedSavedTournament))
+      setSuccess(['published', 'completed'].includes(String(saved.status || '').toLowerCase()) && (saved.registrationUrl || saved.portalUrl) ? `Tournament changes saved. ${saved.status === 'completed' ? 'Tournament page URL' : 'Registration URL'}: ${saved.registrationUrl || saved.portalUrl}` : 'Tournament changes saved. Continue editing or close the tournament builder when finished.')
+      logFrontendEvent({ category: 'host.portal', message: 'host_tournament_updated', data: { tournamentId: saved.id, status: saved.status, templateKey: saved.templateKey || editForm.templateKey || 'classic-flyer', teamSlotLimit: saved.teamSlotLimit, registeredTeamCount: saved.registeredTeamCount, openTeamSlotCount: saved.openTeamSlotCount, tournamentSummaryPresent: Boolean(String((editForm.templateData as any)?.tournamentSummary || '').trim()), tournamentSummaryLength: String((editForm.templateData as any)?.tournamentSummary || '').length, tournamentCourseMiscPresent: Boolean(String((editForm.templateData as any)?.tournamentCourseMisc || '').trim()), tournamentCourseMiscLength: String((editForm.templateData as any)?.tournamentCourseMisc || '').length, requestedStartDate: editForm.startDate || null, storedStartDate: saved.startDate || null, userTimeZone: getUserTimeZone(), builderRemainedOpen: true } })
     } catch (err) {
       const message = getFriendlyTournamentError(err, 'save')
       const conflict = err && typeof err === 'object' && 'conflict' in err ? (err as any).conflict : null
@@ -1188,7 +1252,7 @@ export default function HostPortal() {
                   ) : null}
 
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button className="btn btnPrimary" disabled={saving}>{saving ? 'Creating…' : (String(form.organizerEmail || '').trim() ? 'Create tournament and invite organizer' : 'Create tournament')}</button>
+                    <button className="btn btnPrimary" disabled={saving}>{saving ? 'Creating Draft Tournament…' : 'Create Tournament in Draft Status'}</button>
                     <button
                       type="button"
                       className="btn"
@@ -1267,7 +1331,13 @@ export default function HostPortal() {
                 ) : null}
                 <div className="formStack" style={{ marginTop: 12 }}>
                   {visibleHostedTournaments.length === 0 ? <div className="small">{draftFilterSelected ? (showArchivedTournaments ? 'No archived draft tournaments.' : 'No draft tournaments.') : (showArchivedTournaments ? `No archived tournaments in ${selectedHostYearNumber}.` : `No active tournaments in ${selectedHostYearNumber}.`)}</div> : visibleHostedTournaments.map((tournament) => (
-                  <div key={tournament.id} className={editingId === tournament.id ? 'card' : undefined} style={editingId === tournament.id ? { padding: 16 } : undefined}>
+                  <div
+                    key={tournament.id}
+                    id={editingId === tournament.id ? undefined : hostTournamentRowId(tournament.id)}
+                    className={editingId === tournament.id ? 'card' : 'hostTournamentListFocusTarget'}
+                    tabIndex={editingId === tournament.id ? undefined : -1}
+                    style={editingId === tournament.id ? { padding: 16 } : undefined}
+                  >
                     {editingId === tournament.id && editForm ? (
                       <form onSubmit={onSaveTournament} className="formStack" onClick={(e) => e.stopPropagation()}>
                         <RegisteredGolfers tournament={tournament} />
@@ -1386,13 +1456,7 @@ export default function HostPortal() {
                         ) : null}
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <button className="btn btnPrimary" disabled={saving}>{saving ? 'Saving…' : 'Save tournament changes'}</button>
-                          <button type="button" className="btn" onClick={() => {
-                            logFrontendEvent({ category: 'host.portal', message: 'host_tournament_edit_cancelled', data: { tournamentId: editingId } })
-                            setEditingId(null)
-                            setEditForm(null)
-                            setTournamentInfoOpen(false)
-                            setError(null)
-                          }}>Cancel</button>
+                          <button type="button" className="btn" onClick={() => closeTournamentBuilder(editingId)}>Close tournament builder</button>
                         </div>
                       </form>
                     ) : (
@@ -1401,6 +1465,7 @@ export default function HostPortal() {
                         archived={showArchivedTournaments}
                         busy={archiveBusyId === tournament.id}
                         showPublishedLeaderboard
+                        showDraftPreviewUrl
                         onSelect={showArchivedTournaments ? undefined : (selectedTournament) => startEditing(selectedTournament)}
                         onArchive={onArchiveTournament}
                         onRestore={onRestoreTournament}

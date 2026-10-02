@@ -61,6 +61,30 @@ export default function Directions() {
             </ol>
           </div>
         </div>
+
+        <div className="grid grid2" style={{ marginTop: 12 }}>
+          <div className="card" style={{ background: 'rgba(255,247,237,.8)' }}>
+            <h3 style={{ marginTop: 0 }}>Individual Skins Challenge</h3>
+            <ol style={{ lineHeight: 1.6, margin: 0, paddingLeft: 18 }}>
+              <li>Create an <strong>Individual Challenge</strong> and choose <strong>Skins</strong> as the individual challenge game.</li>
+              <li>Each golfer records their own hole-by-hole score.</li>
+              <li>A golfer must have the outright lowest score on a hole to win that hole.</li>
+              <li>A tied low score is a push and awards no points; standard Skins does not carry pushed points forward.</li>
+              <li>The leaderboard shows each hole's winner and score plus the worst score and the golfer or golfers who recorded it.</li>
+            </ol>
+          </div>
+
+          <div className="card" style={{ background: 'rgba(240,253,244,.84)' }}>
+            <h3 style={{ marginTop: 0 }}>Individual Skins - Push Challenge</h3>
+            <ol style={{ lineHeight: 1.6, margin: 0, paddingLeft: 18 }}>
+              <li>Create an <strong>Individual Challenge</strong> and choose <strong>Skins - Push</strong>.</li>
+              <li>A golfer must have the outright lowest score on a hole; otherwise the hole pushes.</li>
+              <li>On an outright win, the golfer earns the selected dollars-per-hole value for each stroke between their score and the worst score recorded on that hole.</li>
+              <li>Dollars from pushed holes carry forward and are added to the next outright hole winner.</li>
+              <li>The leaderboard shows the hole winner and score, the worst score and golfer name or names, pushed dollars, and dollars awarded.</li>
+            </ol>
+          </div>
+        </div>
       </div>
     </div>
   )

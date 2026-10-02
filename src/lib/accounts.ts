@@ -383,6 +383,7 @@ export type TournamentLiveLeaderboardResponse = {
 
 export type TournamentPortal = {
   tournament: Tournament
+  isDraftPreview?: boolean
   registrationCount?: number
   teamSlotLimit?: number | null
   registeredTeamCount?: number

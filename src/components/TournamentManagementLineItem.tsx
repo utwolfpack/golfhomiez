@@ -42,6 +42,7 @@ export default function TournamentManagementLineItem({
   archived = false,
   busy = false,
   showPublishedLeaderboard = false,
+  showDraftPreviewUrl = false,
   onSelect,
   onArchive,
   onRestore,
@@ -50,6 +51,7 @@ export default function TournamentManagementLineItem({
   archived?: boolean
   busy?: boolean
   showPublishedLeaderboard?: boolean
+  showDraftPreviewUrl?: boolean
   onSelect?: (tournament: Tournament) => void
   onArchive?: (tournament: Tournament) => void
   onRestore?: (tournament: Tournament) => void
@@ -58,7 +60,13 @@ export default function TournamentManagementLineItem({
   const normalizedStatus = String(tournament.status || '').toLowerCase()
   const publicStatus = ['published', 'completed'].includes(normalizedStatus)
   const published = normalizedStatus === 'published'
-  const tournamentUrl = !archived && publicStatus ? (tournament.registrationUrl || tournament.portalUrl || null) : null
+  const draft = normalizedStatus === 'draft'
+  const draftPreviewUrl = !archived && showDraftPreviewUrl && draft ? (tournament.portalUrl || null) : null
+  const publishedTournamentUrl = !archived && publicStatus ? (tournament.registrationUrl || tournament.portalUrl || null) : null
+  const tournamentUrl = draftPreviewUrl || publishedTournamentUrl
+  const tournamentUrlLabel = draftPreviewUrl ? 'DRAFT PREVIEW URL' : 'GOLFER REGISTRATION URL'
+  const previewTournamentUrlLabel = draftPreviewUrl ? 'Preview draft preview URL in a new tab' : 'Preview golfer registration URL in a new tab'
+  const copyTournamentUrlLabel = draftPreviewUrl ? 'Copy draft preview URL' : 'Copy golfer registration URL'
   const publicTournamentId = tournament.tournamentIdentifier || tournament.id
   const leaderboardPath = !archived && published && showPublishedLeaderboard ? `/tournaments/${encodeURIComponent(publicTournamentId)}/leaderboard` : null
   const picturesPath = !archived && publicStatus && Number(tournament.imageCount || 0) > 0 ? `/tournaments/${encodeURIComponent(publicTournamentId)}/pictures` : null
@@ -80,7 +88,7 @@ export default function TournamentManagementLineItem({
     if (!tournamentUrl) return
     try {
       await navigator.clipboard?.writeText(tournamentUrl)
-      logFrontendEvent({ category: 'host.tournaments', message: 'copy_tournament_registration_url', data: { tournamentId: tournament.id, tournamentName: tournament.name } })
+      logFrontendEvent({ category: 'host.tournaments', message: draftPreviewUrl ? 'copy_tournament_draft_preview_url' : 'copy_tournament_registration_url', data: { tournamentId: tournament.id, tournamentName: tournament.name, urlType: draftPreviewUrl ? 'draft_preview' : 'registration' } })
     } catch (_) {
       // Clipboard access may be unavailable in some browsers; the visible URL remains selectable.
     }
@@ -91,7 +99,7 @@ export default function TournamentManagementLineItem({
     if (!tournamentUrl) return
     const previewWindow = window.open(tournamentUrl, '_blank', 'noopener,noreferrer')
     if (previewWindow) previewWindow.opener = null
-    logFrontendEvent({ category: 'host.tournaments', message: 'preview_tournament_registration_url', data: { tournamentId: tournament.id, tournamentName: tournament.name, opened: Boolean(previewWindow) } })
+    logFrontendEvent({ category: 'host.tournaments', message: draftPreviewUrl ? 'preview_tournament_draft_preview_url' : 'preview_tournament_registration_url', data: { tournamentId: tournament.id, tournamentName: tournament.name, opened: Boolean(previewWindow), urlType: draftPreviewUrl ? 'draft_preview' : 'registration' } })
   }
 
   const openLeaderboard = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -130,12 +138,12 @@ export default function TournamentManagementLineItem({
           {counts.hasTeamSlotLimit && counts.openTeamSlotCount != null ? <div><span>Team Slots Open</span><strong>{counts.openTeamSlotCount}</strong></div> : null}
           {tournamentUrl ? (
             <div className="tournament-management-line__url">
-              <span>GOLFER REGISTRATION URL</span>
+              <span>{tournamentUrlLabel}</span>
               <div className="tournament-management-line__url-row" onClick={stopActionClick}>
                 <strong className="tournament-management-line__url-text">{tournamentUrl}</strong>
                 <span className="tournament-management-line__url-actions">
-                  <button className="btn btnSmall tournament-management-line__preview" type="button" aria-label="Preview golfer registration URL in a new tab" title="Preview golfer registration page" onClick={previewTournamentUrl}>↗</button>
-                  <button className="btn btnSmall tournament-management-line__copy" type="button" aria-label="Copy golfer registration URL" title="Copy golfer registration URL" onClick={copyTournamentUrl}>⧉</button>
+                  <button className="btn btnSmall tournament-management-line__preview" type="button" aria-label={previewTournamentUrlLabel} title={previewTournamentUrlLabel} onClick={previewTournamentUrl}>↗</button>
+                  <button className="btn btnSmall tournament-management-line__copy" type="button" aria-label={copyTournamentUrlLabel} title={copyTournamentUrlLabel} onClick={copyTournamentUrl}>⧉</button>
                 </span>
               </div>
             </div>

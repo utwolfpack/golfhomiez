@@ -180,6 +180,34 @@ export type ScheduledJobCommercialMetadata = {
   } | null
 }
 
+
+export type ScheduledJobProgress = {
+  phase?: string | null
+  correlationId?: string | null
+  runId?: string | null
+  processedCourses?: number | null
+  coursesProcessedThisRun?: number | null
+  resumedCourses?: number | null
+  totalCourses?: number | null
+  eligibleCourses?: number | null
+  coursesWithoutWebsite?: number | null
+  coursesWithEmails?: number | null
+  failedCourses?: number | null
+  pageFailures?: number | null
+  pagesAttempted?: number | null
+  pagesFetched?: number | null
+  emailRecordsDiscovered?: number | null
+  percentComplete?: number | null
+  elapsedMs?: number | null
+  coursesPerMinute?: number | null
+  estimatedRemainingMs?: number | null
+  expectedCompletionAt?: string | null
+  updatedAt?: string | null
+  maxPagesPerCourse?: number | null
+  retryAttempts?: number | null
+  checkpointFile?: string | null
+}
+
 export type ScheduledJob = {
   id: string
   name: string
@@ -194,6 +222,7 @@ export type ScheduledJob = {
   lastRun?: ScheduledJobLastRun | null
   canCancel?: boolean
   activeRunId?: string | null
+  activeProgress?: ScheduledJobProgress | null
   commercialMetadata?: ScheduledJobCommercialMetadata | null
 }
 
