@@ -149,10 +149,10 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
             {rows.map((row) => (
               <div className={`tournament-flyer-attribute-row tournament-flyer-attribute-row--${row.key}`} key={row.key}>
                 <span className="tournament-flyer-attribute-icon" style={{ color: accentColor }}><TournamentAttributeIcon iconKey={row.key} size={46} contained /></span>
-                <div className="tournament-flyer-attribute-copy">
+                <span className="tournament-flyer-attribute-copy">
                   <strong>{row.label}</strong>
                   <span className="tournament-flyer-attribute-value">{row.displayValue}</span>
-                </div>
+                </span>
               </div>
             ))}
           </div>

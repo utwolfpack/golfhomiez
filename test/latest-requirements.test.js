@@ -940,3 +940,16 @@ test('public rich text and mobile tournament flyers wrap at normal word boundari
   assert.match(styles, /\.tournament-flyer--spec-layout \.tournament-flyer-title\{[\s\S]*?font-size:clamp\(25px,9\.5vw,36px\) !important;[\s\S]*?text-wrap:balance;/)
   assert.match(styles, /\.tournament-guided-flyer--spec-layout \.tournament-guided-hero-copy h1\{[\s\S]*?font-size:clamp\(28px,9\.5vw,40px\) !important;[\s\S]*?text-wrap:balance;/)
 })
+
+
+test('Classic tournament flyer keeps event detail labels and values visible on mobile', () => {
+  const styles = read('src/index.css')
+  const portal = read('src/pages/TournamentPortal.tsx')
+
+  assert.doesNotMatch(styles, /\.tournament-flyer-attribute-row > div:nth-child\(2\)\{display:none !important;\}/)
+  assert.match(portal, /<span className="tournament-flyer-attribute-copy">[\s\S]*?<strong>\{row\.label\}<\/strong>[\s\S]*?<span className="tournament-flyer-attribute-value">\{row\.displayValue\}<\/span>[\s\S]*?<\/span>/)
+  assert.match(styles, /Classic flyer mobile detail visibility guard/)
+  assert.match(styles, /@media screen and \(max-width:720px\)\{[\s\S]*?\.tournament-flyer--spec-layout \.tournament-flyer-attribute-row > \.tournament-flyer-attribute-copy\{[\s\S]*?display:grid !important;[\s\S]*?visibility:visible !important;[\s\S]*?opacity:1 !important;/)
+  assert.match(styles, /\.tournament-flyer--spec-layout \.tournament-flyer-attribute-row > \.tournament-flyer-attribute-copy > strong\{[\s\S]*?color:var\(--tournament-template-accent,#0f3f24\) !important;/)
+  assert.match(styles, /\.tournament-flyer--spec-layout \.tournament-flyer-attribute-row > \.tournament-flyer-attribute-copy > \.tournament-flyer-attribute-value\{[\s\S]*?color:#111827 !important;/)
+})
