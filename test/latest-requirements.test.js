@@ -766,6 +766,23 @@ test('printed flyer fills the center intentionally instead of creating a dedicat
   assert.doesNotMatch(portal, /justify-content: space-between !important;/)
 })
 
+test('printed flyer uses spare height for sponsor content instead of a large unused band above the footer', () => {
+  const portal = read('src/pages/TournamentPortal.tsx')
+
+  assert.match(portal, /tournament-print-flyer--has-sponsors/)
+  assert.match(portal, /const printSponsorColumns = Math\.max\(1, Math\.min\(5, logos\.length\)\)/)
+  assert.match(portal, /const printSupportLayout = logos\.length && printInfoPanelCount \? 'mixed' : logos\.length \? 'sponsors-only' : 'info-only'/)
+  assert.match(portal, /tournament-print-support-section--\$\{printSupportLayout\}/)
+  assert.match(portal, /tournament-print-sponsors--columns-\$\{printSponsorColumns\}/)
+  assert.match(portal, /\.tournament-print-flyer--has-sponsors:not\(\.tournament-print-flyer--content-full\) \{[\s\S]*?grid-template-rows: auto auto auto minmax\(0, 1fr\) auto !important;/)
+  assert.match(portal, /\.tournament-print-support-section--mixed \{ grid-template-rows: auto minmax\(0\.62in, 1fr\) !important;/)
+  assert.match(portal, /\.tournament-print-sponsors \{[\s\S]*?grid-template-rows: auto minmax\(0\.46in, 1fr\) !important;[\s\S]*?height: 100% !important;/)
+  assert.match(portal, /\.tournament-print-sponsors div \{[\s\S]*?align-content: center !important;[\s\S]*?height: 100% !important;/)
+  assert.match(portal, /\.tournament-print-sponsors--columns-4 div \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\) !important; \}/)
+  assert.match(portal, /printSpaceUtilization: 'adaptive-sponsor-fill'/)
+  assert.match(portal, /printSponsorLogoCount:/)
+})
+
 
 test('printed flyer removes the Golf Homiez Tournament eyebrow and keeps aligned section edges', () => {
   const portal = read('src/pages/TournamentPortal.tsx')
@@ -952,4 +969,112 @@ test('Classic tournament flyer keeps event detail labels and values visible on m
   assert.match(styles, /@media screen and \(max-width:720px\)\{[\s\S]*?\.tournament-flyer--spec-layout \.tournament-flyer-attribute-row > \.tournament-flyer-attribute-copy\{[\s\S]*?display:grid !important;[\s\S]*?visibility:visible !important;[\s\S]*?opacity:1 !important;/)
   assert.match(styles, /\.tournament-flyer--spec-layout \.tournament-flyer-attribute-row > \.tournament-flyer-attribute-copy > strong\{[\s\S]*?color:var\(--tournament-template-accent,#0f3f24\) !important;/)
   assert.match(styles, /\.tournament-flyer--spec-layout \.tournament-flyer-attribute-row > \.tournament-flyer-attribute-copy > \.tournament-flyer-attribute-value\{[\s\S]*?color:#111827 !important;/)
+})
+
+test('tournament flyer uses one account-aware registration workflow on desktop and mobile without screen QR or duplicate registration cards', () => {
+  const portal = read('src/pages/TournamentPortal.tsx')
+  const styles = read('src/index.css')
+
+  assert.match(portal, /registrationContent\?: ReactNode/)
+  assert.match(portal, /registrationDeadlineAction\?: ReactNode/)
+  assert.match(portal, /tournament-registration-slot/)
+  assert.match(portal, /function renderRegistrationAction\(surface: 'flyer'\)/)
+  assert.match(portal, /You are already registered for this tournament\./)
+  assert.match(portal, /Registered team: \$\{registeredTeamName\}/)
+  assert.match(portal, /Create your free account and register/)
+  assert.match(portal, /Create free account &amp; continue/)
+  assert.match(portal, /Choose your \{requiredTeamSize\}-player team/)
+  assert.match(portal, /registration_account_creation_started/)
+  assert.match(portal, /registrationContent=\{renderRegistrationAction\('flyer'\)\}/)
+  assert.match(portal, /registrationDeadlineAction=\{renderRegistrationDeadlineAction\(\)\}/)
+  assert.match(portal, /registration_deadline_action_selected/)
+  assert.match(portal, /Team: \$\{registeredTeamName\}/)
+  assert.doesNotMatch(portal, /tournament-mobile-registration-section/)
+  assert.doesNotMatch(portal, /tournament-mobile-qr-slot/)
+  assert.doesNotMatch(portal, /tournament-desktop-registration-slot/)
+  assert.doesNotMatch(portal, /<a href=\{flyerPageUrl \|\| undefined\}>\{flyerPageUrl\}<\/a>/)
+  assert.doesNotMatch(portal, /<strong>Registration<\/strong>[\s\S]{0,3000}Create account to register/)
+
+  assert.match(styles, /\.tournament-registration-slot\{display:block;min-width:0\}/)
+  assert.match(styles, /@media screen and \(max-width:820px\)\{[\s\S]*?\.tournament-registration-slot\{display:block!important;width:100%\}[\s\S]*?\.tournament-guided-flyer--spec-layout \.tournament-guided-register\{grid-template-columns:minmax\(0,1fr\)\}/)
+  assert.doesNotMatch(styles, /\.tournament-mobile-qr-slot/)
+  assert.doesNotMatch(styles, /\.tournament-mobile-registration-section/)
+})
+
+test('tournament registration deadline action is conditional and routes users into the flyer workflow with registered-team feedback', () => {
+  const portal = read('src/pages/TournamentPortal.tsx')
+
+  assert.match(portal, /\{registrationDeadline \? \([\s\S]*?tournament-flyer-action-band[\s\S]*?Registration deadline: \{registrationDeadline\}[\s\S]*?registrationDeadlineAction[\s\S]*?\) : null\}/)
+  assert.match(portal, /\{registrationDeadline \? \([\s\S]*?tournament-guided-action-band[\s\S]*?Registration deadline: \{registrationDeadline\}[\s\S]*?registrationDeadlineAction[\s\S]*?\) : null\}/)
+  assert.match(portal, /function focusFlyerRegistration\(\)/)
+  assert.match(portal, /document\.getElementById\('tournament-registration-flyer-panel'\)/)
+  assert.match(portal, /\{user \? 'Register now' : 'Create account & register'\}/)
+  assert.match(portal, /Already registered[\s\S]*?Team: \$\{registeredTeamName\}/)
+})
+
+test('Fairway Poster keeps the tournament description and dark fact cells readable without overlap', () => {
+  const portal = read('src/pages/TournamentPortal.tsx')
+  const styles = read('src/index.css')
+
+  assert.match(portal, /tournament-guided-flyer--has-description/)
+  assert.match(styles, /tournament-guided-flyer--fairway-poster \.tournament-guided-description\{[\s\S]*?background:#f8fafc!important;[\s\S]*?color:#1f2937!important/)
+  assert.match(styles, /tournament-guided-flyer--fairway-poster\.tournament-guided-flyer--has-description \.tournament-guided-facts\{margin-top:0\}/)
+  assert.match(styles, /tournament-guided-flyer--fairway-poster \.tournament-guided-facts\{[\s\S]*?background:#071b1d;color:#f8fafc/)
+  assert.match(styles, /tournament-guided-flyer--fairway-poster \.tournament-guided-fact:nth-child\(even\) \*\{color:#f8fafc\}/)
+})
+
+test('tournament flyer themes have distinct poster, editorial, charity, evening, and invitation visual treatments', () => {
+  const styles = read('src/index.css')
+
+  assert.match(styles, /Fairway Poster: angled black\/turquoise event-poster language/)
+  assert.match(styles, /tournament-guided-flyer--fairway-poster \.tournament-guided-hero-shade\{background:linear-gradient\(125deg/)
+  assert.match(styles, /Modern Golf Open: sponsor-forward editorial blocks/)
+  assert.match(styles, /tournament-guided-flyer--modern-open \.tournament-guided-hero\{margin:20px;border-radius:28px/)
+  assert.match(styles, /Charity & Memorial: elegant cause-first treatment/)
+  assert.match(styles, /tournament-guided-flyer--charity-tribute \.tournament-guided-kicker\{color:#e5c96c/)
+  assert.match(styles, /Sunset Drive: dramatic evening-event palette/)
+  assert.match(styles, /tournament-guided-flyer--sunset-drive \.tournament-guided-action-band\{background:#9f1d1d!important/)
+  assert.match(styles, /Green Invitation: refined school\/club invitation style/)
+  assert.match(styles, /tournament-guided-flyer--green-invite \.tournament-guided-facts\{background:#5f2d78/)
+})
+
+
+test('printed flyer themes mirror desktop palettes while keeping FlyerSpecs hierarchy and print-only scope', () => {
+  const portal = read('src/pages/TournamentPortal.tsx')
+  const printStylesStart = portal.indexOf('const TOURNAMENT_FLYER_PRINT_STYLES')
+  const printStylesEnd = portal.indexOf('\n`', printStylesStart + 10)
+  const printStyles = portal.slice(printStylesStart, printStylesEnd > printStylesStart ? printStylesEnd : undefined)
+
+  assert.match(printStyles, /@media print \{/)
+  assert.match(printStyles, /FlyerSpecs v2: each print theme uses the same five-section information hierarchy/)
+  assert.match(printStyles, /Classic Flyer: clean traditional golf-event program/)
+  assert.match(printStyles, /tournament-print-flyer--classic-flyer[\s\S]*?border: 0\.035in double #0f3f24/)
+
+  assert.match(printStyles, /Fairway Poster: bold angled black\/turquoise poster treatment/)
+  assert.match(printStyles, /tournament-print-flyer--fairway-poster \.tournament-print-banner::after[\s\S]*?linear-gradient\(125deg/)
+  assert.match(printStyles, /tournament-print-flyer--fairway-poster \.tournament-print-detail-grid[\s\S]*?repeat\(3, minmax\(0,1fr\)\)/)
+  assert.match(printStyles, /tournament-print-flyer--fairway-poster \.tournament-print-detail:nth-child\(odd\)[\s\S]*?#10a9ae/)
+  assert.match(printStyles, /tournament-print-flyer--fairway-poster \.tournament-print-detail:nth-child\(even\) span,[\s\S]*?color: #f8fafc/)
+
+  assert.match(printStyles, /Modern Golf Open: sponsor-forward editorial layout/)
+  assert.match(printStyles, /tournament-print-flyer--modern-open \.tournament-print-banner[\s\S]*?border-radius: 0\.22in/)
+  assert.match(printStyles, /tournament-print-flyer--modern-open \.tournament-print-action-band \{ background: #244b17/)
+
+  assert.match(printStyles, /Charity & Memorial: formal cause-first dark green and gold composition/)
+  assert.match(printStyles, /tournament-print-flyer--charity-tribute[\s\S]*?background: var\(--tournament-print-background, #10230e\)/)
+  assert.match(printStyles, /tournament-print-flyer--charity-tribute \.tournament-print-presented[\s\S]*?color: #e5c96c/)
+
+  assert.match(printStyles, /Sunset Drive: premium evening-event poster/)
+  assert.match(printStyles, /tournament-print-flyer--sunset-drive[\s\S]*?background: var\(--tournament-print-background, #080808\)/)
+  assert.match(printStyles, /tournament-print-flyer--sunset-drive \.tournament-print-action-band \{ background: #9f1d1d/)
+
+  assert.match(printStyles, /Green Invitation: school\/club invitation composition/)
+  assert.match(printStyles, /tournament-print-flyer--green-invite \.tournament-print-primary-section[\s\S]*?grid-template-columns: 42% minmax\(0,1fr\)/)
+  assert.match(printStyles, /grid-template-areas: 'image heading' 'description description'/)
+  assert.match(printStyles, /tournament-print-flyer--green-invite \.tournament-print-detail:nth-child\(3n\+2\) \{ background: #0f6770/)
+
+  assert.match(portal, /printThemeDesignVersion: 'flyer-specs-v2'/)
+  assert.match(portal, /printThemeKey: template\.key/)
+  assert.match(portal, /printThemeAlignment: 'desktop-theme-matched'/)
+  assert.match(portal, /printPrimarySections: 5/)
 })

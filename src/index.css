@@ -11091,3 +11091,131 @@ button.navDropdownItem{font:inherit;}
   }
 }
 
+
+/* 2026-10 tournament flyer registration + flyer-theme variety.
+   The flyer owns one account-aware registration workflow on desktop and mobile.
+   Screen QR/URL duplication and the legacy below-flyer registration card are removed. */
+.tournament-registration-slot{display:block;min-width:0}
+
+.tournament-registration-action{min-width:0;color:#17202a;text-transform:none;text-align:left}
+.tournament-registration-action:focus{outline:3px solid rgba(22,101,52,.24);outline-offset:4px}
+.tournament-registration-action .input{width:100%;min-width:0;box-sizing:border-box}
+.tournament-registration-flow,
+.tournament-account-registration-flow{display:grid;gap:12px}
+.tournament-registration-flow-heading{display:grid;gap:3px}
+.tournament-registration-flow-heading strong{font-size:18px;line-height:1.15;color:#102a1c}
+.tournament-registration-flow-heading > span:last-child{font-size:12px;line-height:1.35;color:#475569}
+.tournament-registration-eyebrow{font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:#166534}
+.tournament-registration-mode{display:flex;gap:12px;flex-wrap:wrap;padding:8px 10px;border:1px solid #dbe5dd;border-radius:10px;background:#f8faf8}
+.tournament-registration-mode label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#24352a;cursor:pointer}
+.tournament-registration-fields{display:grid;gap:8px;min-width:0}
+.tournament-registration-fields .small{margin-top:2px;color:#526057;line-height:1.35}
+.tournament-registration-submit{justify-self:start;min-width:210px}
+.tournament-registration-success,
+.tournament-registration-unavailable{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:12px;background:#ecfdf3;border:1px solid #a7f3c0;color:#14532d}
+.tournament-registration-unavailable{display:grid;background:#fff7ed;border-color:#fed7aa;color:#9a3412}
+.tournament-registration-success > div{display:grid;gap:3px}
+.tournament-registration-success strong,.tournament-registration-unavailable strong{font-size:17px}
+.tournament-registration-success span:not(.tournament-registration-status-icon),.tournament-registration-unavailable span{font-size:12px;line-height:1.4}
+.tournament-registration-status-icon{display:grid;place-items:center;width:28px;height:28px;flex:0 0 28px;border-radius:50%;background:#166534;color:#fff;font-weight:950}
+.tournament-account-registration-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0;padding:0;list-style:none}
+.tournament-account-registration-steps li{display:flex;gap:8px;align-items:flex-start;padding:9px;border:1px solid #dbe5dd;border-radius:10px;background:#f8faf8}
+.tournament-account-registration-steps li > span{display:grid;place-items:center;width:22px;height:22px;flex:0 0 22px;border-radius:50%;background:#166534;color:#fff;font-size:11px;font-weight:900}
+.tournament-account-registration-steps li div{display:grid;gap:2px;min-width:0}
+.tournament-account-registration-steps strong{font-size:12px;line-height:1.2;color:#183125}
+.tournament-account-registration-steps small{font-size:10px;line-height:1.3;color:#64748b}
+.tournament-account-signin-hint a{font-weight:800;color:#166534}
+.tournament-registration-deadline-action{display:flex!important;align-items:center;justify-content:flex-end;flex:0 0 auto;min-width:0}
+.tournament-registration-deadline-button{min-height:44px;padding:10px 18px;border:0;border-radius:999px;background:#fff!important;color:var(--tournament-template-accent,#0f3f24)!important;font-weight:900;white-space:nowrap;box-shadow:0 2px 8px rgba(15,23,42,.14)}
+.tournament-registration-deadline-button:hover,.tournament-registration-deadline-button:focus-visible{transform:translateY(-1px);box-shadow:0 5px 14px rgba(15,23,42,.2)}
+.tournament-registration-deadline-status{display:inline-flex;align-items:center;min-height:42px;padding:9px 14px;border-radius:999px;background:rgba(255,255,255,.94);color:var(--tournament-template-accent,#0f3f24)!important;font-size:12px!important;font-weight:900!important;letter-spacing:0!important;text-transform:none!important;opacity:1!important;white-space:nowrap}
+.tournament-registration-deadline-registered{display:grid!important;gap:2px!important;min-width:190px;padding:9px 14px;border-radius:12px;background:#ecfdf3;color:#14532d;text-align:left;box-shadow:0 2px 8px rgba(15,23,42,.14)}
+.tournament-registration-deadline-registered strong{font-size:13px!important;line-height:1.2!important;color:#14532d!important}
+.tournament-registration-deadline-registered span{font-size:11px!important;line-height:1.25!important;color:#166534!important;letter-spacing:0!important;text-transform:none!important;opacity:1!important}
+
+/* Let the embedded flyer workflow use the old QR column without becoming cramped. */
+.tournament-flyer--spec-layout .tournament-flyer-register-card{grid-template-columns:minmax(180px,.42fr) minmax(360px,1.58fr)}
+.tournament-flyer--spec-layout .tournament-registration-slot{padding:14px 16px;background:#fff}
+.tournament-guided-flyer--spec-layout .tournament-guided-register{grid-template-columns:minmax(150px,.4fr) minmax(360px,1.6fr);align-items:stretch}
+.tournament-guided-flyer--spec-layout .tournament-guided-register > .tournament-registration-slot{padding:14px 16px;background:#fff;border-radius:12px}
+.tournament-guided-flyer--spec-layout .tournament-guided-register > div:first-child{align-self:center}
+.tournament-guided-register-hint{display:block;margin-top:8px;color:rgba(255,255,255,.9);font-size:12px;line-height:1.35;font-weight:700;text-transform:none}
+
+/* Fairway Poster: angled black/turquoise event-poster language inspired by bold charity flyers. */
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster{background:#edf4ef!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-hero{clip-path:polygon(0 0,100% 0,100% 90%,0 100%)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-hero-shade{background:linear-gradient(125deg,rgba(0,0,0,.83) 0 44%,rgba(8,145,153,.62) 44% 62%,rgba(0,0,0,.2) 62% 100%)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-hero-copy{align-items:flex-start;justify-content:flex-end;text-align:left;padding-bottom:70px}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-hero-copy h1{max-width:720px;text-transform:uppercase;font-style:italic;letter-spacing:-.045em}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-kicker{display:inline-block;background:#12b8bd;color:#071b1d;padding:6px 10px;transform:skew(-7deg);font-weight:950}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-description{position:relative;z-index:4;margin:0;padding:16px 28px;border-top:0;border-bottom:1px solid #cbd5e1;background:#f8fafc!important;color:#1f2937!important;text-align:center}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-description .richTextContent,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-description .richTextContent p,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-description .richTextContent div,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-description .richTextContent li,
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-description .richTextContent span{color:#1f2937!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-description .richTextContent a{color:#0f766e!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-facts{margin-top:-26px;position:relative;z-index:3;background:#071b1d;color:#f8fafc;box-shadow:0 12px 28px rgba(15,23,42,.22)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster.tournament-guided-flyer--has-description .tournament-guided-facts{margin-top:0}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-fact:nth-child(even),
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-fact:nth-child(even) *{color:#f8fafc}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-fact:nth-child(odd){background:#10a9ae}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--fairway-poster .tournament-guided-fact:nth-child(odd) *{color:#06191b}
+
+/* Modern Golf Open: sponsor-forward editorial blocks with crisp white space. */
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open{background:#f7f5ef!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-hero{margin:20px;border-radius:28px;overflow:hidden;min-height:400px;width:auto!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-hero-shade{background:linear-gradient(90deg,rgba(10,28,18,.9),rgba(10,28,18,.28) 62%,rgba(10,28,18,.08))}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-hero-copy{min-height:400px;padding:44px;justify-content:center;align-items:flex-start;text-align:left}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-hero-copy h1{text-transform:uppercase;letter-spacing:-.035em;max-width:640px}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-facts{margin:0 20px;background:#fff;border:1px solid #d8dfd8;border-radius:18px;overflow:hidden}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-fact{background:#fff!important;color:#1f2937;border-color:#e5e7eb}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-fact svg{color:#244b17}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-sponsors{border:2px solid #244b17;box-shadow:0 10px 24px rgba(36,75,23,.08)}
+
+/* Charity & Memorial: elegant cause-first treatment modeled on formal benefit posters. */
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute{background:#10230e!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-hero-shade{background:linear-gradient(180deg,rgba(5,15,7,.3),rgba(5,15,7,.92))}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-hero-copy h1{font-size:clamp(46px,8vw,88px);font-family:Georgia,'Times New Roman',serif;letter-spacing:-.035em}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-kicker{color:#e5c96c;letter-spacing:.2em}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-host{color:#f6e9b7}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-facts{background:#b8902d}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-body{background:linear-gradient(180deg,#10230e,#193416)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--charity-tribute .tournament-guided-charity{border:1px solid rgba(229,201,108,.55);box-shadow:0 0 0 5px rgba(229,201,108,.08)}
+
+/* Sunset Drive: dramatic evening-event palette inspired by premium date-night posters. */
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive{background:#080808!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-hero{min-height:520px}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-hero-shade{background:linear-gradient(180deg,rgba(0,0,0,.06),rgba(0,0,0,.28) 45%,rgba(0,0,0,.94)),linear-gradient(110deg,rgba(217,119,6,.22),transparent 48%)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-hero-copy h1{font-size:clamp(54px,9vw,100px);text-transform:uppercase;font-style:italic;letter-spacing:-.05em;text-shadow:0 4px 0 #000,0 0 20px rgba(245,158,11,.22)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-kicker{color:#f59e0b}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-facts{background:#101010;border-top:2px solid #f59e0b;border-bottom:2px solid #f59e0b}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-action-band{background:#9f1d1d!important;box-shadow:0 0 0 4px #111}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--sunset-drive .tournament-guided-body{background:linear-gradient(180deg,#111,#26170a)}
+
+/* Green Invitation: refined school/club invitation style with layered ribbon facts. */
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite{background:#f7f2df!important}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero{border-bottom:12px solid #6d3f86}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-image{width:48%;clip-path:ellipse(78% 92% at 0% 50%)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-copy{margin-left:41%;background:linear-gradient(90deg,rgba(247,242,223,.9),#f7f2df 24%)}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-copy h1{font-family:Georgia,'Times New Roman',serif;text-transform:none;color:#4d2366;letter-spacing:-.04em}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-kicker{color:#b8860b}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-facts{background:#5f2d78}
+.tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-action-band{background:#0f6770!important}
+
+@media screen and (max-width:820px){
+  .tournament-registration-slot{display:block!important;width:100%}
+  .tournament-registration-action--flyer{display:grid;gap:12px}
+  .tournament-account-registration-steps{grid-template-columns:1fr}
+  .tournament-registration-submit{width:100%;min-width:0}
+  .tournament-guided-flyer--spec-layout .tournament-guided-register{grid-template-columns:minmax(0,1fr)}
+  .tournament-flyer--spec-layout .tournament-flyer-register-card{grid-template-columns:minmax(0,1fr)}
+  .tournament-flyer--spec-layout .tournament-flyer-register-copy{font-size:24px}
+  .tournament-registration-deadline-action{width:100%;justify-content:stretch}
+  .tournament-registration-deadline-button,.tournament-registration-deadline-status,.tournament-registration-deadline-registered{width:100%;box-sizing:border-box;white-space:normal}
+  .tournament-registration-deadline-button{justify-content:center}
+  .tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-hero{margin:12px;min-height:360px}
+  .tournament-guided-flyer--spec-layout.tournament-guided-flyer--modern-open .tournament-guided-hero-copy{min-height:360px;padding:26px}
+  .tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-image{width:100%;clip-path:none;opacity:.32}
+  .tournament-guided-flyer--spec-layout.tournament-guided-flyer--green-invite .tournament-guided-hero-copy{margin-left:0;background:rgba(247,242,223,.78)}
+}
