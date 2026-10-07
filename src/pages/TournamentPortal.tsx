@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type CSSProperties, type SyntheticEvent } from 'react'
+import { Fragment, useEffect, useMemo, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useAuth } from '../context/AuthContext'
 import { fetchMyTeams, fetchTournamentPortal, registerForTournament, type TournamentFinalLeaderboardRow, type TournamentPortal as TournamentPortalData, type TournamentStartAssignment } from '../lib/accounts'
@@ -80,7 +80,7 @@ function flyerRegistrationDeadline(templateData: TournamentTemplateData) {
   return formatFriendlyDate(raw)
 }
 
-function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, accentColor }: { tournament: NonNullable<TournamentPortalData['tournament']>; templateData: TournamentTemplateData; attributeIcons: Record<TournamentAttributeIconKey, string>; accentColor: string }) {
+function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, accentColor, registrationContent, registrationDeadlineAction }: { tournament: NonNullable<TournamentPortalData['tournament']>; templateData: TournamentTemplateData; attributeIcons: Record<TournamentAttributeIconKey, string>; accentColor: string; registrationContent?: ReactNode; registrationDeadlineAction?: ReactNode }) {
   const title = tournament.name
   const host = templateData.hostOrganization || tournament.hostGolfCourseName || tournament.organizerName || 'Host organization'
   const logos = Array.isArray(templateData.logoFiles) ? templateData.logoFiles.slice(0, 18) : []
@@ -89,21 +89,18 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
   const backgroundImageUrl = tournament.templateBackgroundImageUrl || DEFAULT_TOURNAMENT_BANNER_URL
   const isDefaultBackground = !tournament.templateBackgroundImageUrl
   const description = String(tournament.description || '')
-  const flyerPageUrl = tournament.portalUrl || (typeof window !== 'undefined' ? window.location.href : tournament.portalPath || '')
   const charityImageUrl = templateData.supportingPhotoUrl || DEFAULT_TOURNAMENT_CHARITY_IMAGE_URL
   const promotionalPhotoUrl = String(templateData.promotionalPhotoUrl || '').trim()
   const flyerBackgroundColor = normalizeTournamentBackgroundColor(templateData.flyerBackgroundColor)
   const hasMiscSection = Boolean(richTextHasContent(templateData.miscNotes) || promotionalPhotoUrl)
   const charityMessage = richTextHasContent(templateData.charityMessage) ? String(templateData.charityMessage) : DEFAULT_TOURNAMENT_CHARITY_MESSAGE
   const isDefaultCharityImage = !templateData.supportingPhotoUrl
-  const qrCodeUrl = getTournamentQrCodeUrl(tournament.tournamentIdentifier || tournament.id)
   const registrationDeadline = flyerRegistrationDeadline(templateData)
   const feesInclude = lines(templateData.feesInclude)
   const prizeDetails = lines(templateData.prizeDetails)
   const contestDetails = lines(templateData.holeContestsExtras)
   const highlightCount = [feesInclude, prizeDetails, contestDetails].filter((items) => items.length > 0).length
   const hasContact = Boolean(String(templateData.contactPerson || '').trim() || String(templateData.contactPhone || '').trim() || String(templateData.contactEmail || '').trim())
-  const qrCorrelationId = getCorrelationId()
   const bannerCorrelationId = getCorrelationId()
   const charityCorrelationId = getCorrelationId()
   const promotionalPhotoCorrelationId = getCorrelationId()
@@ -156,14 +153,16 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
               </div>
             ))}
           </div>
-          <div className="tournament-flyer-action-band" style={{ background: accentColor }}>
-            <div>
-              <span className="tournament-flyer-action-kicker">Ready to play?</span>
-              <strong>Register for this tournament</strong>
-              {registrationDeadline ? <small>Registration deadline: {registrationDeadline}</small> : <small>Scan the QR code below or open the tournament page.</small>}
+          {registrationDeadline ? (
+            <div className="tournament-flyer-action-band" style={{ background: accentColor }}>
+              <div>
+                <span className="tournament-flyer-action-kicker">Ready to play?</span>
+                <strong>Register for this tournament</strong>
+                <small>Registration deadline: {registrationDeadline}</small>
+              </div>
+              <div className="tournament-registration-deadline-action">{registrationDeadlineAction}</div>
             </div>
-            <a href={flyerPageUrl || undefined}>Register now</a>
-          </div>
+          ) : null}
         </section>
 
         <div className="tournament-flyer-body">
@@ -244,24 +243,11 @@ function ClassicTournamentFlyer({ tournament, templateData, attributeIcons, acce
             ) : null}
             <div className="tournament-flyer-register-card" style={{ borderColor: accentColor }}>
               <div className="tournament-flyer-register-copy" style={{ background: accentColor }}>
-                Register Now
-                <div><a href={flyerPageUrl || undefined}>{flyerPageUrl}</a></div>
+                Registration
+                <div>Choose or create your tournament team below.</div>
               </div>
-              <div className="tournament-flyer-qr-code" style={{ color: accentColor }}>
-                {qrCodeUrl ? (
-                  <img
-                    src={qrCodeUrl}
-                    alt={`QR code for ${title} tournament page`}
-                    width="156"
-                    height="156"
-                    loading="lazy"
-                    decoding="async"
-                    data-correlation-id={qrCorrelationId}
-                    onLoad={() => logFrontendEvent({ category: 'tournament.portal', message: 'qr_code_loaded', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null, correlationId: qrCorrelationId } })}
-                    onError={() => logFrontendEvent({ category: 'tournament.portal', level: 'error', message: 'qr_code_load_failed', data: { tournamentId: tournament.id, tournamentIdentifier: tournament.tournamentIdentifier || null, correlationId: qrCorrelationId } })}
-                  />
-                ) : <span>QR CODE</span>}
-                <span>Scan to open tournament page</span>
+              <div className="tournament-registration-slot">
+                {registrationContent}
               </div>
             </div>
           </section>
@@ -278,9 +264,11 @@ type GuidedTournamentFlyerProps = {
   attributeIcons: Record<TournamentAttributeIconKey, string>
   accentColor: string
   templateKey: string
+  registrationContent?: ReactNode
+  registrationDeadlineAction?: ReactNode
 }
 
-function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accentColor, templateKey }: GuidedTournamentFlyerProps) {
+function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accentColor, templateKey, registrationContent, registrationDeadlineAction }: GuidedTournamentFlyerProps) {
   const title = tournament.name
   const host = templateData.hostOrganization || tournament.hostGolfCourseName || tournament.organizerName || 'Host organization'
   const backgroundImageUrl = tournament.templateBackgroundImageUrl || DEFAULT_TOURNAMENT_BANNER_URL
@@ -292,8 +280,6 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
   const charityMessage = richTextHasContent(templateData.charityMessage) ? String(templateData.charityMessage) : DEFAULT_TOURNAMENT_CHARITY_MESSAGE
   const feeValue = templateData.entryFee ? (String(templateData.entryFee).trim().startsWith('$') ? templateData.entryFee : `$${templateData.entryFee}`) : 'To be announced'
   const rows = ATTRIBUTE_ROWS.map((row) => ({ ...row, displayValue: row.key === 'registrationFee' ? feeValue : row.value(tournament, templateData) }))
-  const flyerPageUrl = tournament.portalUrl || (typeof window !== 'undefined' ? window.location.href : tournament.portalPath || '')
-  const qrCodeUrl = getTournamentQrCodeUrl(tournament.tournamentIdentifier || tournament.id)
   const logos = Array.isArray(templateData.logoFiles) ? templateData.logoFiles.slice(0, 18) : []
   const registrationDeadline = flyerRegistrationDeadline(templateData)
   const feesInclude = lines(templateData.feesInclude)
@@ -304,12 +290,11 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
   const bannerCorrelationId = getCorrelationId()
   const charityCorrelationId = getCorrelationId()
   const promotionalPhotoCorrelationId = getCorrelationId()
-  const qrCorrelationId = getCorrelationId()
   const slug = templateKey.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()
 
   return (
     <section
-      className={`card tournament-flyer tournament-guided-flyer tournament-guided-flyer--${slug} tournament-guided-flyer--spec-layout`}
+      className={`card tournament-flyer tournament-guided-flyer tournament-guided-flyer--${slug} tournament-guided-flyer--spec-layout${richTextHasContent(description) ? ' tournament-guided-flyer--has-description' : ''}`}
       aria-label="Tournament flyer"
       style={{ '--tournament-template-accent': accentColor, '--tournament-template-background': flyerBackgroundColor || undefined } as CSSProperties}
     >
@@ -347,14 +332,16 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
             </div>
           ))}
         </div>
-        <div className="tournament-guided-action-band">
-          <div>
-            <span>Ready to play?</span>
-            <strong>Register for this tournament</strong>
-            {registrationDeadline ? <small>Registration deadline: {registrationDeadline}</small> : <small>Use the tournament page or scan the QR code below.</small>}
+        {registrationDeadline ? (
+          <div className="tournament-guided-action-band">
+            <div>
+              <span>Ready to play?</span>
+              <strong>Register for this tournament</strong>
+              <small>Registration deadline: {registrationDeadline}</small>
+            </div>
+            <div className="tournament-registration-deadline-action">{registrationDeadlineAction}</div>
           </div>
-          <a href={flyerPageUrl || undefined}>Register now</a>
-        </div>
+        ) : null}
       </section>
 
       <div className="tournament-guided-body">
@@ -434,22 +421,12 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
           ) : null}
           <div className="tournament-guided-register">
             <div>
-              <div className="tournament-guided-register-title">Register Now</div>
-              <a href={flyerPageUrl || undefined}>{flyerPageUrl}</a>
+              <div className="tournament-guided-register-title">Registration</div>
+              <span className="tournament-guided-register-hint">Choose or create your tournament team below.</span>
             </div>
-            {qrCodeUrl ? (
-              <img
-                src={qrCodeUrl}
-                alt={`QR code for ${title} tournament page`}
-                width="138"
-                height="138"
-                loading="lazy"
-                decoding="async"
-                data-correlation-id={qrCorrelationId}
-                onLoad={() => logFrontendEvent({ category: 'tournament.portal', message: 'tournament_template_qr_code_loaded', data: { tournamentId: tournament.id, templateKey, correlationId: qrCorrelationId } })}
-                onError={() => logFrontendEvent({ category: 'tournament.portal', level: 'error', message: 'tournament_template_qr_code_load_failed', data: { tournamentId: tournament.id, templateKey, correlationId: qrCorrelationId } })}
-              />
-            ) : null}
+            <div className="tournament-registration-slot">
+              {registrationContent}
+            </div>
           </div>
         </section>
       </div>
@@ -458,11 +435,11 @@ function GuidedTournamentFlyer({ tournament, templateData, attributeIcons, accen
 }
 
 
-function TournamentFlyer({ tournament, templateData, attributeIcons, accentColor, templateKey }: GuidedTournamentFlyerProps) {
+function TournamentFlyer({ tournament, templateData, attributeIcons, accentColor, templateKey, registrationContent, registrationDeadlineAction }: GuidedTournamentFlyerProps) {
   if (!templateKey || templateKey === 'classic-flyer') {
-    return <ClassicTournamentFlyer tournament={tournament} templateData={templateData} attributeIcons={attributeIcons} accentColor={accentColor} />
+    return <ClassicTournamentFlyer tournament={tournament} templateData={templateData} attributeIcons={attributeIcons} accentColor={accentColor} registrationContent={registrationContent} registrationDeadlineAction={registrationDeadlineAction} />
   }
-  return <GuidedTournamentFlyer tournament={tournament} templateData={templateData} attributeIcons={attributeIcons} accentColor={accentColor} templateKey={templateKey} />
+  return <GuidedTournamentFlyer tournament={tournament} templateData={templateData} attributeIcons={attributeIcons} accentColor={accentColor} templateKey={templateKey} registrationContent={registrationContent} registrationDeadlineAction={registrationDeadlineAction} />
 }
 
 function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, accentColor, templateKey }: GuidedTournamentFlyerProps) {
@@ -490,6 +467,8 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
   const printContactEmail = String(templateData.contactEmail || '').trim()
   const hasPrintContact = Boolean(printContactPerson || printContactPhone || printContactEmail)
   const printRegistrationDeadline = flyerRegistrationDeadline(templateData)
+  const printSponsorColumns = Math.max(1, Math.min(5, logos.length))
+  const printSupportLayout = logos.length && printInfoPanelCount ? 'mixed' : logos.length ? 'sponsors-only' : 'info-only'
   const printOptionalContentCount = printFeesInclude.length + printPrizeDetails.length + printContestDetails.length + logos.length + (printMiscNotes ? 2 : 0) + (promotionalPhotoUrl ? 2 : 0)
   const descriptionTextLength = richTextToPlainText(description).length
   const charityTextLength = richTextToPlainText(charityMessage).length
@@ -501,7 +480,7 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
 
   return (
     <section
-      className={`tournament-print-flyer tournament-print-flyer--${templateKey || 'classic-flyer'} tournament-print-flyer--content-${printContentDensity} tournament-print-flyer--spec-layout`}
+      className={`tournament-print-flyer tournament-print-flyer--${templateKey || 'classic-flyer'} tournament-print-flyer--content-${printContentDensity} ${logos.length ? 'tournament-print-flyer--has-sponsors' : 'tournament-print-flyer--no-sponsors'} tournament-print-flyer--spec-layout`}
       aria-label="Printable tournament flyer"
       style={{ '--tournament-print-background': flyerBackgroundColor || undefined, '--tournament-template-accent': accentColor } as CSSProperties}
     >
@@ -567,7 +546,7 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
       </section>
 
       {(printInfoPanelCount || logos.length) ? (
-        <section className="tournament-print-support-section" aria-label="Tournament inclusions, prizes, contests, and sponsors">
+        <section className={`tournament-print-support-section tournament-print-support-section--${printSupportLayout}`} aria-label="Tournament inclusions, prizes, contests, and sponsors">
           {printInfoPanelCount ? (
             <div className="tournament-print-mid-grid tournament-print-mid-grid--info-only">
               <div className={`tournament-print-columns tournament-print-columns--${printInfoPanelCount}`}>
@@ -578,7 +557,7 @@ function PrintableTournamentFlyer({ tournament, templateData, attributeIcons, ac
             </div>
           ) : null}
           {logos.length ? (
-            <div className="tournament-print-sponsors">
+            <div className={`tournament-print-sponsors tournament-print-sponsors--columns-${printSponsorColumns}`}>
               <strong>{templateData.sponsorsAvailable ? 'Sponsors — opportunities available' : 'Sponsors'}</strong>
               <div>
                 {logos.map((logo, index) => <img key={`${logo.slice(0, 24)}-${index}`} src={logo} alt={`Sponsor logo ${index + 1}`} onError={(event) => { event.currentTarget.style.display = 'none' }} />)}
@@ -793,6 +772,11 @@ const TOURNAMENT_FLYER_PRINT_STYLES = `
     grid-template-rows: auto auto auto auto auto !important;
     gap: 0.065in !important;
   }
+  /* Keep sparse printed flyers visually filled by giving spare page height to meaningful sponsor content
+     instead of leaving one large empty band above the contact / QR footer. */
+  .tournament-print-flyer--has-sponsors:not(.tournament-print-flyer--content-full) {
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto !important;
+  }
   .tournament-print-emblem {
     position: absolute !important;
     top: 0.14in !important;
@@ -955,7 +939,9 @@ const TOURNAMENT_FLYER_PRINT_STYLES = `
   .tournament-print-flyer--content-light .tournament-print-photo-card img { max-width: 2.25in !important; }
   .tournament-print-flyer--content-light .tournament-print-photo-card img { max-height: 1.6in !important; }
 
-  .tournament-print-support-section { align-content: start !important; }
+  .tournament-print-support-section { align-content: start !important; min-height: 0 !important; }
+  .tournament-print-support-section--mixed { grid-template-rows: auto minmax(0.62in, 1fr) !important; align-content: stretch !important; }
+  .tournament-print-support-section--sponsors-only { grid-template-rows: minmax(0.78in, 1fr) !important; align-content: stretch !important; }
   .tournament-print-mid-grid { display: grid !important; min-width: 0 !important; }
   .tournament-print-columns { display: grid !important; gap: 0.06in !important; min-width: 0 !important; width: 100% !important; }
   .tournament-print-columns--1 { grid-template-columns: minmax(0, 1fr) !important; }
@@ -977,10 +963,42 @@ const TOURNAMENT_FLYER_PRINT_STYLES = `
   .tournament-print-columns .tournament-flyer-info-panel .tournament-attribute-icon { width: 0.22in !important; height: 0.22in !important; display: inline-flex !important; }
   .tournament-print-columns .tournament-flyer-info-panel ul { margin: 0 !important; padding-left: 0.14in !important; }
   .tournament-print-columns .tournament-flyer-info-panel li { font-size: 7.6pt !important; line-height: 1.08 !important; margin: 0 0 0.015in !important; }
-  .tournament-print-sponsors { border-top: 1px solid #b7d7ad !important; padding-top: 0.035in !important; }
-  .tournament-print-sponsors strong { display: block !important; color: #0f3f24 !important; font-size: 7.8pt !important; text-transform: uppercase !important; text-align: center !important; }
-  .tournament-print-sponsors div { display: grid !important; grid-template-columns: repeat(5, minmax(0, 1fr)) !important; gap: 0.04in !important; align-items: center !important; min-height: 0.3in !important; }
-  .tournament-print-sponsors img { max-width: 100% !important; max-height: 0.3in !important; object-fit: contain !important; margin: 0 auto !important; display: block !important; }
+  .tournament-print-sponsors {
+    display: grid !important;
+    grid-template-rows: auto minmax(0.46in, 1fr) !important;
+    gap: 0.045in !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    padding: 0.05in 0.08in !important;
+    border: 1px solid #b7d7ad !important;
+    border-radius: 0.065in !important;
+    background: #f7fbf5 !important;
+    box-sizing: border-box !important;
+  }
+  .tournament-print-sponsors strong { display: block !important; color: #0f3f24 !important; font-size: 7.8pt !important; line-height: 1 !important; text-transform: uppercase !important; text-align: center !important; }
+  .tournament-print-sponsors div {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    gap: 0.08in !important;
+    align-items: center !important;
+    align-content: center !important;
+    justify-items: center !important;
+    min-height: 0.46in !important;
+    height: 100% !important;
+  }
+  .tournament-print-sponsors--columns-1 div { grid-template-columns: minmax(0, 1fr) !important; }
+  .tournament-print-sponsors--columns-2 div { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .tournament-print-sponsors--columns-3 div { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .tournament-print-sponsors--columns-4 div { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+  .tournament-print-sponsors--columns-5 div { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; }
+  .tournament-print-sponsors img { max-width: 1.12in !important; max-height: 0.46in !important; object-fit: contain !important; margin: 0 auto !important; display: block !important; }
+  .tournament-print-sponsors--columns-1 img { max-width: 2.35in !important; max-height: 0.66in !important; }
+  .tournament-print-sponsors--columns-2 img { max-width: 1.75in !important; max-height: 0.6in !important; }
+  .tournament-print-flyer--content-light .tournament-print-sponsors img { max-height: 0.58in !important; }
+  .tournament-print-flyer--content-light .tournament-print-sponsors--columns-1 img { max-height: 0.78in !important; }
+  .tournament-print-flyer--content-full .tournament-print-sponsors { grid-template-rows: auto minmax(0.3in, auto) !important; height: auto !important; }
+  .tournament-print-flyer--content-full .tournament-print-sponsors div { min-height: 0.3in !important; height: auto !important; }
+  .tournament-print-flyer--content-full .tournament-print-sponsors img { max-height: 0.32in !important; }
 
   .tournament-print-footer-grid {
     display: grid !important;
@@ -996,30 +1014,458 @@ const TOURNAMENT_FLYER_PRINT_STYLES = `
   .tournament-print-register { width: 1.05in !important; justify-self: end !important; align-self: end !important; text-align: center !important; padding: 0.055in !important; }
   .tournament-print-register img { width: 0.82in !important; height: 0.82in !important; margin: 0.025in auto 0 !important; display: block !important; }
 
-  .tournament-print-flyer--fairway-poster { background: var(--tournament-print-background, #f4f8e4) !important; border-color: #174b22 !important; }
-  .tournament-print-flyer--fairway-poster .tournament-print-header { background: #174b22 !important; margin: -0.18in -0.18in 0 !important; padding: 0.14in 0.82in 0.12in !important; }
-  .tournament-print-flyer--fairway-poster .tournament-print-header h1,
-  .tournament-print-flyer--fairway-poster .tournament-print-presented { color: #fff !important; }
-  .tournament-print-flyer--modern-open { background: var(--tournament-print-background, #eff1d9) !important; border-color: #244b17 !important; }
-  .tournament-print-flyer--modern-open .tournament-print-header { text-align: left !important; padding-right: 0.72in !important; }
-  .tournament-print-flyer--modern-open .tournament-print-header h1 { color: #244b17 !important; }
-  .tournament-print-flyer--modern-open .tournament-print-detail:nth-child(odd) { background: #dfe8ba !important; }
-  .tournament-print-flyer--charity-tribute { background: var(--tournament-print-background, #1f3d0f) !important; border-color: #6f8f2d !important; color: #fff !important; }
-  .tournament-print-flyer--charity-tribute .tournament-print-header h1,
-  .tournament-print-flyer--charity-tribute .tournament-print-presented { color: #fff !important; font-family: Georgia, 'Times New Roman', serif !important; text-transform: none !important; }
-  .tournament-print-flyer--charity-tribute .tournament-print-description,
-  .tournament-print-flyer--charity-tribute .tournament-print-detail,
-  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary,
+  /* FlyerSpecs v2: each print theme uses the same five-section information hierarchy while
+     intentionally changing composition, typography, geometry, and palette to match its desktop theme. */
+
+  /* Classic Flyer: clean traditional golf-event program with restrained green framing. */
+  .tournament-print-flyer--classic-flyer {
+    background: var(--tournament-print-background, #ffffff) !important;
+    border: 0.035in double #0f3f24 !important;
+  }
+  .tournament-print-flyer--classic-flyer .tournament-print-header {
+    border-bottom: 0.035in solid #0f3f24 !important;
+    padding-bottom: 0.06in !important;
+  }
+  .tournament-print-flyer--classic-flyer .tournament-print-banner {
+    border-color: #7aa27d !important;
+    border-radius: 0.12in !important;
+  }
+  .tournament-print-flyer--classic-flyer .tournament-print-detail,
+  .tournament-print-flyer--classic-flyer .tournament-print-beneficiary,
+  .tournament-print-flyer--classic-flyer .tournament-print-misc,
+  .tournament-print-flyer--classic-flyer .tournament-print-contact,
+  .tournament-print-flyer--classic-flyer .tournament-print-register,
+  .tournament-print-flyer--classic-flyer .tournament-print-columns .tournament-flyer-info-panel {
+    border-color: #9fc29f !important;
+    background: #f8fbf6 !important;
+  }
+
+  /* Fairway Poster: bold angled black/turquoise poster treatment, matching the desktop fairway theme. */
+  .tournament-print-flyer--fairway-poster {
+    background: var(--tournament-print-background, #edf4ef) !important;
+    border: 0 !important;
+    color: #071b1d !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-primary-section {
+    position: relative !important;
+    display: grid !important;
+    grid-template-areas: 'hero' 'description' !important;
+    gap: 0.06in !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-header {
+    position: absolute !important;
+    z-index: 4 !important;
+    left: 0.18in !important;
+    bottom: 0.42in !important;
+    width: 5.9in !important;
+    padding: 0 !important;
+    text-align: left !important;
+    background: transparent !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-header h1 {
+    margin: 0.035in 0 0 !important;
+    color: #ffffff !important;
+    font-size: 38pt !important;
+    line-height: 0.86 !important;
+    font-style: italic !important;
+    letter-spacing: -0.035em !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0.025in 0.045in rgba(0,0,0,.65) !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-presented {
+    display: inline-block !important;
+    width: fit-content !important;
+    padding: 0.035in 0.07in !important;
+    background: #12b8bd !important;
+    color: #071b1d !important;
+    font-size: 7.6pt !important;
+    font-weight: 950 !important;
+    letter-spacing: .12em !important;
+    transform: skew(-7deg) !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-banner {
+    grid-area: hero !important;
+    position: relative !important;
+    height: 2.32in !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    clip-path: polygon(0 0,100% 0,100% 91%,0 100%) !important;
+    background: #071b1d !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-banner::after {
+    content: '' !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: linear-gradient(125deg,rgba(0,0,0,.78) 0 43%,rgba(8,145,153,.58) 43% 62%,rgba(0,0,0,.12) 62% 100%) !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-description {
+    grid-area: description !important;
+    border: 0 !important;
+    border-bottom: 0.02in solid #94a3b8 !important;
+    border-radius: 0 !important;
+    background: #f8fafc !important;
+    color: #1f2937 !important;
+    text-align: left !important;
+    padding: 0.075in 0.12in !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-detail-grid {
+    grid-template-columns: repeat(3, minmax(0,1fr)) !important;
+    gap: 0 !important;
+    background: #071b1d !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-detail {
+    border: 0 !important;
+    border-radius: 0 !important;
+    min-height: 0.48in !important;
+    padding: 0.055in 0.07in !important;
+    background: #071b1d !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-detail:nth-child(odd) { background: #10a9ae !important; }
+  .tournament-print-flyer--fairway-poster .tournament-print-detail:nth-child(odd) strong,
+  .tournament-print-flyer--fairway-poster .tournament-print-detail:nth-child(odd) span,
+  .tournament-print-flyer--fairway-poster .tournament-print-detail:nth-child(odd) .tournament-attribute-icon { color: #06191b !important; }
+  .tournament-print-flyer--fairway-poster .tournament-print-detail:nth-child(even) strong,
+  .tournament-print-flyer--fairway-poster .tournament-print-detail:nth-child(even) span,
+  .tournament-print-flyer--fairway-poster .tournament-print-detail:nth-child(even) .tournament-attribute-icon { color: #f8fafc !important; }
+  .tournament-print-flyer--fairway-poster .tournament-print-action-band {
+    border-radius: 0 !important;
+    background: #174b22 !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-beneficiary,
+  .tournament-print-flyer--fairway-poster .tournament-print-misc,
+  .tournament-print-flyer--fairway-poster .tournament-print-contact,
+  .tournament-print-flyer--fairway-poster .tournament-print-columns .tournament-flyer-info-panel {
+    border-color: #8db6a6 !important;
+    border-radius: 0 !important;
+    background: #f8fafc !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-register {
+    border: 0.025in solid #12b8bd !important;
+    border-radius: 0 !important;
+    background: #071b1d !important;
+  }
+  .tournament-print-flyer--fairway-poster .tournament-print-register strong { color: #ffffff !important; }
+  .tournament-print-flyer--fairway-poster .tournament-print-register img { background: #ffffff !important; padding: 0.025in !important; box-sizing: border-box !important; }
+  .tournament-print-flyer--fairway-poster .tournament-print-sponsors { border-color: #8db6a6 !important; background: #f8fafc !important; }
+
+  /* Modern Golf Open: sponsor-forward editorial layout with rounded hero and crisp white information cards. */
+  .tournament-print-flyer--modern-open {
+    background: var(--tournament-print-background, #f7f5ef) !important;
+    border-color: #244b17 !important;
+    padding: 0.2in !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-primary-section { position: relative !important; }
+  .tournament-print-flyer--modern-open .tournament-print-banner {
+    position: relative !important;
+    height: 2.18in !important;
+    border: 0 !important;
+    border-radius: 0.22in !important;
+    background: #18351d !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-banner::after {
+    content: '' !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: linear-gradient(90deg,rgba(10,28,18,.88),rgba(10,28,18,.25) 63%,rgba(10,28,18,.06)) !important;
+    border-radius: inherit !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-header {
+    position: absolute !important;
+    z-index: 4 !important;
+    left: 0.28in !important;
+    top: 0.33in !important;
+    width: 5.35in !important;
+    padding: 0 !important;
+    text-align: left !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-header h1 {
+    color: #ffffff !important;
+    font-size: 34pt !important;
+    letter-spacing: -0.025em !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-presented { color: #dce9cf !important; letter-spacing: .08em !important; }
+  .tournament-print-flyer--modern-open .tournament-print-description {
+    margin: -0.02in 0.14in 0 !important;
+    border: 0 !important;
+    border-left: 0.045in solid #244b17 !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+    text-align: left !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-detail-grid {
+    grid-template-columns: repeat(3, minmax(0,1fr)) !important;
+    gap: 0.055in !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-detail {
+    border-color: #d8dfd8 !important;
+    border-radius: 0.12in !important;
+    background: #ffffff !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-detail strong,
+  .tournament-print-flyer--modern-open .tournament-print-detail .tournament-attribute-icon { color: #244b17 !important; }
+  .tournament-print-flyer--modern-open .tournament-print-action-band { background: #244b17 !important; border-radius: 0.12in !important; }
+  .tournament-print-flyer--modern-open .tournament-print-beneficiary,
+  .tournament-print-flyer--modern-open .tournament-print-misc,
+  .tournament-print-flyer--modern-open .tournament-print-contact,
+  .tournament-print-flyer--modern-open .tournament-print-register,
+  .tournament-print-flyer--modern-open .tournament-print-columns .tournament-flyer-info-panel {
+    border-color: #d8dfd8 !important;
+    border-radius: 0.13in !important;
+    background: #ffffff !important;
+  }
+  .tournament-print-flyer--modern-open .tournament-print-sponsors {
+    border: 0.02in solid #244b17 !important;
+    border-radius: 0.1in !important;
+    padding: 0.05in 0.08in !important;
+    background: #ffffff !important;
+  }
+
+  /* Charity & Memorial: formal cause-first dark green and gold composition. */
+  .tournament-print-flyer--charity-tribute {
+    background: var(--tournament-print-background, #10230e) !important;
+    border-color: #b8902d !important;
+    color: #ffffff !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-primary-section { position: relative !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-banner {
+    position: relative !important;
+    height: 2.08in !important;
+    border: 0.02in solid #b8902d !important;
+    border-radius: 0 !important;
+    background: #0b180a !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-banner::after {
+    content: '' !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: linear-gradient(180deg,rgba(5,15,7,.28),rgba(5,15,7,.9)) !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-header {
+    position: absolute !important;
+    z-index: 4 !important;
+    left: 0.7in !important;
+    right: 0.7in !important;
+    top: 0.44in !important;
+    padding: 0 !important;
+    text-align: center !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-header h1 {
+    color: #ffffff !important;
+    font-family: Georgia, 'Times New Roman', serif !important;
+    font-size: 34pt !important;
+    line-height: .94 !important;
+    text-transform: none !important;
+    letter-spacing: -0.025em !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-presented {
+    color: #e5c96c !important;
+    font-family: Georgia, 'Times New Roman', serif !important;
+    letter-spacing: .12em !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-description {
+    border-color: rgba(229,201,108,.65) !important;
+    background: #f4f6e8 !important;
+    color: #26321d !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-detail-grid { grid-template-columns: repeat(3, minmax(0,1fr)) !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-detail {
+    border-color: rgba(229,201,108,.72) !important;
+    background: #294d15 !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-detail strong,
+  .tournament-print-flyer--charity-tribute .tournament-print-detail .tournament-attribute-icon { color: #e5c96c !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-detail span { color: #ffffff !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-action-band { background: #b8902d !important; color: #13230f !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary {
+    border-color: #b8902d !important;
+    background: #173413 !important;
+    color: #ffffff !important;
+  }
+  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary strong,
+  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary span { color: #e5c96c !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary p,
+  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary .richTextContent,
+  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary .richTextContent * { color: #f4f6e8 !important; }
   .tournament-print-flyer--charity-tribute .tournament-print-misc,
   .tournament-print-flyer--charity-tribute .tournament-print-contact,
   .tournament-print-flyer--charity-tribute .tournament-print-register,
-  .tournament-print-flyer--charity-tribute .tournament-print-columns .tournament-flyer-info-panel { background: #f4f6e8 !important; color: #111827 !important; }
-  .tournament-print-flyer--charity-tribute .tournament-print-beneficiary p,
+  .tournament-print-flyer--charity-tribute .tournament-print-columns .tournament-flyer-info-panel {
+    border-color: #b8902d !important;
+    background: #f4f6e8 !important;
+    color: #111827 !important;
+  }
   .tournament-print-flyer--charity-tribute .tournament-print-misc-copy p,
   .tournament-print-flyer--charity-tribute .tournament-print-contact span { color: #111827 !important; }
-  .tournament-print-flyer--sunset-drive { background: var(--tournament-print-background, #f5f0dc) !important; border-color: #41520d !important; }
-  .tournament-print-flyer--sunset-drive .tournament-print-header h1 { color: #41520d !important; font-size: 36pt !important; }
-  .tournament-print-flyer--green-invite { background: var(--tournament-print-background, #f4f1df) !important; border-color: #176b2c !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-sponsors { border-color: #b8902d !important; background: #173413 !important; }
+  .tournament-print-flyer--charity-tribute .tournament-print-sponsors strong { color: #e5c96c !important; }
+
+  /* Sunset Drive: premium evening-event poster with black, amber, and red energy. */
+  .tournament-print-flyer--sunset-drive {
+    background: var(--tournament-print-background, #080808) !important;
+    border-color: #f59e0b !important;
+    color: #ffffff !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-primary-section { position: relative !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-banner {
+    position: relative !important;
+    height: 2.55in !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #050505 !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-banner::after {
+    content: '' !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: linear-gradient(180deg,rgba(0,0,0,.02),rgba(0,0,0,.25) 42%,rgba(0,0,0,.94)),linear-gradient(110deg,rgba(217,119,6,.24),transparent 48%) !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-header {
+    position: absolute !important;
+    z-index: 4 !important;
+    left: 0.45in !important;
+    right: 0.45in !important;
+    bottom: 0.28in !important;
+    padding: 0 !important;
+    text-align: center !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-header h1 {
+    color: #ffffff !important;
+    font-size: 40pt !important;
+    line-height: .85 !important;
+    font-style: italic !important;
+    letter-spacing: -0.045em !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0.03in 0 #000000 !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-presented { color: #f59e0b !important; letter-spacing: .12em !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-description {
+    border-color: #5a3410 !important;
+    background: #171717 !important;
+    color: #f8fafc !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-description * { color: #f8fafc !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-detail-grid { grid-template-columns: repeat(3, minmax(0,1fr)) !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-detail {
+    border: 0 !important;
+    border-top: 0.035in solid #f59e0b !important;
+    border-radius: 0 !important;
+    background: #101010 !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-detail strong,
+  .tournament-print-flyer--sunset-drive .tournament-print-detail .tournament-attribute-icon { color: #f59e0b !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-detail span { color: #ffffff !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-action-band { background: #9f1d1d !important; border-radius: 0 !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-beneficiary,
+  .tournament-print-flyer--sunset-drive .tournament-print-misc,
+  .tournament-print-flyer--sunset-drive .tournament-print-contact,
+  .tournament-print-flyer--sunset-drive .tournament-print-columns .tournament-flyer-info-panel {
+    border-color: #7c4a13 !important;
+    border-radius: 0 !important;
+    background: #171717 !important;
+    color: #ffffff !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-beneficiary strong,
+  .tournament-print-flyer--sunset-drive .tournament-print-beneficiary span,
+  .tournament-print-flyer--sunset-drive .tournament-print-misc-copy strong,
+  .tournament-print-flyer--sunset-drive .tournament-print-contact strong,
+  .tournament-print-flyer--sunset-drive .tournament-print-columns .tournament-flyer-info-panel h3,
+  .tournament-print-flyer--sunset-drive .tournament-print-sponsors strong { color: #f59e0b !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-beneficiary p,
+  .tournament-print-flyer--sunset-drive .tournament-print-beneficiary .richTextContent,
+  .tournament-print-flyer--sunset-drive .tournament-print-beneficiary .richTextContent *,
+  .tournament-print-flyer--sunset-drive .tournament-print-misc-copy p,
+  .tournament-print-flyer--sunset-drive .tournament-print-misc-copy .richTextContent,
+  .tournament-print-flyer--sunset-drive .tournament-print-misc-copy .richTextContent *,
+  .tournament-print-flyer--sunset-drive .tournament-print-contact span,
+  .tournament-print-flyer--sunset-drive .tournament-print-columns .tournament-flyer-info-panel,
+  .tournament-print-flyer--sunset-drive .tournament-print-columns .tournament-flyer-info-panel * { color: #f8fafc !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-register {
+    border: 0.025in solid #f59e0b !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+  }
+  .tournament-print-flyer--sunset-drive .tournament-print-register strong { color: #9f1d1d !important; }
+  .tournament-print-flyer--sunset-drive .tournament-print-sponsors { border-color: #7c4a13 !important; background: #171717 !important; }
+
+  /* Green Invitation: school/club invitation composition mirroring the desktop cream, purple, and teal theme. */
+  .tournament-print-flyer--green-invite {
+    background: var(--tournament-print-background, #f7f2df) !important;
+    border-color: #5f2d78 !important;
+    color: #14361f !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-primary-section {
+    display: grid !important;
+    grid-template-columns: 42% minmax(0,1fr) !important;
+    grid-template-areas: 'image heading' 'description description' !important;
+    gap: 0.08in !important;
+    align-items: stretch !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-header {
+    grid-area: heading !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    text-align: left !important;
+    padding: 0.12in 0.13in !important;
+    border-top: 0.05in solid #b8860b !important;
+    border-bottom: 0.05in solid #0f6770 !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-header h1 {
+    color: #4d2366 !important;
+    font-family: Georgia, 'Times New Roman', serif !important;
+    font-size: 34pt !important;
+    line-height: .88 !important;
+    text-transform: none !important;
+    letter-spacing: -0.04em !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-presented { color: #b8860b !important; letter-spacing: .1em !important; }
+  .tournament-print-flyer--green-invite .tournament-print-banner {
+    grid-area: image !important;
+    height: 2.2in !important;
+    border: 0 !important;
+    border-radius: 52% 0 0 52% / 50% 0 0 50% !important;
+    background: #d8d2b5 !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-description {
+    grid-area: description !important;
+    border: 0 !important;
+    border-left: 0.05in solid #5f2d78 !important;
+    border-radius: 0 !important;
+    background: #fffdf2 !important;
+    color: #334155 !important;
+    text-align: left !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-detail-grid {
+    grid-template-columns: repeat(3, minmax(0,1fr)) !important;
+    gap: 0.04in !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-detail {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #5f2d78 !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-detail:nth-child(3n+2) { background: #0f6770 !important; }
+  .tournament-print-flyer--green-invite .tournament-print-detail strong,
+  .tournament-print-flyer--green-invite .tournament-print-detail span,
+  .tournament-print-flyer--green-invite .tournament-print-detail .tournament-attribute-icon { color: #ffffff !important; }
+  .tournament-print-flyer--green-invite .tournament-print-action-band { background: #0f6770 !important; border-radius: 0 !important; }
+  .tournament-print-flyer--green-invite .tournament-print-beneficiary,
+  .tournament-print-flyer--green-invite .tournament-print-misc,
+  .tournament-print-flyer--green-invite .tournament-print-contact,
+  .tournament-print-flyer--green-invite .tournament-print-register,
+  .tournament-print-flyer--green-invite .tournament-print-columns .tournament-flyer-info-panel {
+    border-color: #c7a8d5 !important;
+    background: #fffdf2 !important;
+  }
+  .tournament-print-flyer--green-invite .tournament-print-beneficiary strong,
+  .tournament-print-flyer--green-invite .tournament-print-beneficiary span,
+  .tournament-print-flyer--green-invite .tournament-print-misc-copy strong,
+  .tournament-print-flyer--green-invite .tournament-print-contact strong,
+  .tournament-print-flyer--green-invite .tournament-print-register strong,
+  .tournament-print-flyer--green-invite .tournament-print-sponsors strong { color: #5f2d78 !important; }
+  .tournament-print-flyer--green-invite .tournament-print-sponsors { border-color: #0f6770 !important; background: #fffdf6 !important; }
+
 }
 `
 
@@ -1167,12 +1613,131 @@ export default function TournamentPortal() {
   const template = getTournamentTemplate(tournament?.templateKey)
   const templateData = { ...emptyTournamentTemplateData(), ...(tournament?.templateData || {}) }
   const attributeIcons = template.attributeIcons
+  const registeredTeamName = String(portal?.viewerRegistration?.teamName || '').trim()
+
+
+  function renderRegistrationAction(surface: 'flyer') {
+    const sectionId = 'tournament-registration-flyer-panel'
+    const startAccountCreation = () => {
+      const returnTo = `/tournaments/${encodeURIComponent(id)}`
+      logFrontendEvent({ category: 'tournament.portal', message: 'registration_account_creation_started', data: { tournamentId: id, surface, returnTo, correlationId: getCorrelationId() } })
+      navigate(`/register?returnTo=${encodeURIComponent(returnTo)}`)
+    }
+
+    return (
+      <div className={`tournament-registration-action tournament-registration-action--${surface}`} id={sectionId} data-registration-surface={surface} tabIndex={-1}>
+        {isDraftTournament || registrationClosed ? (
+          <div className="tournament-registration-unavailable" role="status">
+            <strong>Registration is closed.</strong>
+            <span>{isDraftTournament ? 'This tournament is still in Draft status.' : 'This tournament is no longer accepting registrations.'}</span>
+          </div>
+        ) : registered ? (
+          <div className="tournament-registration-success" role="status">
+            <span className="tournament-registration-status-icon" aria-hidden="true">✓</span>
+            <div>
+              <strong>You are already registered for this tournament.</strong>
+              <span>{registeredTeamName ? `Registered team: ${registeredTeamName}. No additional action is needed.` : 'Your registration is confirmed. No additional action is needed.'}</span>
+            </div>
+          </div>
+        ) : slotsFull ? (
+          <div className="tournament-registration-unavailable" role="status">
+            <strong>Tournament team slots are full.</strong>
+            <span>Registration is currently unavailable because all team slots have been filled.</span>
+          </div>
+        ) : user ? (
+          <div className="tournament-registration-flow">
+            <div className="tournament-registration-flow-heading">
+              <span className="tournament-registration-eyebrow">Tournament registration</span>
+              <strong>Choose your {requiredTeamSize}-player team</strong>
+              <span>Use an existing team or create the tournament team here. You are included automatically.</span>
+            </div>
+            <div className="tournament-registration-mode" role="radiogroup" aria-label="Tournament registration team choice">
+              <label><input type="radio" checked={teamMode === 'existing'} onChange={() => setTeamMode('existing')} /> Existing team</label>
+              <label><input type="radio" checked={teamMode === 'new'} onChange={() => setTeamMode('new')} /> New team</label>
+            </div>
+            {teamMode === 'existing' ? (
+              <div className="tournament-registration-fields">
+                <label className="label" htmlFor={`tournament-team-${surface}`}>Team</label>
+                <select id={`tournament-team-${surface}`} className="input" value={selectedTeamId} onChange={(e) => setSelectedTeamId(e.target.value)}>
+                  <option value="">Select one of your teams</option>
+                  {eligibleTeams.map((team) => <option key={team.id} value={team.id}>{team.name} ({team.members?.length || 0} players)</option>)}
+                </select>
+                {eligibleTeams.length === 0 ? <div className="small">You do not currently have a {requiredTeamSize}-player team. Choose New team to create one for this tournament.</div> : null}
+              </div>
+            ) : (
+              <div className="tournament-registration-fields">
+                <div>
+                  <label className="label" htmlFor={`tournament-new-team-${surface}`}>Team name</label>
+                  <input id={`tournament-new-team-${surface}`} className="input" value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="Team name" />
+                </div>
+                <div className="small">This tournament requires exactly {requiredTeamSize} players per team. You are included automatically; enter {requiredTeammateCount} teammate{requiredTeammateCount === 1 ? '' : 's'} below.</div>
+                {newTeamMembers.map((member, index) => (
+                  <div key={`${surface}-${member.id}`} className="grid tournament-registration-member-row" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <input className="input" value={member.name} onChange={(e) => setNewTeamMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, name: e.target.value } : item))} placeholder={`Teammate ${index + 1} name`} />
+                    <input className="input" type="email" value={member.email} onChange={(e) => setNewTeamMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, email: e.target.value } : item))} placeholder="email@example.com" />
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="btn btnPrimary tournament-registration-submit" type="button" disabled={registering || registrationClosed || authLoading || slotsFull || !registrationTeamReady} onClick={onRegister}>
+              {registering ? 'Registering…' : 'Register for tournament team'}
+            </button>
+          </div>
+        ) : (
+          <div className="tournament-account-registration-flow">
+            <div className="tournament-registration-flow-heading">
+              <span className="tournament-registration-eyebrow">New to Golf Homiez?</span>
+              <strong>Create your free account and register</strong>
+              <span>Golf Homiez will return you to this tournament after account creation so you can finish your team registration.</span>
+            </div>
+            <ol className="tournament-account-registration-steps">
+              <li><span>1</span><div><strong>Create your account</strong><small>Enter your name, email, and password.</small></div></li>
+              <li><span>2</span><div><strong>Verify your email</strong><small>Use the verification message sent to your inbox.</small></div></li>
+              <li><span>3</span><div><strong>Register your team</strong><small>Return here and select or create your tournament team.</small></div></li>
+            </ol>
+            <button className="btn btnPrimary tournament-registration-submit" type="button" disabled={authLoading || registrationClosed || slotsFull} onClick={startAccountCreation}>Create free account &amp; continue</button>
+            <div className="small tournament-account-signin-hint">Already have an account? <Link to={`/login?returnTo=${encodeURIComponent(`/tournaments/${id}`)}`}>Sign in to register.</Link></div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function focusFlyerRegistration() {
+    const correlationId = getCorrelationId()
+    const target = typeof document !== 'undefined' ? document.getElementById('tournament-registration-flyer-panel') : null
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (target instanceof HTMLElement) target.focus({ preventScroll: true })
+    logFrontendEvent({ category: 'tournament.portal', message: 'registration_deadline_action_selected', data: { tournamentId: id, authenticated: Boolean(user), registered, registeredTeamName: registeredTeamName || null, targetFound: Boolean(target), correlationId } })
+  }
+
+  function renderRegistrationDeadlineAction() {
+    if (isDraftTournament || registrationClosed) {
+      return <span className="tournament-registration-deadline-status">Registration closed</span>
+    }
+    if (registered) {
+      return (
+        <div className="tournament-registration-deadline-registered" role="status">
+          <strong>Already registered</strong>
+          <span>{registeredTeamName ? `Team: ${registeredTeamName}` : 'Your tournament registration is confirmed.'}</span>
+        </div>
+      )
+    }
+    if (slotsFull) {
+      return <span className="tournament-registration-deadline-status">Team slots are full</span>
+    }
+    return (
+      <button className="btn tournament-registration-deadline-button" type="button" aria-controls="tournament-registration-flyer-panel" onClick={focusFlyerRegistration}>
+        {user ? 'Register now' : 'Create account & register'}
+      </button>
+    )
+  }
 
   return (
     <div className="container pageStack">
       <div className="card pageCardShell">
         <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          {tournament ? <button type="button" className="btn btnPrimary" onClick={() => { logFrontendEvent({ category: 'tournament.portal', message: 'tournament_flyer_print_requested', data: { tournamentId: tournament.id, beneficiaryImageFit: 'contain-natural-size', promotionalImageFit: templateData.promotionalPhotoUrl ? 'contain-natural-size' : 'not-provided', photoPresentation: 'embedded-no-container', descriptionPlacement: 'separate-readable-block', printedTournamentUrlText: false, printFooterLayout: 'aligned-contact-left-qr-right', printWhitespaceStrategy: 'flyer-specs-five-section-composition', customBackgroundColor: normalizeTournamentBackgroundColor(templateData.flyerBackgroundColor) || null } }); window.print() }}>Print flyer</button> : null}
+          {tournament ? <button type="button" className="btn btnPrimary" onClick={() => { logFrontendEvent({ category: 'tournament.portal', message: 'tournament_flyer_print_requested', data: { tournamentId: tournament.id, beneficiaryImageFit: 'contain-natural-size', promotionalImageFit: templateData.promotionalPhotoUrl ? 'contain-natural-size' : 'not-provided', photoPresentation: 'embedded-no-container', descriptionPlacement: 'separate-readable-block', printedTournamentUrlText: false, printFooterLayout: 'aligned-contact-left-qr-right', printWhitespaceStrategy: 'flyer-specs-five-section-composition', printSpaceUtilization: 'adaptive-sponsor-fill', printSponsorLogoCount: Array.isArray(templateData.logoFiles) ? templateData.logoFiles.length : 0, printThemeDesignVersion: 'flyer-specs-v2', printThemeKey: template.key, printThemeAlignment: 'desktop-theme-matched', printPrimarySections: 5, customBackgroundColor: normalizeTournamentBackgroundColor(templateData.flyerBackgroundColor) || null } }); window.print() }}>Print flyer</button> : null}
           {tournament && !isDraftTournament && Number(tournament.imageCount || 0) > 0 ? (
             <Link
               className="btn tournamentFlyerPicturesButton"
@@ -1199,7 +1764,7 @@ export default function TournamentPortal() {
                 <span>This dedicated Golf Homiez tournament URL is visible to the signed-in host while the tournament is in Draft status. Publish the tournament when it is ready for golfers to view and register.</span>
               </div>
             ) : null}
-            <TournamentFlyer tournament={tournament} templateData={templateData} attributeIcons={attributeIcons} accentColor={template.accentColor} templateKey={template.key} />
+            <TournamentFlyer tournament={tournament} templateData={templateData} attributeIcons={attributeIcons} accentColor={template.accentColor} templateKey={template.key} registrationContent={renderRegistrationAction('flyer')} registrationDeadlineAction={renderRegistrationDeadlineAction()} />
             <PrintableTournamentFlyer tournament={tournament} templateData={templateData} attributeIcons={attributeIcons} accentColor={template.accentColor} templateKey={template.key} />
             <div className="formStack" style={{ maxWidth: 760 }}>
               {isCompletedTournament ? (
@@ -1220,50 +1785,6 @@ export default function TournamentPortal() {
                     <div><strong>Organizer:</strong> {tournament.organizerName || 'Golf Homiez organizer'}</div>
                     <div><strong>Host:</strong> {tournament.hostGolfCourseName || 'Host to be announced'}</div>
                     {portal ? <TournamentPublicSlotSummary portal={portal} /> : null}
-                  </div>
-                  <div className="card" style={{ padding: 16 }}>
-                    <strong>Registration</strong>
-                    {!registered && user ? (
-                      <div className="formStack" style={{ marginBottom: 12 }}>
-                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                          <label><input type="radio" checked={teamMode === 'existing'} onChange={() => setTeamMode('existing')} /> Existing team</label>
-                          <label><input type="radio" checked={teamMode === 'new'} onChange={() => setTeamMode('new')} /> New team</label>
-                        </div>
-                        {teamMode === 'existing' ? (
-                          <div>
-                            <label className="label">Team</label>
-                            <select className="input" value={selectedTeamId} onChange={(e) => setSelectedTeamId(e.target.value)}>
-                              <option value="">Select one of your teams</option>
-                              {eligibleTeams.map((team) => <option key={team.id} value={team.id}>{team.name} ({team.members?.length || 0} players)</option>)}
-                            </select>
-                            {eligibleTeams.length === 0 ? <div className="small" style={{ marginTop: 6 }}>You do not currently have a {requiredTeamSize}-player team. Choose New team to create one for this tournament.</div> : null}
-                          </div>
-                        ) : (
-                          <div className="formStack">
-                            <div>
-                              <label className="label">Team name</label>
-                              <input className="input" value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="Team name" />
-                            </div>
-                            <div className="small">This tournament requires exactly {requiredTeamSize} players per team. You are included automatically; enter {requiredTeammateCount} teammate{requiredTeammateCount === 1 ? '' : 's'} below.</div>
-                            {newTeamMembers.map((member, index) => (
-                              <div key={member.id} className="grid tournament-registration-member-row" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                                <input className="input" value={member.name} onChange={(e) => setNewTeamMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, name: e.target.value } : item))} placeholder={`Teammate ${index + 1} name`} />
-                                <input className="input" type="email" value={member.email} onChange={(e) => setNewTeamMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, email: e.target.value } : item))} placeholder="email@example.com" />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-                    {registered ? (
-                      <div className="small" style={{ color: '#166534', fontWeight: 700 }}>You are already registered for this tournament.</div>
-                    ) : slotsFull ? (
-                      <div className="small" style={{ color: '#b91c1c', fontWeight: 700 }}>Tournament team slots are full.</div>
-                    ) : (
-                      <button className="btn btnPrimary" type="button" disabled={registering || registrationClosed || authLoading || slotsFull || (Boolean(user) && !registrationTeamReady)} onClick={onRegister}>
-                        {registering ? 'Registering…' : user ? 'Register for tournament team' : 'Create account to register'}
-                      </button>
-                    )}
                   </div>
                 </>
               )}
